@@ -22,6 +22,7 @@ const { applyEffects } = require('./effects');
 const { applyRender, handlePrompt, handlePick } = require('./requests');
 const { register } = require('./semantic');
 const { resolveServerSource } = require('./server-source');
+const { resolveServer } = require('./server-download');
 const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
 const { activateView, stateForUri } = require('./views');
 const { SCHEME, store } = require('./store');
@@ -99,6 +100,54 @@ function userFacing(error) {
 }
 
 /**
+ * Describe the server serving this window, for the `magit.serverInfo` command.
+ *
+ * The version shown is the one the live handshake reported, so an explicit
+ * override whose probe version is null still reports what the server itself
+ * said. When no session completed its handshake the command reports that there
+ * is no active server instead of failing.
+ *
+ * @returns {string} one user-facing line with a single product prefix
+ */
+function serverInfoCommand() {
+  const server = store.server;
+  if (!server || store.serverVersion === undefined) {
+    return 'magit-lsp: no active magit-lsp server';
+  }
+  const version = store.serverVersion || server.version;
+  return version
+    ? `magit-lsp: server ${version} (${server.origin}) at ${server.command}`
+    : `magit-lsp: server (${server.origin}) at ${server.command}; version not reported`;
+}
+
+/**
+ * Install or reinstall the managed server at the pinned extension version.
+ *
+ * The managed release is always the target, independent of `server.source`, and
+ * a fresh download replaces any verified cache entry only after it succeeds, so
+ * a failed reinstall leaves the previously installed binary working.
+ *
+ * @param {vscode.ExtensionContext} context
+ * @returns {Promise<string>} one user-facing line with a single product prefix
+ */
+async function installManagedServer(context) {
+  try {
+    const resolved = await resolveServer({
+      version: extensionVersion,
+      cacheRoot: context.globalStorageUri?.fsPath,
+      force: true,
+    });
+    const text = `magit-lsp: installed server ${resolved.version} at ${resolved.executable}`;
+    vscode.window.showInformationMessage(text);
+    return text;
+  } catch (error) {
+    const text = userFacing(error);
+    vscode.window.showErrorMessage(text);
+    return text;
+  }
+}
+
+/**
  * Activate the extension.
  *
  * @param {vscode.ExtensionContext} context
@@ -134,6 +183,12 @@ function activate(context) {
        if (draft) return close(draft);
      }),
     vscode.commands.registerCommand('magit.mirrorFoldShortcuts', mirrorFoldShortcuts),
+    vscode.commands.registerCommand('magit.serverInfo', () => {
+      const text = serverInfoCommand();
+      vscode.window.showInformationMessage(text);
+      return text;
+    }),
+    vscode.commands.registerCommand('magit.installServer', () => installManagedServer(context)),
      vscode.workspace.onDidCloseTextDocument(onDocumentClosed),
      vscode.workspace.onDidChangeTextDocument(onChanged),
     vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged)
@@ -221,6 +276,7 @@ async function startClient(context) {
     }
     throw rejection;
   }
+  store.serverVersion = client.initializeResult?.serverInfo?.version ?? null;
   store.semanticChanged = register(
     vscode,
     client,
@@ -234,6 +290,7 @@ async function startClient(context) {
  */
 async function deactivate() {
   store.disposing = true;
+  store.serverVersion = undefined;
   disconnect('the editor session is closing; copy your text before reopening');
   if (store.client) {
     await store.client.stop();

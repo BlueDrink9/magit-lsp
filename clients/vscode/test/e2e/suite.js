@@ -379,6 +379,116 @@ async function run() {
       console.log(`PASS native automatic cached-server startup: ${evidencePath}`);
       return;
     }
+    if (suiteMode === 'server-commands') {
+      // Both management commands run against the seeded managed server: info
+      // reports the live handshake, and a forced reinstall downloads fresh
+      // fixture bytes over the production fetch boundary without a network.
+      const expected = process.env.MAGIT_VSCODE_DOWNLOAD_EXPECTED;
+      const cacheRoot = process.env.MAGIT_VSCODE_DOWNLOAD_CACHE;
+      assert(expected, 'MAGIT_VSCODE_DOWNLOAD_EXPECTED must name the seeded executable');
+      assert(cacheRoot, 'MAGIT_VSCODE_DOWNLOAD_CACHE must name the isolated global storage');
+      const { store } = require(`${extension.extensionPath}/lib/store.js`);
+      const { PROTOCOL_VERSION } = require(`${extension.extensionPath}/lib/version.js`);
+      await waitFor(() => Boolean(store.clientReady), 'seeded-server client promise');
+      await store.clientReady;
+      const initialized = store.client?.initializeResult;
+      assert(initialized, 'the seeded server completed initialization');
+      assert.equal(store.server?.origin, 'managed', 'the seeded session resolved a managed server');
+      assert.equal(store.serverVersion, initialized.serverInfo?.version,
+        'the handshake version is stored for diagnostics');
+      const readable = (text, label) => {
+        assert.equal(typeof text, 'string', `${label}: command returns text`);
+        assert.match(text, /^magit-lsp: /, `${label}: one product prefix`);
+        assert.equal((text.match(/magit-lsp: /g) || []).length, 1, `${label}: prefix not repeated`);
+        assert.doesNotMatch(text, /\n\s+at |\bError:|\{"|undefined|null/, `${label}: no stack or raw JSON`);
+      };
+      const infoText = await vscode.commands.executeCommand('magit.serverInfo');
+      readable(infoText, 'server-info');
+      assert.match(infoText, /server .* \(managed\) at /,
+        'server-info reports origin and the live handshake version');
+      assert.equal(infoText.includes(expected), true, 'server-info names the launched executable');
+
+      const { releasePayload } = require('./download-startup.js');
+      const sourceBinary = path.resolve(__dirname, '../../../..', 'target/debug/magit-lsp');
+      const seededBytes = fs.readFileSync(expected);
+      // Serve a distinguishable copy of the built server so the forced
+      // replacement is observable. The running cache binary is never written:
+      // Linux refuses to open a mapped executable for writing (ETXTBSY).
+      const payloadBinary = path.join(evidence, 'reinstall-payload-magit-lsp');
+      fs.writeFileSync(payloadBinary, Buffer.concat([
+        fs.readFileSync(sourceBinary),
+        Buffer.from('\n# forced-reinstall-fixture\n'),
+      ]));
+      const payloadBytes = fs.readFileSync(payloadBinary);
+      assert.equal(payloadBytes.equals(seededBytes), false,
+        'the served release differs from the seeded cache binary');
+      const payload = releasePayload(payloadBinary);
+      const fetches = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (url) => {
+        fetches.push(String(url));
+        if (String(url) === `${payload.base}/${payload.archiveName}.sha256`) {
+          return new Response(Buffer.from(payload.sidecar));
+        }
+        if (String(url) === `${payload.base}/${payload.archiveName}`) {
+          return new Response(payload.archive);
+        }
+        throw new Error(`unexpected download ${url}`);
+      };
+      let installText;
+      try {
+        installText = await vscode.commands.executeCommand('magit.installServer');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      readable(installText, 'install/reinstall');
+      assert.match(installText, /installed server .* at /, 'install reports the installed path and version');
+      assert.equal(installText.includes(expected), true, 'install reports the seeded cache path');
+      assert.deepEqual(fetches, [
+        `${payload.base}/${payload.archiveName}.sha256`,
+        `${payload.base}/${payload.archiveName}`,
+      ], 'a forced reinstall fetched fresh release bytes despite a valid cache');
+      assert.deepEqual(fs.readFileSync(expected), payloadBytes,
+        'the forced reinstall atomically replaced the cache binary with the fresh download');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(path.dirname(expected), 'manifest.json'), 'utf8'));
+      assert.equal(manifest.version, extension.packageJSON.version,
+        'the reinstalled manifest names the extension version');
+      assert.equal(path.dirname(expected).endsWith(`${path.sep}x86_64-unknown-linux-gnu`), true,
+        'the reinstalled entry is the pinned managed asset');
+      assert.equal(
+        fs.readdirSync(path.dirname(path.dirname(expected))).sort().join(','),
+        'x86_64-unknown-linux-gnu',
+        'no staging, retired or lock residue remains after the reinstall',
+      );
+      const evidencePath = `${evidence}/server-commands-evidence.json`;
+      fs.writeFileSync(evidencePath, JSON.stringify({
+        status: 'pass',
+        editorVersion: vscode.version,
+        extensionVersion: extension.packageJSON.version,
+        serverVersion: store.serverVersion,
+        serverInfoMessage: infoText,
+        serverOrigin: store.server?.origin,
+        serverExecutable: store.server?.command,
+        seededExecutable: expected,
+        cacheRoot,
+        installMessage: installText,
+        forcedReinstall: {
+          fetched: fetches,
+          replacedStaleBinary: true,
+          payloadDiffersFromSeededBinary: true,
+          manifestVersion: manifest.version,
+        },
+        protocolVersion: initialized.capabilities?.experimental?.magit?.protocolVersion,
+        protocolVersionExpected: PROTOCOL_VERSION,
+        downloadServedBy: 'fixture release payload over the production fetch boundary; '
+          + 'no live release download',
+        cleanup: 'isolated editor and server stopped by the native runner',
+        evidencePath,
+      }, null, 2));
+      console.log(`PASS native server management commands: ${evidencePath}`);
+      return;
+    }
     if (suiteMode === 'version') {
       const { store } = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/store`);
       const fixtureManifest = JSON.parse(fs.readFileSync(

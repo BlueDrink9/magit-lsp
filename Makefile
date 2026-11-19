@@ -155,6 +155,13 @@ vscode-version-warning: build vscode-deps
 vscode-download-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-download-startup,MAGIT_VSCODE_DOWNLOAD_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
+# Focused native server management: against the pre-seeded managed release, the
+# server-info command must report it and install/reinstall must force a fresh
+# verified download and atomically replace the cached binary.
+.PHONY: vscode-server-commands
+vscode-server-commands: vscode-prereqs build vscode-deps
+	$(call run,vscode-server-commands,MAGIT_VSCODE_SERVER_COMMANDS_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
 vscode-e2e: build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 

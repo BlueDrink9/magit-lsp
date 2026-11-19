@@ -372,12 +372,13 @@ function settle() {
  * Build one admission harness: a minimal editor fake, a client fake and the
  * scripted initialize result or start rejection.
  *
- * @param {{startError?: string, stopError?: string, protocolVersion?: unknown, includeProtocol?: boolean, settings?: object, globalStorage?: string, events?: string[]}} options
+ * @param {{startError?: string, stopError?: string, protocolVersion?: unknown, includeProtocol?: boolean, settings?: object, globalStorage?: string, events?: string[], serverVersion?: string}} options
  */
 function admissionHarness(options) {
   const commands = new Map();
   const errorMessages = [];
   const warnings = [];
+  const infoMessages = [];
   const output = [];
   const requests = [];
   const notifications = [];
@@ -434,6 +435,7 @@ function admissionHarness(options) {
       onDidChangeActiveTextEditor: () => ({ dispose() {} }),
       showErrorMessage: (text) => { errorMessages.push(text); },
       showWarningMessage: (text) => { warnings.push(text); },
+      showInformationMessage: (text) => { infoMessages.push(text); },
       showTextDocument: async (document) => ({ document, selection: { isEmpty: true } }),
       visibleTextEditors: [],
       tabGroups: {
@@ -466,7 +468,11 @@ function admissionHarness(options) {
       this.features = [];
       this.handlers = new Map();
       this.initializeResult = {
-        serverInfo: { version: require('../package.json').version },
+        serverInfo: {
+          version: Object.hasOwn(options, 'serverVersion')
+            ? options.serverVersion
+            : require('../package.json').version,
+        },
         capabilities: {
           semanticTokensProvider: {
             legend: { tokenTypes: [], tokenModifiers: [] },
@@ -517,7 +523,7 @@ function admissionHarness(options) {
     }
   }
   return {
-    vscode, LanguageClient, commands, errorMessages, warnings, output, requests,
+    vscode, LanguageClient, commands, errorMessages, warnings, infoMessages, output, requests,
     notifications, lifecycle, events, opened,
     constructions: () => constructions,
     serverOptions: () => instances.at(-1),
@@ -753,6 +759,126 @@ async function testServerStartup() {
   assert.deepEqual(unhandled, [], 'download failure never leaves an unhandled rejection');
 }
 
+/**
+ * Management commands: both are contributed, registered and activate the
+ * extension; server info reports the live handshake while install/reinstall
+ * always forces a fresh pinned managed download, all with readable single-prefix
+ * output.
+ */
+async function testServerCommands() {
+  const manifest = require('../package.json');
+  const contributed = new Set((manifest.contributes?.commands || []).map((entry) => entry.command));
+  const activationEvents = new Set(manifest.activationEvents || []);
+  for (const id of ['magit.installServer', 'magit.serverInfo']) {
+    assert.equal(contributed.has(id), true, `${id} is a contributed command`);
+    assert.equal(activationEvents.has(`onCommand:${id}`), true, `${id} activates the extension`);
+  }
+  /**
+   * @param {string} text
+   * @param {string} label
+   */
+  function readable(text, label) {
+    assert.equal(typeof text, 'string', `${label}: command returns readable text`);
+    assert.match(text, /^magit-lsp: /, `${label}: one product prefix`);
+    assert.equal((text.match(/magit-lsp: /g) || []).length, 1, `${label}: prefix is not repeated`);
+    assert.doesNotMatch(text, /\n\s+at |\bError:|\{"|undefined|null/, `${label}: no stack or raw JSON`);
+  }
+
+  // An active managed session reports the handshake version, origin and path.
+  const executable = '/storage/server/v0.1.0/x86_64-unknown-linux-gnu/magit-lsp';
+  let harness = admissionHarness({
+    settings: { 'magit-lsp.server.source': 'managed' },
+    globalStorage: '/storage',
+    protocolVersion: 1,
+    serverVersion: '0.1.0',
+  });
+  let extension = loadExtension(harness.vscode, harness.LanguageClient, {
+    resolveServer: async () => ({ executable, version: manifest.version }),
+  });
+  extension.activate({ subscriptions: [], globalStorageUri: { fsPath: '/storage' } });
+  await require('../lib/store').store.clientReady;
+  assert.equal(typeof harness.commands.get('magit.serverInfo'), 'function');
+  assert.equal(typeof harness.commands.get('magit.installServer'), 'function');
+  const managedInfo = await harness.commands.get('magit.serverInfo')();
+  readable(managedInfo, 'server-info managed');
+  assert.match(managedInfo, /server 0\.1\.0 \(managed\) at \/storage\/server/,
+    'server-info reports handshake version, origin and executable path');
+  assert.equal(harness.infoMessages.at(-1), managedInfo, 'server-info is shown to the user');
+  await extension.deactivate();
+
+  // An explicit override has no probe version; without a handshake version the
+  // line still names the path and origin instead of printing null.
+  harness = admissionHarness({
+    settings: { 'magit-lsp.server.path': process.execPath },
+    protocolVersion: 1,
+    serverVersion: null,
+  });
+  extension = loadExtension(harness.vscode, harness.LanguageClient);
+  extension.activate({ subscriptions: [] });
+  await require('../lib/store').store.clientReady;
+  const explicitInfo = await harness.commands.get('magit.serverInfo')();
+  readable(explicitInfo, 'server-info explicit');
+  assert.match(explicitInfo, /server \(explicit\) at /);
+  assert.equal(explicitInfo.includes(process.execPath), true, 'explicit executable path is reported');
+  assert.match(explicitInfo, /version not reported/);
+  await extension.deactivate();
+
+  // Without a completed handshake the command explains the situation and never
+  // throws, even though activation itself reported the resolver failure.
+  const { ServerDownloadError } = require('../lib/server-download');
+  harness = admissionHarness({ settings: {}, globalStorage: '/storage' });
+  extension = loadExtension(harness.vscode, harness.LanguageClient, {
+    resolveServer: async () => {
+      throw new ServerDownloadError('download failed: no network');
+    },
+  });
+  extension.activate({ subscriptions: [], globalStorageUri: { fsPath: '/storage' } });
+  await settle();
+  const noServer = await harness.commands.get('magit.serverInfo')();
+  readable(noServer, 'server-info without a session');
+  assert.equal(noServer, 'magit-lsp: no active magit-lsp server');
+  assert.equal(harness.errorMessages.some((text) => text.includes('no active')), false,
+    'missing server info is not an error');
+  await extension.deactivate();
+
+  // Install always targets the pinned managed release and forces a fresh
+  // download, independent of the configured source, and reports path + version.
+  /** @type {object[]} */
+  const calls = [];
+  let installFails = false;
+  harness = admissionHarness({
+    settings: { 'magit-lsp.server.source': 'managed' },
+    globalStorage: '/storage',
+    protocolVersion: 1,
+    serverVersion: '0.1.0',
+  });
+  extension = loadExtension(harness.vscode, harness.LanguageClient, {
+    resolveServer: async (options) => {
+      calls.push(options);
+      if (installFails) throw new ServerDownloadError('download failed: connection refused');
+      return { executable, version: manifest.version };
+    },
+  });
+  extension.activate({ subscriptions: [], globalStorageUri: { fsPath: '/storage' } });
+  await require('../lib/store').store.clientReady;
+  const installed = await harness.commands.get('magit.installServer')();
+  readable(installed, 'install success');
+  assert.deepEqual(calls.at(-1), { version: manifest.version, cacheRoot: '/storage', force: true },
+    'install forces the pinned managed release even with a valid cache');
+  assert.match(installed, new RegExp(`installed server ${manifest.version.replaceAll('.', '\\.')} at `));
+  assert.equal(installed.includes(executable), true, 'install reports the installed path');
+  installFails = true;
+  const failed = await harness.commands.get('magit.installServer')();
+  readable(failed, 'install failure');
+  assert.match(failed, /^magit-lsp: download failed: connection refused$/);
+  assert.equal(harness.errorMessages.at(-1), failed, 'install failure is shown as an error');
+  for (const text of [...harness.infoMessages, ...harness.errorMessages]) {
+    readable(text, 'management output');
+  }
+  await extension.deactivate();
+}
+
 module.exports = testStatusOpenLifecycle;
 module.exports.protocolAdmission = testProtocolAdmission;
 module.exports.serverStartup = testServerStartup;
+module.exports.serverCommands = testServerCommands;

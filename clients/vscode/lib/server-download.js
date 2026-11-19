@@ -619,6 +619,12 @@ async function fetchBytes(url, limit) {
  * published first is re-verified and reused, never replaced or deleted, and a
  * failure leaves no partial entry and removes only this attempt's staging.
  *
+ * A forced install ignores any existing verified entry, including one published
+ * while this download ran: the previous entry is renamed aside under the lock,
+ * the staged entry takes its place, and the retired entry is removed only after
+ * the publish succeeds. A failed publish restores the previous entry, so the
+ * previously installed binary keeps working.
+ *
  * Extraction uses Node's built-in `zlib` and a minimal ustar reader (plus the
  * mtime-only pax extended header Python's default tarfile format emits) rather
  * than a tar dependency: the published archive is produced by
@@ -629,9 +635,10 @@ async function fetchBytes(url, limit) {
  * @param {string} version normalized release version
  * @param {string} asset validated release asset target
  * @param {Transport} transport external download boundary
+ * @param {boolean} [force] replace an existing verified entry instead of reusing it
  * @returns {Promise<string>} published executable path
  */
-async function install(entry, version, asset, transport) {
+async function install(entry, version, asset, transport, force = false) {
   const stem = `magit-lsp-v${version}-${asset}`;
   const archiveName = `${stem}.tar.gz`;
   const base = `https://github.com/${REPOSITORY}/releases/download/v${version}`;
@@ -666,11 +673,33 @@ async function install(entry, version, asset, transport) {
     const manifest = { version, asset, size: binary.length, digest: sha256(binary) };
     fs.writeFileSync(path.join(staging, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     return withEntryLock(entry, () => {
-      const winner = cachedExecutable(entry, version);
-      if (winner) return winner;
-      removeInvalidEntry(entry, version);
-      fs.renameSync(staging, entry);
+      if (!force) {
+        const winner = cachedExecutable(entry, version);
+        if (winner) return winner;
+      }
+      /** @type {string|undefined} retired directory holding the displaced entry */
+      let retired;
+      if (force && cachedExecutable(entry, version)) {
+        retired = fs.mkdtempSync(path.join(parent, '.retired-'));
+        fs.renameSync(entry, path.join(retired, 'entry'));
+      }
+      try {
+        removeInvalidEntry(entry, version);
+        fs.renameSync(staging, entry);
+      } catch (error) {
+        if (retired) {
+          try {
+            fs.renameSync(path.join(retired, 'entry'), entry);
+          } catch {}
+        }
+        throw error;
+      }
       staging = undefined;
+      if (retired) {
+        try {
+          fs.rmSync(retired, { recursive: true, force: true });
+        } catch {}
+      }
       return path.join(entry, 'magit-lsp');
     });
   } catch (error) {
@@ -695,6 +724,7 @@ const inFlight = new Map();
  * @property {string} cacheRoot directory the extension owns for cached servers
  * @property {Transport} [transport] external download boundary; tests inject fixtures here
  * @property {{platform?: string, arch?: string, glibc?: string|null}} [runtime] reported host facts
+ * @property {boolean} [force] download and publish even when a verified entry already exists
  */
 
 /**
@@ -706,7 +736,9 @@ const inFlight = new Map();
  * it is returned, concurrent calls in this process share one download, and
  * extension hosts sharing the cache publish complete entries by directory
  * rename under a bounded per-entry lock, so a failed download leaves no partial
- * files and no unverified binary behind.
+ * files and no unverified binary behind. A forced resolution downloads and
+ * publishes afresh even when a verified entry already exists; a failure keeps
+ * the previous entry installable.
  *
  * @param {ResolveOptions} options
  * @returns {Promise<{executable: string, version: string}>}
@@ -719,12 +751,13 @@ async function resolveServer(options) {
   }
   const asset = releaseAsset(options?.runtime ?? {});
   const entry = cacheEntry(cacheRoot, version, asset);
-  const cached = cachedExecutable(entry, version);
+  const force = options?.force === true;
+  const cached = force ? undefined : cachedExecutable(entry, version);
   if (cached) return { executable: cached, version };
   const transport = options?.transport ?? fetchBytes;
-  let pending = inFlight.get(entry);
+  let pending = force ? undefined : inFlight.get(entry);
   if (!pending) {
-    if (fs.existsSync(entry)) {
+    if (!force && fs.existsSync(entry)) {
       // Best effort before downloading: an invalid entry must never stay
       // launchable if this attempt fails. The lock re-check keeps a competing
       // host's freshly published winner from being deleted; publication
@@ -734,15 +767,18 @@ async function resolveServer(options) {
       } catch {}
     }
     // Re-check after clearing so an install that finished while we waited for
-    // the lock is reused instead of downloaded again.
-    const settled = cachedExecutable(entry, version);
+    // the lock is reused instead of downloaded again. A forced install always
+    // downloads, so it never reuses that settled entry.
+    const settled = force ? undefined : cachedExecutable(entry, version);
     if (settled) return { executable: settled, version };
-    pending = install(entry, version, asset, transport);
-    inFlight.set(entry, pending);
-    pending.then(
-      () => inFlight.delete(entry),
-      () => inFlight.delete(entry),
-    );
+    pending = install(entry, version, asset, transport, force);
+    if (!force) {
+      inFlight.set(entry, pending);
+      pending.then(
+        () => inFlight.delete(entry),
+        () => inFlight.delete(entry),
+      );
+    }
   }
   const executable = await pending;
   return { executable, version };

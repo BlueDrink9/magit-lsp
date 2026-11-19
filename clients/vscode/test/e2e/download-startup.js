@@ -55,6 +55,34 @@ function packagedArchive(binary, stem, archiveName) {
 }
 
 /**
+ * Build the one release payload an isolated run may download.
+ *
+ * The archive is produced from the supplied binary with the packager's Python
+ * tarfile settings, so a forced reinstall can be served entirely offline while
+ * still exercising the production checksum and extraction path.
+ *
+ * @param {string} binary path to `magit-lsp`
+ * @returns {{version: string, stem: string, archiveName: string, base: string,
+ *   archive: Buffer, sidecar: string}}
+ */
+function releasePayload(binary) {
+  const version = JSON.parse(
+    fs.readFileSync(path.join(root, 'clients/vscode/package.json'), 'utf8')
+  ).version;
+  const stem = `magit-lsp-v${version}-${ASSET}`;
+  const archiveName = `${stem}.tar.gz`;
+  const archive = packagedArchive(binary, stem, archiveName);
+  return {
+    version,
+    stem,
+    archiveName,
+    base: `https://github.com/BlueDrink9/magit-lsp/releases/download/v${version}`,
+    archive,
+    sidecar: `${digest(archive)}  ${archiveName}\n`,
+  };
+}
+
+/**
  * Install the extension's pinned release into one isolated profile's cache.
  *
  * The cache root is the exact directory the extension passes as its global
@@ -67,31 +95,26 @@ function packagedArchive(binary, stem, archiveName) {
  * @returns {Promise<{version: string, asset: string, cacheRoot: string, executable: string}>}
  */
 async function prepareDownloadCache({ directory, binary }) {
-  const version = JSON.parse(
-    fs.readFileSync(path.join(root, 'clients/vscode/package.json'), 'utf8')
-  ).version;
-  const stem = `magit-lsp-v${version}-${ASSET}`;
-  const archiveName = `${stem}.tar.gz`;
-  const base = `https://github.com/BlueDrink9/magit-lsp/releases/download/v${version}`;
+  const payload = releasePayload(binary);
   const cacheRoot = path.join(directory, 'user', 'User', 'globalStorage', EXTENSION_ID);
-  const archive = packagedArchive(binary, stem, archiveName);
   const { resolveServer } = require('../../lib/server-download.js');
   const resolved = await resolveServer({
-    version,
+    version: payload.version,
     cacheRoot,
     runtime: { platform: 'linux', arch: 'x64', glibc: '2.36' },
     transport: async (url) => {
-      if (url === `${base}/${archiveName}.sha256`) {
-        return Buffer.from(`${digest(archive)}  ${archiveName}\n`);
+      if (url === `${payload.base}/${payload.archiveName}.sha256`) {
+        return Buffer.from(payload.sidecar);
       }
-      if (url === `${base}/${archiveName}`) return archive;
+      if (url === `${payload.base}/${payload.archiveName}`) return payload.archive;
       throw new Error(`unexpected download ${url}`);
     },
   });
-  assert.equal(resolved.version, version, 'the seeded cache names the extension version');
+  assert.equal(resolved.version, payload.version, 'the seeded cache names the extension version');
   assert.equal(resolved.executable.startsWith(`${cacheRoot}${path.sep}`), true,
     'the production helper installs the server below the extension cache root');
-  return { version, asset: ASSET, cacheRoot, executable: resolved.executable };
+  return { version: payload.version, asset: ASSET, cacheRoot, executable: resolved.executable };
 }
 
 exports.prepareDownloadCache = prepareDownloadCache;
+exports.releasePayload = releasePayload;

@@ -17,7 +17,9 @@
     "onCommand:magit.open",
     "onCommand:magit.key",
     "onCommand:magit.invoke",
-    "onCommand:magit.mirrorFoldShortcuts"
+    "onCommand:magit.mirrorFoldShortcuts",
+    "onCommand:magit.installServer",
+    "onCommand:magit.serverInfo"
   ],
   "main": "./extension.js",
   "scripts": {
@@ -166,6 +168,16 @@
         "command": "magit.mirrorFoldShortcuts",
         "title": "Mirror my fold shortcuts",
         "category": "Magit"
+      },
+      {
+        "command": "magit.installServer",
+        "title": "Install/Reinstall Managed Server",
+        "category": "Magit LSP"
+      },
+      {
+        "command": "magit.serverInfo",
+        "title": "Show Server Information",
+        "category": "Magit LSP"
       }
     ],
     "menus": {

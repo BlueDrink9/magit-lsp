@@ -388,10 +388,12 @@ test('one generic dispatcher carries every contributed action binding', () => {
     'magit.cancelEdit',
     'magit.closeEdit',
     'magit.confirmEdit',
+    'magit.installServer',
     'magit.invoke',
     'magit.key',
     'magit.mirrorFoldShortcuts',
     'magit.open',
+    'magit.serverInfo',
   ]);
   // No contributed VSCode command may be named after a server action; every
   // action binding goes through `magit.invoke` with a canonical server ID.
@@ -633,6 +635,7 @@ if (failures.length > 0) {
 require('./open.test')().then(async () => {
   await require('./open.test').protocolAdmission();
   await require('./open.test').serverStartup();
+  await require('./open.test').serverCommands();
   passed += await require('./server-download.test')();
   console.log(`ok ${passed} tests`);
 }).catch((error) => {

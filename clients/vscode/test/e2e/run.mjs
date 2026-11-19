@@ -54,7 +54,9 @@ const focusedHead = suiteMode === 'head';
 const focusedVersion = suiteMode === 'version';
 const focusedF5 = suiteMode === 'f5';
 const focusedDownload = suiteMode === 'download';
+const focusedCommands = suiteMode === 'server-commands';
 const strictFocused = focusedEdit || focusedHead || focusedVersion || focusedF5 || focusedDownload
+  || focusedCommands
   || ['A06', 'A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
@@ -101,7 +103,7 @@ writeFileSync(`${directory}/user/User/settings.json`, JSON.stringify({
   // Server source and path are machine-scoped, so only user settings apply.
   // The automatic download case forces managed source so PATH discovery cannot
   // pick a host binary; it resolves the seeded pinned release from the cache.
-  ...(focusedDownload
+  ...(focusedDownload || focusedCommands
     ? { 'magit-lsp.server.source': 'managed' }
     : { 'magit-lsp.server.path': `${root}/target/debug/magit-lsp` }),
 }));
@@ -140,7 +142,7 @@ await new Promise((resolve) => listener.close(resolve));
 // Seed the isolated profile's exact-version cache through the production
 // resolver, then let the real extension find it with managed source configured.
 let downloadFixture;
-if (focusedDownload) {
+if (focusedDownload || focusedCommands) {
   downloadFixture = await require('./download-startup.js').prepareDownloadCache({
     directory,
     binary: `${root}/target/debug/magit-lsp`,
@@ -189,7 +191,7 @@ if (focusedVersion) {
   versionFixture = require('./version-fixture.js').createVersionFixture(directory);
   env.MAGIT_VSCODE_VERSION_FIXTURE = versionFixture.extensionPath;
 }
-if (focusedEdit || focusedHead || focusedVersion || focusedDownload) {
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands) {
   mkdirSync(`${directory}/launcher`);
   writeFileSync(`${directory}/launcher/package.json`, JSON.stringify({
     publisher: 'test', name: 'native-edit-launcher', version: '1.0.0',
@@ -219,12 +221,12 @@ const args = [
   '--extensions-dir', `${directory}/extensions`,
   `--extensionDevelopmentPath=${root}/clients/vscode`,
   ...(focusedVersion ? [`--extensionDevelopmentPath=${versionFixture.extensionPath}`] : []),
-   ...(focusedEdit || focusedHead || focusedVersion || focusedDownload
+   ...(focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands
     ? [`--extensionDevelopmentPath=${directory}/launcher`]
     : [`--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`]), repo,
 ];
 let result;
-if (focusedEdit || focusedHead || focusedVersion || focusedDownload) {
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands) {
   const child = spawn(editor, args, { env, stdio: 'inherit' });
   let launchError;
   child.on('error', (error) => { launchError = error; });
@@ -261,7 +263,11 @@ const f5Evidence = focusedF5 && existsSync(`${directory}/f5-evidence.json`)
 // The download evidence records failures too, so readiness requires a pass.
 const downloadEvidence = focusedDownload && existsSync(`${directory}/download-startup-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/download-startup-evidence.json`, 'utf8')) : null;
+// The command evidence records failures too, so readiness requires a pass.
+const commandEvidence = focusedCommands && existsSync(`${directory}/server-commands-evidence.json`)
+  ? JSON.parse(readFileSync(`${directory}/server-commands-evidence.json`, 'utf8')) : null;
 const evidenceReady = focusedVersion ? existsSync(`${directory}/version-warning-evidence.json`)
+  : focusedCommands ? commandEvidence?.status === 'pass'
   : focusedDownload ? downloadEvidence?.status === 'pass'
   : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
@@ -290,6 +296,8 @@ if (!evidenceReady) {
       ? 'Missing native F5 evidence; see the isolated evidence directory above.'
       : focusedDownload
       ? 'Missing native automatic cached-server startup evidence; see the isolated evidence directory above.'
+      : focusedCommands
+      ? 'Missing native server management command evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A34_ONLY === '1'
       ? 'Missing A34 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A33_ONLY === '1'

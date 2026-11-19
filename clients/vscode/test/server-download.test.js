@@ -1601,6 +1601,87 @@ async function run() {
     }
   });
 
+  await check('forced reinstall downloads fresh and replaces a verified entry', async () => {
+    const root = temporaryRoot();
+    try {
+      const first = releaseFixture();
+      const installed = await resolveServer({
+        version: VERSION, cacheRoot: root, transport: first.transport, runtime: RUNTIME,
+      });
+      assert.deepEqual(fs.readFileSync(installed.executable), BINARY, 'the first release is installed');
+      const entry = entryOf(root);
+      const parent = path.dirname(entry);
+      const replacement = Buffer.from('#!/bin/sh\necho replacement\n');
+      const second = releaseFixture({ binary: replacement });
+      const reinstalled = await resolveServer({
+        version: VERSION,
+        cacheRoot: root,
+        transport: second.transport,
+        runtime: RUNTIME,
+        force: true,
+      });
+      assert.equal(reinstalled.executable, installed.executable);
+      assert.deepEqual(second.calls, [
+        `${second.base}/${archiveNameOf()}.sha256`,
+        `${second.base}/${archiveNameOf()}`,
+      ], 'a forced reinstall fetches fresh bytes despite a valid cache entry');
+      assert.deepEqual(fs.readFileSync(reinstalled.executable), replacement,
+        'the cache entry was atomically replaced by the fresh release');
+      const manifest = JSON.parse(fs.readFileSync(path.join(entry, 'manifest.json'), 'utf8'));
+      assert.equal(manifest.digest, digest(replacement));
+      assert.equal(manifest.size, replacement.length);
+      assert.deepEqual(fs.readdirSync(parent), [ASSET], 'no staging, retired or lock residue remains');
+      const reuse = releaseFixture();
+      await resolveServer({
+        version: VERSION, cacheRoot: root, transport: reuse.transport, runtime: RUNTIME,
+      });
+      assert.deepEqual(reuse.calls, [], 'a normal resolution reuses the forced entry without fetching');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('failed forced reinstall keeps the previous managed binary', async () => {
+    const root = temporaryRoot();
+    try {
+      const first = releaseFixture();
+      const installed = await resolveServer({
+        version: VERSION, cacheRoot: root, transport: first.transport, runtime: RUNTIME,
+      });
+      const entry = entryOf(root);
+      const before = fs.readFileSync(installed.executable);
+      const badSidecar = releaseFixture({
+        binary: Buffer.from('#!/bin/sh\nexit 9\n'),
+        sidecar: `${'0'.repeat(64)}  ${archiveNameOf()}\n`,
+      });
+      await assert.rejects(
+        resolveServer({
+          version: VERSION,
+          cacheRoot: root,
+          transport: badSidecar.transport,
+          runtime: RUNTIME,
+          force: true,
+        }),
+        (error) => error.name === 'ServerDownloadError'
+          && /^magit-lsp: archive checksum does not match /m.test(error.message),
+        'a failed reinstall is a single-prefix readable download error',
+      );
+      assert.deepEqual(fs.readFileSync(installed.executable), before,
+        'the previously installed managed binary is untouched');
+      assert.deepEqual(fs.readdirSync(path.dirname(entry)), [ASSET],
+        'a failed reinstall leaves no staging, retired or lock residue');
+      const reuse = releaseFixture();
+      const reused = await resolveServer({
+        version: VERSION, cacheRoot: root, transport: reuse.transport, runtime: RUNTIME,
+      });
+      assert.equal(reused.executable, installed.executable,
+        'the previous binary stays launchable after the failed reinstall');
+      assert.deepEqual(reuse.calls, [], 'reuse after a failed reinstall never fetches');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   if (failures.length > 0) {
     const detail = failures
       .map((failure) => `FAIL: ${failure.name}\n${failure.error.stack ?? failure.error}`)
