@@ -308,6 +308,13 @@ pub enum PromptAction {
         /// The branch name answered at the first prompt.
         source: String,
     },
+    /// Reset the answered branch to a second answered revision.
+    BranchReset,
+    /// Second half of a reset: point this validated branch at the answered revision.
+    BranchResetTarget {
+        /// The branch name answered at the first prompt.
+        source: String,
+    },
     /// Delete the answered branch.
     BranchDelete,
     /// Set a description on the answered branch.
@@ -563,6 +570,30 @@ pub fn resume_prompt(
                 ctx,
                 |repo| repo.rename_branch(&source, &target),
                 format!("Renamed branch {source} to {target}"),
+            )
+        }
+        PromptAction::BranchReset => {
+            let PromptValue::Text(source) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let source = source.trim().to_owned();
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Reset to", "", "Target revision"),
+                    PromptAction::BranchResetTarget { source },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchResetTarget { source } => {
+            let PromptValue::Text(target) = answer else {
+                return Err(crate::Error::new("Expected a revision"));
+            };
+            let target = target.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.reset_branch(&source, &target),
+                format!("Reset branch {source} to {target}"),
             )
         }
         PromptAction::BranchDelete => {
@@ -998,6 +1029,7 @@ fn build() -> Registry {
         command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch at HEAD", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
+        command! { id: "branch.reset", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
         command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
         command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a tag at HEAD", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
         command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, effects: &[] },
@@ -1555,6 +1587,17 @@ fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Create branch", "", "New branch name"),
             PromptAction::BranchCreate,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the branch to reset, then for the revision to reset it to.
+fn branch_reset(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Reset branch", "", "Branch to reset"),
+            PromptAction::BranchReset,
         )),
         ..Default::default()
     })

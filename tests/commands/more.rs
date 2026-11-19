@@ -1244,3 +1244,112 @@ fn remote_prune_of_missing_remote_surfaces_gits_refusal() {
     );
     assert!(!test.session.has_pending_prompt());
 }
+
+#[test]
+fn branch_reset_moves_a_side_branch_to_a_revision_without_switching() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "feature", "HEAD~1"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.reset".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("expected reset target prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("HEAD".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Reset branch feature to HEAD"),
+        "{:?}",
+        result.effects
+    );
+    let feature = tmp.git(&["rev-parse", "feature"]).trim().to_owned();
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_eq!(feature, head, "reset must move feature to HEAD");
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
+        "reset must not check the branch out"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_reset_of_current_branch_surfaces_gits_refusal() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.reset".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
+        .unwrap()
+    else {
+        panic!("expected reset target prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts.iter().any(|text| {
+            let text = text.to_lowercase();
+            text.contains("cannot force update the branch") && text.contains("main")
+        }),
+        "{:?}",
+        result.effects
+    );
+    let main = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_eq!(main, head, "Git's refusal must leave main at HEAD");
+    assert!(!test.session.has_pending_prompt());
+}

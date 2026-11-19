@@ -170,7 +170,7 @@ pub fn definition() -> MenuDef {
                         "magit-branch-rename",
                         "",
                     ),
-                    action("x", "branch.reset", "reset", "magit-branch-reset", "R-6.1"),
+                    action("x", "branch.reset", "reset", "magit-branch-reset", ""),
                     action(
                         "k",
                         "branch.delete",

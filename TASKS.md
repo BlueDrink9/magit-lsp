@@ -373,7 +373,7 @@ Post-release; scopes for phases 10–13 remain mandatory in [specifications](./T
 - [ ] **T067 — branch-checkout-spin.**
 - [ ] **T068 — network-seam.**
 - [ ] **T069 — fetch-push-pull.**
-- [ ] **T070 — branch-reset.**
+- [x] **T070 — branch-reset.** Delivered early as Early T070 (see that ad hoc entry).
 - [ ] **T071 — annotated-tags.**
 - [ ] **T072 — stash-views.**
 - [ ] **T073 — stash-operations.**
@@ -508,7 +508,11 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Verified (remotes rename/prune, part 3/3, A3) — `make ui-file FILE=tests/ui/scenarios/remote-rename.scn` → exit 0; menu-driven `M r` prompts for `origin` then `upstream` and `git remote` reports `upstream` only; no snapshot reflects remote rows, so none changed.
   - Early T042 remotes complete; remaining Planned R-6.3: remote.configure, prune-refspecs, unshallow, update-default, tag.release, tag.prune; the Phase 10 T042 line stays unticked.
   - Done: `0f64083`.
-- [ ] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
+- [x] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
+  - Reset is exactly `git branch -f <name> <target>`: it never checks out the branch and never touches the working tree. That separation is deliberate; file checkout at a revision stays T067.
+  - Verified (Early T070, A1) — `grep -n 'id: "branch\.reset"' src/commands.rs` → `command!` registration at `:1032`; `src/menus/branch.rs:173` clears the `x` marker to `""` while the `b C` configure row and the four checkout rows keep `R-6.1`; KEYMAPS.md §5.4.2 documents `b x` at `:155` and its remaining-planned note no longer lists reset.
+  - Verified (Early T070, A2) — `make test-rust FILTER="--test commands"` → exit 0; the two new tests cover a side branch moving to the target without switching, and Git's refusal of the checked-out branch surfacing as a warn message.
+  - Verified (Early T070, A3) — `make ui-file FILE=tests/ui/scenarios/branch-reset.scn` → exit 0; `b x` prompts for `feature` then `HEAD`, and `git rev-parse feature` equals `git rev-parse HEAD` with `main` still checked out.
 
 ## Completed work
 

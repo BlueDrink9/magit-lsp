@@ -530,6 +530,12 @@ impl GitRepo {
         self.run(&["branch", "-d", name.as_str()]).map(|_| ())
     }
 
+    /// Force `name` to point at `target` without checking it out or touching
+    /// the working tree; Git reports its own refusal of invalid inputs.
+    pub fn reset_branch(&self, name: &str, target: &str) -> Result<()> {
+        self.run(&["branch", "-f", name, target]).map(|_| ())
+    }
+
     /// Create a tag at HEAD. Tag names are not validated here; Git refuses
     /// invalid or duplicate names itself.
     pub fn create_tag(&self, name: &str) -> Result<()> {
