@@ -2,9 +2,9 @@
 //!
 //! The workspace has no JSON Schema validator dependency, so this deliberately
 //! covers only the keywords the generated artifacts emit: `$ref`, `anyOf`,
-//! `oneOf`, `type`, `const`, `enum`, `required`, `properties`, `items` and
-//! `additionalProperties`. Unknown keywords are ignored, so tolerated extra
-//! properties are not rejected.
+//! `oneOf`, `type`, `const`, `enum`, `required`, `properties`, `items`,
+//! `minimum` and `additionalProperties`. Unknown keywords are ignored, so
+//! tolerated extra properties are not rejected.
 
 use serde_json::Value;
 use std::path::Path;
@@ -84,6 +84,16 @@ pub fn schema_errors(root: &Value, schema: &Value, value: &Value, path: &str) ->
         if !satisfied {
             errors.push(format!("{path}: expected type {kinds}, found {value}"));
             return errors;
+        }
+    }
+
+    if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
+        if let Some(number) = value.as_f64() {
+            if number < minimum {
+                errors.push(format!(
+                    "{path}: {value} is less than the minimum {minimum}"
+                ));
+            }
         }
     }
 

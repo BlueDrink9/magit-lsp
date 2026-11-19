@@ -144,6 +144,16 @@ fn prompts_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     names_schema(OPTIONAL_PROMPT_KINDS)
 }
 
+/// Schema for `minimumVersion`: optional by omission, otherwise a positive
+/// integer. Cross-field `<= v` enforcement stays in the runtime parser.
+fn minimum_version_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 1,
+    })
+}
+
 /// Wire declaration of `capabilities.experimental.magit`, mirrored as the
 /// generated `docs/schema/rich-capabilities.json` artifact.
 ///
@@ -162,6 +172,7 @@ pub struct RichCapabilityDeclaration {
     ///
     /// A present value must be a positive integer no greater than `v`.
     #[serde(default, rename = "minimumVersion", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "minimum_version_schema")]
     pub minimum_version: Option<u64>,
     /// Client keymap delivery strategy.
     pub keys: crate::protocol::KeymapDelivery,

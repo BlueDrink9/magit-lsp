@@ -8,7 +8,7 @@ mod fixtures;
 mod example_recordings;
 
 use fixtures::schema::{read_schema, schema_errors};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use magit_lsp::keymap::{Binding, EditorMode};
@@ -2097,6 +2097,53 @@ fn recorded_magit_declarations_validate_against_capability_schema() {
         assert!(
             errors.is_empty(),
             "{source} must validate against the capability schema: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn generated_capability_schema_requires_positive_minimum_version() {
+    let schema = generate_schema::capability_artifact().schema;
+    assert_eq!(schema["title"], "RichCapabilityDeclaration");
+    assert_eq!(schema["properties"]["minimumVersion"]["type"], "integer");
+    assert_eq!(schema["properties"]["minimumVersion"]["minimum"], 1);
+
+    let rows: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/current-client-capabilities.json"),
+        )
+        .expect("read current capability fixture"),
+    )
+    .expect("current capability fixture is JSON");
+    let base = &rows[0]["magit"];
+
+    let mut omitted = base.clone();
+    omitted
+        .as_object_mut()
+        .expect("declaration is an object")
+        .remove("minimumVersion");
+    assert!(
+        schema_errors(&schema, &schema, &omitted, "$").is_empty(),
+        "omitting minimumVersion must validate"
+    );
+
+    let mut one = base.clone();
+    one["minimumVersion"] = json!(1);
+    assert!(
+        schema_errors(&schema, &schema, &one, "$").is_empty(),
+        "minimumVersion 1 must validate"
+    );
+
+    for rejected in [Value::Null, json!(0), json!(-1), json!(1.5), json!("2")] {
+        let mut declaration = base.clone();
+        declaration["minimumVersion"] = rejected.clone();
+        let errors = schema_errors(&schema, &schema, &declaration, "$");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("$.minimumVersion")),
+            "minimumVersion {rejected} must be rejected: {errors:?}"
         );
     }
 }
