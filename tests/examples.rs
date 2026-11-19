@@ -1526,14 +1526,25 @@ fn a_divergent_example_expectation_fails_the_replay() {
 /// normal replay still rejects a divergent render.
 #[test]
 fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
-    let stale = example_lines("plain-code-action.jsonl");
-    let index = stale
+    // The committed recording is current, so a stale payload is constructed
+    // here instead of borrowed from the artifact: the test state it needs must
+    // not depend on whether a recording happens to lag the server.
+    let current = example_lines("plain-code-action.jsonl");
+    let index = current
         .iter()
         .position(|line| {
             line.dir == Dir::ServerToClient
                 && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
         })
         .expect("the recorded status render");
+    replay_example_mode("plain-code-action.jsonl", &current, false)
+        .expect("the committed recording replays strictly before it is perturbed");
+    let mut stale: Vec<Line> = current
+        .iter()
+        .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
+        .collect();
+    stale[index].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"] =
+        Value::String("Head: not the recorded render".to_owned());
     let error = replay_example_mode("plain-code-action.jsonl", &stale, false)
         .expect_err("strict replay must reject a stale recording");
     assert!(error.contains("recorded s2c frame mismatch"), "{error}");
@@ -1543,6 +1554,11 @@ fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
     let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
     replay_example_mode("plain-code-action.jsonl", &reparsed, false)
         .expect("captured frames replay strictly against the same server");
+    assert_ne!(
+        reparsed[index].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"],
+        stale[index].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"],
+        "regeneration replaced the stale render with the server's answer"
+    );
     reparsed[index].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"] =
         Value::String("Head: not the recorded render".to_owned());
     let error = replay_example_mode("plain-code-action.jsonl", &reparsed, false)
@@ -1557,11 +1573,20 @@ fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
 /// replays strictly; normal replay still rejects a changed action.
 #[test]
 fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
-    let stale = example_lines("commit-edit-abort.jsonl");
-    let index = stale
+    // Same rule as the render case: build the stale registry here so the test
+    // does not require the committed recording to lag the server.
+    let current = example_lines("commit-edit-abort.jsonl");
+    let index = current
         .iter()
         .position(|line| line.dir == Dir::ServerToClient && line.message.get("result").is_some_and(Value::is_array))
         .expect("the recorded code-action response");
+    replay_example_mode("commit-edit-abort.jsonl", &current, false)
+        .expect("the committed recording replays strictly before it is perturbed");
+    let mut stale: Vec<Line> = current
+        .iter()
+        .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
+        .collect();
+    stale[index].message["result"][0]["title"] = Value::String("Stale: not the current registry".to_owned());
     let error = replay_example_mode("commit-edit-abort.jsonl", &stale, false)
         .expect_err("strict replay must reject the stale recording");
     assert!(error.contains("recorded s2c frame mismatch"), "{error}");
@@ -1570,6 +1595,11 @@ fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
     let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
     replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
         .expect("captured frames replay strictly against the same server");
+    assert_ne!(
+        reparsed[index].message["result"][0]["title"],
+        stale[index].message["result"][0]["title"],
+        "regeneration replaced the stale action with the current registry entry"
+    );
     reparsed[index].message["result"][0]["title"] = Value::String("Drifted: not the current registry".to_owned());
     let error = replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
         .expect_err("strict replay must reject the changed action");
