@@ -17,7 +17,15 @@ const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
 
-const vscode = require('./fake/vscode');
+const vscodeModule = require('./fake/vscode');
+const {
+  Position,
+  Selection,
+  __test,
+  commands: vscodeCommands,
+  window,
+  workspace,
+} = vscodeModule;
 const { LanguageClient, instances } = require('./fake/languageclient');
 
 /** Scripted client with explicit, validated work-done progress support. */
@@ -65,45 +73,45 @@ class IntegrationClient extends LanguageClient {
 // group. Dirty choices use the existing scripted answer solely in this fake.
 const tabObserver = { handler: undefined };
 const nativeTabs = new WeakMap();
-Object.defineProperty(vscode.window.tabGroups, 'all', { get() {
-  return vscode.__test.editors.map((editor) => {
+Object.defineProperty(window.tabGroups, 'all', { get() {
+  return __test.editors.map((editor) => {
     if (!nativeTabs.has(editor)) nativeTabs.set(editor, { input: { uri: editor.document.uri } });
     return { tabs: [nativeTabs.get(editor)] };
   });
 } });
-vscode.window.tabGroups.onDidChangeTabs = (handler) => {
+window.tabGroups.onDidChangeTabs = (handler) => {
   tabObserver.handler = handler;
   return { dispose() {} };
 };
-const executeWorkbenchCommand = vscode.commands.executeCommand.bind(vscode.commands);
-vscode.commands.executeCommand = async (name, ...args) => {
+const executeWorkbenchCommand = vscodeCommands.executeCommand.bind(vscodeCommands);
+vscodeCommands.executeCommand = async (name, ...args) => {
   if (name !== 'workbench.action.closeActiveEditor') return executeWorkbenchCommand(name, ...args);
   const draft = require('../lib/drafts').current();
   if (!draft) return;
   if (draft.document.isDirty) {
-    const selected = await vscode.window.showQuickPick([
+    const selected = await window.showQuickPick([
       { id: 'save' }, { id: 'discard' }, { id: 'cancel' },
     ]);
     if (!selected || selected.id === 'cancel') return;
     if (selected.id === 'save') await draft.document.save();
     else await executeWorkbenchCommand('workbench.action.files.revert', draft.uri);
   }
-  const tab = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+  const tab = window.tabGroups.all.flatMap((group) => group.tabs)
     .find((item) => item.input.uri.toString() === draft.uri.toString());
-  vscode.__test.editors.splice(0, vscode.__test.editors.length,
-    ...vscode.__test.editors.filter((editor) => editor.document !== draft.document));
+  __test.editors.splice(0, __test.editors.length,
+    ...__test.editors.filter((editor) => editor.document !== draft.document));
   draft.document.isClosed = true;
   if (tabObserver.handler) tabObserver.handler({ closed: [tab] });
 };
 
 // Model VSCode's built-in local filesystem, not an extension draft provider.
 const savedHandlers = [];
-vscode.workspace.onDidSaveTextDocument = (handler) => {
+workspace.onDidSaveTextDocument = (handler) => {
   savedHandlers.push(handler);
   return { dispose() {} };
 };
-const nativeOpen = vscode.workspace.openTextDocument;
-vscode.workspace.openTextDocument = async (...args) => {
+const nativeOpen = workspace.openTextDocument;
+workspace.openTextDocument = async (...args) => {
   const document = await nativeOpen(...args);
   if (!document.nativeSaveInstalled) {
     document.nativeSaveInstalled = true;
@@ -185,7 +193,7 @@ function createRepository() {
 function loadExtension() {
   const originalLoad = Module._load;
   Module._load = function load(request, parent, isMain) {
-    if (request === 'vscode') return vscode;
+    if (request === 'vscode') return vscodeModule;
     if (request === 'vscode-languageclient/node') return { LanguageClient: IntegrationClient };
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -205,13 +213,13 @@ async function run() {
   }
 
   const repo = createRepository();
-  vscode.__test.reset();
-  vscode.workspace.registerFileSystemProvider('file', {
+  __test.reset();
+  workspace.registerFileSystemProvider('file', {
     readFile: (uri) => fs.readFileSync(uri.fsPath),
     writeFile: (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
   });
-  vscode.__test.setWorkspaceFolder(repo);
-  vscode.__test.setConfiguration({
+  __test.setWorkspaceFolder(repo);
+  __test.setConfiguration({
     'magit-lsp.serverPath': binary,
     'magit-lsp.profile': 'standard',
   });
@@ -221,15 +229,15 @@ async function run() {
   extension.activate(context);
 
   try {
-    const commands = vscode.__test.commands;
+    const commands = __test.commands;
     const client = instances.at(-1);
     assert(client, 'the extension started a language client');
     const declaration = client.requests.find((request) => request.method === 'initialize').params.capabilities.experimental.magit;
-    const shared = require('../types/shared-lists');
+    const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
     assert.deepEqual(declaration, {
       v: 1, keys: 'static', modifiers: 'full', layout: ['main'],
-      effects: [...shared.optionalEffects],
-      prompts: [...shared.optionalPromptKinds],
+      effects: [...optionalEffects],
+      prompts: [...optionalPromptKinds],
       pick: {
         multi: true,
         freeText: false,
@@ -245,11 +253,11 @@ async function run() {
     // 1. Open the status view and display the server's text verbatim.
     await commands.get('magit.open')();
     await waitFor(
-      () => vscode.__test.activeEditor
-        && /Unstaged changes/.test(vscode.__test.activeEditor.document.getText()),
+      () => __test.activeEditor
+        && /Unstaged changes/.test(__test.activeEditor.document.getText()),
       'status view text'
     );
-    const statusEditor = vscode.__test.activeEditor;
+    const statusEditor = __test.activeEditor;
     const openedText = statusEditor.document.getText();
     assert.match(openedText, /Unstaged changes/);
     assert.equal(statusEditor.document.uri.scheme, 'magit');
@@ -281,12 +289,12 @@ async function run() {
       'acknowledged the render caused by the key press'
     );
 
-    await require('./selection-integration').checkShapes({ vscode, commands, client, editor: statusEditor });
+    await require('./selection-integration').checkShapes({ vscode: vscodeModule, commands, client, editor: statusEditor });
 
     // Static mode is a metadata-only transition: it must not invalidate the
     // virtual document or disturb the user's selection.
     const statusState = require('../lib/store').store.views.get('v1');
-    const selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 3));
+    const selection = new Selection(new Position(0, 0), new Position(0, 3));
     statusEditor.selection = selection;
     const linesBeforeStatic = statusState.lines;
     const versionBeforeStatic = statusState.version;
@@ -296,9 +304,9 @@ async function run() {
     });
     const changedBeforeStatic = client.notes.filter((note) => note.method === 'view/rendered').length;
     await commands.get('magit.invoke')({ command: 'common.toggle-text-mode' });
-    await waitFor(() => vscode.__test.contextValues.get('magit.textMode') === true,
+    await waitFor(() => __test.contextValues.get('magit.textMode') === true,
       'text-mode context');
-    assert.equal(vscode.__test.contextValues.get('magit.textMode'), true);
+    assert.equal(__test.contextValues.get('magit.textMode'), true);
     assert.equal(statusEditor.selection, selection);
     assert.equal(statusState.lines, linesBeforeStatic);
     assert.equal(statusState.version, versionBeforeStatic);
@@ -314,26 +322,26 @@ async function run() {
     assert.equal(statusState.lines, linesBeforeStatic);
     assert.equal(statusEditor.selection, selection);
     await commands.get('magit.invoke')({ command: 'common.toggle-text-mode' });
-    await waitFor(() => vscode.__test.contextValues.get('magit.textMode') === false,
+    await waitFor(() => __test.contextValues.get('magit.textMode') === false,
       'interactive-mode context');
     await waitFor(() => /queued\.txt/.test(statusEditor.document.getText()), 'queued refresh after static mode');
-    assert.equal(vscode.__test.contextValues.get('magit.textMode'), false);
+    assert.equal(__test.contextValues.get('magit.textMode'), false);
     assert.notEqual(statusState.lines, linesBeforeStatic);
     documentsChangedSubscription.dispose();
 
     // 3. A server menu becomes a QuickPick; selecting a row sends its key.
     let promptItems;
-    vscode.__test.setQuickPickAnswer((items) => {
+    __test.setQuickPickAnswer((items) => {
       promptItems = items;
       return items.find((item) => item.id === 'no');
     });
     await commands.get('magit.invoke')({ command: 'open.commit' });
     await waitFor(
-      () => vscode.__test.lastQuickPick
-        && vscode.__test.lastQuickPick.items.some((item) => item.key === 'c'),
+      () => __test.lastQuickPick
+        && __test.lastQuickPick.items.some((item) => item.key === 'c'),
       'commit menu QuickPick'
     );
-    const menu = vscode.__test.lastQuickPick;
+    const menu = __test.lastQuickPick;
     const initialMenuState = require('../lib/store').store.views.get(
       require('../lib/store').store.quickPickViewId
     );
@@ -376,7 +384,7 @@ async function run() {
       ],
     };
     let pickItems;
-    vscode.__test.setQuickPickAnswer((items) => {
+    __test.setQuickPickAnswer((items) => {
       pickItems = items;
       return items[1];
     });
@@ -395,7 +403,7 @@ async function run() {
     assert.deepEqual(pickItems.map((item) => item.id), ['a', 'b']);
 
     // Cancelling a pick answers an empty selection.
-    vscode.__test.setQuickPickAnswer(() => undefined);
+    __test.setQuickPickAnswer(() => undefined);
     const cancelPickId = 'pick-cancel-integration';
     client.dispatch({
       jsonrpc: '2.0',
@@ -479,7 +487,7 @@ async function run() {
     // The real prompt handler must interpret the first displayed row as No
     // when the server's default is false (including destructive prompts).
     const { promptFor } = require('../lib/requests');
-    vscode.__test.setQuickPickAnswer((items) => items[0]);
+    __test.setQuickPickAnswer((items) => items[0]);
     for (const vector of require('../../../tests/data/client-contracts.json').prompts
       .filter((item) => item.name === 'confirm-default-false'
         || item.name === 'confirm-destructive')) {
@@ -513,7 +521,7 @@ async function run() {
     let previousDraft;
     const startDraft = async () => {
       if (previousDraft) await idle(previousDraft);
-      await vscode.window.showTextDocument(statusEditor.document);
+      await window.showTextDocument(statusEditor.document);
       fs.writeFileSync(path.join(repo, 'tracked.txt'), `managed probe ${++probe}\n`);
       git(repo, ['add', 'tracked.txt']);
       const before = new Set(draftStore.drafts.keys());
@@ -536,7 +544,7 @@ async function run() {
       assert.deepEqual(opens.at(-1).params.textDocument, { uri: draft.effect.uri,
         languageId: 'gitcommit', version: 1, text: draft.effect.text });
       assert.equal(draft.document.getText(), draft.effect.text);
-      assert.equal(vscode.__test.contextValues.get('magit.active'), false, 'native typing is not captured');
+      assert.equal(__test.contextValues.get('magit.active'), false, 'native typing is not captured');
       return draft;
     };
     const unchangedIndex = () => execFileSync('git', ['-C', repo, 'show', ':tracked.txt']);
@@ -572,7 +580,7 @@ async function run() {
     const finishCount = client.requests.filter((request) => request.method === 'workspace/executeCommand').length;
     client.sendNotification('textDocument/didChange', { textDocument: { uri: draft.effect.uri,
       version: draft.version }, contentChanges: [{ text: 'stale text must not replace native text' }] });
-    await waitFor(() => vscode.__test.messages.some((notice) => notice.level === 'error'
+    await waitFor(() => __test.messages.some((notice) => notice.level === 'error'
       && notice.text.includes('stale or duplicated')), 'readable version error');
     assert.equal(draft.document.getText(), unsent, 'sync errors retain native text');
     assert.equal(client.requests.filter((request) => request.method === 'workspace/executeCommand').length, finishCount);
@@ -597,13 +605,13 @@ async function run() {
     const oldHead = head();
     const oldIndex = unchangedIndex();
     const oldWork = fs.readFileSync(path.join(repo, 'tracked.txt'));
-    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'cancel'));
+    __test.setQuickPickAnswer((items) => items.find((item) => item.id === 'cancel'));
     await commands.get('magit.closeEdit')();
     assert(draftStore.drafts.has(draft.runId));
     assert.equal(draft.document.getText(), 'hidden unsaved changes\n', 'Cancel retains unsaved text');
     assert.equal(progress.get(draftProgress.get(draft)), 'begin', 'Cancel keeps the commit pending');
     assert.equal(head(), oldHead);
-    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'discard'));
+    __test.setQuickPickAnswer((items) => items.find((item) => item.id === 'discard'));
     await commands.get('magit.closeEdit')();
     await idle(draft);
     assert(!draftStore.drafts.has(draft.runId), 'Discard confirmation completed');
@@ -613,7 +621,7 @@ async function run() {
 
     draft = await startDraft();
     draft.document.replaceText('dirty save close\n');
-    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'save'));
+    __test.setQuickPickAnswer((items) => items.find((item) => item.id === 'save'));
     await commands.get('magit.closeEdit')();
     await idle(draft);
     assert.equal(subject(), 'dirty save close');
@@ -632,7 +640,7 @@ async function run() {
     await draft.queue;
     assert.equal(head(), closeHead, 'another matching tab still exists');
     draft.tabs = new Set([ownedTab]);
-    await vscode.__test.closeDocument(draft.document);
+    await __test.closeDocument(draft.document);
     require('../lib/drafts').onTabsChanged({ closed: [ownedTab] });
     await draft.queue;
     await idle(draft);
@@ -658,7 +666,7 @@ async function run() {
       ? Promise.reject(new Error('draft synchronization rejected'))
       : savedNotification.call(client, method, params);
     const requestStart = client.requests.length;
-    const noticeStart = vscode.__test.messages.length;
+    const noticeStart = __test.messages.length;
     await invokeGenerated('common.cancel');
     assert.equal(client.requests.slice(requestStart).filter((request) =>
       request.method === 'workspace/executeCommand'
@@ -667,7 +675,7 @@ async function run() {
     assert(draftStore.drafts.has(draft.runId), 'rejected sync retains registration');
     assert.equal(draft.document.getText(), abortText, 'rejected sync retains bytes');
     assert(!draft.document.isClosed, 'rejected sync keeps tab open');
-    assert(vscode.__test.messages.slice(noticeStart).some((notice) =>
+    assert(__test.messages.slice(noticeStart).some((notice) =>
       notice.level === 'error' && notice.text.includes('draft synchronization rejected')),
     'rejected sync reports current error');
     assert.equal(head(), priorHead, 'rejected sync leaves HEAD unchanged');
@@ -676,12 +684,12 @@ async function run() {
 
     const owner = draft.client;
     draft.client = undefined;
-    const unavailableNoticeStart = vscode.__test.messages.length;
+    const unavailableNoticeStart = __test.messages.length;
     await invokeGenerated('common.cancel');
     assert.equal(draft.document.getText(), abortText, 'unavailable owner retains bytes');
     assert(!draft.document.isClosed, 'unavailable owner retains tab');
     assert(draftStore.drafts.has(draft.runId), 'unavailable owner retains registration');
-    assert(vscode.__test.messages.slice(unavailableNoticeStart).some((notice) =>
+    assert(__test.messages.slice(unavailableNoticeStart).some((notice) =>
       notice.level === 'error' && notice.text.includes('connection is unavailable')),
     'unavailable owner reports current error');
     assert.equal(head(), priorHead, 'unavailable owner leaves HEAD unchanged');
@@ -793,12 +801,12 @@ async function run() {
     await pendingEditAbort;
     assert(draftStore.drafts.has(draft.runId), 'Abort snapshot cannot close over newer edit');
     assert.equal(draft.document.getText(), 'retain native edit made during Abort\n');
-    assert(vscode.__test.messages.some((notice) => notice.level === 'error'
+    assert(__test.messages.some((notice) => notice.level === 'error'
       && notice.text.includes('changed while aborting')));
 
     const teardownText = 'retain native edit during acknowledged Abort teardown\n';
     const teardownContext = deferredAbort();
-    const savedExecute = vscode.commands.executeCommand;
+    const savedExecute = vscodeCommands.executeCommand;
     let waitingOnTeardownContext = false;
     const teardownCommands = [];
     client.sendRequest = async (method, params) => {
@@ -808,7 +816,7 @@ async function run() {
       }
       return realSendRequest(method, params);
     };
-    vscode.commands.executeCommand = async (name, ...args) => {
+    vscodeCommands.executeCommand = async (name, ...args) => {
       teardownCommands.push(name);
       if (name === 'setContext' && args[0] === 'magit.editing' && args[1] === false
         && !waitingOnTeardownContext) {
@@ -822,11 +830,11 @@ async function run() {
     draft.document.replaceText(teardownText);
     teardownContext.release();
     await pendingTeardownAbort;
-    vscode.commands.executeCommand = savedExecute;
+    vscodeCommands.executeCommand = savedExecute;
     assert.equal(draft.document.getText(), teardownText, 'teardown edit retains exact bytes');
     assert(draftStore.drafts.has(draft.runId), 'teardown edit retains registration');
     assert(!draft.document.isClosed, 'teardown edit keeps tab open');
-    assert.equal(vscode.__test.contextValues.get('magit.editing'), true,
+    assert.equal(__test.contextValues.get('magit.editing'), true,
       'teardown edit restores registered context');
     assert(!teardownCommands.includes('workbench.action.files.revert'),
       'teardown edit prevents revert');
@@ -835,12 +843,12 @@ async function run() {
 
     client.sendRequest = savedRequest;
     let healthyReverts = 0;
-    vscode.commands.executeCommand = async (name, ...args) => {
+    vscodeCommands.executeCommand = async (name, ...args) => {
       if (name === 'workbench.action.files.revert') healthyReverts += 1;
       return savedExecute(name, ...args);
     };
     await invokeGenerated('common.cancel');
-    vscode.commands.executeCommand = savedExecute;
+    vscodeCommands.executeCommand = savedExecute;
     assert(!draftStore.drafts.has(draft.runId), 'healthy exact Abort closes after retained edit retry');
     assert(draft.document.isClosed, 'healthy exact Abort closes editor once');
     assert.equal(healthyReverts, 1, 'healthy exact Abort reverts once');
@@ -861,7 +869,7 @@ async function run() {
       }
       return realSendRequest(method, params);
     };
-    vscode.commands.executeCommand = async (name, ...args) => {
+    vscodeCommands.executeCommand = async (name, ...args) => {
       disconnectTeardownCommands.push(name);
       if (name === 'workbench.action.files.setActiveEditorReadonlyInSession'
         && !waitingOnTeardownGate) {
@@ -875,7 +883,7 @@ async function run() {
     require('../lib/drafts').disconnect('disconnect during Abort teardown');
     teardownGate.release();
     await pendingDisconnectAbort;
-    vscode.commands.executeCommand = savedExecute;
+    vscodeCommands.executeCommand = savedExecute;
     assert.equal(draft.document.getText(), disconnectText, 'disconnect teardown retains exact bytes');
     assert(draftStore.drafts.has(draft.runId), 'disconnect teardown retains registration');
     assert(!draft.document.isClosed, 'disconnect teardown keeps tab open');
@@ -910,30 +918,30 @@ async function run() {
 
     // The displayed text is always the server's last render; never recomposed.
     assert.match(statusEditor.document.getText(), /Unstaged changes/);
-    assert.equal(vscode.__test.output.filter((line) => line.startsWith('unknown effect')).length, 0);
+    assert.equal(__test.output.filter((line) => line.startsWith('unknown effect')).length, 0);
 
     // Quit is dispatched through the registered command and scoped to the
     // repository that owns the originating view. This harness uses mocked
     // VSCode APIs; it is not evidence of native tab behavior.
     const { store } = require('../lib/store');
     const secondRepo = createRepository();
-    vscode.__test.setWorkspaceFolder(secondRepo);
+    __test.setWorkspaceFolder(secondRepo);
     await commands.get('magit.open')();
     await waitFor(() => store.views.size === 2, 'second repository view');
     await commands.get('magit.invoke')({ command: 'common.quit' });
     assert.equal(store.views.size, 1, 'quit removes only the originating repository view');
     assert.equal(Array.from(store.views.values())[0].repo, repo);
-    vscode.__test.setWorkspaceFolder(repo);
+    __test.setWorkspaceFolder(repo);
     await commands.get('magit.open')();
     await commands.get('magit.invoke')({ command: 'common.quit' });
     assert.equal(store.views.size, 0, 'root quit removes the affected stored view');
     await commands.get('magit.open')();
     await waitFor(() => store.views.size === 1, 'reopened repository view');
     fs.rmSync(secondRepo, { recursive: true, force: true });
-    await require('./selection-integration').checkGitSelections({ vscode, commands, client });
+    await require('./selection-integration').checkGitSelections({ vscode: vscodeModule, commands, client });
     // A disconnected owner cannot finish or restart against a new connection;
     // server shutdown aborts the pending helper, while native text is retained.
-    vscode.__test.setWorkspaceFolder(repo);
+    __test.setWorkspaceFolder(repo);
     await commands.get('magit.open')();
     fs.writeFileSync(path.join(repo, 'tracked.txt'), 'disconnect draft probe\n');
     git(repo, ['add', 'tracked.txt']);
@@ -965,10 +973,10 @@ run().then(() => {
   for (const client of instances) {
     if (client.stderr) console.error(`--- magit-lsp stderr ---\n${client.stderr}`);
   }
-  for (const message of vscode.__test.messages) {
+  for (const message of __test.messages) {
     console.error(`--- ${message.level}: ${message.text}`);
   }
-  for (const line of vscode.__test.output) {
+  for (const line of __test.output) {
     console.error(`--- output: ${line}`);
   }
   process.exitCode = 1;
