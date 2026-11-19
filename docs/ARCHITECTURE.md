@@ -178,15 +178,17 @@ Rendering updates are not effects; they arrive as `view/render`.
 ### 3.6 Prompts (what each kind means)
 
 A **prompt** is one question the server asks the user. The server sends a
-`view/prompt` *request* and waits for the response. The response always
-contains `cancelled: bool`. If `cancelled` is true the command stops quietly
-(no error message).
+`view/prompt` *notification* and waits for the answer. The client answers with
+the `view/promptRespond` *request*, carrying the same `promptId`; the answer
+always contains `cancelled: bool`. If `cancelled` is true the command stops
+quietly (no error message). There is no server response to `view/prompt`; the
+notification plus `view/promptRespond` pair is the whole transport.
 
-Common request fields: `promptId` (string, unique), `kind`, `title` (the
+Common prompt fields: `promptId` (string, unique), `kind`, `title` (the
 question, shown prominently, e.g. `"Delete branch feature/x?"`), `detail?`
 (extra lines of explanation).
 
-| `kind` | Question it asks | Extra request fields | Response `value` |
+| `kind` | Question it asks | Extra prompt fields | Answer `value` |
 | --- | --- | --- | --- |
 | `confirm` | Yes or no | `yesLabel?` (default "Yes"), `noLabel?` (default "No"), `destructive: bool` (client should style it as dangerous and make "No" the default focus), `default: bool` (default `false`) | `true` (yes) or `false` (no) |
 | `text` | A free-form single line of text | `placeholder?`, `default?` (prefilled text), `secret?` | the string the user typed (may be empty) |
@@ -335,8 +337,10 @@ per view/menu while sharing analogous actions across views.
   offline.
 
 **Wire shapes** (see §4): `view/keymap` (server → client) carries
-`{viewId, scope, version, capture, bindings: [{command, keys, modes, label, doc, group, status}]}`
-where `keys` is a list of alternatives, each a canonical key string.
+`{viewId, scope, version, capture, bindings: [{command, keys, modes, label, status}]}`
+where `keys` is a list of alternatives, each a canonical key string. `version`
+is the advisory render generation the bindings belong to and is never
+acknowledged; `0` identifies a draft/edit keymap keyed by `runId`.
 
 **Client delivery modes** (declared by the client in `initialize`):
 
@@ -370,6 +374,10 @@ Only `dynamic` and `static` are accepted as client key delivery modes.
   tests require explicit reasoned exceptions.
 - Standard `ctrl+c` cancel returns `passThrough` for a non-empty text selection
   when there is no menu, prompt or select mode to cancel, preserving copying.
+- A static client may be unable to replay a server `passThrough` for a key that
+  is neither printable nor a clipboard shortcut; it logs the limit. Changing the
+  declared modifier fidelity does not fix replay: that declaration describes
+  reporting, not replay capability.
 
 **Fold keys: reuse the client's own fold keys** (so users who customised fold
 keys keep them). Implementation per client:
@@ -407,6 +415,10 @@ keys keep them). Implementation per client:
      `editor.toggleFold`. If any, offer a command **"Magit: Mirror my fold
      shortcuts"** that shows (or, with consent, appends) equivalent entries
      targeting `magit.invoke` with `when: magit.active`.
+     Mirroring is explicit and on-demand: the extension never watches or
+     rewrites the user's file, and a changed `editor.toggleFold` affects only
+     the next explicit mirror run. The shipped default bindings cover users who
+     keep or do not customise the native fold keys.
 
 **Server-side hard rules**
 - The server validates the merged keymap and reports conflicts when distinct

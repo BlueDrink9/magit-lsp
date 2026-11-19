@@ -5,7 +5,7 @@ replacements land.
 
 ### 4.1 Client → server (current contract)
 
-Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#completed-work).
+Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#completed-work). Wire decisions are recorded in the [rich protocol v1 decision record](design/rich-protocol-v1.md); planned changes below are marked as planned, not current.
 
 | Method | Params | Returns |
 | --- | --- | --- |
@@ -13,22 +13,59 @@ Initialize selects Plain when `capabilities.experimental.magit` is absent. A dec
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
-| `view/invoke` | `{viewId, command, args?, cursor?, selection?}` | `{effects: [...]}` |
+| `view/invoke` | `{viewId, version?, command, args?, cursor?, selection?}` | `{effects: [...]}` |
 | `view/rendered` (notification) | `{viewId, version}` | — |
 | `view/resync` | `{viewId}` | full render |
 | `view/resize` (notification) | `{viewId, cols, rows}` | — |
 | `view/setMode` | `{viewId, mode: "interactive"/"text"}` | `{effects}` |
 | `view/promptRespond` | `{promptId, cancelled, value?}` | — |
 
+Standard positional reads (`documentSymbol`, `definition`, `documentLink`,
+`foldingRange`, semantic tokens) resolve against the last acknowledged tree, or
+the current tree before the first acknowledgement, and return `null` in text
+mode. Rich `view/invoke` and `view/key` commands are different: `version`
+selects the exact acknowledged version or, under the acknowledgement and
+validated-offer rules, the exact current version; a stale version produces the
+readable stale-view warning. The two policies are deliberate; see the decision
+record.
+
+**Planned version negotiation (T113 decision; not implemented).** The
+initialize result will report
+`capabilities.experimental.magit.protocolVersion`, and a rich declaration will
+carry `minimumVersion` beside `v`. A server rejects an unsupported `v` (already
+implemented) or a `minimumVersion` above its `protocolVersion` with a readable
+initialize error; a client that receives a lower `protocolVersion` than it
+requires shows a readable message and does not open rich views. The current
+contract checks only `v = 1` and advertises no protocol version.
+
 ### 4.2 Server → client
 
 | Method | Params |
 | --- | --- |
 | `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?: [{startLine, endLine, lines}], cursor?: {line, column}, mode, pending?, menu?: Menu}` |
-| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, doc, group, status}], mode, pending?, liveKeys?: [string]}` |
+| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, status}], mode, pending?, liveKeys?: [string]}` |
 | `view/effects` (notification) | `{effects: [...]}` for asynchronous effects |
-| `view/prompt` (request) | See [Architecture §3.6](ARCHITECTURE.md#36-prompts-what-each-kind-means) and the [detailed client contract](CLIENT_SPEC.md); returns `{cancelled, value?}` |
+| `view/prompt` (notification) | See [Architecture §3.6](ARCHITECTURE.md#36-prompts-what-each-kind-means) and the [detailed client contract](CLIENT_SPEC.md); the client answers with the `view/promptRespond` request (`{promptId, cancelled, value?}`) |
 | standard server requests/notifications | `window/showDocument`, `window/showMessage`, `$/progress` |
+
+`view/render` has three forms: full `text` (no `edits`), one or more `edits`
+against `baseVersion`, or a state/mode-only render with neither `text` nor
+`edits` that does not advance `version`. The server currently emits at most one
+edit; if a future server emits several, they do not overlap, `endLine` is
+exclusive, and clients apply them bottom-up (descending `startLine`).
+
+A view retains one acknowledged tree/version, which is the edit base and the
+source for standard positional reads. Successive renders may be delivered before
+any acknowledgement; a render whose base is not the retained acknowledged
+version carries full `text`. An acknowledgement is valid only for the current
+version; stale acknowledgements are no-ops. A client that missed an update
+requests `view/resync` instead of acknowledging an older version.
+
+`view/keymap.version` is the advisory render generation the bindings belong to;
+it is never acknowledged. `0` identifies a draft/edit keymap keyed by `runId`,
+not a normal view. A static client may be unable to replay a `passThrough` key
+that is neither printable nor a clipboard shortcut; it logs that client limit,
+and declaring basic modifier fidelity does not change replay capability.
 
 Current shared Rich/Plain providers are document symbols, definition, document
 links (no resolve), folding ranges, full semantic tokens, code actions, and the
