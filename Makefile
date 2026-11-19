@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -151,6 +151,12 @@ vscode-unit: vscode-deps
 .PHONY: vscode-package
 vscode-package:
 	$(call run,vscode-package,pnpm --dir clients/vscode install --frozen-lockfile --node-linker=hoisted --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}" && version=$$(node -p "require('./clients/vscode/package.json').version") && mkdir -p build/vscode && pnpm --dir clients/vscode exec vsce package --out "../../build/vscode/magit-lsp-$$version.vsix" && python3 scripts/check_vsix.py "build/vscode/magit-lsp-$$version.vsix")
+
+# Static guard for the manual publication workflow and its crate metadata.
+# PyYAML is unavailable, so the workflow is checked as text; the Cargo half
+# runs `cargo package --list` offline to catch an incomplete crate.
+release-automation-check:
+	$(call run,release-automation-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py)
 
 vscode-version-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-version-startup,MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs)

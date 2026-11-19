@@ -4,6 +4,7 @@ version = "0.1.0"
 license = "GPL-3.0-only"
 description = "A Git repository interface for editors over the Language Server Protocol"
 repository = "https://github.com/BlueDrink9/magit-lsp"
+readme = "README.md"
 edition = "2021"
 
 [lib]
