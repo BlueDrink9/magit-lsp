@@ -1,5 +1,5 @@
 --- Bundled Neovim adapter version and server mismatch reporting.
-local M = { version = '0.1.0' }
+local M = { version = '0.2.0' }
 
 --- Warn when initialized server metadata does not match this adapter.
 ---@param server_info table|nil
