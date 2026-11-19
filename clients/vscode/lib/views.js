@@ -266,7 +266,6 @@ exports.isMenuKind = isMenuKind;
 exports.tabUri = tabUri;
 exports.ensureView = ensureView;
 exports.showView = showView;
-exports.showDocument = showDocument;
 exports.applyCursor = applyCursor;
 exports.activateView = activateView;
 exports.closeView = closeView;

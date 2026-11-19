@@ -164,4 +164,3 @@ async function deactivate() {
 
 exports.activate = activate;
 exports.deactivate = deactivate;
-exports.createClient = createClient;
