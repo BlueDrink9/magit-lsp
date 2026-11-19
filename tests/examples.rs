@@ -1111,6 +1111,43 @@ fn json_excerpt(value: Option<&Value>) -> String {
     format!("{:?}... ({total} chars total)", excerpt)
 }
 
+/// The exchange identity of a recorded or captured frame.
+///
+/// Regeneration may replace a response payload but must not silently rename an
+/// exchange: the method (request or notification) and the request/response id
+/// still have to match the recorded frame.
+fn frame_identity(message: &Map<String, Value>) -> String {
+    let method = message.get("method").and_then(Value::as_str);
+    match (method, message.get("id")) {
+        (Some(method), Some(id)) => format!("request {method} id {id}"),
+        (Some(method), None) => format!("notification {method}"),
+        (None, Some(id)) => format!("response id {id}"),
+        (None, None) => "payload".to_owned(),
+    }
+}
+
+/// Build a recorded artifact line from a captured server frame.
+///
+/// The recorded `dir`, `note` and `source` envelope is preserved and only
+/// `message` is replaced with the normalized captured frame. The result is
+/// re-parsed as a recorded line, so an unexpected key or source is refused
+/// rather than written, and a changed exchange identity is an error.
+fn captured_line(line: &Line, observed: &Value) -> Result<String, String> {
+    let observed_object = observed.as_object().ok_or("captured frame is not an object")?;
+    let recorded_identity = frame_identity(&line.message);
+    let observed_identity = frame_identity(observed_object);
+    if recorded_identity != observed_identity {
+        return Err(format!(
+            "captured frame identity changed: recorded {recorded_identity}, observed {observed_identity}"
+        ));
+    }
+    let mut value: Value = serde_json::from_str(&line.raw).map_err(|error| error.to_string())?;
+    value["message"] = observed.clone();
+    let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+    parse_line(&text).map_err(|error| format!("captured line is not a recorded exchange: {error}"))?;
+    Ok(text)
+}
+
 /// Replay one recorded example against the real server.
 ///
 /// Every recorded `c2s` line is sent in order after the fixture substitution
@@ -1125,8 +1162,23 @@ fn json_excerpt(value: Option<&Value>) -> String {
 /// independent, `view/render` and `view/keymap` for a newly opened view, is
 /// ordered by the server: `send_outcome` emits every render before its keymap,
 /// so the rich recording keeps that order and needs no phase grouping.
+///
+/// Set `MAGIT_LSP_REGENERATE_EXAMPLES` (via `make update-examples`) to capture
+/// the server's current answers instead: see [`replay_example_mode`].
 fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
-    let regenerate = std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some();
+    replay_example_mode(name, lines, std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some())
+}
+
+/// Replay one recorded example, optionally capturing instead of comparing.
+///
+/// Strict replay (`regenerate == false`) is the default: every captured frame
+/// must equal its recorded counterpart after normalization. Regeneration
+/// (`regenerate == true`) still sends the recorded requests in order, enforces
+/// the same frame ordering and the same post-exit checks, and still normalizes
+/// roots, binary paths, run ids, outbound ids and hashes; only a divergent `s2c`
+/// payload is captured through [`captured_line`], which keeps the recorded
+/// envelope and refuses a changed exchange identity.
+fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<Vec<String>, String> {
     let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
@@ -1202,33 +1254,21 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
                     RECORDED_BINARY,
                     &mut recorded_hashes,
                 );
-                let response_id = actual.get("id");
-                let intentional_action_registry_change = regenerate && response_id.is_some_and(|id| {
-                    lines[..index].iter().any(|request| request.dir == Dir::ClientToServer
-                        && request.message.get("id") == Some(id)
-                        && request.message.get("method").and_then(Value::as_str) == Some("textDocument/codeAction"))
-                });
-                if intentional_action_registry_change {
-                    validate_action_capture(&expected, &observed).map_err(|error| format!("{where_}: {error}"))?;
-                }
-                let action_envelope_matches = intentional_action_registry_change;
-                if observed != expected && !action_envelope_matches {
-                    let (path, expected_value, observed_value) = first_difference(&expected, &observed)
-                        .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
-                    return Err(format!(
-                        "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
-                        json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
-                    ));
-                }
-                if intentional_action_registry_change && expected != observed {
-                    // Keep recorded hashes and metadata, never persist temporary fixture values.
-                    let mut value: Value = serde_json::from_str(&line.raw).map_err(|error| error.to_string())?;
-                    value["message"]["result"] = Value::Array(observed["result"].as_array().unwrap().iter().map(|action| {
-                        expected["result"].as_array().unwrap().iter().position(|old| old == action)
-                            .map(|position| line.message["result"][position].clone())
-                            .unwrap_or_else(|| action.clone())
-                    }).collect());
-                    regenerated[index] = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+                if observed != expected {
+                    if !regenerate {
+                        let (path, expected_value, observed_value) = first_difference(&expected, &observed)
+                            .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
+                        return Err(format!(
+                            "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
+                            json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
+                        ));
+                    }
+                    // Regeneration captures the server's current answer instead
+                    // of blessing the stale recording, but only for the same
+                    // exchange: a different method or request/response id is a
+                    // replay failure, not a capture.
+                    regenerated[index] =
+                        captured_line(line, &observed).map_err(|error| format!("{where_}: {error}"))?;
                 }
             }
         }
@@ -1480,6 +1520,86 @@ fn a_divergent_example_expectation_fails_the_replay() {
         error.contains("recorded s2c frame mismatch") && error.contains("not the recorded render"),
         "the mismatch must be reported: {error}"
     );
+}
+
+/// Regeneration captures the server's current answers and they replay strictly;
+/// normal replay still rejects a divergent render.
+#[test]
+fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
+    let stale = example_lines("plain-code-action.jsonl");
+    let index = stale
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
+        })
+        .expect("the recorded status render");
+    let error = replay_example_mode("plain-code-action.jsonl", &stale, false)
+        .expect_err("strict replay must reject a stale recording");
+    assert!(error.contains("recorded s2c frame mismatch"), "{error}");
+    let captured = replay_example_mode("plain-code-action.jsonl", &stale, true)
+        .expect("regeneration captures the current frames");
+    assert_eq!(captured.len(), stale.len(), "regeneration keeps every recorded line");
+    let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    replay_example_mode("plain-code-action.jsonl", &reparsed, false)
+        .expect("captured frames replay strictly against the same server");
+    reparsed[index].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"] =
+        Value::String("Head: not the recorded render".to_owned());
+    let error = replay_example_mode("plain-code-action.jsonl", &reparsed, false)
+        .expect_err("strict replay must reject the divergent render");
+    assert!(
+        error.contains("recorded s2c frame mismatch") && error.contains("not the recorded render"),
+        "the mismatch must be reported: {error}"
+    );
+}
+
+/// Regeneration captures the current code-action registry and the capture
+/// replays strictly; normal replay still rejects a changed action.
+#[test]
+fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
+    let stale = example_lines("commit-edit-abort.jsonl");
+    let index = stale
+        .iter()
+        .position(|line| line.dir == Dir::ServerToClient && line.message.get("result").is_some_and(Value::is_array))
+        .expect("the recorded code-action response");
+    let error = replay_example_mode("commit-edit-abort.jsonl", &stale, false)
+        .expect_err("strict replay must reject the stale recording");
+    assert!(error.contains("recorded s2c frame mismatch"), "{error}");
+    let captured = replay_example_mode("commit-edit-abort.jsonl", &stale, true)
+        .expect("regeneration captures the current code actions");
+    let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
+        .expect("captured frames replay strictly against the same server");
+    reparsed[index].message["result"][0]["title"] = Value::String("Drifted: not the current registry".to_owned());
+    let error = replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
+        .expect_err("strict replay must reject the changed action");
+    assert!(error.contains("recorded s2c frame mismatch at $.result[0].title"), "{error}");
+}
+
+/// Regeneration refuses a captured frame that changes the recorded exchange.
+#[test]
+fn regeneration_refuses_a_changed_exchange_identity() {
+    let lines = example_lines("plain-open.jsonl");
+    let request = lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").is_some()
+                && line.message.get("id").is_some()
+        })
+        .expect("the recorded outbound request");
+    let mut observed = Value::Object(request.message.clone());
+    observed["params"] = serde_json::json!({"drifted": true});
+    let captured = captured_line(request, &observed).expect("a payload change is captured");
+    assert_eq!(parse_line(&captured).expect("the captured line parses").dir, Dir::ServerToClient);
+    let method = observed["method"].clone();
+    observed["method"] = Value::String("workspace/notApplyEdit".to_owned());
+    let error = captured_line(request, &observed).expect_err("a renamed method is refused");
+    assert!(error.contains("identity changed"), "{error}");
+    observed["method"] = method;
+    observed["id"] = Value::String("magit-lsp/outbound/99".to_owned());
+    let error = captured_line(request, &observed).expect_err("a changed id is refused");
+    assert!(error.contains("identity changed"), "{error}");
 }
 
 /// A divergent rich expectation must make the rich replay fail.
