@@ -10,3 +10,33 @@ snapshot: dispatch
 keys: Escape
 wait
 expect screen contains "Unstaged changes"
+# Select the dispatch's own "Toggle text mode" entry. The key is handled by the
+# open menu and must target the owning status document, not the menu float:
+# the menu closes and the status view itself becomes editable text.
+keys: ?
+wait
+expect view_stack.menus == 1
+keys: C-t
+wait
+expect windows.floating == 0
+expect view_stack.menus == 0
+expect view_stack.count == 1
+expect keymap.scope == "status"
+# The server's text-mode keymap binds only the toggle (src/session.rs keymap_notice).
+expect keymap.keys.length == 1
+expect keymap.keys.0 == "ctrl+t"
+expect screen contains "Unstaged changes"
+snapshot: text-mode
+# Returning proves the status document is interactive again: `?` is a server
+# request only while captured, so it must open the dispatch instead of typing.
+keys: C-t
+wait
+keys: ?
+wait
+expect view_stack.menus == 1
+expect screen contains "Transient and dwim commands"
+keys: Escape
+wait
+expect view_stack.menus == 0
+expect screen contains "Unstaged changes"
+snapshot: interactive
