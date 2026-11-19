@@ -505,12 +505,15 @@ end
 T['server version warning only reports mismatch or missing metadata'] = function()
   child.lua([[WARNINGS = {}; vim.notify = function(message) table.insert(WARNINGS, message) end
     local version = require('magit-lsp.version')
+    CLIENT_VERSION = version.version
     version.check({ version = version.version }, { '/selected/magit-lsp' })
     version.check({ version = '9.9.9' }, { '/selected/magit-lsp' })
     version.check({}, { '/selected/magit-lsp' })]])
   local warnings = child.lua_get('WARNINGS')
+  local client_version = child.lua_get('CLIENT_VERSION')
+  local expected = string.format('client version %s, server version 9.9.9', client_version)
   MiniTest.expect.equality(#warnings, 2)
-  MiniTest.expect.equality(warnings[1]:find('client version 0.1.0, server version 9.9.9', 1, true) ~= nil, true)
+  MiniTest.expect.equality(warnings[1]:find(expected, 1, true) ~= nil, true)
   MiniTest.expect.equality(warnings[1]:find('/selected/magit-lsp', 1, true) ~= nil, true)
   MiniTest.expect.equality(warnings[2]:find('server version missing', 1, true) ~= nil, true)
 end
