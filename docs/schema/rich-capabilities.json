@@ -108,6 +108,15 @@
       },
       "type": "array"
     },
+    "minimumVersion": {
+      "description": "Oldest server session version the client can use; absent means `v`.\n\nA present value must be a positive integer no greater than `v`.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "modifiers": {
       "$ref": "#/$defs/KeyModifiers",
       "description": "Client key modifier fidelity."
