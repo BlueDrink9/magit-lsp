@@ -308,6 +308,74 @@ async function run() {
     assert.equal(openedViews.length, 1, 'first open did not return one descriptor');
     assert.equal(openedViews[0].id, uri.authority, 'status URI is not the opened view id');
     assert.equal(openedViews[0].kind, 'status');
+    if (suiteMode === 'download') {
+      // This case has no `magit-lsp.serverPath`; the extension must resolve the
+      // seeded cache entry through production code and launch exactly that file.
+      const expected = process.env.MAGIT_VSCODE_DOWNLOAD_EXPECTED;
+      const cacheRoot = process.env.MAGIT_VSCODE_DOWNLOAD_CACHE;
+      assert(expected, 'MAGIT_VSCODE_DOWNLOAD_EXPECTED must name the seeded executable');
+      assert(cacheRoot, 'MAGIT_VSCODE_DOWNLOAD_CACHE must name the isolated global storage');
+      const { store } = require(`${extension.extensionPath}/lib/store.js`);
+      const { PROTOCOL_VERSION } = require(`${extension.extensionPath}/lib/version.js`);
+      assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || '', '',
+        'the automatic startup case runs without a configured server path');
+      await waitFor(() => Boolean(store.clientReady), 'cached-server client promise');
+      await store.clientReady;
+      const initialized = store.client?.initializeResult;
+      assert(initialized, 'the cached server completed initialization');
+      const protocolVersion = initialized.capabilities?.experimental?.magit?.protocolVersion;
+      assert.equal(protocolVersion, PROTOCOL_VERSION,
+        'the cached server accepts the client protocol version');
+      const listing = execFileSync('ps', ['-ww', '-eo', 'pid=,args=']).toString()
+        .split('\n').map((line) => line.trim()).filter(Boolean);
+      const commandOf = (line) => line.split(/\s+/).slice(1).join(' ');
+      const launched = listing.filter((line) => commandOf(line) === expected);
+      assert.equal(launched.length, 1, 'exactly one server process runs the seeded executable');
+      const sourceBinary = path.resolve(__dirname, '../../../..', 'target/debug/magit-lsp');
+      assert.equal(expected === sourceBinary, false,
+        'the launched server is the cache path, not the source-tree binary');
+      assert.equal(listing.filter((line) => commandOf(line) === sourceBinary).length, 0,
+        'no process runs the source-tree binary');
+      assert.equal(path.basename(cacheRoot), 'magit-lsp.magit-lsp',
+        'the cache root is the extension global storage directory');
+      assert.equal(path.basename(path.dirname(cacheRoot)), 'globalStorage',
+        'the cache root sits below extension global storage');
+      assert.equal(fs.statSync(expected).isFile(), true, 'the launched cache path is a file');
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(path.dirname(expected), 'manifest.json'), 'utf8'));
+      assert.equal(manifest.version, extension.packageJSON.version,
+        'the seeded cache manifest names the extension version');
+      assert.equal(manifest.asset, 'x86_64-unknown-linux-gnu', 'the seeded cache names the release asset');
+      await vscode.commands.executeCommand('magit.invoke', { command: 'common.refresh' });
+      assert(invoked('common.refresh'), 'the cached-server status accepted a refresh');
+      await waitFor(() => /tracked\.txt/.test(editor.document.getText()),
+        'refreshed cached-server status');
+      const evidencePath = `${evidence}/download-startup-evidence.json`;
+      fs.writeFileSync(evidencePath, JSON.stringify({
+        status: 'pass',
+        editorVersion: vscode.version,
+        extensionVersion: extension.packageJSON.version,
+        serverVersion: initialized.serverInfo?.version,
+        serverPathSetting: vscode.workspace.getConfiguration('magit-lsp').get('serverPath'),
+        expectedExecutable: expected,
+        cacheRoot,
+        cacheLocation: 'isolated profile User/globalStorage/magit-lsp.magit-lsp',
+        cacheManifest: { version: manifest.version, asset: manifest.asset, digest: manifest.digest },
+        launchedProcessCommand: launched[0],
+        sourceBinaryRunning: false,
+        protocolVersion,
+        protocolVersionExpected: PROTOCOL_VERSION,
+        initialized: Boolean(store.clientReady),
+        refreshed: 'common.refresh',
+        statusText: editor.document.getText(),
+        cacheSeededBy: 'real resolveServer with a fixture archive of target/debug/magit-lsp; '
+          + 'no live release download',
+        cleanup: 'isolated editor and server stopped by the native runner',
+        evidencePath,
+      }, null, 2));
+      console.log(`PASS native automatic cached-server startup: ${evidencePath}`);
+      return;
+    }
     if (suiteMode === 'version') {
       const { store } = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/store`);
       const fixtureManifest = JSON.parse(fs.readFileSync(

@@ -53,7 +53,8 @@ const focusedEdit = suiteMode === 'edit';
 const focusedHead = suiteMode === 'head';
 const focusedVersion = suiteMode === 'version';
 const focusedF5 = suiteMode === 'f5';
-const strictFocused = focusedEdit || focusedHead || focusedVersion || focusedF5
+const focusedDownload = suiteMode === 'download';
+const strictFocused = focusedEdit || focusedHead || focusedVersion || focusedF5 || focusedDownload
   || ['A06', 'A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
@@ -107,7 +108,9 @@ execFileSync('git', ['-C', repo, 'add', '.']);
 execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'initial']);
 writeFileSync(`${repo}/tracked.txt`, 'replacement\n');
 writeFileSync(`${repo}/.vscode/settings.json`, JSON.stringify({
-  'magit-lsp.serverPath': `${root}/target/debug/magit-lsp`,
+  // The automatic download case must leave the server path unset so the
+  // extension resolves its pinned release from the isolated profile cache.
+  ...(focusedDownload ? {} : { 'magit-lsp.serverPath': `${root}/target/debug/magit-lsp` }),
   ...(process.env.MAGIT_VSCODE_A33_ONLY === '1' ? { 'magit-lsp.profile': 'vim' } : {}),
   'security.workspace.trust.enabled': false,
   'workbench.colorTheme': 'Default Dark Modern',
@@ -131,16 +134,35 @@ await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
 env.MAGIT_VSCODE_CDP_PORT = String(listener.address().port);
 await new Promise((resolve) => listener.close(resolve));
 
+// Seed the isolated profile's exact-version cache through the production
+// resolver, then let the real extension find it with no serverPath configured.
+let downloadFixture;
+if (focusedDownload) {
+  downloadFixture = await require('./download-startup.js').prepareDownloadCache({
+    directory,
+    binary: `${root}/target/debug/magit-lsp`,
+  });
+  env.MAGIT_VSCODE_DOWNLOAD_EXPECTED = downloadFixture.executable;
+  env.MAGIT_VSCODE_DOWNLOAD_CACHE = downloadFixture.cacheRoot;
+}
+
 /**
- * PIDs whose command line names this run's unique user-data directory.
+ * PIDs whose command line names this run's unique directory.
+ *
+ * `ps` is used instead of `pgrep`, which this environment does not provide.
+ * The match covers the editor, the extension host and the cached server, so a
+ * killed editor cannot leave a server behind.
  *
  * @param {string} base
  * @returns {number[]}
  */
 function ownedPids(base) {
   try {
-    return execFileSync('pgrep', ['-f', '--', `${base}/user`])
-      .toString().trim().split('\n').filter(Boolean).map(Number);
+    return execFileSync('ps', ['-ww', '-eo', 'pid=,args=']).toString().split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.includes(`${base}/`))
+      .map((line) => Number.parseInt(line, 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
   } catch {
     return [];
   }
@@ -164,7 +186,7 @@ if (focusedVersion) {
   versionFixture = require('./version-fixture.js').createVersionFixture(directory);
   env.MAGIT_VSCODE_VERSION_FIXTURE = versionFixture.extensionPath;
 }
-if (focusedEdit || focusedHead || focusedVersion) {
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload) {
   mkdirSync(`${directory}/launcher`);
   writeFileSync(`${directory}/launcher/package.json`, JSON.stringify({
     publisher: 'test', name: 'native-edit-launcher', version: '1.0.0',
@@ -194,11 +216,12 @@ const args = [
   '--extensions-dir', `${directory}/extensions`,
   `--extensionDevelopmentPath=${root}/clients/vscode`,
   ...(focusedVersion ? [`--extensionDevelopmentPath=${versionFixture.extensionPath}`] : []),
-   ...(focusedEdit || focusedHead || focusedVersion ? [`--extensionDevelopmentPath=${directory}/launcher`]
+   ...(focusedEdit || focusedHead || focusedVersion || focusedDownload
+    ? [`--extensionDevelopmentPath=${directory}/launcher`]
     : [`--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`]), repo,
 ];
 let result;
-if (focusedEdit || focusedHead || focusedVersion) {
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload) {
   const child = spawn(editor, args, { env, stdio: 'inherit' });
   let launchError;
   child.on('error', (error) => { launchError = error; });
@@ -232,7 +255,11 @@ const headEvidence = focusedHead && existsSync(`${directory}/head-operations-evi
 // The F5 evidence records failures too, so readiness requires an explicit pass.
 const f5Evidence = focusedF5 && existsSync(`${directory}/f5-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/f5-evidence.json`, 'utf8')) : null;
+// The download evidence records failures too, so readiness requires a pass.
+const downloadEvidence = focusedDownload && existsSync(`${directory}/download-startup-evidence.json`)
+  ? JSON.parse(readFileSync(`${directory}/download-startup-evidence.json`, 'utf8')) : null;
 const evidenceReady = focusedVersion ? existsSync(`${directory}/version-warning-evidence.json`)
+  : focusedDownload ? downloadEvidence?.status === 'pass'
   : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
   : focusedF5
@@ -258,6 +285,8 @@ if (!evidenceReady) {
       ? 'Missing production real-file native evidence; see the isolated evidence directory above.'
       : focusedF5
       ? 'Missing native F5 evidence; see the isolated evidence directory above.'
+      : focusedDownload
+      ? 'Missing native automatic cached-server startup evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A34_ONLY === '1'
       ? 'Missing A34 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A33_ONLY === '1'

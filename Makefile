@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -148,6 +148,12 @@ vscode-version-startup: vscode-prereqs build vscode-deps
 
 vscode-version-warning: build vscode-deps
 	$(call run,vscode-version-warning,MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
+# Focused native automatic startup: an isolated profile with no serverPath must
+# find, verify and launch its pre-seeded cached release, then serve status.
+.PHONY: vscode-download-startup
+vscode-download-startup: vscode-prereqs build vscode-deps
+	$(call run,vscode-download-startup,MAGIT_VSCODE_DOWNLOAD_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 vscode-e2e: build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
