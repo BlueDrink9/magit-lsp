@@ -1238,7 +1238,7 @@ fn remote_prune_of_missing_remote_surfaces_gits_refusal() {
         _ => None,
     });
     assert!(
-        refusal.is_some_and(|text| text.contains("git remote prune nosuch failed")),
+        refusal.is_some_and(|text| text.contains("git remote prune -- nosuch failed")),
         "{:?}",
         result.effects
     );
@@ -1352,4 +1352,310 @@ fn branch_reset_of_current_branch_surfaces_gits_refusal() {
     let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
     assert_eq!(main, head, "Git's refusal must leave main at HEAD");
     assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_reset_answers_cannot_select_a_delete_operation() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "feature", "HEAD~1"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let snapshot = |tmp: &RepoFixture| {
+        (
+            tmp.git(&[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/heads/",
+                "refs/tags/",
+            ]),
+            tmp.git(&["symbolic-ref", "HEAD"]) + &tmp.git(&["rev-parse", "HEAD"]),
+            tmp.git(&["ls-files", "--stage", "-z"]),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap()
+                + &std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        )
+    };
+    let before = snapshot(&tmp);
+    let feature_before = tmp.git(&["rev-parse", "feature"]);
+    for answer in ["--delete", "-D"] {
+        let Execution::Prompt(first) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: "branch.reset".into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected branch name prompt");
+        };
+        let Execution::Prompt(second) = test
+            .session
+            .resume_prompt(&first.prompt_id, Some(PromptValue::Text("feature".into())))
+            .unwrap()
+        else {
+            panic!("expected reset target prompt");
+        };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(&second.prompt_id, Some(PromptValue::Text(answer.into())))
+            .unwrap()
+        else {
+            panic!("expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("revision cannot begin with '-'")),
+            "answer {answer}: expected readable refusal, got {:?}",
+            result.effects
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("Reset branch")),
+            "answer {answer}: must not report a reset: {:?}",
+            result.effects
+        );
+        assert_eq!(snapshot(&tmp), before, "answer {answer} must change nothing");
+        assert_eq!(
+            tmp.git(&["rev-parse", "feature"]),
+            feature_before,
+            "answer {answer} must leave the branch ref in place"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+    for answer in ["--delete", "-D"] {
+        let Execution::Prompt(first) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: "branch.reset".into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected branch name prompt");
+        };
+        let Execution::Prompt(second) = test
+            .session
+            .resume_prompt(&first.prompt_id, Some(PromptValue::Text(answer.into())))
+            .unwrap()
+        else {
+            panic!("expected reset target prompt");
+        };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(&second.prompt_id, Some(PromptValue::Text("HEAD".into())))
+            .unwrap()
+        else {
+            panic!("expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("not a valid branch name")),
+            "name answer {answer}: expected readable refusal, got {:?}",
+            result.effects
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("Reset branch")),
+            "name answer {answer}: must not report a reset: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            snapshot(&tmp),
+            before,
+            "name answer {answer} must change nothing"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.reset".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("expected reset target prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("HEAD".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Reset branch feature to HEAD"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "feature"]),
+        tmp.git(&["rev-parse", "HEAD"]),
+        "an ordinary reset must still move the branch"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["tag", "keep"]);
+    let mirror = tmp.path().join("mirror").display().to_string();
+    tmp.git(&["remote", "add", "upstream", mirror.as_str()]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["for-each-ref", "--format=%(refname) %(objectname)"]),
+            tmp.git(&["config", "--local", "--list"]),
+            tmp.git(&["status", "--porcelain"]),
+        )
+    };
+    let before = state(&tmp);
+    let run = |test: &mut TestSession, command: &str, answers: &[&str]| {
+        let Execution::Prompt(mut prompt) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: command.into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("{command}: expected prompt");
+        };
+        for (index, answer) in answers.iter().enumerate() {
+            let last = index + 1 == answers.len();
+            let execution = test
+                .session
+                .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text((*answer).into())))
+                .unwrap();
+            if last {
+                let Execution::Done(result) = execution else {
+                    panic!("{command}: expected completion for {answer}");
+                };
+                return result;
+            }
+            let Execution::Prompt(next) = execution else {
+                panic!("{command}: expected follow-up prompt");
+            };
+            prompt = next;
+        }
+        unreachable!("answers are never empty")
+    };
+    let cases: &[(&str, &[&str])] = &[
+        ("tag.create", &["-l"]),
+        ("tag.create", &["--delete"]),
+        ("tag.create", &["-d"]),
+        ("tag.delete", &["-d"]),
+        ("tag.delete", &["--delete"]),
+        ("remote.add", &["--mirror", mirror.as_str()]),
+        ("remote.add", &["origin2", "--upload-pack=/bin/sh"]),
+        ("remote.remove", &["--all"]),
+        ("remote.remove", &["-n"]),
+        ("remote.rename", &["--dry-run", "renamed"]),
+        ("remote.rename", &["upstream", "-f"]),
+        ("remote.prune", &["-n"]),
+        ("remote.prune", &["--dry-run"]),
+    ];
+    for (command, answers) in cases {
+        let result = run(&mut test, command, answers);
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("cannot begin with '-'")),
+            "{command} {answers:?}: expected readable refusal, got {:?}",
+            result.effects
+        );
+        for success in [
+            "Created tag",
+            "Deleted tag",
+            "Added remote",
+            "Removed remote",
+            "Renamed remote",
+            "Pruned remote",
+        ] {
+            assert!(
+                !texts.iter().any(|text| text.starts_with(success)),
+                "{command} {answers:?}: must not report {success}: {:?}",
+                result.effects
+            );
+        }
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{command} {answers:?} must change nothing"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+    let result = run(&mut test, "tag.create", &["v1"]);
+    assert!(
+        message_texts(&result.effects).contains(&"Created tag v1"),
+        "{:?}",
+        result.effects
+    );
+    let result = run(&mut test, "remote.add", &["origin2", mirror.as_str()]);
+    assert!(
+        message_texts(&result.effects).contains(&"Added remote origin2"),
+        "{:?}",
+        result.effects
+    );
+    let result = run(&mut test, "remote.rename", &["origin2", "renamed"]);
+    assert!(
+        message_texts(&result.effects).contains(&"Renamed remote origin2 to renamed"),
+        "{:?}",
+        result.effects
+    );
+    let result = run(&mut test, "remote.remove", &["renamed"]);
+    assert!(
+        message_texts(&result.effects).contains(&"Removed remote renamed"),
+        "{:?}",
+        result.effects
+    );
+    let tags = tmp.git(&["tag", "--list"]);
+    assert!(tags.lines().any(|line| line == "v1"), "{tags}");
+    assert!(tags.lines().any(|line| line == "keep"), "{tags}");
+    let remotes = tmp.git(&["remote"]);
+    assert!(remotes.lines().any(|line| line == "upstream"), "{remotes}");
+    assert!(!remotes.lines().any(|line| line == "renamed"), "{remotes}");
+    let config = tmp.git(&["config", "--local", "--list"]);
+    assert!(
+        !config.contains("remote.renamed."),
+        "a removed remote must leave no config: {config}"
+    );
 }

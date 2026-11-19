@@ -531,46 +531,80 @@ impl GitRepo {
     }
 
     /// Force `name` to point at `target` without checking it out or touching
-    /// the working tree; Git reports its own refusal of invalid inputs.
+    /// the working tree.
+    ///
+    /// The branch name is validated with [`Self::validate_branch_name`] and a
+    /// target Git would parse as an option is refused here, so an answer can
+    /// never select a different `git branch` operation. Git reports its own
+    /// refusal of invalid revisions.
     pub fn reset_branch(&self, name: &str, target: &str) -> Result<()> {
-        self.run(&["branch", "-f", name, target]).map(|_| ())
+        let name = self.validate_branch_name(name)?;
+        Self::reject_option_like("revision", target)?;
+        self.run(&["branch", "-f", name.as_str(), "--", target])
+            .map(|_| ())
     }
 
-    /// Create a tag at HEAD. Tag names are not validated here; Git refuses
-    /// invalid or duplicate names itself.
+    /// Refuse a free-text operand that Git would read as an option.
+    ///
+    /// Operands are forwarded after a `--` terminator as well; this check
+    /// exists so the user sees a readable refusal instead of Git's or a
+    /// different operation's output.
+    fn reject_option_like(kind: &str, value: &str) -> Result<()> {
+        if value.starts_with('-') {
+            return Err(Error::new(format!(
+                "A {kind} cannot begin with '-'. Enter a plain name without leading dashes."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Create a tag at HEAD. An option-like name is refused at this boundary so
+    /// it cannot select a different `git tag` mode; Git refuses invalid or
+    /// duplicate names itself.
     pub fn create_tag(&self, name: &str) -> Result<()> {
-        self.run(&["tag", name]).map(|_| ())
+        Self::reject_option_like("tag name", name)?;
+        self.run(&["tag", "--", name]).map(|_| ())
     }
 
     /// Delete `name`, leaving Git's refusal of a missing tag to surface as its
-    /// own error.
+    /// own error. An option-like name is refused at this boundary.
     pub fn delete_tag(&self, name: &str) -> Result<()> {
-        self.run(&["tag", "-d", name]).map(|_| ())
+        Self::reject_option_like("tag name", name)?;
+        self.run(&["tag", "-d", "--", name]).map(|_| ())
     }
 
-    /// Add remote `name` pointing at `url`. Names and URLs are not validated
-    /// here; Git refuses invalid or duplicate names itself.
+    /// Add remote `name` pointing at `url`. Option-like names and URLs are
+    /// refused at this boundary; Git refuses invalid or duplicate names itself.
     pub fn add_remote(&self, name: &str, url: &str) -> Result<()> {
-        self.run(&["remote", "add", name, url]).map(|_| ())
+        Self::reject_option_like("remote name", name)?;
+        Self::reject_option_like("remote URL", url)?;
+        self.run(&["remote", "add", "--", name, url]).map(|_| ())
     }
 
     /// Remove remote `name`, leaving Git's refusal of a missing remote to
-    /// surface as its own error.
+    /// surface as its own error. An option-like name is refused at this
+    /// boundary.
     pub fn remove_remote(&self, name: &str) -> Result<()> {
-        self.run(&["remote", "remove", name]).map(|_| ())
+        Self::reject_option_like("remote name", name)?;
+        self.run(&["remote", "remove", "--", name]).map(|_| ())
     }
 
     /// Rename remote `old` to `new`, leaving Git's refusals (missing source,
-    /// duplicate target) to surface as their own errors.
+    /// duplicate target) to surface as their own errors. Option-like names are
+    /// refused at this boundary.
     pub fn rename_remote(&self, old: &str, new: &str) -> Result<()> {
-        self.run(&["remote", "rename", old, new]).map(|_| ())
+        Self::reject_option_like("remote name", old)?;
+        Self::reject_option_like("remote name", new)?;
+        self.run(&["remote", "rename", "--", old, new]).map(|_| ())
     }
 
     /// Delete local tracking refs of remote `name` that no longer exist on it
     /// without contacting the remote. Git's refusal of a missing remote
-    /// surfaces as its own error.
+    /// surfaces as its own error; an option-like name is refused at this
+    /// boundary.
     pub fn prune_remote(&self, name: &str) -> Result<()> {
-        self.run(&["remote", "prune", name]).map(|_| ())
+        Self::reject_option_like("remote name", name)?;
+        self.run(&["remote", "prune", "--", name]).map(|_| ())
     }
 
     /// Store `description` in Git's configuration for the named branch.
