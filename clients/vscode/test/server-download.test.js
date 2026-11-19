@@ -455,11 +455,98 @@ function resolveProduction(root) {
 }
 
 /**
+ * Build a temporary PATH containing one fake `magit-lsp` program.
+ *
+ * The program records that it was started, so a test can prove the PATH probe
+ * did or did not run, and prints the version its fixture names.
+ *
+ * @param {{version?: string, script?: string}} [options]
+ * @returns {{root: string, bin: string, marker: string, env: NodeJS.ProcessEnv, remove: () => void}}
+ */
+function fakePathServer(options = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-server-path-'));
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  const marker = path.join(root, 'probed');
+  const script = options.script
+    ?? `#!/bin/sh\n: > '${marker}'\necho 'magit-lsp ${options.version ?? VERSION}'\n`;
+  const program = path.join(bin, 'magit-lsp');
+  fs.writeFileSync(program, script);
+  fs.chmodSync(program, 0o755);
+  return {
+    root,
+    bin,
+    marker,
+    env: { ...process.env, PATH: bin },
+    remove: () => fs.rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+/**
+ * Build a temporary executable file for an explicit server-path setting.
+ *
+ * @returns {{path: string, remove: () => void}}
+ */
+function fakeExplicitServer() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-server-explicit-'));
+  const executable = path.join(root, 'magit-lsp');
+  fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(executable, 0o755);
+  return { path: executable, remove: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+/**
+ * Record managed resolutions without reaching the network.
+ *
+ * @returns {{calls: object[], resolve: (options: object) => Promise<{executable: string, version: string}>}}
+ */
+function managedFixture() {
+  /** @type {object[]} */
+  const calls = [];
+  return {
+    calls,
+    resolve: async (options) => {
+      calls.push(options);
+      return { executable: '/managed/cache/magit-lsp', version: options.version };
+    },
+  };
+}
+
+/**
+ * Assert one readable server-source rejection.
+ *
+ * @param {Promise<unknown>} promise
+ * @param {...RegExp} patterns
+ * @returns {Promise<void>}
+ */
+async function rejectsSource(promise, ...patterns) {
+  await assert.rejects(promise, (error) => {
+    assert.equal(error.name, 'ServerSourceError', `readable failure: ${error.message}`);
+    for (const pattern of patterns) assert.match(error.message, pattern);
+    return true;
+  });
+}
+
+/**
+ * Load the server-source resolver fresh so an earlier harness's injected
+ * downloader cannot stay bound to the cached module.
+ *
+ * @returns {typeof import('../lib/server-source')}
+ */
+function freshServerSource() {
+  for (const name of ['server-source', 'server-download']) {
+    delete require.cache[require.resolve(`../lib/${name}`)];
+  }
+  return require('../lib/server-source');
+}
+
+/**
  * Run every verified-download check, returning how many passed.
  *
  * @returns {Promise<number>} number of passed checks
  */
 async function run() {
+  const { resolveServerSource } = freshServerSource();
   const failures = [];
   let passed = 0;
   /**
@@ -814,7 +901,7 @@ async function run() {
         await rejects(
           resolveServer({ version: VERSION, cacheRoot: root, transport: fixture.transport, runtime }),
           pattern,
-          /magit-lsp\.serverPath/,
+          /magit-lsp\.server\.path/,
         );
       }
       assert.equal(fixture.calls.length, 0, 'unsupported hosts never download a binary');
@@ -1253,6 +1340,264 @@ async function run() {
       );
     } finally {
       fs.rmSync(bodyRoot, { recursive: true, force: true });
+    }
+  });
+
+  await check('automatic source prefers explicit path, matching PATH, then managed', async () => {
+    const explicit = fakeExplicitServer();
+    const pathFixture = fakePathServer();
+    const managed = managedFixture();
+    try {
+      const selected = await resolveServerSource({
+        source: 'auto',
+        path: explicit.path,
+        version: VERSION,
+        cacheRoot: '/cache',
+        env: pathFixture.env,
+        managed: managed.resolve,
+      });
+      assert.deepEqual(selected,
+        { command: explicit.path, origin: 'explicit', version: null },
+        'a valid explicit path is used verbatim');
+      assert.equal(fs.existsSync(pathFixture.marker), false, 'explicit path skips the PATH probe');
+      assert.deepEqual(managed.calls, [], 'explicit path never resolves a managed release');
+
+      const fromPath = await resolveServerSource({
+        source: 'auto',
+        path: '',
+        version: VERSION,
+        cacheRoot: '/cache',
+        env: pathFixture.env,
+        managed: managed.resolve,
+      });
+      assert.deepEqual(fromPath,
+        { command: 'magit-lsp', origin: 'system', version: VERSION },
+        'a PATH binary reporting the pinned version is used');
+      assert.equal(fs.existsSync(pathFixture.marker), true, 'PATH discovery probes --version');
+      assert.deepEqual(managed.calls, [], 'matching PATH binary never resolves a managed release');
+
+      const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-server-no-path-'));
+      try {
+        const fallback = await resolveServerSource({
+          source: 'auto',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: { ...process.env, PATH: empty },
+          managed: managed.resolve,
+        });
+        assert.deepEqual(fallback,
+          { command: '/managed/cache/magit-lsp', origin: 'managed', version: VERSION },
+          'no explicit path and no PATH binary falls back to managed');
+      } finally {
+        fs.rmSync(empty, { recursive: true, force: true });
+      }
+    } finally {
+      explicit.remove();
+      pathFixture.remove();
+    }
+  });
+
+  await check('automatic source reports an invalid explicit path without fallback', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-server-invalid-'));
+    const pathFixture = fakePathServer();
+    const managed = managedFixture();
+    try {
+      for (const configured of [path.join(root, 'missing'), root]) {
+        await rejectsSource(
+          resolveServerSource({
+            source: 'auto',
+            path: configured,
+            version: VERSION,
+            cacheRoot: '/cache',
+            env: pathFixture.env,
+            managed: managed.resolve,
+          }),
+          /configured server path/,
+          new RegExp(configured.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        );
+      }
+      assert.equal(fs.existsSync(pathFixture.marker), false, 'invalid path never probes PATH');
+      assert.deepEqual(managed.calls, [], 'invalid path never starts a download');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      pathFixture.remove();
+    }
+  });
+
+  await check('automatic source skips a mismatched PATH binary to managed', async () => {
+    const path = fakePathServer({ version: '9.9.9' });
+    const managed = managedFixture();
+    try {
+      const selected = await resolveServerSource({
+        source: 'auto',
+        path: '',
+        version: VERSION,
+        cacheRoot: '/cache',
+        env: path.env,
+        managed: managed.resolve,
+      });
+      assert.deepEqual(selected,
+        { command: '/managed/cache/magit-lsp', origin: 'managed', version: VERSION },
+        'a mismatched PATH binary is skipped');
+      assert.deepEqual(managed.calls,
+        [{ version: VERSION, cacheRoot: '/cache' }],
+        'managed resolution names the pinned version');
+    } finally {
+      path.remove();
+    }
+  });
+
+  await check('automatic source ignores unusable PATH binaries', async () => {
+    for (const script of ['#!/bin/sh\nexit 3\n', '#!/bin/sh\necho not-a-server\n']) {
+      const path = fakePathServer({ script });
+      const managed = managedFixture();
+      try {
+        const selected = await resolveServerSource({
+          source: 'auto',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: path.env,
+          managed: managed.resolve,
+        });
+        assert.equal(selected.origin, 'managed', 'an unverifiable PATH binary is not selected');
+        assert.deepEqual(managed.calls, [{ version: VERSION, cacheRoot: '/cache' }]);
+      } finally {
+        path.remove();
+      }
+    }
+  });
+
+  await check('system source never downloads and reports PATH failures readably', async () => {
+    const managed = managedFixture();
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-server-empty-path-'));
+    const matched = fakePathServer();
+    const mismatched = fakePathServer({ version: '9.9.9' });
+    const failing = fakePathServer({ script: '#!/bin/sh\nexit 2\n' });
+    const garbled = fakePathServer({ script: '#!/bin/sh\necho magit-lsp-not-a-version\n' });
+    try {
+      const selected = await resolveServerSource({
+        source: 'system',
+        path: '',
+        version: VERSION,
+        cacheRoot: '/cache',
+        env: matched.env,
+        managed: managed.resolve,
+      });
+      assert.deepEqual(selected,
+        { command: 'magit-lsp', origin: 'system', version: VERSION },
+        'a matching PATH binary is used in system mode');
+
+      await rejectsSource(
+        resolveServerSource({
+          source: 'system',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: { ...process.env, PATH: empty },
+          managed: managed.resolve,
+        }),
+        /no magit-lsp was found on PATH/,
+        /magit-lsp\.server\.path/,
+        /magit-lsp\.server\.source/,
+      );
+      await rejectsSource(
+        resolveServerSource({
+          source: 'system',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: mismatched.env,
+          managed: managed.resolve,
+        }),
+        /reports version 9\.9\.9/,
+        /requires 0\.1\.0/,
+      );
+      await rejectsSource(
+        resolveServerSource({
+          source: 'system',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: failing.env,
+          managed: managed.resolve,
+        }),
+        /cannot report its version/,
+        /--version exited 2/,
+      );
+      await rejectsSource(
+        resolveServerSource({
+          source: 'system',
+          path: '',
+          version: VERSION,
+          cacheRoot: '/cache',
+          env: garbled.env,
+          managed: managed.resolve,
+        }),
+        /cannot report its version/,
+        /did not print "magit-lsp <X\.Y\.Z>"/,
+      );
+      assert.deepEqual(managed.calls, [], 'system source never resolves a managed release');
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+      matched.remove();
+      mismatched.remove();
+      failing.remove();
+      garbled.remove();
+    }
+  });
+
+  await check('managed source ignores the explicit path and resolves the pinned release', async () => {
+    const explicit = fakeExplicitServer();
+    const managed = managedFixture();
+    try {
+      const selected = await resolveServerSource({
+        source: 'managed',
+        path: explicit.path,
+        version: VERSION,
+        cacheRoot: '/cache',
+        managed: managed.resolve,
+      });
+      assert.deepEqual(selected,
+        { command: '/managed/cache/magit-lsp', origin: 'managed', version: VERSION },
+        'managed mode ignores the explicit path');
+      assert.deepEqual(managed.calls, [{ version: VERSION, cacheRoot: '/cache' }]);
+    } finally {
+      explicit.remove();
+    }
+  });
+
+  await check('offline managed reuse never reaches the network', async () => {
+    const root = temporaryRoot();
+    const fixture = releaseFixture();
+    try {
+      const installed = await resolveServer({
+        version: VERSION, cacheRoot: root, transport: fixture.transport, runtime: RUNTIME,
+      });
+      const originalFetch = globalThis.fetch;
+      let fetches = 0;
+      globalThis.fetch = () => {
+        fetches += 1;
+        throw new Error('offline resolution must not fetch');
+      };
+      try {
+        const reused = await resolveServerSource({
+          source: 'managed',
+          path: '',
+          version: VERSION,
+          cacheRoot: root,
+          runtime: RUNTIME,
+        });
+        assert.deepEqual(reused,
+          { command: installed.executable, origin: 'managed', version: VERSION },
+          'the previously installed pinned binary is reused');
+        assert.equal(fetches, 0, 'resolution never calls the fetch boundary');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 

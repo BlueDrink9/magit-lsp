@@ -261,8 +261,8 @@ async function automaticStartup(binary) {
       writeFile: (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
     });
     __test.setWorkspaceFolder(repo);
-    __test.setConfiguration({ 'magit-lsp.profile': 'standard' });
-    assert.equal(workspace.getConfiguration('magit-lsp').get('serverPath'), undefined,
+    __test.setConfiguration({ 'magit-lsp.profile': 'standard', 'magit-lsp.server.source': 'managed' });
+    assert.equal(workspace.getConfiguration('magit-lsp').get('server.path'), undefined,
       'the automatic startup leaves the server path unset');
 
     const extension = loadExtension();
@@ -354,7 +354,7 @@ async function run() {
   });
   __test.setWorkspaceFolder(repo);
   __test.setConfiguration({
-    'magit-lsp.serverPath': binary,
+    'magit-lsp.server.path': binary,
     'magit-lsp.profile': 'standard',
   });
 

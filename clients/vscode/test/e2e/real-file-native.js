@@ -389,7 +389,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, chec
     const { spawn } = require('node:child_process');
     const { once } = require('node:events');
     const { createMessageConnection, StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
-    const helper = spawn(vscode.workspace.getConfiguration('magit-lsp').get('serverPath'), [],
+    const helper = spawn(vscode.workspace.getConfiguration('magit-lsp').get('server.path'), [],
       { stdio: ['pipe', 'pipe', 'pipe'] });
     const exited = once(helper, 'exit');
     const foreign = createMessageConnection(new StreamMessageReader(helper.stdout),

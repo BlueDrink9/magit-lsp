@@ -2055,10 +2055,27 @@
     "configuration": {
       "title": "magit-lsp",
       "properties": {
-        "magit-lsp.serverPath": {
+        "magit-lsp.server.source": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "system",
+            "managed"
+          ],
+          "enumDescriptions": [
+            "Use an explicit server path, then a matching binary on PATH, then the pinned managed release.",
+            "Use an explicit server path or a matching binary on PATH and never download.",
+            "Always use the pinned managed release, ignoring the server path."
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "description": "How the magit-lsp server executable is chosen."
+        },
+        "magit-lsp.server.path": {
           "type": "string",
           "default": "",
-          "description": "Path to the magit-lsp executable. Leave empty to download the release matching this extension version into extension storage. Set a PATH name or absolute path to start your own server instead and skip the download."
+          "scope": "machine",
+          "description": "Path to a magit-lsp executable. A nonempty path is started as configured and skips PATH discovery and download; an invalid path is reported instead of falling back."
         },
         "magit-lsp.profile": {
           "type": "string",

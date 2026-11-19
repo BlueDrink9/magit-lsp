@@ -21,7 +21,7 @@ const { close, current, disconnect, handleInvoke, onChanged, setup } = require('
 const { applyEffects } = require('./effects');
 const { applyRender, handlePrompt, handlePick } = require('./requests');
 const { register } = require('./semantic');
-const { resolveServer } = require('./server-download');
+const { resolveServerSource } = require('./server-source');
 const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
 const { activateView, stateForUri } = require('./views');
 const { SCHEME, store } = require('./store');
@@ -85,6 +85,20 @@ function createClient(command, profile) {
 }
 
 /**
+ * Present a user-facing failure with exactly one extension prefix.
+ *
+ * Server resolution and download failures already carry the prefix; any other
+ * failure is prefixed here, so no message is shown bare or doubled.
+ *
+ * @param {any} error a caught or thrown boundary value
+ * @returns {string}
+ */
+function userFacing(error) {
+  const text = message(error);
+  return text.startsWith('magit-lsp: ') ? text : `magit-lsp: ${text}`;
+}
+
+/**
  * Activate the extension.
  *
  * @param {vscode.ExtensionContext} context
@@ -129,7 +143,7 @@ function activate(context) {
 
   store.clientReady = startClient(context).catch((error) => {
     store.output.appendLine(`language client failed: ${message(error)}`);
-    vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
+    vscode.window.showErrorMessage(userFacing(error));
     throw error;
   });
   // A user may never open a view; keep the failed readiness observable without
@@ -142,22 +156,25 @@ function activate(context) {
 /**
  * Resolve the server executable the client should start.
  *
- * A nonempty `magit-lsp.serverPath` always wins, so PATH names and absolute
- * paths are started exactly as configured and nothing is downloaded. Otherwise
- * the release pinned to this extension's manifest version is resolved below the
- * extension's own global storage.
+ * `magit-lsp.server.path` is the explicit override and `magit-lsp.server.source`
+ * selects the automatic order (explicit path, matching PATH binary, managed
+ * download), a PATH-only system binary that never downloads, or a forced
+ * managed download. A failed or incompatible explicit path is reported, never
+ * silently replaced. The resolved origin and version are kept for diagnostics.
  *
  * @param {vscode.ExtensionContext} context
- * @param {string} configured `magit-lsp.serverPath` setting
+ * @param {{get: (name: string) => any}} config `magit-lsp` configuration
  * @returns {Promise<string>} launched command
  */
-async function resolveServerCommand(context, configured) {
-  if (configured) return configured;
-  const resolved = await resolveServer({
+async function resolveServerCommand(context, config) {
+  const resolved = await resolveServerSource({
+    source: config.get('server.source'),
+    path: config.get('server.path'),
     version: extensionVersion,
     cacheRoot: context.globalStorageUri?.fsPath,
   });
-  return resolved.executable;
+  store.server = resolved;
+  return resolved.command;
 }
 
 /**
@@ -172,7 +189,7 @@ async function resolveServerCommand(context, configured) {
 async function startClient(context) {
   const config = vscode.workspace.getConfiguration('magit-lsp');
   const profile = config.get('profile') || 'standard';
-  const command = await resolveServerCommand(context, config.get('serverPath') || '');
+  const command = await resolveServerCommand(context, config);
   // Deactivation may have happened while a download was in flight; never start
   // a transport the editor is no longer able to stop.
   if (store.disposing) return;

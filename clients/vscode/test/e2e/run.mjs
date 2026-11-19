@@ -98,6 +98,12 @@ mkdirSync(`${directory}/user/User`, { recursive: true });
 writeFileSync(`${directory}/user/User/settings.json`, JSON.stringify({
   'keyboard.dispatch': 'keyCode',
   'window.dialogStyle': 'custom',
+  // Server source and path are machine-scoped, so only user settings apply.
+  // The automatic download case forces managed source so PATH discovery cannot
+  // pick a host binary; it resolves the seeded pinned release from the cache.
+  ...(focusedDownload
+    ? { 'magit-lsp.server.source': 'managed' }
+    : { 'magit-lsp.server.path': `${root}/target/debug/magit-lsp` }),
 }));
 writeFileSync(`${directory}/user/User/keybindings.json`, JSON.stringify(mirror, null, 2));
 writeFileSync(`${directory}/mirrored-bindings.json`, JSON.stringify(mirror, null, 2));
@@ -108,9 +114,6 @@ execFileSync('git', ['-C', repo, 'add', '.']);
 execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'initial']);
 writeFileSync(`${repo}/tracked.txt`, 'replacement\n');
 writeFileSync(`${repo}/.vscode/settings.json`, JSON.stringify({
-  // The automatic download case must leave the server path unset so the
-  // extension resolves its pinned release from the isolated profile cache.
-  ...(focusedDownload ? {} : { 'magit-lsp.serverPath': `${root}/target/debug/magit-lsp` }),
   ...(process.env.MAGIT_VSCODE_A33_ONLY === '1' ? { 'magit-lsp.profile': 'vim' } : {}),
   'security.workspace.trust.enabled': false,
   'workbench.colorTheme': 'Default Dark Modern',
@@ -135,7 +138,7 @@ env.MAGIT_VSCODE_CDP_PORT = String(listener.address().port);
 await new Promise((resolve) => listener.close(resolve));
 
 // Seed the isolated profile's exact-version cache through the production
-// resolver, then let the real extension find it with no serverPath configured.
+// resolver, then let the real extension find it with managed source configured.
 let downloadFixture;
 if (focusedDownload) {
   downloadFixture = await require('./download-startup.js').prepareDownloadCache({

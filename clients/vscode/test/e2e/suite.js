@@ -309,16 +309,18 @@ async function run() {
     assert.equal(openedViews[0].id, uri.authority, 'status URI is not the opened view id');
     assert.equal(openedViews[0].kind, 'status');
     if (suiteMode === 'download') {
-      // This case has no `magit-lsp.serverPath`; the extension must resolve the
-      // seeded cache entry through production code and launch exactly that file.
+      // This case forces managed source and no path; the extension must resolve
+      // the seeded cache entry through production code and launch exactly it.
       const expected = process.env.MAGIT_VSCODE_DOWNLOAD_EXPECTED;
       const cacheRoot = process.env.MAGIT_VSCODE_DOWNLOAD_CACHE;
       assert(expected, 'MAGIT_VSCODE_DOWNLOAD_EXPECTED must name the seeded executable');
       assert(cacheRoot, 'MAGIT_VSCODE_DOWNLOAD_CACHE must name the isolated global storage');
       const { store } = require(`${extension.extensionPath}/lib/store.js`);
       const { PROTOCOL_VERSION } = require(`${extension.extensionPath}/lib/version.js`);
-      assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || '', '',
+      assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('server.path') || '', '',
         'the automatic startup case runs without a configured server path');
+      assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('server.source'), 'managed',
+        'the automatic startup case cannot fall through to PATH discovery');
       await waitFor(() => Boolean(store.clientReady), 'cached-server client promise');
       await store.clientReady;
       const initialized = store.client?.initializeResult;
@@ -356,7 +358,8 @@ async function run() {
         editorVersion: vscode.version,
         extensionVersion: extension.packageJSON.version,
         serverVersion: initialized.serverInfo?.version,
-        serverPathSetting: vscode.workspace.getConfiguration('magit-lsp').get('serverPath'),
+        serverSourceSetting: vscode.workspace.getConfiguration('magit-lsp').get('server.source'),
+        serverSettingValue: vscode.workspace.getConfiguration('magit-lsp').get('server.path'),
         expectedExecutable: expected,
         cacheRoot,
         cacheLocation: 'isolated profile User/globalStorage/magit-lsp.magit-lsp',
@@ -384,8 +387,8 @@ async function run() {
         'version fixture server initialization');
       assert(store.clientReady, 'version fixture extension did not become ready');
       assert.match(editor.document.getText(), /tracked\.txt/, 'version fixture status is unusable');
-      const serverPath = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
-      const executable = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/version`).resolveCommand(serverPath);
+      const configuredPath = vscode.workspace.getConfiguration('magit-lsp').get('server.path') || 'magit-lsp';
+      const executable = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/version`).resolveCommand(configuredPath);
       let warningText;
       await waitFor(() => {
         const text = cdp('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('.notifications-toasts .notification-toast')).filter((element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; }).map((element) => element.innerText).join(' ')`, returnByValue: true }).result.value;

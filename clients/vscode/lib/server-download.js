@@ -129,7 +129,7 @@ function releaseAsset(runtime) {
   const arch = runtime.arch ?? process.arch;
   const glibc = runtime.glibc === undefined ? hostGlibc() : runtime.glibc;
   const shape = `${platform}-${arch}`;
-  const guidance = 'set "magit-lsp.serverPath" to a magit-lsp executable instead';
+  const guidance = 'set "magit-lsp.server.path" to a magit-lsp executable instead';
   if (platform !== 'linux' || arch !== 'x64') {
     fail(`no release asset for ${shape}: only ${ASSET} is published; ${guidance}`);
   }
@@ -702,7 +702,7 @@ const inFlight = new Map();
  *
  * The release tag is exactly the requested version, never `latest`. Only the
  * published Linux x86_64 GNU asset is installed; any other host fails with
- * guidance to set `magit-lsp.serverPath`. A cached binary is re-verified before
+ * guidance to set `magit-lsp.server.path`. A cached binary is re-verified before
  * it is returned, concurrent calls in this process share one download, and
  * extension hosts sharing the cache publish complete entries by directory
  * rename under a bounded per-entry lock, so a failed download leaves no partial

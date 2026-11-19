@@ -29,7 +29,10 @@ function loadExtension(vscode, LanguageClient, serverDownload) {
   Module._load = function load(request, parent, isMain) {
     if (request === 'vscode') return vscode;
     if (request === 'vscode-languageclient/node') return { LanguageClient };
-    if (request === './server-download' && serverDownload) return serverDownload;
+    if (request === './server-download' && serverDownload) {
+      // Keep the real normalization helpers and override only the injected boundary.
+      return { ...originalLoad.call(this, request, parent, isMain), ...serverDownload };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -85,7 +88,7 @@ async function testStatusOpenLifecycle() {
     workspace: {
       workspaceFolders: [{ uri: { fsPath: '/repo' } }],
       getConfiguration: () => ({
-        get: (name) => (name === 'serverPath' ? 'magit-lsp' : undefined),
+        get: (name) => (name === 'server.path' ? process.execPath : undefined),
       }),
       registerTextDocumentContentProvider: (scheme, provider) => {
         providers.set(scheme, provider);
@@ -380,7 +383,7 @@ function admissionHarness(options) {
   const notifications = [];
   const lifecycle = [];
   const events = options.events || [];
-  const settings = options.settings || { 'magit-lsp.serverPath': 'magit-lsp' };
+  const settings = options.settings || { 'magit-lsp.server.path': process.execPath };
   const providers = new Map();
   const opened = [];
   const instances = [];
@@ -653,7 +656,10 @@ async function testServerStartup() {
   process.on('unhandledRejection', onUnhandled);
   try {
     // Default unset and explicit empty both resolve the pinned release.
-    for (const settings of [{}, { 'magit-lsp.serverPath': '' }]) {
+    for (const settings of [
+      { 'magit-lsp.server.source': 'managed' },
+      { 'magit-lsp.server.source': 'managed', 'magit-lsp.server.path': '' },
+    ]) {
       const events = [];
       const calls = [];
       const executable = '/storage/server/v0.1.0/x86_64-unknown-linux-gnu/magit-lsp';
@@ -687,13 +693,14 @@ async function testServerStartup() {
       await extension.deactivate();
     }
 
-    // A nonempty PATH name or absolute path is launched as configured and never
-    // consults the download resolver.
-    for (const configured of ['/opt/magit-lsp/bin/magit-lsp', 'magit-lsp']) {
+    // A nonempty explicit path is launched as configured and never consults the
+    // download resolver or PATH discovery.
+    {
+      const configured = process.execPath;
       const events = [];
       let resolutions = 0;
       const harness = admissionHarness({
-        settings: { 'magit-lsp.serverPath': configured }, events, protocolVersion: 1,
+        settings: { 'magit-lsp.server.path': configured }, events, protocolVersion: 1,
       });
       const extension = loadExtension(harness.vscode, harness.LanguageClient, {
         resolveServer: async () => {
@@ -714,7 +721,7 @@ async function testServerStartup() {
     let resolutions = 0;
     const harness = admissionHarness({ settings: {}, globalStorage: '/storage' });
     const guidance = 'no release asset for linux-arm64: only x86_64-unknown-linux-gnu is published; '
-      + 'set "magit-lsp.serverPath" to a magit-lsp executable instead';
+      + 'set "magit-lsp.server.path" to a magit-lsp executable instead';
     const extension = loadExtension(harness.vscode, harness.LanguageClient, {
       resolveServer: async () => {
         resolutions += 1;
@@ -726,7 +733,7 @@ async function testServerStartup() {
     assert.equal(harness.constructions(), 0, 'failed download never constructs a client');
     assert.deepEqual(harness.lifecycle, [], 'failed download never starts a transport');
     const guidanceMessages = () => harness.errorMessages
-      .filter((text) => text.includes('magit-lsp.serverPath'));
+      .filter((text) => text.includes('magit-lsp.server.path'));
     assert.equal(guidanceMessages().length, 1, 'readable download/manual-override guidance');
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await harness.commands.get('magit.open')();

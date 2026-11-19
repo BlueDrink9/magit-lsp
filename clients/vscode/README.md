@@ -27,16 +27,21 @@ make build                 # or: cargo build
    Host with `clients/vscode` loaded and this repository as the workspace.
 4. In the new window run **Magit: Open Status** from the command palette.
 
-The extension starts the server named by `magit-lsp.serverPath` (default
-`magit-lsp`, resolved on `PATH`). Point it at a built binary in your workspace
-or user settings:
+By default `magit-lsp.server.source` is `auto`: the extension uses an explicit
+`magit-lsp.server.path`, then a version-compatible `magit-lsp` on `PATH`, then
+the pinned release downloaded into extension storage. Point it at a built binary
+in your workspace or user settings:
 
 ```json
 {
-  "magit-lsp.serverPath": "/home/you/src/magit-lsp/target/debug/magit-lsp",
+  "magit-lsp.server.path": "/home/you/src/magit-lsp/target/debug/magit-lsp",
   "magit-lsp.profile": "standard"
 }
 ```
+
+Set `magit-lsp.server.source` to `system` to use only an explicit path or a
+`PATH` binary and never download, or to `managed` to always use the pinned
+managed release and ignore `magit-lsp.server.path`.
 
 `magit-lsp.profile` selects the server keymap profile (`standard` or `vim`).
 The client requests static key delivery: the server sends rendered text and

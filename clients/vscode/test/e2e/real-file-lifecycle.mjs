@@ -47,7 +47,7 @@ try {
     const snapshot = () => ({ head: git('rev-parse', 'HEAD'), index: git('write-tree'), worktree: git('diff', '--binary'), status: git('status', '--porcelain') });
     const before = snapshot();
     mkdirSync(`${base}/other-workspace`); mkdirSync(`${base}/launcher`); mkdirSync(`${base}/user/User`, { recursive: true });
-    write(`${base}/user/User/settings.json`, { 'magit-lsp.serverPath': `${root}/target/debug/magit-lsp`, 'window.title': base, 'window.dialogStyle': 'custom', 'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false, 'git.enabled': false });
+    write(`${base}/user/User/settings.json`, { 'magit-lsp.server.path': `${root}/target/debug/magit-lsp`, 'window.title': base, 'window.dialogStyle': 'custom', 'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false, 'git.enabled': false });
     const listener = createServer();
     await new Promise(r => listener.listen(0, '127.0.0.1', r));
     const port = listener.address().port;
