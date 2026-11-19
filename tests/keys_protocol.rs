@@ -297,6 +297,107 @@ fn a_stale_version_resolves_by_identity_not_by_line_index() {
 }
 
 #[test]
+fn dispatch_text_mode_targets_nearest_document_through_stacked_menus() {
+    use magit_lsp::view::{Placement, ViewKind, ViewMode};
+
+    for stacked in [false, true] {
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("base.txt", "base\n")])
+            .build();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let (document, initial) =
+            test.open_view("nearest", ViewKind::Status, Placement::Main, STATUS_VIEWPORT);
+        test.ack();
+        let text = test.text();
+        if stacked {
+            test.open_view(
+                "commit-menu",
+                ViewKind::Menu("menu.commit".into()),
+                Placement::Float,
+                STATUS_VIEWPORT,
+            );
+            test.ack();
+        }
+        test.open_view(
+            "dispatch",
+            ViewKind::Menu("menu.dispatch".into()),
+            Placement::Float,
+            STATUS_VIEWPORT,
+        );
+        test.ack();
+
+        let result = test.press("ctrl+t");
+        let render = result.render.expect("document mode render");
+        assert_eq!(render.view_id, document.id);
+        assert_eq!(render.mode, ViewMode::Text);
+        assert_eq!(render.version, initial.version);
+        assert!(render.text.is_none() && render.edits.is_none());
+        assert_eq!(test.view_ids(), vec!["v1", "nearest"]);
+        assert_eq!(test.text(), text);
+        let discovery = result.keymap.expect("document mode discovery");
+        assert_eq!(discovery.view_id, document.id);
+        assert_eq!(discovery.mode, ViewMode::Text);
+        assert!(!discovery.capture);
+        assert_eq!(discovery.bindings.len(), 1);
+        assert_eq!(discovery.bindings[0].command, "common.toggle-text-mode");
+        test.focus("v1");
+        assert_eq!(test.keymap_notice().unwrap().mode, ViewMode::Interactive);
+    }
+}
+
+#[test]
+fn dispatch_without_document_refuses_without_mutating_menu() {
+    use magit_lsp::view::{Placement, ViewKind};
+
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let mut test = TestSession::new(tmp.path().to_string_lossy(), Profile::Vim);
+    test.open_view(
+        "dispatch",
+        ViewKind::Menu("menu.dispatch".into()),
+        Placement::Float,
+        STATUS_VIEWPORT,
+    );
+    test.ack();
+    let views = test.view_ids();
+    let text = test.text();
+    let menu = test.menu("dispatch");
+    let discovery = test.keymap_notice();
+    let result = test.press("ctrl+t");
+    assert_eq!(result.effects, vec![Effect::message(MessageLevel::Info, "Not available in this view")]);
+    assert!(result.render.is_none());
+    assert_eq!(test.view_ids(), views);
+    assert_eq!(test.text(), text);
+    assert_eq!(test.menu("dispatch"), menu);
+    assert_eq!(test.keymap_notice(), discovery);
+}
+
+#[test]
+fn menu_help_and_cancel_remain_view_local() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let (commit, _) = test.open_via_command("open.commit");
+    test.ack();
+    let help = test.press("?");
+    assert!(help.effects.iter().any(|effect| matches!(effect, Effect::PushView { .. })));
+    assert_eq!(test.menu(test.view_id()).unwrap().id, "dispatch");
+    assert!(!test.view_ids().contains(&commit.id));
+    assert_eq!(test.view_ids().len(), 2);
+    test.ack();
+    test.invoke("common.cancel");
+    assert_eq!(test.view_ids(), vec!["v1"]);
+    test.open_via_command("open.commit");
+    test.ack();
+    test.invoke("common.quit");
+    assert_eq!(test.view_ids(), vec!["v1"]);
+}
+
+#[test]
 fn non_positional_keys_and_menu_options_ignore_obsolete_render_versions() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("base.txt", "base\n")])

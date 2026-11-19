@@ -78,6 +78,15 @@ impl Scope {
     }
 }
 
+/// Where a command acts when a menu item invokes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandTarget {
+    /// The nearest view that owns a document; transient menus above it are skipped.
+    Document,
+    /// The view the command was invoked from, including a menu.
+    View,
+}
+
 /// Pure availability shared by command dispatch and Plain action discovery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Availability {
@@ -129,6 +138,25 @@ macro_rules! command {
         doc: $doc:expr,
         status: $status:expr,
         run: $run:expr,
+        effects: $effects:expr,
+        target: $target:expr $(,)?
+    ) => {
+        Command {
+            id: $id,
+            scope: $scope,
+            doc: $doc,
+            status: $status,
+            run: $run,
+            effects: $effects,
+            target: $target,
+        }
+    };
+    (
+        id: $id:expr,
+        scope: $scope:expr,
+        doc: $doc:expr,
+        status: $status:expr,
+        run: $run:expr,
         effects: $effects:expr $(,)?
     ) => {
         Command {
@@ -138,6 +166,7 @@ macro_rules! command {
             status: $status,
             run: $run,
             effects: $effects,
+            target: CommandTarget::Document,
         }
     };
 }
@@ -151,6 +180,8 @@ pub struct Command {
     pub run: RunFn,
     /// Optional effects this command may emit, in declaration order.
     pub effects: &'static [EffectKind],
+    /// Where the command acts when a menu item invokes it.
+    pub target: CommandTarget,
 }
 
 /// Return the registered command's declared effects; empty when unknown.
@@ -1071,6 +1102,7 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: cancel,
             effects: &[],
+            target: CommandTarget::View,
         },
         command! {
             id: "common.confirm",
@@ -1087,6 +1119,7 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: quit,
             effects: &[],
+            target: CommandTarget::View,
         },
         command! {
             id: "common.cycle-visibility",
@@ -1171,6 +1204,7 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: open_dispatch,
             effects: &[],
+            target: CommandTarget::View,
         },
         command! {
             id: "open.commit",
@@ -1358,6 +1392,7 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: save_menu_args,
             effects: &[],
+            target: CommandTarget::View,
         },
         command! {
             id: "menu.reset-args",
@@ -1366,6 +1401,7 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: reset_menu_args,
             effects: &[],
+            target: CommandTarget::View,
         },
         planned(
             "commit-message.history-prev",

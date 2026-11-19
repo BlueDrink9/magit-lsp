@@ -462,7 +462,9 @@ impl Session {
                     .and_then(|view| view.menu())
                     .map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
-                if registered.applies_to(&scope) {
+                if registered.target == commands::CommandTarget::View
+                    && registered.applies_to(&scope)
+                {
                     return self.dispatch(
                         crate::dispatch::DispatchRequest {
                             action_target: None,

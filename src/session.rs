@@ -2027,12 +2027,14 @@ impl Session {
         Ok(result)
     }
 
-    /// The nearest view below `view_id` to which `command` applies.
+    /// The nearest ancestor matching the command's target kind and scope.
     fn matching_ancestor(&self, view_id: &str, command: &commands::Command) -> Option<String> {
         let mut current = self.views.previous_of(view_id);
         while let Some(view) = current {
             let id = view.descriptor().id.clone();
-            if command.applies_to(view.descriptor().scope.as_str()) {
+            if (command.target == commands::CommandTarget::View || !view.is_menu())
+                && command.applies_to(view.descriptor().scope.as_str())
+            {
                 return Some(id);
             }
             current = self.views.previous_of(&id);
