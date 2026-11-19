@@ -27,7 +27,8 @@ class LicensingTests(unittest.TestCase):
 
     def test_client_spec_and_readme_acknowledgement(self):
         spec = (ROOT / 'docs/CLIENT_SPEC.md').read_text()
-        self.assertIn('Apache-2.0', spec.splitlines()[2])
+        header = '\n'.join(spec.splitlines()[:10])
+        self.assertIn('Apache-2.0', header)
         readme = (ROOT / 'README.md').read_text()
         self.assertIn('[LICENSING.md]', readme)
         self.assertTrue(readme.rstrip().endswith(

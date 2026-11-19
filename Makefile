@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -157,6 +157,13 @@ vscode-package:
 # runs `cargo package --list` offline to catch an incomplete crate.
 release-automation-check:
 	$(call run,release-automation-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py)
+
+# Shellcheck plus the offline release contract suite for the download/packaging
+# scripts the release workflow and installer path depend on. shellcheck is not
+# in the flake dev shell yet, so a missing tool fails with a readable message
+# instead of silently skipping the lint half.
+release-contract-check:
+	$(call run,release-contract-check,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-check: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/release -p 'test_*.py')
 
 # Static guard for the prepared (not submitted) Mason registry package. PyYAML
 # is absent, so clients/mason/package.yaml is checked line by line against
