@@ -170,9 +170,9 @@
 | `-` | `-a` | `-` | Implemented | tag |
 | `-` | `-s` | `-` | Implemented | tag |
 | `-` | `=u` | `-` | Implemented | tag |
-| `magit-tag-create` | `t t` | `tag.create` | Planned R-6.3 | tag |
+| `magit-tag-create` | `t t` | `tag.create` | Implemented | tag |
 | `magit-tag-release` | `t r` | `tag.release` | Planned R-6.3 | tag |
-| `magit-tag-delete` | `t k` | `tag.delete` | Planned R-6.3 | tag |
+| `magit-tag-delete` | `t k` | `tag.delete` | Implemented | tag |
 | `magit-tag-prune` | `t p` | `tag.prune` | Planned R-6.3 | tag |
 | `-` | `?` | `open.dispatch` | Implemented | tag |
 | `magit-branch-reset` | `X b` | `reset.branch` | Planned R-6.3 | reset |

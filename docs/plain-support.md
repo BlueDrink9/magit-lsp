@@ -266,8 +266,8 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `submodule.synchronize` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
 | `submodule.unpopulate` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
 | `submodule.update` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `tag.create` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `tag.delete` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `tag.create` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `tag.delete` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `tag.prune` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `tag.release` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `worktree.checkout` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
