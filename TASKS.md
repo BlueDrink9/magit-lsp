@@ -513,6 +513,7 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Verified (Early T070, A1) — `grep -n 'id: "branch\.reset"' src/commands.rs` → `command!` registration at `:1032`; `src/menus/branch.rs:173` clears the `x` marker to `""` while the `b C` configure row and the four checkout rows keep `R-6.1`; KEYMAPS.md §5.4.2 documents `b x` at `:155` and its remaining-planned note no longer lists reset.
   - Verified (Early T070, A2) — `make test-rust FILTER="--test commands"` → exit 0; the two new tests cover a side branch moving to the target without switching, and Git's refusal of the checked-out branch surfacing as a warn message.
   - Verified (Early T070, A3) — `make ui-file FILE=tests/ui/scenarios/branch-reset.scn` → exit 0; `b x` prompts for `feature` then `HEAD`, and `git rev-parse feature` equals `git rev-parse HEAD` with `main` still checked out.
+  - Done: `c6d8379`.
 
 ## Completed work
 
