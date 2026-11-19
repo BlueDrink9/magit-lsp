@@ -544,6 +544,48 @@ impl GitRepo {
             .map(|_| ())
     }
 
+    /// Whether the index or worktree has any uncommitted change, including
+    /// untracked files.
+    pub fn is_dirty(&self) -> Result<bool> {
+        Ok(!self.run(&["status", "--porcelain"])?.trim().is_empty())
+    }
+
+    /// Reset the current branch and index to `revision`, leaving the worktree
+    /// untouched.
+    ///
+    /// `revision` is refused here when it would parse as an option; Git
+    /// reports its own refusal of invalid revisions. The revision follows the
+    /// mode directly because `git reset` reads an operand after `--` as a
+    /// path.
+    pub fn reset_mixed(&self, revision: &str) -> Result<()> {
+        Self::reject_option_like("revision", revision)?;
+        self.run(&["reset", "--mixed", revision]).map(|_| ())
+    }
+
+    /// Move the current branch to `revision`, leaving the index and worktree
+    /// untouched.
+    pub fn reset_soft(&self, revision: &str) -> Result<()> {
+        Self::reject_option_like("revision", revision)?;
+        self.run(&["reset", "--soft", revision]).map(|_| ())
+    }
+
+    /// Reset the current branch, index and worktree to `revision`.
+    ///
+    /// Git refuses the operation itself when local changes would be lost.
+    pub fn reset_hard(&self, revision: &str) -> Result<()> {
+        Self::reject_option_like("revision", revision)?;
+        self.run(&["reset", "--hard", revision]).map(|_| ())
+    }
+
+    /// Reset the current branch and index to `revision`, keeping local
+    /// changes that do not conflict with it.
+    ///
+    /// Git refuses the operation itself when local changes conflict.
+    pub fn reset_keep(&self, revision: &str) -> Result<()> {
+        Self::reject_option_like("revision", revision)?;
+        self.run(&["reset", "--keep", revision]).map(|_| ())
+    }
+
     /// Refuse a free-text operand that Git would read as an option.
     ///
     /// Operands are forwarded after a `--` terminator as well; this check

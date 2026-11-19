@@ -1721,3 +1721,309 @@ fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
         "a removed remote must leave no config: {config}"
     );
 }
+
+/// Invoke a single-prompt reset command and answer its revision prompt.
+fn reset_invoke(
+    test: &mut TestSession,
+    command: &str,
+    answer: &str,
+) -> magit_lsp::session::Execution {
+    let execution = test
+        .session
+        .start_invoke(&magit_lsp::protocol::ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: command.into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let magit_lsp::session::Execution::Prompt(prompt) = execution else {
+        panic!("{command}: expected a revision prompt");
+    };
+    test.session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(magit_lsp::protocol::PromptValue::Text(answer.into())),
+        )
+        .unwrap()
+}
+
+#[test]
+fn reset_mixed_moves_head_and_leaves_the_old_tree_as_a_worktree_change() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = reset_invoke(&mut test, "reset.mixed", "HEAD~1") else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Reset to HEAD~1 (mixed)"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "mixed reset must move HEAD to the parent"
+    );
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    assert_eq!(
+        tmp.git(&["diff", "--cached", "--name-only"]).trim(),
+        "",
+        "mixed reset must clear the index back to the parent"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        "second\n",
+        "mixed reset must leave the worktree untouched"
+    );
+    assert!(
+        tmp.git(&["status", "--porcelain"])
+            .lines()
+            .any(|line| line.contains("second.txt")),
+        "the child commit's file must remain an unstaged worktree change: {}",
+        tmp.git(&["status", "--porcelain"])
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_soft_keeps_a_staged_change_staged() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    std::fs::write(tmp.path().join("base.txt"), "staged\n").unwrap();
+    tmp.git(&["add", "base.txt"]);
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = reset_invoke(&mut test, "reset.soft", "HEAD~1") else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Reset to HEAD~1 (soft)"),
+        "{:?}",
+        result.effects
+    );
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "soft reset must move HEAD to the parent"
+    );
+    assert!(
+        tmp.git(&["diff", "--cached", "--name-only"])
+            .lines()
+            .any(|line| line == "base.txt"),
+        "soft reset must leave the staged change staged: {}",
+        tmp.git(&["diff", "--cached", "--name-only"])
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "staged\n",
+        "soft reset must leave the worktree untouched"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_hard_on_a_clean_tree_proceeds_without_confirmation() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
+        panic!("a clean tree must not ask for confirmation");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Reset to HEAD~1 (hard)"),
+        "{:?}",
+        result.effects
+    );
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "hard reset must move HEAD to the parent"
+    );
+    assert!(
+        !tmp.path().join("second.txt").exists(),
+        "hard reset must remove the child commit's file from the worktree"
+    );
+    assert_eq!(tmp.git(&["status", "--porcelain"]).trim(), "");
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_hard_on_a_dirty_tree_declines_then_discards_when_confirmed() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
+        panic!("a dirty tree must ask for confirmation");
+    };
+    let Execution::Done(declined) = test
+        .session
+        .resume_prompt(
+            &confirm.prompt_id,
+            Some(PromptValue::Text("no".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&declined.effects).contains(&"Hard reset to HEAD~1 cancelled"),
+        "{:?}",
+        declined.effects
+    );
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        second,
+        "declining must leave HEAD in place"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        "dirty\n",
+        "declining must leave the worktree in place"
+    );
+    let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
+        panic!("the dirty tree must still ask for confirmation");
+    };
+    let Execution::Done(confirmed) = test
+        .session
+        .resume_prompt(
+            &confirm.prompt_id,
+            Some(PromptValue::Text("yes".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&confirmed.effects).contains(&"Reset to HEAD~1 (hard)"),
+        "{:?}",
+        confirmed.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "confirming must move HEAD to the parent"
+    );
+    assert!(
+        !tmp.path().join("second.txt").exists(),
+        "confirming must discard the child commit's file"
+    );
+    assert_eq!(
+        tmp.git(&["status", "--porcelain"]).trim(),
+        "",
+        "confirming must leave a clean tree behind"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_keep_surfaces_gits_refusal_when_local_changes_would_be_lost() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "second\n")])
+        .build();
+    std::fs::write(tmp.path().join("base.txt"), "local\n").unwrap();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = reset_invoke(&mut test, "reset.keep", "HEAD~1") else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.to_lowercase().contains("not uptodate")),
+        "Git's refusal must surface as a readable message: {:?}",
+        result.effects
+    );
+    assert!(
+        !texts.iter().any(|text| text.starts_with("Reset to")),
+        "a refused keep reset must not report success: {:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        second,
+        "Git's refusal must leave HEAD in place"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "local\n",
+        "Git's refusal must leave the local change in place"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_revision_answers_cannot_select_git_options() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["rev-parse", "HEAD"]),
+            tmp.git(&["status", "--porcelain"]),
+            tmp.git(&["ls-files", "--stage", "-z"]),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap()
+                + &std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        )
+    };
+    let before = state(&tmp);
+    for answer in ["-D", "--hard"] {
+        let Execution::Done(result) = reset_invoke(&mut test, "reset.mixed", answer) else {
+            panic!("answer {answer}: expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("revision cannot begin with '-'")),
+            "answer {answer}: expected readable refusal, got {:?}",
+            result.effects
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("Reset to")),
+            "answer {answer}: must not report a reset: {:?}",
+            result.effects
+        );
+        assert_eq!(state(&tmp), before, "answer {answer} must change nothing");
+        assert!(!test.session.has_pending_prompt());
+    }
+}

@@ -1,0 +1,16 @@
+# Early reset part 1: a mixed reset moves HEAD back and leaves the old files in the worktree.
+fixture: clean
+profile: vim
+profile-only: true
+---
+sh: printf 'second\n' > second.txt && git add second.txt && git commit -qm second && git rev-parse HEAD~1 > .git/first
+keys: X
+wait
+expect screen contains "mixed"
+keys: m
+wait prompt
+expect screen contains "Reset to"
+keys: HEAD~1 Enter
+wait
+expect screen contains "Reset to HEAD~1 (mixed)"
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/first)" && test -f second.txt && test "$(cat second.txt)" = second

@@ -186,6 +186,23 @@ profiles.
 
 Remote configure, prune-refspecs, unshallow and update-default remain planned.
 
+#### 5.4.5 Reset menu: supported subset
+
+Open the reset menu with `x` (bound to `X` in the `vim` profile). These menu keys
+are identical in both profiles.
+
+| Keys | Supported action |
+| --- | --- |
+| `X m` | Mixed reset: move `HEAD` and reset the index to a prompted revision, leaving the working tree alone |
+| `X s` | Soft reset: move `HEAD` to a prompted revision, leaving index and working tree alone |
+| `X h` | Hard reset: move `HEAD` and reset the index and working tree to a prompted revision, confirming when the working tree is dirty |
+| `X k` | Keep reset: move `HEAD` and reset the index to a prompted revision, keeping uncommitted changes intact |
+
+Each row prompts once for the target revision; a free-text target never reaches
+Git in option position. `X h` asking for confirmation on a dirty tree is a
+deliberate deviation from Magit, which hard-resets without asking. `X b` (reset
+a branch) and `X f/i/w` (path-scoped) remain planned.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

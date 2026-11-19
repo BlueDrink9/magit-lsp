@@ -12,7 +12,7 @@ use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::menu::Menu;
 use crate::patch::{FileLayout, SelectionOp};
-use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, Selection, ViewPromptParams};
+use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, PromptValue, Selection, ViewPromptParams};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{Placement, ViewKind, ViewMode, VisibilityCommand};
@@ -377,6 +377,19 @@ pub enum PromptAction {
     },
     /// Prune stale tracking branches of the answered remote.
     RemotePrune,
+    /// Reset HEAD and the index to the answered revision.
+    ResetMixed,
+    /// Move HEAD to the answered revision.
+    ResetSoft,
+    /// Reset HEAD, index and worktree to the answered revision.
+    ResetHard,
+    /// Second half of a hard reset: the revision accepted after the dirty-tree warning.
+    ResetHardConfirm {
+        /// The revision answered at the first prompt.
+        revision: String,
+    },
+    /// Reset HEAD and the index to the answered revision, keeping local changes.
+    ResetKeep,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -750,6 +763,24 @@ pub fn resume_prompt(
                 format!("Pruned remote {name}"),
             )
         }
+        PromptAction::ResetMixed => reset_answered(ctx, answer, ResetMode::Mixed),
+        PromptAction::ResetSoft => reset_answered(ctx, answer, ResetMode::Soft),
+        PromptAction::ResetHard => reset_answered(ctx, answer, ResetMode::Hard),
+        PromptAction::ResetKeep => reset_answered(ctx, answer, ResetMode::Keep),
+        PromptAction::ResetHardConfirm { revision } => {
+            let PromptValue::Text(answer) = answer else {
+                return Err(crate::Error::new("Expected a confirmation"));
+            };
+            if answer.trim() != "yes" {
+                ctx.info(format!("Hard reset to {revision} cancelled"));
+                return Ok(CommandOutcome::default());
+            }
+            branch_action(
+                ctx,
+                |repo| repo.reset_hard(&revision),
+                format!("Reset to {revision} (hard)"),
+            )
+        }
     }
 }
 
@@ -1068,6 +1099,10 @@ fn build() -> Registry {
         command! { id: "remote.remove", scope: Scope::MenuAction, doc: "Remove a remote", status: CommandStatus::Implemented, run: remote_remove, effects: &[] },
         command! { id: "remote.rename", scope: Scope::MenuAction, doc: "Rename a remote", status: CommandStatus::Implemented, run: remote_rename, effects: &[] },
         command! { id: "remote.prune", scope: Scope::MenuAction, doc: "Prune stale tracking branches of a remote", status: CommandStatus::Implemented, run: remote_prune, effects: &[] },
+        command! { id: "reset.mixed", scope: Scope::MenuAction, doc: "Reset HEAD and the index to a revision", status: CommandStatus::Implemented, run: reset_mixed, effects: &[] },
+        command! { id: "reset.soft", scope: Scope::MenuAction, doc: "Move HEAD to a revision", status: CommandStatus::Implemented, run: reset_soft, effects: &[] },
+        command! { id: "reset.hard", scope: Scope::MenuAction, doc: "Reset HEAD, index and worktree to a revision", status: CommandStatus::Implemented, run: reset_hard, effects: &[] },
+        command! { id: "reset.keep", scope: Scope::MenuAction, doc: "Reset HEAD and the index to a revision, keeping local changes", status: CommandStatus::Implemented, run: reset_keep, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1575,6 +1610,87 @@ fn branch_action(
     Ok(CommandOutcome { refresh: true, ..Default::default() })
 }
 
+/// Which `git reset` mode an answered revision applies with.
+enum ResetMode {
+    /// Reset HEAD and the index.
+    Mixed,
+    /// Move HEAD only.
+    Soft,
+    /// Reset HEAD, index and worktree.
+    Hard,
+    /// Reset HEAD and the index, keeping non-conflicting local changes.
+    Keep,
+}
+
+/// Reset to the revision answered at the prompt in `mode`, warning instead of
+/// acting when the answer is empty.
+///
+/// Hard mode asks for a second confirmation while the worktree is dirty, so a
+/// reset that discards uncommitted work is never silent.
+fn reset_answered(
+    ctx: &mut CommandCtx<'_>,
+    answer: PromptValue,
+    mode: ResetMode,
+) -> Result<CommandOutcome> {
+    let Some(revision) = reset_revision(answer) else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Enter a revision to reset to",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    if matches!(mode, ResetMode::Hard) {
+        let repo = GitRepo::open(ctx.repo_path)?;
+        match repo.is_dirty() {
+            Ok(true) => {
+                return Ok(CommandOutcome {
+                    prompt: Some((
+                        hard_reset_confirm_prompt(&revision),
+                        PromptAction::ResetHardConfirm { revision },
+                    )),
+                    ..Default::default()
+                });
+            }
+            Ok(false) => {}
+            Err(err) => {
+                ctx.effects
+                    .push(Effect::message(MessageLevel::Warn, err.to_string()));
+                return Ok(CommandOutcome::default());
+            }
+        }
+    }
+    let (success, action): (String, fn(&GitRepo, &str) -> Result<()>) = match mode {
+        ResetMode::Mixed => (format!("Reset to {revision} (mixed)"), GitRepo::reset_mixed),
+        ResetMode::Soft => (format!("Reset to {revision} (soft)"), GitRepo::reset_soft),
+        ResetMode::Hard => (format!("Reset to {revision} (hard)"), GitRepo::reset_hard),
+        ResetMode::Keep => (format!("Reset to {revision} (keep)"), GitRepo::reset_keep),
+    };
+    branch_action(ctx, |repo| action(repo, &revision), success)
+}
+
+/// The trimmed revision text of a prompt answer, unless it is empty or not text.
+fn reset_revision(answer: PromptValue) -> Option<String> {
+    let PromptValue::Text(revision) = answer else {
+        return None;
+    };
+    let revision = revision.trim().to_owned();
+    (!revision.is_empty()).then_some(revision)
+}
+
+/// Build the single-line prompt asking for the revision to reset to.
+fn reset_revision_prompt() -> ViewPromptParams {
+    branch_name_prompt("Reset to", "", "Revision")
+}
+
+/// Build the confirmation prompt shown before a hard reset discards changes.
+fn hard_reset_confirm_prompt(revision: &str) -> ViewPromptParams {
+    branch_name_prompt(
+        &format!("Working tree has changes; hard reset to {revision} discards them. Type yes to proceed"),
+        "",
+        "yes",
+    )
+}
+
 /// Build a single-line text prompt for a branch name.
 fn branch_name_prompt(title: &str, default: &str, placeholder: &str) -> ViewPromptParams {
     ViewPromptParams {
@@ -1690,6 +1806,38 @@ fn remote_prune(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             branch_name_prompt("Prune remote", "", "Remote to prune"),
             PromptAction::RemotePrune,
         )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the revision to reset to, mixed mode.
+fn reset_mixed(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((reset_revision_prompt(), PromptAction::ResetMixed)),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the revision HEAD should move to, soft mode.
+fn reset_soft(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((reset_revision_prompt(), PromptAction::ResetSoft)),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the revision reset hard should discard changes back to.
+fn reset_hard(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((reset_revision_prompt(), PromptAction::ResetHard)),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the revision reset keep should apply.
+fn reset_keep(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((reset_revision_prompt(), PromptAction::ResetKeep)),
         ..Default::default()
     })
 }
