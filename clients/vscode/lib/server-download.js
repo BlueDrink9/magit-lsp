@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
@@ -37,6 +38,8 @@ const LIMITS = Object.freeze({
   members: 8,
   redirects: 5,
   requestMilliseconds: 180000,
+  lockAttempts: 150,
+  lockWaitMilliseconds: 10,
 });
 
 /**
@@ -187,24 +190,141 @@ function cachedExecutable(entry, version) {
 }
 
 /**
- * Remove an unverified cached install so it can never be launched.
+ * Synchronously pause between bounded lock attempts.
  *
- * Leftover staging directories from an interrupted process are removed too, so
- * a failed download leaves no partial files behind.
+ * Publication is synchronous once the download completes, so a promise-based
+ * delay could not let other work in this process make progress anyway.
  *
- * @param {string} entry cache directory for this version and asset
+ * @param {number} milliseconds
  * @returns {void}
  */
-function discardEntry(entry) {
-  /** @type {string[]} */
-  let names = [];
+function pause(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+/**
+ * Path of the per-entry publication lock shared by every extension host.
+ *
+ * The lock is a sibling of the entry, so it never becomes part of a published
+ * install and no staging directory is mistaken for it.
+ *
+ * @param {string} entry cache directory for this version and asset
+ * @returns {string}
+ */
+function entryLock(entry) {
+  return `${entry}.lock`;
+}
+
+/**
+ * Remove a lock whose recorded owner is a dead process on this host.
+ *
+ * A lock is never taken from a live owner, and elapsed time alone never expires
+ * one: a crashed publisher is recognised only from its recorded hostname and
+ * process id, so a slow or suspended publisher keeps ownership. A lock whose
+ * owner cannot be identified (another host, a corrupt record) is left alone.
+ *
+ * @param {string} lock lock directory
+ * @returns {boolean} whether a stale lock was removed
+ */
+function removeStaleLock(lock) {
+  let owner;
   try {
-    names = fs.readdirSync(entry);
-  } catch {}
-  for (const name of ['magit-lsp', 'manifest.json', ...names.filter((name) => name.startsWith('.staging-'))]) {
+    const [host, pid] = fs.readFileSync(path.join(lock, 'owner'), 'utf8').trim().split(/\s+/);
+    owner = { host, pid: Number(pid) };
+  } catch {
+    return false;
+  }
+  if (owner.host !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) return false;
+  try {
+    process.kill(owner.pid, 0);
+    return false;
+  } catch (error) {
+    if (error.code !== 'ESRCH') return false;
+  }
+  try {
+    fs.rmSync(lock, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Acquire the bounded per-entry publication lock.
+ *
+ * Publication mutates only one entry directory, so a short lock is enough to
+ * serialize invalid-entry removal and the publishing rename between extension
+ * hosts. Waiting is bounded; a publisher that never gets the lock fails
+ * readably instead of racing a live owner.
+ *
+ * @param {string} entry cache directory for this version and asset
+ * @returns {string} lock directory now owned by this attempt
+ */
+function acquireEntryLock(entry) {
+  const lock = entryLock(entry);
+  for (let attempt = 0; attempt < LIMITS.lockAttempts; attempt += 1) {
     try {
-      fs.rmSync(path.join(entry, name), { force: true, recursive: true });
+      fs.mkdirSync(lock);
+      try {
+        fs.writeFileSync(path.join(lock, 'owner'), `${os.hostname()} ${process.pid}\n`);
+      } catch {}
+      return lock;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    if (removeStaleLock(lock)) continue;
+    pause(LIMITS.lockWaitMilliseconds);
+  }
+  fail(`timed out waiting for another process to finish installing magit-lsp in ${entry}`);
+}
+
+/**
+ * Run one action while owning the entry publication lock.
+ *
+ * @template T
+ * @param {string} entry cache directory for this version and asset
+ * @param {() => T} action
+ * @returns {T}
+ */
+function withEntryLock(entry, action) {
+  const lock = acquireEntryLock(entry);
+  try {
+    return action();
+  } finally {
+    try {
+      fs.rmSync(lock, { recursive: true, force: true });
     } catch {}
+  }
+}
+
+/**
+ * Delete an unverified cached install so it can never be launched.
+ *
+ * Only this entry's known files are removed, and only under the entry lock, so
+ * a competing publisher that just completed a good install is re-read and
+ * reused instead of deleted. An entry directory holding anything else is left
+ * intact and reported, never swept. Staging directories live beside the entry
+ * now, so no other process's staging is ever touched here.
+ *
+ * @param {string} entry cache directory for this version and asset
+ * @param {string} version normalized release version
+ * @returns {void}
+ */
+function removeInvalidEntry(entry, version) {
+  if (cachedExecutable(entry, version)) return;
+  for (const name of ['magit-lsp', 'manifest.json']) {
+    try {
+      fs.rmSync(path.join(entry, name), { force: true });
+    } catch {}
+  }
+  try {
+    fs.rmdirSync(entry);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    if (error.code === 'ENOTEMPTY' || error.code === 'EEXIST') {
+      fail(`cannot replace the cached magit-lsp ${version}: ${entry} contains unexpected files`);
+    }
+    throw error;
   }
 }
 
@@ -465,9 +585,12 @@ async function fetchBytes(url, limit) {
 /**
  * Download, verify and atomically publish one release executable.
  *
- * Every check happens before anything is written. The verified binary is
- * staged inside its own cache directory and published with one rename, so a
- * failure never leaves a partial install and never replaces an existing one.
+ * Every check happens before anything is written. The verified binary and its
+ * manifest are staged together in a uniquely owned sibling directory and the
+ * complete entry is published by renaming that one directory into the entry
+ * path, under a bounded per-entry lock. A competing extension host that
+ * published first is re-verified and reused, never replaced or deleted, and a
+ * failure leaves no partial entry and removes only this attempt's staging.
  *
  * Extraction uses Node's built-in `zlib` and a minimal ustar reader (plus the
  * mtime-only pax extended header Python's default tarfile format emits) rather
@@ -485,6 +608,7 @@ async function install(entry, version, asset, transport) {
   const stem = `magit-lsp-v${version}-${asset}`;
   const archiveName = `${stem}.tar.gz`;
   const base = `https://github.com/${REPOSITORY}/releases/download/v${version}`;
+  const parent = path.dirname(entry);
   /** @type {string|undefined} */
   let staging;
   try {
@@ -501,8 +625,8 @@ async function install(entry, version, asset, transport) {
     );
     if (sha256(archive) !== digest) fail(`archive checksum does not match ${archiveName}.sha256`);
     const binary = extractBinary(archive, stem);
-    fs.mkdirSync(entry, { recursive: true });
-    staging = fs.mkdtempSync(path.join(entry, '.staging-'));
+    fs.mkdirSync(parent, { recursive: true });
+    staging = fs.mkdtempSync(path.join(parent, '.staging-'));
     const stagedBinary = path.join(staging, 'magit-lsp');
     fs.writeFileSync(stagedBinary, binary);
     fs.chmodSync(stagedBinary, 0o755);
@@ -513,11 +637,15 @@ async function install(entry, version, asset, transport) {
       fs.closeSync(handle);
     }
     const manifest = { version, asset, size: binary.length, digest: sha256(binary) };
-    const stagedManifest = path.join(staging, 'manifest.json');
-    fs.writeFileSync(stagedManifest, `${JSON.stringify(manifest, null, 2)}\n`);
-    fs.renameSync(stagedBinary, path.join(entry, 'magit-lsp'));
-    fs.renameSync(stagedManifest, path.join(entry, 'manifest.json'));
-    return path.join(entry, 'magit-lsp');
+    fs.writeFileSync(path.join(staging, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    return withEntryLock(entry, () => {
+      const winner = cachedExecutable(entry, version);
+      if (winner) return winner;
+      removeInvalidEntry(entry, version);
+      fs.renameSync(staging, entry);
+      staging = undefined;
+      return path.join(entry, 'magit-lsp');
+    });
   } catch (error) {
     throw error instanceof ServerDownloadError
       ? error
@@ -548,8 +676,10 @@ const inFlight = new Map();
  * The release tag is exactly the requested version, never `latest`. Only the
  * published Linux x86_64 GNU asset is installed; any other host fails with
  * guidance to set `magit-lsp.serverPath`. A cached binary is re-verified before
- * it is returned, concurrent calls in this process share one download, and a
- * failed download leaves no partial files and no unverified binary behind.
+ * it is returned, concurrent calls in this process share one download, and
+ * extension hosts sharing the cache publish complete entries by directory
+ * rename under a bounded per-entry lock, so a failed download leaves no partial
+ * files and no unverified binary behind.
  *
  * @param {ResolveOptions} options
  * @returns {Promise<{executable: string, version: string}>}
@@ -567,11 +697,19 @@ async function resolveServer(options) {
   const transport = options?.transport ?? fetchBytes;
   let pending = inFlight.get(entry);
   if (!pending) {
-    // Re-check before discarding so an install that finished after our first
-    // check is reused instead of downloaded again.
+    if (fs.existsSync(entry)) {
+      // Best effort before downloading: an invalid entry must never stay
+      // launchable if this attempt fails. The lock re-check keeps a competing
+      // host's freshly published winner from being deleted; publication
+      // repeats the check authoritatively, so a failure here is not fatal.
+      try {
+        withEntryLock(entry, () => removeInvalidEntry(entry, version));
+      } catch {}
+    }
+    // Re-check after clearing so an install that finished while we waited for
+    // the lock is reused instead of downloaded again.
     const settled = cachedExecutable(entry, version);
     if (settled) return { executable: settled, version };
-    discardEntry(entry);
     pending = install(entry, version, asset, transport);
     inFlight.set(entry, pending);
     pending.then(

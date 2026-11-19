@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, fork } = require('node:child_process');
 const zlib = require('node:zlib');
 
 const { LIMITS, resolveServer } = require('../lib/server-download');
@@ -15,6 +15,7 @@ const ASSET = 'x86_64-unknown-linux-gnu';
 const BINARY = Buffer.from('#!/bin/sh\nexit 0\n');
 const RUNTIME = { platform: 'linux', arch: 'x64', glibc: '2.36' };
 const FIXTURE_PROGRAM = path.join(__dirname, '..', '..', '..', 'scripts', 'test_release_archive_fixture.py');
+const PROCESS_FIXTURE = path.join(__dirname, 'server-download-process.js');
 
 /** Create a temporary cache root; the caller removes it. */
 function temporaryRoot() {
@@ -192,6 +193,106 @@ function entryOf(root, version = VERSION) {
 }
 
 /**
+ * Write one release fixture's archive and sidecar for an independent process.
+ *
+ * @param {string} directory destination directory
+ * @param {string} name fixture file stem
+ * @param {Buffer} binary released executable bytes
+ * @returns {{archivePath: string, sidecarPath: string}}
+ */
+function writeReleaseFixture(directory, name, binary) {
+  const fixture = releaseFixture({ binary });
+  const archivePath = path.join(directory, `${name}.tar.gz`);
+  const sidecarPath = path.join(directory, `${name}.sha256`);
+  fs.writeFileSync(archivePath, fixture.archive);
+  fs.writeFileSync(sidecarPath, `${digest(fixture.archive)}  ${archiveNameOf()}\n`);
+  return { archivePath, sidecarPath };
+}
+
+/**
+ * Start one independent resolver process sharing this cache root.
+ *
+ * The fixture gates every transport call, so the parent deterministically
+ * controls which extension host reaches publication first.
+ *
+ * @param {object} plan serializable plan handed to the fixture
+ * @param {import('node:child_process').ChildProcess[]} children every spawned process, for cleanup
+ * @returns {{child: import('node:child_process').ChildProcess, next: (type: string) => Promise<any>, send: (message: object) => void}}
+ */
+function startResolver(plan, children) {
+  const child = fork(PROCESS_FIXTURE, [], { silent: true });
+  children.push(child);
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  /** @type {Map<string, any[]>} */
+  const queued = new Map();
+  /** @type {Map<string, ((message: any) => void)[]>} */
+  const waiting = new Map();
+  child.on('message', (message) => {
+    const waiters = waiting.get(message.type) ?? [];
+    const waiter = waiters.shift();
+    if (waiter) {
+      waiter(message);
+      return;
+    }
+    queued.set(message.type, [...(queued.get(message.type) ?? []), message]);
+  });
+  const next = (type) =>
+    new Promise((resolve, reject) => {
+      const available = (queued.get(type) ?? []).shift();
+      if (available) {
+        resolve(available);
+        return;
+      }
+      const timer = setTimeout(() => reject(new Error(`resolver did not report ${type}: ${stderr}`)), 30000);
+      waiting.set(type, [
+        ...(waiting.get(type) ?? []),
+        (message) => {
+          clearTimeout(timer);
+          resolve(message);
+        },
+      ]);
+    });
+  child.send({ type: 'resolve', ...plan });
+  return { child, next, send: (message) => child.send(message) };
+}
+
+/**
+ * List staging directories beside one entry directory.
+ *
+ * @param {string} entry cache directory for one version
+ * @returns {string[]} sorted staging sibling names
+ */
+function stagingSiblings(entry) {
+  const parent = path.dirname(entry);
+  return fs.existsSync(parent)
+    ? fs
+        .readdirSync(parent)
+        .filter((name) => name.startsWith('.staging-'))
+        .sort()
+    : [];
+}
+
+/**
+ * Assert one entry is exactly a complete, self-consistent install.
+ *
+ * @param {string} entry cache directory for one version
+ * @param {Buffer} binary expected executable bytes
+ * @param {string} version expected release version
+ */
+function assertCompleteInstall(entry, binary, version) {
+  assert.deepEqual(fs.readdirSync(entry).sort(), ['magit-lsp', 'manifest.json'], 'entry holds only its files');
+  const manifest = JSON.parse(fs.readFileSync(path.join(entry, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.version, version);
+  assert.equal(manifest.asset, ASSET);
+  assert.equal(manifest.size, binary.length);
+  assert.equal(manifest.digest, digest(binary));
+  assert.deepEqual(fs.readFileSync(path.join(entry, 'magit-lsp')), binary);
+}
+
+/**
  * Assert a rejected resolution names its reason readably.
  *
  * @param {Promise<unknown>} promise
@@ -203,6 +304,37 @@ async function rejects(promise, ...patterns) {
     for (const pattern of patterns) assert.match(error.message, pattern);
     return true;
   });
+}
+
+/**
+ * Fail the next publication rename deterministically at the production boundary.
+ *
+ * The helper under test is unchanged: this replaces the filesystem call, not a
+ * code path, so `install` still stages, locks and cleans up exactly as it does
+ * for a real rename error. Only destinations inside the entry directory fail,
+ * so nothing outside publication is affected.
+ *
+ * @param {string} entry cache directory for one version
+ * @returns {{calls: () => number, restore: () => void}}
+ */
+function failPublicationRename(entry) {
+  const original = fs.renameSync;
+  let calls = 0;
+  fs.renameSync = (source, destination) => {
+    if (destination === entry || destination.startsWith(`${entry}${path.sep}`)) {
+      calls += 1;
+      const error = new Error(`EACCES: permission denied, rename '${source}' -> '${destination}'`);
+      error.code = 'EACCES';
+      throw error;
+    }
+    return original(source, destination);
+  };
+  return {
+    calls: () => calls,
+    restore: () => {
+      fs.renameSync = original;
+    },
+  };
 }
 
 /**
@@ -311,6 +443,155 @@ async function run() {
       assert.equal(fixture.calls.length, 2, 'one sidecar and one archive transfer for both callers');
     } finally {
       release();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check("independent resolvers never delete another host's staging or winner", async () => {
+    const root = temporaryRoot();
+    /** @type {import('node:child_process').ChildProcess[]} */
+    const children = [];
+    try {
+      const entry = entryOf(root);
+      const parent = path.dirname(entry);
+      fs.mkdirSync(parent, { recursive: true });
+      // Another extension host is already staging a verified install here.
+      const foreignStaging = fs.mkdtempSync(path.join(parent, '.staging-'));
+      fs.writeFileSync(path.join(foreignStaging, 'magit-lsp'), BINARY);
+      const fixtures = path.join(root, 'fixtures');
+      fs.mkdirSync(fixtures);
+      const winner = Buffer.from('#!/bin/sh\n# winner\nexit 0\n');
+      const contender = Buffer.from('#!/bin/sh\n# contender\nexit 0\n');
+
+      const first = startResolver({
+        cacheRoot: root,
+        version: VERSION,
+        runtime: RUNTIME,
+        ...writeReleaseFixture(fixtures, 'winner', winner),
+      }, children);
+      const second = startResolver({
+        cacheRoot: root,
+        version: VERSION,
+        runtime: RUNTIME,
+        ...writeReleaseFixture(fixtures, 'contender', contender),
+      }, children);
+
+      // Both hosts verified the empty cache before either transfer, then wait.
+      await Promise.all([first.next('transport'), second.next('transport')]);
+      first.send({ type: 'continue' });
+      const published = await first.next('resolved');
+      assert.equal(published.executable, path.join(entry, 'magit-lsp'));
+      assertCompleteInstall(entry, winner, VERSION);
+
+      // The second host loses publication and must reuse the winner unchanged.
+      second.send({ type: 'continue' });
+      const reused = await second.next('resolved');
+      assert.equal(reused.executable, published.executable);
+      assertCompleteInstall(entry, winner, VERSION);
+      assert.deepEqual(
+        fs.readFileSync(path.join(foreignStaging, 'magit-lsp')),
+        BINARY,
+        "the other host's active staging survives",
+      );
+      assert.deepEqual(stagingSiblings(entry), [path.basename(foreignStaging)], 'only the foreign staging remains');
+
+      // A failed resolution must not touch another host's staging either.
+      const failing = startResolver({
+        cacheRoot: root,
+        version: '0.0.9',
+        runtime: RUNTIME,
+        ...writeReleaseFixture(fixtures, 'failing', BINARY),
+        failure: 'connection reset by peer',
+      }, children);
+      const failure = await failing.next('failed');
+      assert.equal(failure.name, 'ServerDownloadError');
+      assert.match(failure.message, /connection reset by peer/);
+      assert.deepEqual(
+        fs.readFileSync(path.join(foreignStaging, 'magit-lsp')),
+        BINARY,
+        'a failed resolution leaves staging alone',
+      );
+      assert.deepEqual(stagingSiblings(entry), [path.basename(foreignStaging)]);
+      assert.deepEqual(stagingSiblings(entryOf(root, '0.0.9')), [], 'the failed attempt removed its own staging');
+    } finally {
+      for (const child of children) child.kill('SIGKILL');
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('failed publication leaves no partial entry and preserves prior versions', async () => {
+    const root = temporaryRoot();
+    /** @type {import('node:child_process').ChildProcess[]} */
+    const children = [];
+    try {
+      const priorVersion = '0.1.1';
+      const priorFixture = releaseFixture({ version: priorVersion });
+      await resolveServer({
+        version: priorVersion,
+        cacheRoot: root,
+        transport: priorFixture.transport,
+        runtime: RUNTIME,
+      });
+      const priorEntry = entryOf(root, priorVersion);
+      assertCompleteInstall(priorEntry, BINARY, priorVersion);
+
+      const entry = entryOf(root);
+      const parent = path.dirname(entry);
+      fs.mkdirSync(parent, { recursive: true });
+      const fixtures = path.join(root, 'fixtures');
+      fs.mkdirSync(fixtures);
+      const release = writeReleaseFixture(fixtures, 'release', BINARY);
+      const start = () =>
+        startResolver({ cacheRoot: root, version: VERSION, runtime: RUNTIME, ...release }, children);
+
+      // A live owner holds the publication lock: the attempt fails readably.
+      const lock = `${entry}.lock`;
+      fs.mkdirSync(lock);
+      fs.writeFileSync(path.join(lock, 'owner'), `${os.hostname()} ${process.pid}\n`);
+      const blocked = start();
+      blocked.send({ type: 'continue' });
+      const locked = await blocked.next('failed');
+      assert.equal(locked.name, 'ServerDownloadError');
+      assert.match(locked.message, /timed out waiting for another process/);
+      assert.equal(fs.existsSync(path.join(entry, 'magit-lsp')), false, 'no binary published');
+      assert.equal(fs.existsSync(path.join(entry, 'manifest.json')), false, 'no manifest published');
+      assert.deepEqual(stagingSiblings(entry), [], 'the failed attempt removed its own staging');
+      assert.equal(fs.existsSync(lock), true, 'a live owner keeps its lock');
+      fs.rmSync(lock, { recursive: true, force: true });
+
+      // An invalid entry holding foreign files cannot be replaced atomically.
+      fs.mkdirSync(entry);
+      fs.writeFileSync(path.join(entry, 'keep.txt'), 'foreign\n');
+      fs.writeFileSync(path.join(entry, 'magit-lsp'), 'tampered binary\n');
+      const obstructed = start();
+      obstructed.send({ type: 'continue' });
+      const unexpected = await obstructed.next('failed');
+      assert.equal(unexpected.name, 'ServerDownloadError');
+      assert.match(unexpected.message, /contains unexpected files/);
+      assert.deepEqual(fs.readdirSync(entry), ['keep.txt'], 'no binary-only entry and foreign files untouched');
+      assert.deepEqual(stagingSiblings(entry), [], 'the failed attempt removed its own staging');
+      assertCompleteInstall(priorEntry, BINARY, priorVersion);
+
+      // The publication rename itself fails: no entry or staging survives.
+      fs.rmSync(entry, { recursive: true, force: true });
+      const fault = failPublicationRename(entry);
+      try {
+        const fixture = releaseFixture();
+        await rejects(
+          resolveServer({ version: VERSION, cacheRoot: root, transport: fixture.transport, runtime: RUNTIME }),
+          /cannot install magit-lsp/,
+          /permission denied/,
+        );
+        assert.equal(fault.calls(), 1, 'failure happened at the publication rename');
+      } finally {
+        fault.restore();
+      }
+      assert.equal(fs.existsSync(entry), false, 'no binary-only entry after a failed rename');
+      assert.equal(fs.existsSync(`${entry}.lock`), false, 'the publication lock is released');
+      assert.deepEqual(stagingSiblings(entry), [], 'the failed attempt removed its own staging');
+      assertCompleteInstall(priorEntry, BINARY, priorVersion);
+    } finally {
+      for (const child of children) child.kill('SIGKILL');
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
