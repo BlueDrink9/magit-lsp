@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const zlib = require('node:zlib');
 
 const { LIMITS, resolveServer } = require('../lib/server-download');
@@ -13,6 +14,7 @@ const VERSION = require('../package.json').version;
 const ASSET = 'x86_64-unknown-linux-gnu';
 const BINARY = Buffer.from('#!/bin/sh\nexit 0\n');
 const RUNTIME = { platform: 'linux', arch: 'x64', glibc: '2.36' };
+const FIXTURE_PROGRAM = path.join(__dirname, '..', '..', '..', 'scripts', 'test_release_archive_fixture.py');
 
 /** Create a temporary cache root; the caller removes it. */
 function temporaryRoot() {
@@ -95,6 +97,59 @@ function releaseMembers(stem, binary) {
     { name: `${stem}/LICENSE-APACHE`, content: 'apache\n' },
     { name: `${stem}/INSTALL.md`, content: 'install\n' },
   ];
+}
+
+/**
+ * Build a release archive with the packager's Python tarfile settings.
+ *
+ * `scripts/package-release.sh` writes with Python's default tarfile format, so
+ * a fractional mtime adds pax extended headers. Running the real producer-side
+ * code keeps the fixture honest instead of hand-writing an equivalent archive.
+ *
+ * @param {Buffer} binary released executable bytes
+ * @param {string} [version] release version named inside the archive
+ * @returns {Buffer} gzip release archive bytes
+ */
+function packagedArchive(binary, version = VERSION) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-release-fixture-'));
+  try {
+    const binaryPath = path.join(directory, 'magit-lsp');
+    fs.writeFileSync(binaryPath, binary);
+    const archivePath = path.join(directory, archiveNameOf(version));
+    execFileSync('python3', [FIXTURE_PROGRAM, archivePath, stemOf(version), binaryPath], { stdio: 'pipe' });
+    return fs.readFileSync(archivePath);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Encode one pax extended-header record with its self-describing length.
+ *
+ * @param {string} key record key
+ * @param {string} value record value
+ * @returns {string}
+ */
+function paxRecord(key, value) {
+  const body = ` ${key}=${value}\n`;
+  let length = Buffer.byteLength(body) + 1;
+  for (;;) {
+    const record = `${length}${body}`;
+    const actual = Buffer.byteLength(record);
+    if (actual === length) return record;
+    length = actual;
+  }
+}
+
+/**
+ * Build a pax extended header member carrying already-encoded records.
+ *
+ * @param {string} records concatenated pax records
+ * @param {string} [name] member name replacing the producer's `././@PaxHeader`
+ * @returns {{name: string, content: string, type: string}}
+ */
+function paxMember(records, name = '././@PaxHeader') {
+  return { name, content: records, type: 'x' };
 }
 
 /**
@@ -208,6 +263,30 @@ async function run() {
       const explicit = await resolve(`v${VERSION}`);
       assert.equal(explicit.executable, executable, 'a leading v names the same release');
       assert.equal(fixture.calls.length, 2, 'normalized version reuses the cache');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('installs the packager Python tarfile archive with pax mtime headers', async () => {
+    const root = temporaryRoot();
+    try {
+      const archive = packagedArchive(BINARY);
+      const tar = zlib.gunzipSync(archive);
+      assert.equal(tar.includes(Buffer.from('././@PaxHeader')), true, 'fixture exercises pax headers');
+      assert.equal(tar.includes(Buffer.from('mtime=1700000000.125')), true, 'fixture has a fractional mtime');
+      const fixture = releaseFixture({ archive });
+      const installed = await resolveServer({
+        version: VERSION,
+        cacheRoot: root,
+        transport: fixture.transport,
+        runtime: RUNTIME,
+      });
+      assert.deepEqual(
+        fs.readFileSync(installed.executable),
+        BINARY,
+        'the exact binary bytes from the Python archive are installed',
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -358,6 +437,65 @@ async function run() {
         'an oversized license',
         [{ name: `${stem}/LICENSE`, content: 'x'.repeat(LIMITS.memberBytes + 1) }, ...without('LICENSE')],
         /invalid size/,
+      ],
+    ];
+    for (const [label, members, pattern] of cases) {
+      const root = temporaryRoot();
+      try {
+        const fixture = releaseFixture({ members });
+        await rejects(
+          resolveServer({ version: VERSION, cacheRoot: root, transport: fixture.transport, runtime: RUNTIME }),
+          pattern,
+        );
+        assertNoInstall(entryOf(root));
+      } catch (error) {
+        error.message = `${label}: ${error.message}`;
+        throw error;
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  await check('malicious pax metadata cannot bypass archive checks', async () => {
+    const stem = stemOf();
+    const binaryName = `${stem}/magit-lsp`;
+    const published = releaseMembers(stem, BINARY);
+    const without = (name) => published.filter((member) => member.name !== `${stem}/${name}`);
+    const cases = [
+      [
+        'a pax path override',
+        [paxMember(paxRecord('path', '../magit-lsp')), ...published],
+        /unsupported archive pax metadata "path"/,
+      ],
+      [
+        'a pax linkpath override',
+        [paxMember(paxRecord('linkpath', '/etc/passwd')), ...published],
+        /unsupported archive pax metadata "linkpath"/,
+      ],
+      ['pax size metadata', [paxMember(paxRecord('size', '1')), ...published], /unsupported archive pax metadata "size"/],
+      ['a pax record longer than its member', [paxMember('99 mtime=1\n'), ...published], /corrupt release archive pax header/],
+      ['a pax record without a newline', [paxMember('12 mtime=1.5'), ...published], /corrupt release archive pax header/],
+      ['an invalid pax mtime value', [paxMember(paxRecord('mtime', 'nan')), ...published], /corrupt release archive pax header/],
+      [
+        'a pax header naming another member',
+        [paxMember(paxRecord('mtime', '1.5'), 'PaxHeaders/evil'), ...published],
+        /unsupported archive pax member/,
+      ],
+      [
+        'a pax header at end of archive',
+        [...published, paxMember(paxRecord('mtime', '1.5'))],
+        /corrupt release archive pax header/,
+      ],
+      [
+        'a pax-wrapped symlink binary',
+        [paxMember(paxRecord('mtime', '1.5')), { name: binaryName, content: '', type: '2' }, ...without('magit-lsp')],
+        /not a regular file/,
+      ],
+      [
+        'a pax-wrapped duplicate binary',
+        [...published, paxMember(paxRecord('mtime', '1.5')), { name: binaryName, content: BINARY }],
+        /duplicate archive member/,
       ],
     ];
     for (const [label, members, pattern] of cases) {

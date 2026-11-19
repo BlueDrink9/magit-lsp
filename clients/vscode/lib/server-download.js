@@ -19,6 +19,9 @@ const MINIMUM_GLIBC = [2, 35];
 /** Files every release archive contains below its versioned stem directory. */
 const ARCHIVE_FILES = ['magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md'];
 
+/** Member name Python's tarfile uses for the pax extended header it emits. */
+const PAX_HEADER_NAME = '././@PaxHeader';
+
 /**
  * Resource bounds for one resolution.
  *
@@ -275,6 +278,43 @@ function tarNumber(header, offset, length) {
 }
 
 /**
+ * Validate the narrow pax metadata the release packager emits.
+ *
+ * `scripts/package-release.sh` writes archives with Python's default tarfile
+ * format, which emits a `././@PaxHeader` record whenever a member has a
+ * non-integer mtime. Only the `mtime` key is accepted, and its value is never
+ * applied to the member: names, types and sizes always come from the tar header
+ * itself, so pax metadata cannot redirect or resize a member.
+ *
+ * @param {Buffer} content pax extended header payload
+ * @returns {void}
+ */
+function parsePaxMetadata(content) {
+  let offset = 0;
+  while (offset < content.length) {
+    const space = content.indexOf(0x20, offset);
+    if (space === -1) fail('corrupt release archive pax header');
+    const lengthText = content.toString('ascii', offset, space);
+    if (!/^[1-9][0-9]*$/.test(lengthText)) fail('corrupt release archive pax header');
+    const length = Number.parseInt(lengthText, 10);
+    if (!Number.isSafeInteger(length) || length < space - offset + 4) {
+      fail('corrupt release archive pax header');
+    }
+    if (offset + length > content.length) fail('corrupt release archive pax header');
+    const record = content.subarray(space + 1, offset + length);
+    if (record[record.length - 1] !== 0x0a) fail('corrupt release archive pax header');
+    const body = record.subarray(0, record.length - 1);
+    const equals = body.indexOf(0x3d);
+    if (equals <= 0) fail('corrupt release archive pax header');
+    const key = body.toString('ascii', 0, equals);
+    const value = body.toString('utf8', equals + 1);
+    if (key !== 'mtime') fail(`unsupported archive pax metadata ${JSON.stringify(key)}`);
+    if (!/^-?[0-9]+(?:\.[0-9]+)?$/.test(value)) fail('corrupt release archive pax header');
+    offset += length;
+  }
+}
+
+/**
  * @typedef {object} TarMember
  * @property {string} name member path
  * @property {string} type member type flag
@@ -286,8 +326,10 @@ function tarNumber(header, offset, length) {
  * Split an uncompressed tar archive into members, validating every header.
  *
  * This deliberately implements only the format `scripts/package-release.sh`
- * writes (POSIX ustar regular files). No member path is ever used as a
- * filesystem path, so traversal, absolute paths and link members are refused.
+ * writes: POSIX ustar regular files, plus the `mtime`-only pax extended header
+ * Python's default tarfile format adds for non-integer mtimes. No member path is
+ * ever used as a filesystem path, so traversal, absolute paths and link members
+ * are refused.
  *
  * @param {Buffer} buffer uncompressed archive bytes
  * @returns {TarMember[]}
@@ -296,6 +338,7 @@ function tarMembers(buffer) {
   /** @type {TarMember[]} */
   const members = [];
   let offset = 0;
+  let paxPending = false;
   while (offset + 512 <= buffer.length) {
     const header = buffer.subarray(offset, offset + 512);
     if (header.every((byte) => byte === 0)) break;
@@ -312,9 +355,20 @@ function tarMembers(buffer) {
     const prefix = tarField(header, 345, 155);
     const name = prefix ? `${prefix}/${tarField(header, 0, 100)}` : tarField(header, 0, 100);
     const type = String.fromCharCode(header[156] === 0 ? 0x30 : header[156]);
+    if (type === 'x') {
+      if (paxPending) fail('corrupt release archive pax header');
+      if (name !== PAX_HEADER_NAME) fail(`unsupported archive pax member ${JSON.stringify(name)}`);
+      if (size <= 0 || size > LIMITS.memberBytes) fail('invalid size for archive pax header');
+      parsePaxMetadata(buffer.subarray(offset + 512, offset + 512 + size));
+      paxPending = true;
+      offset += 512 + Math.ceil(size / 512) * 512;
+      continue;
+    }
+    paxPending = false;
     members.push({ name, type, size, content: buffer.subarray(offset + 512, offset + 512 + size) });
     offset += 512 + Math.ceil(size / 512) * 512;
   }
+  if (paxPending) fail('corrupt release archive pax header');
   if (members.length === 0) fail('release archive is empty');
   return members;
 }
@@ -415,8 +469,9 @@ async function fetchBytes(url, limit) {
  * staged inside its own cache directory and published with one rename, so a
  * failure never leaves a partial install and never replaces an existing one.
  *
- * Extraction uses Node's built-in `zlib` and a minimal ustar reader rather than
- * a tar dependency: the published archive is produced by
+ * Extraction uses Node's built-in `zlib` and a minimal ustar reader (plus the
+ * mtime-only pax extended header Python's default tarfile format emits) rather
+ * than a tar dependency: the published archive is produced by
  * `scripts/package-release.sh`, and reusing that exact file set as the only
  * accepted structure keeps the format surface small without new dependencies.
  *
