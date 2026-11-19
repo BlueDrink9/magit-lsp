@@ -523,6 +523,13 @@ impl GitRepo {
             .map(|_| ())
     }
 
+    /// Delete `name`, leaving Git's refusal of the current or an unmerged
+    /// branch to surface as its own error.
+    pub fn delete_branch(&self, name: &str) -> Result<()> {
+        let name = self.validate_branch_name(name)?;
+        self.run(&["branch", "-d", name.as_str()]).map(|_| ())
+    }
+
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
         Self::command_in_with_env(

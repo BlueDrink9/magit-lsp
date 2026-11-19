@@ -595,3 +595,105 @@ fn branch_rename_prompts_twice_and_moves_the_ref() {
     );
     assert!(!test.session.has_pending_prompt());
 }
+
+#[test]
+fn branch_delete_removes_a_side_branch_without_switching() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "feature"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.delete".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Text("feature".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Deleted branch feature"),
+        "{:?}",
+        result.effects
+    );
+    let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(
+        !branches.lines().any(|line| line == "feature"),
+        "{branches}"
+    );
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
+        "delete must leave main checked out"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_delete_of_current_branch_surfaces_gits_refusal() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.delete".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Text("main".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts.iter().any(|text| {
+            let text = text.to_lowercase();
+            text.contains("cannot delete branch") && text.contains("main")
+        }),
+        "{:?}",
+        result.effects
+    );
+    let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(
+        branches.lines().any(|line| line == "main"),
+        "Git's refusal must keep the checked-out branch: {branches}"
+    );
+}

@@ -176,7 +176,7 @@ pub fn definition() -> MenuDef {
                         "branch.delete",
                         "delete",
                         "magit-branch-delete",
-                        "R-6.1",
+                        "",
                     ),
                     action(
                         "h",

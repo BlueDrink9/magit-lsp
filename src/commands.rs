@@ -308,6 +308,8 @@ pub enum PromptAction {
         /// The branch name answered at the first prompt.
         source: String,
     },
+    /// Delete the answered branch.
+    BranchDelete,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -533,6 +535,13 @@ pub fn resume_prompt(
                 |repo| repo.rename_branch(&source, &target),
                 format!("Renamed branch {source} to {target}"),
             )
+        }
+        PromptAction::BranchDelete => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(ctx, |repo| repo.delete_branch(&name), format!("Deleted branch {name}"))
         }
     }
 }
@@ -843,6 +852,7 @@ fn build() -> Registry {
         },
         command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch at HEAD", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
+        command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1386,6 +1396,20 @@ fn branch_rename(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Rename branch", &current, "Branch to rename"),
             PromptAction::BranchRename,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the branch to delete.
+fn branch_delete(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let current = GitRepo::open(ctx.repo_path)?
+        .current_branch()
+        .unwrap_or_default();
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Delete branch", &current, "Branch to delete"),
+            PromptAction::BranchDelete,
         )),
         ..Default::default()
     })
