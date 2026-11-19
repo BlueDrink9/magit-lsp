@@ -10,6 +10,19 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "The extension starts a magit-lsp server process and can run user-configured executables, so it is disabled in untrusted workspaces."
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlueDrink9/magit-lsp"
+  },
   "categories": [
     "Other"
   ],
@@ -37,7 +50,7 @@
   "devDependencies": {
     "@oxc-parser/binding-linux-x64-gnu": "^0.159.0",
     "@types/node": "^20.19.43",
-    "@types/vscode": "^1.145.0",
+    "@types/vscode": "~1.85.0",
     "@vscode/vsce": "^4.1.1",
     "knip": "^6.45.1",
     "ovsx": "^1.4.0",

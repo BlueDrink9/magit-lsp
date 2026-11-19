@@ -143,6 +143,15 @@ vscode-unit: vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode-unit,node clients/vscode/test/test.js)
 
+# Offline distributable VSIX (no bundler, no publish): package the unbundled
+# client with its runtime deps into build/ and fail if the archive lacks the
+# entry files or either runtime dependency. vsce discovers dependencies through
+# `npm list`, which cannot read pnpm's isolated symlinks, so install the same
+# frozen lockfile with pnpm's hoisted linker first (build tree only).
+.PHONY: vscode-package
+vscode-package:
+	$(call run,vscode-package,pnpm --dir clients/vscode install --frozen-lockfile --node-linker=hoisted --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}" && version=$$(node -p "require('./clients/vscode/package.json').version") && mkdir -p build/vscode && pnpm --dir clients/vscode exec vsce package --out "../../build/vscode/magit-lsp-$$version.vsix" && python3 scripts/check_vsix.py "build/vscode/magit-lsp-$$version.vsix")
+
 vscode-version-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-version-startup,MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
