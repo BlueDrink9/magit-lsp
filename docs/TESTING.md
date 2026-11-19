@@ -29,26 +29,41 @@ only temp paths and timings.
 
 ### Protocol example replay and capture
 
-`make test-rust FILTER="--test examples"` replays the committed exchanges
+`make test-rust FILTER="--test examples"` replays every maintained recording
 against the real binary. Server frames and action arrays remain strictly
 ordered; only the path, binary, outbound-id, run-id and commit-hash
-canonicalization documented in `tests/examples.rs` is allowed.
+canonicalization documented in `tests/examples.rs` is allowed. Strict replay
+fails on a divergent payload, a reordered action array or changed frame
+ordering; only files that do not record a dynamic `view/keymap` push may skip
+one, while a file that records one keeps it in strict order
+([tests/examples.rs:1197–1204](../tests/examples.rs#L1197),
+[tests/examples.rs:1151–1288](../tests/examples.rs#L1151)).
 
-`make update-examples` captures only the two Plain commit-edit exchanges.
-It permits exactly T041's promotion of `log.local-branches`,
-`log.all-branches` and `log.all-references` from planned rows to implemented
-registry positions (`log.load-more` is log-scoped, not offered here). Titles,
-disabled reasons, URI, generation and the ordered remainder must match exactly. Every other frame
-must match normal replay before any recording is written. New entries come
-from validated real-server responses; retained entries keep their recorded
-values, not temporary fixture paths. Unchanged lines (including requests and
-metadata) remain byte-identical, existing fragment boundaries are preserved,
-and each generated capture fragment must stay below 100000 bytes (a bounded
-capture/storage constraint, not a human-readability or authored-transcript
-quota). Capture fails rather than refreshing unrelated drift. Intact authored
-transcripts need not be split solely for size. Inspect the diff, rerun normal replay, and commit
-recordings separately; then run `make update-schema`, `make schema-check`
-and `make docs-check`, committing generated worked exchanges separately.
+`make update-examples` regenerates all six maintained logical recordings:
+`plain-open`, `rich-lifecycle`, `plain-code-action`, `plain-document-prompt`,
+`commit-edit-abort` and `commit-edit-confirm`
+([tests/examples.rs:1290–1298](../tests/examples.rs#L1290)). Regeneration
+sends the recorded requests in order and enforces the same frame ordering and
+post-exit checks as replay. It still normalizes roots, binary paths, run ids,
+outbound ids and hashes; only a divergent `s2c` payload is captured. A capture
+keeps the recorded line's envelope and refuses a changed exchange identity:
+the method (request or notification) and the request/response id must match
+the recorded frame ([tests/examples.rs:1114–1149](../tests/examples.rs#L1114)).
+New entries come from validated real-server responses; retained entries keep
+their recorded values, not temporary fixture paths.
+
+Regeneration keeps each recording's artifact mapping: the two commit-edit
+exchanges stay split across their existing `-01`/`-02` fragments, every other
+recording is monolithic, and an unrelated recording name is refused
+([tests/examples.rs:1300–1315](../tests/examples.rs#L1300)). Unchanged lines
+stay byte-identical, existing fragment boundaries are preserved, and every
+generated fragment must stay below 100000 bytes (a bounded capture/storage
+constraint, not a human-readability or authored-transcript quota)
+([tests/examples.rs:1317–1336](../tests/examples.rs#L1317)). Intact authored
+transcripts need not be split solely for size. Inspect the diff, rerun normal
+replay, and commit recordings separately; then run `make update-schema`,
+`make schema-check` and `make docs-check`, committing generated worked
+exchanges separately.
 
 ### Fixtures and oracles
 
