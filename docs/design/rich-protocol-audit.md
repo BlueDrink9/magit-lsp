@@ -234,19 +234,47 @@ report was dishonest.
   (`clients/vscode/lib/effects.js:7-35`). The server can emit arbitrary
   canonical chords as `Effect::PassThrough { key }`
   (`src/protocol.rs:29-30`; resolution at `src/session.rs:1343-1346`).
-  VS Code declares `modifiers: 'full'` (`clients/vscode/lib/session.js:64-66`),
-  so the server may also offer non-basic chords it cannot replay.
-- **Proposal:** Choose one deliberately: (a) map common non-printable keys
-  (`Enter`, `Escape`, `Tab`, arrows, deletion) to VS Code commands; (b) declare
-  `modifiers: 'basic'` for VS Code so non-basic chords are not delivered; or
-  (c) document the limitation and keep printable/clipboard fallback. Option (b)
-  is the narrowest honest declaration, but it also removes bindings; (a) is
-  behavior work; (c) is documentation only.
-- **Wire change:** No for (a)/(c); (b) changes a declared capability value, not
-  the wire shape.
-- **Risk:** Medium if a captured key silently does nothing; the current log is
-  developer-facing, not user-facing.
-- **Effort:** S–M.
+  VS Code declares `modifiers: 'full'`
+  (`clients/vscode/lib/session.js:64-66`), so the server may also offer
+  non-basic chords it cannot replay. It also declares `keys: 'static'` there:
+  its shortcuts are the `contributes.keybindings` entries in
+  `clients/vscode/package.json`, not a server-pushed keymap.
+- **Three distinct concerns:** modifier reporting fidelity is how faithfully a
+  client reports the modifiers of a captured key (`KeyModifiers`,
+  `src/protocol.rs:342-355`); static key capture is the fixed shortcut set the
+  client installs and forwards; fallback replay is `effects.js` turning a
+  server `passThrough` key into editor input. Only the last one is the defect.
+- **Proposal:** Choose one deliberately: (a) add bounded explicit replay
+  support — map the named non-printable canonical keys the server can emit
+  (`Enter`, `Escape`, `Tab`/backtab, arrows, `Home`/`End`, `PageUp`/`PageDown`,
+  `Delete`/`Backspace`) to their VS Code commands in
+  `clients/vscode/lib/effects.js`, keep the printable/clipboard cases, and log
+  anything outside that bounded set; or
+  (b) document the limit — keep the printable/clipboard fallback and record in
+  the protocol/client reference that a static client may log
+  `passThrough: cannot replay` for non-printable canonical keys. (a) is
+  behavior work; (b) is documentation only.
+- **Rejected — modifier downgrading:** Declaring `modifiers: 'basic'` for VS
+  Code does not fix replay. The declaration describes reporting fidelity, not
+  replay capability (`src/protocol.rs:342-355`). `basic_step` returns true for
+  every unshifted step without Meta (`src/keymap.rs:287-297`), so named
+  non-printable keys (`Enter`, `Escape`, arrows) and unshifted Ctrl/Alt chords
+  — the class `effects.js:7-35` rejects — remain admitted. The only steps it
+  filters are Meta-bearing chords and shifted chords other than bare
+  `shift+Tab`; a filtered binding gains no replay. VS Code is static, so it
+  never receives `view/keymap` and the delivery-side filter does not apply;
+  filtering server lookup does not remove its installed
+  `contributes.keybindings` shortcuts, which keep bypassing replay. Where the
+  server does resolve a forwarded key, removing a shifted chord from the keymap
+  turns a formerly handled key into a `Match::None` → `PassThrough` result
+  (`src/keyhandler.rs:172-189`), the same unreplayable effect. The change can
+  only drop bindings and create pass-throughs, not add replay.
+- **Wire change:** No for (a)/(b).
+- **Risk:** Medium in both cases. (a) can map a key to the wrong editor action
+  or drift from the canonical key set; (b) accepts that a captured key silently
+  does nothing, and the current log is developer-facing, not user-facing.
+- **Effort:** S–M overall: (a) M for the bounded replay table and its VS Code
+  tests; (b) S documentation.
 
 ### 8. Static clients learn about a mode change only through render-derived context
 
@@ -437,10 +465,11 @@ report was dishonest.
   describes a field that does change behavior; item 11's declaration now
   matches honored layout.
 - **Real but documentation-only:** items 1, 2, 4, 9, 10, W1-W3.
-- **Real with behavior work:** items 7, 8, and item 5's missing advertised
+- **Real with behavior work:** item 8, and item 5's missing advertised
   version/client-minimum handshake only (its strict `v1` declaration rejection
   and readable initialize error already exist; VS Code's package-version warning
-  is not protocol negotiation).
+  is not protocol negotiation). Item 7 needs either bounded replay support or a
+  documented client limit; its status alone does not force behavior work.
 - **Unknown:** none. If a future check cannot establish a claim, label it
   **unknown** rather than inferring a defect; the baseline read did not leave
   one.
