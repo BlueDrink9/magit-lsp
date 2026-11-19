@@ -41,7 +41,7 @@ pub fn definition() -> MenuDef {
                         "remote.configure",
                         "Configure...",
                         "magit-remote-configure",
-                        "R-6.3",
+                        "",
                     ),
                     action("p", "remote.prune", "Prune stale branches", "magit-remote-prune", ""),
                     action(

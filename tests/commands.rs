@@ -94,6 +94,110 @@ const NAMESPACES: &[&str] = &[
 ];
 
 #[test]
+fn remote_session_flows_preserve_configuration_and_require_confirmation() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ui().reply_text(Some("origin".into())).reply_text(Some("https://fetch".into()));
+    test.invoke_ui("remote.add");
+    assert_eq!(tmp.git(&["config", "--get", "remote.origin.url"]), "https://fetch\n");
+    tmp.git(&["config", "remote.origin.tagOpt", "--no-tags"]);
+    test.ui().reply_text(Some("origin".into())).reply_text(Some("upstream".into()));
+    test.invoke_ui("remote.rename");
+    assert_eq!(tmp.git(&["remote"]), "upstream\n");
+    test.ui().reply_text(Some("upstream".into())).reply_text(Some("https://new-fetch".into()))
+        .reply_text(Some("https://new-push".into()));
+    test.invoke_ui("remote.configure");
+    assert_eq!(tmp.git(&["config", "--get", "remote.upstream.url"]), "https://new-fetch\n");
+    assert_eq!(tmp.git(&["config", "--get", "remote.upstream.pushurl"]), "https://new-push\n");
+    assert_eq!(tmp.git(&["config", "--get", "remote.upstream.tagOpt"]), "--no-tags\n");
+    assert_eq!(tmp.git(&["config", "--get", "remote.upstream.fetch"]), "+refs/heads/*:refs/remotes/upstream/*\n");
+    let before = tmp.git(&["config", "--local", "--list"]);
+    test.ui().reply_text(Some("upstream".into())).reply_confirm(false);
+    test.invoke_ui("remote.remove");
+    let request = test.ui().requests().last().unwrap().clone();
+    assert_eq!(request.destructive, Some(true));
+    assert_eq!(request.default, Some(serde_json::json!(false)));
+    assert_eq!(tmp.git(&["config", "--local", "--list"]), before);
+    let Execution::Prompt(name) = test.session.start_invoke(&ViewInvokeParams {
+        view_id: test.view_id().to_string(), command: "remote.remove".into(),
+        version: Some(test.version()), cursor: None, selection: None, args: None,
+    }).unwrap() else { panic!("expected name prompt"); };
+    let Execution::Prompt(confirmation) = test.session.resume_prompt(
+        &name.prompt_id, Some(PromptValue::Text("upstream".into())),
+    ).unwrap() else { panic!("expected confirmation"); };
+    assert!(matches!(test.session.resume_prompt(&confirmation.prompt_id, None).unwrap(), Execution::Done(_)));
+    assert_eq!(tmp.git(&["config", "--local", "--list"]), before);
+    test.ui().reply_text(Some("upstream".into())).reply_confirm(true);
+    test.invoke_ui("remote.remove");
+    assert!(tmp.git(&["remote"]).is_empty());
+}
+
+#[test]
+fn remote_session_cancellation_invalid_and_conflicting_inputs_do_not_mutate() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+    tmp.git(&["remote", "add", "origin", "https://fetch"]);
+    tmp.git(&["remote", "add", "other", "https://other"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let before = tmp.git(&["config", "--local", "--list"]);
+    for (command, answers) in [
+        ("remote.add", vec![Some("new"), None]),
+        ("remote.rename", vec![Some("origin"), None]),
+        ("remote.configure", vec![Some("origin"), Some("https://changed"), None]),
+        ("remote.remove", vec![None]),
+    ] {
+        for answer in answers { test.ui().reply_text(answer.map(Into::into)); }
+        test.invoke_ui(command);
+        assert_eq!(tmp.git(&["config", "--local", "--list"]), before, "{command}");
+    }
+    for (command, answers) in [
+        ("remote.add", vec!["origin", "https://conflict"]),
+        ("remote.add", vec!["bad name", "https://invalid"]),
+        ("remote.rename", vec!["origin", "other"]),
+        ("remote.configure", vec!["origin", "https://changed", "--unsafe"]),
+        ("remote.configure", vec!["missing", "https://fetch", "https://push"]),
+    ] {
+        for answer in answers { test.ui().reply_text(Some(answer.into())); }
+        let result = test.invoke_ui(command);
+        assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Warn, text, .. } if !text.is_empty() && !text.starts_with('{'))), "{command}: {:?}", result.effects);
+        assert_eq!(tmp.git(&["config", "--local", "--list"]), before, "{command}");
+    }
+}
+
+#[test]
+fn tag_session_creates_lightweight_tag_at_selected_revision() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
+        .commit("second", [("f.txt", "second\n")]).build();
+    let chosen = tmp.git(&["rev-parse", "HEAD^"]);
+    tmp.git(&["config", "tag.gpgSign", "true"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ui().reply_text(Some("release".into())).reply_text(Some("HEAD^".into()));
+    test.invoke_ui("tag.create");
+    assert_eq!(tmp.git(&["rev-parse", "release"]), chosen);
+    assert_eq!(tmp.git(&["cat-file", "-t", "release"]), "commit\n");
+}
+
+#[test]
+fn tag_session_cancellation_and_refusals_preserve_refs() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+    tmp.git(&["tag", "existing"]);
+    let before = tmp.git(&["show-ref"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    for answers in [vec![None], vec![Some("cancelled"), None]] {
+        for answer in answers { test.ui().reply_text(answer.map(Into::into)); }
+        test.invoke_ui("tag.create");
+        assert_eq!(tmp.git(&["show-ref"]), before);
+    }
+    for (name, revision) in [("bad name", "HEAD"), ("existing", "HEAD"), ("new", "missing"), ("--unsafe", "HEAD")] {
+        test.ui().reply_text(Some(name.into())).reply_text(Some(revision.into()));
+        let result = test.invoke_ui("tag.create");
+        assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Warn, text, .. } if !text.is_empty() && !text.starts_with('{'))), "{:?}", result.effects);
+        assert_eq!(tmp.git(&["show-ref"]), before);
+    }
+}
+
+#[test]
 fn commit_arguments_are_typed_and_invalid_input_never_stages() {
     use magit_lsp::git::CommitOperation;
     use serde_json::json;

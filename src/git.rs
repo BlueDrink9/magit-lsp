@@ -676,8 +676,15 @@ impl GitRepo {
     /// An option-like name is refused at this boundary so it cannot select a
     /// different `git tag` mode; Git refuses invalid or duplicate names itself.
     pub fn create_tag(&self, name: &str) -> Result<()> {
+        self.create_lightweight_tag(name, "HEAD")
+    }
+
+    /// Create a lightweight tag at a selected commit, ignoring signing config.
+    pub fn create_lightweight_tag(&self, name: &str, revision: &str) -> Result<()> {
         Self::reject_option_like("tag name", name)?;
-        self.run(&["-c", "tag.gpgSign=false", "tag", "--", name])
+        Self::reject_option_like("revision", revision)?;
+        let commit = self.resolve_commit(revision)?;
+        self.run(&["-c", "tag.gpgSign=false", "tag", "--", name, &commit])
             .map(|_| ())
     }
 
@@ -694,6 +701,23 @@ impl GitRepo {
         Self::reject_option_like("remote name", name)?;
         Self::reject_option_like("remote URL", url)?;
         self.run(&["remote", "add", "--", name, url]).map(|_| ())
+    }
+
+    /// Replace an existing remote's fetch and push URLs, preserving other config.
+    pub fn remote_configure(&self, name: &str, fetch_url: &str, push_url: &str) -> Result<()> {
+        Self::reject_option_like("remote name", name)?;
+        for url in [fetch_url, push_url] {
+            Self::reject_option_like("remote URL", url)?;
+            if url.is_empty() || url.contains(['\n', '\r', '\0']) {
+                return Err(Error::new("Remote URL must be non-empty and contain no line breaks"));
+            }
+        }
+        if !self.remote_names()?.iter().any(|remote| remote == name) {
+            return Err(Error::new(format!("Remote '{name}' does not exist")));
+        }
+        self.run(&["config", "--replace-all", &format!("remote.{name}.url"), fetch_url])?;
+        self.run(&["config", "--replace-all", &format!("remote.{name}.pushurl"), push_url])?;
+        Ok(())
     }
 
     /// Remove remote `name`, leaving Git's refusal of a missing remote to

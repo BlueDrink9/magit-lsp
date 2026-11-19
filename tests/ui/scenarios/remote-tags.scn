@@ -1,0 +1,66 @@
+# Native remote management prompts and lightweight tag creation.
+fixture: clean
+---
+wait
+sh: git remote add origin https://example.invalid/old.git
+keys: M
+wait
+keys: a
+wait prompt
+keys: upstream Enter
+wait prompt
+keys: https://example.invalid/upstream.git Enter
+wait
+sh: test "$(git remote | sort | tr '\n' ' ')" = "origin upstream " && test "$(git remote get-url upstream)" = https://example.invalid/upstream.git
+keys: M
+wait
+keys: r
+wait prompt
+keys: upstream Enter
+wait prompt
+keys: publish Enter
+wait
+sh: test "$(git remote | sort | tr '\n' ' ')" = "origin publish " && test "$(git remote get-url publish)" = https://example.invalid/upstream.git
+keys: M
+wait
+keys: C
+wait prompt
+keys: publish Enter
+wait prompt
+keys: https://example.invalid/fetch.git Enter
+wait prompt
+keys: https://example.invalid/push.git Enter
+wait
+sh: test "$(git remote get-url publish)" = https://example.invalid/fetch.git && test "$(git remote get-url --push publish)" = https://example.invalid/push.git
+keys: M
+wait
+keys: k
+wait prompt
+keys: publish Enter
+wait prompt
+expect screen contains "Remove remote 'publish'?"
+expect screen contains "1: Cancel"
+expect screen contains "2: Remove"
+keys: 1 Enter
+wait
+sh: test "$(git remote | sort | tr '\n' ' ')" = "origin publish " && test "$(git remote get-url publish)" = https://example.invalid/fetch.git && test "$(git remote get-url --push publish)" = https://example.invalid/push.git
+keys: M
+wait
+keys: k
+wait prompt
+keys: publish Enter
+wait prompt
+expect screen contains "1: Cancel"
+expect screen contains "2: Remove"
+keys: 2 Enter
+wait
+sh: test "$(git remote)" = origin && test "$(git remote get-url origin)" = https://example.invalid/old.git
+keys: t
+wait
+keys: t
+wait prompt
+keys: native-lightweight Enter
+wait prompt
+keys: C-u HEAD Enter
+wait
+sh: test "$(git cat-file -t refs/tags/native-lightweight)" = commit && test "$(git rev-parse refs/tags/native-lightweight)" = "$(git rev-parse HEAD)" && test "$(git tag --list | sort | tr '\n' ' ')" = "native-lightweight "

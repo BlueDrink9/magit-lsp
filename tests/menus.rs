@@ -19,6 +19,35 @@ fn actions(menu: &Menu) -> Vec<&Item> {
 }
 
 #[test]
+fn remote_and_tag_actions_keep_exact_identity_and_implementation_status() {
+    use magit_lsp::commands::Availability;
+    use magit_lsp::menus;
+    for (name, expected) in [
+        ("remote", vec![
+            ("a", "remote.add", "Add"),
+            ("r", "remote.rename", "Rename"),
+            ("k", "remote.remove", "Remove"),
+            ("C", "remote.configure", "Configure..."),
+            ("p", "remote.prune", "Prune stale branches"),
+        ]),
+        ("tag", vec![("t", "tag.create", "tag"), ("k", "tag.delete", "delete")]),
+    ] {
+        let menu = menus::named(name).unwrap();
+        for (expected_key, expected_command, expected_label) in expected {
+            let item = menu.item(expected_key).expect("existing action key");
+            let Item::Action { key, command, label, .. } = item else {
+                panic!("expected action");
+            };
+            assert_eq!((key.as_str(), command.as_str(), label.as_str()), (expected_key, expected_command, expected_label));
+            assert_eq!(registry().availability(command), Some(Availability::Implemented));
+        }
+    }
+    for command in ["remote.prune-refspecs", "remote.unshallow", "remote.update-default", "tag.release", "tag.prune"] {
+        assert!(matches!(registry().availability(command), Some(Availability::Planned(_))));
+    }
+}
+
+#[test]
 fn every_built_menu_serializes_activation_steps_that_agree_with_the_resolver() {
     use magit_lsp::keyhandler::{resolve_menu, MenuResolution};
     for (name, menu) in menus() {

@@ -735,9 +735,17 @@ fn tag_create_prompts_and_creates_tag_at_head() {
     else {
         panic!("expected tag name prompt");
     };
-    let Execution::Done(result) = test
+    let Execution::Prompt(revision) = test
         .session
         .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v1".into())))
+        .unwrap()
+    else {
+        panic!("expected revision prompt");
+    };
+    assert_eq!(revision.default, Some(serde_json::json!("HEAD")));
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&revision.prompt_id, Some(PromptValue::Text("HEAD".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -1369,9 +1377,16 @@ fn remote_remove_drops_an_existing_remote() {
     else {
         panic!("expected remote name prompt");
     };
-    let Execution::Done(result) = test
+    let Execution::Prompt(confirmation) = test
         .session
         .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("origin".into())))
+        .unwrap()
+    else {
+        panic!("expected removal confirmation");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&confirmation.prompt_id, Some(PromptValue::Bool(true)))
         .unwrap()
     else {
         panic!("expected completion");
@@ -1411,9 +1426,16 @@ fn remote_remove_of_missing_remote_surfaces_gits_refusal() {
     else {
         panic!("expected remote name prompt");
     };
-    let Execution::Done(result) = test
+    let Execution::Prompt(confirmation) = test
         .session
         .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v9".into())))
+        .unwrap()
+    else {
+        panic!("expected removal confirmation");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&confirmation.prompt_id, Some(PromptValue::Bool(true)))
         .unwrap()
     else {
         panic!("expected completion");
@@ -2086,6 +2108,14 @@ fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
                 .session
                 .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text((*answer).into())))
                 .unwrap();
+            let execution = if command == "remote.remove" && last {
+                let Execution::Prompt(confirmation) = execution else {
+                    panic!("expected removal confirmation");
+                };
+                test.session.resume_prompt(&confirmation.prompt_id, Some(PromptValue::Bool(true))).unwrap()
+            } else {
+                execution
+            };
             if last {
                 let Execution::Done(result) = execution else {
                     panic!("{command}: expected completion for {answer}");
@@ -2100,9 +2130,9 @@ fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
         unreachable!("answers are never empty")
     };
     let cases: &[(&str, &[&str])] = &[
-        ("tag.create", &["-l"]),
-        ("tag.create", &["--delete"]),
-        ("tag.create", &["-d"]),
+        ("tag.create", &["-l", "HEAD"]),
+        ("tag.create", &["--delete", "HEAD"]),
+        ("tag.create", &["-d", "HEAD"]),
         ("tag.delete", &["-d"]),
         ("tag.delete", &["--delete"]),
         ("remote.add", &["--mirror", mirror.as_str()]),
@@ -2145,7 +2175,7 @@ fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
         );
         assert!(!test.session.has_pending_prompt());
     }
-    let result = run(&mut test, "tag.create", &["v1"]);
+    let result = run(&mut test, "tag.create", &["v1", "HEAD"]);
     assert!(
         message_texts(&result.effects).contains(&"Created tag v1"),
         "{:?}",
@@ -2948,4 +2978,3 @@ fn branch_spinoff_without_unpushed_commits_creates_the_branch_and_leaves_the_sou
     );
     assert!(!test.session.has_pending_prompt());
 }
-

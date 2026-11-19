@@ -366,6 +366,11 @@ pub enum PromptAction {
     },
     /// Create a tag with the answered name.
     TagCreate,
+    /// Create the named lightweight tag at the answered revision.
+    TagCreateRevision {
+        /// The tag name answered at the first prompt.
+        name: String,
+    },
     /// Delete the answered tag.
     TagDelete,
     /// Add a remote with the answered name.
@@ -377,6 +382,25 @@ pub enum PromptAction {
     },
     /// Remove the answered remote.
     RemoteRemove,
+    /// Remove the named remote only after explicit confirmation.
+    RemoteRemoveConfirm {
+        /// The remote name answered at the first prompt.
+        name: String,
+    },
+    /// Select the remote whose fetch and push URLs should be configured.
+    RemoteConfigure,
+    /// Read the fetch URL for the selected remote.
+    RemoteConfigureFetch {
+        /// The remote name answered at the first prompt.
+        name: String,
+    },
+    /// Read the push URL before applying both URL changes together.
+    RemoteConfigurePush {
+        /// The selected remote name.
+        name: String,
+        /// The fetch URL answered at the previous prompt.
+        fetch: String,
+    },
     /// Rename a remote: the answered name is the existing remote.
     RemoteRename,
     /// Second half of a remote rename: rename this remote to the answered name.
@@ -726,7 +750,19 @@ pub fn resume_prompt(
                 return Err(crate::Error::new("Expected a tag name"));
             };
             let name = name.trim().to_owned();
-            branch_action(ctx, |repo| repo.create_tag(&name), format!("Created tag {name}"))
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Tag revision", "HEAD", "Revision"),
+                    PromptAction::TagCreateRevision { name },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::TagCreateRevision { name } => {
+            let PromptValue::Text(revision) = answer else {
+                return Err(crate::Error::new("Expected a revision"));
+            };
+            branch_action(ctx, |repo| repo.create_lightweight_tag(&name, revision.trim()), format!("Created tag {name}"))
         }
         PromptAction::TagDelete => {
             let PromptValue::Text(name) = answer else {
@@ -764,11 +800,57 @@ pub fn resume_prompt(
                 return Err(crate::Error::new("Expected a remote name"));
             };
             let name = name.trim().to_owned();
+            let mut prompt = head_commit_prompt(
+                &format!("Remove remote '{name}'?"),
+                Some("This permanently removes the remote configuration."),
+            );
+            prompt.default = Some(Value::Bool(false));
+            prompt.yes_label = Some("Remove".into());
+            prompt.no_label = Some("Cancel".into());
+            Ok(CommandOutcome {
+                prompt: Some((prompt, PromptAction::RemoteRemoveConfirm { name })),
+                ..Default::default()
+            })
+        }
+        PromptAction::RemoteRemoveConfirm { name } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
             branch_action(
                 ctx,
                 |repo| repo.remove_remote(&name),
                 format!("Removed remote {name}"),
             )
+        }
+        PromptAction::RemoteConfigure => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Remote fetch URL", "", "Fetch URL"),
+                    PromptAction::RemoteConfigureFetch { name: name.trim().to_owned() },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::RemoteConfigureFetch { name } => {
+            let PromptValue::Text(fetch) = answer else {
+                return Err(crate::Error::new("Expected a remote URL"));
+            };
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Remote push URL", "", "Push URL"),
+                    PromptAction::RemoteConfigurePush { name, fetch: fetch.trim().to_owned() },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::RemoteConfigurePush { name, fetch } => {
+            let PromptValue::Text(push) = answer else {
+                return Err(crate::Error::new("Expected a remote URL"));
+            };
+            branch_action(ctx, |repo| repo.remote_configure(&name, &fetch, push.trim()), format!("Configured remote {name}"))
         }
         PromptAction::RemoteRename => {
             let PromptValue::Text(source) = answer else {
@@ -1150,11 +1232,12 @@ fn build() -> Registry {
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
         command! { id: "branch.reset", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
         command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
-        command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a tag at HEAD", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
+        command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a lightweight tag at a revision", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
         command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, effects: &[] },
         command! { id: "remote.add", scope: Scope::MenuAction, doc: "Add a remote", status: CommandStatus::Implemented, run: remote_add, effects: &[] },
         command! { id: "remote.remove", scope: Scope::MenuAction, doc: "Remove a remote", status: CommandStatus::Implemented, run: remote_remove, effects: &[] },
         command! { id: "remote.rename", scope: Scope::MenuAction, doc: "Rename a remote", status: CommandStatus::Implemented, run: remote_rename, effects: &[] },
+        command! { id: "remote.configure", scope: Scope::MenuAction, doc: "Configure remote URLs", status: CommandStatus::Implemented, run: remote_configure, effects: &[] },
         command! { id: "remote.prune", scope: Scope::MenuAction, doc: "Prune stale tracking branches of a remote", status: CommandStatus::Implemented, run: remote_prune, effects: &[] },
         command! { id: "reset.mixed", scope: Scope::MenuAction, doc: "Reset HEAD and the index to a revision", status: CommandStatus::Implemented, run: reset_mixed, effects: &[] },
         command! { id: "reset.soft", scope: Scope::MenuAction, doc: "Move HEAD to a revision", status: CommandStatus::Implemented, run: reset_soft, effects: &[] },
@@ -1993,7 +2076,7 @@ fn refuse_unsupported_args(ctx: &mut CommandCtx<'_>, command: &str) -> Result<bo
     Ok(true)
 }
 
-/// Prompt for the name of a tag created at HEAD.
+/// Prompt for the name of a lightweight tag, then its target revision.
 fn tag_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     if refuse_unsupported_args(ctx, "tag.create")? {
         return Ok(CommandOutcome::default());
@@ -2021,7 +2104,7 @@ fn remote_add(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
-/// Prompt for the remote to remove.
+/// Prompt for the remote to remove, then require destructive confirmation.
 fn remote_remove(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     if refuse_unsupported_args(ctx, "remote.remove")? {
         return Ok(CommandOutcome::default());
@@ -2030,6 +2113,20 @@ fn remote_remove(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Remove remote", "", "Remote to remove"),
             PromptAction::RemoteRemove,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for a remote name and both URLs before changing configuration.
+fn remote_configure(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "remote.configure")? {
+        return Ok(CommandOutcome::default());
+    }
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Configure remote", "", "Remote name"),
+            PromptAction::RemoteConfigure,
         )),
         ..Default::default()
     })
