@@ -1,0 +1,16 @@
+# Early T042: adding a remote from the status remote menu prompts for name and URL.
+fixture: modified-two-files
+---
+keys: M
+wait
+expect screen contains "Fetch after add"
+keys: a
+wait prompt
+expect screen contains "Add remote"
+keys: origin Enter
+wait prompt
+expect screen contains "URL for remote origin"
+keys: /tmp/magit-remote-target Enter
+wait
+expect screen contains "Added remote origin"
+sh: test "$(git remote get-url origin)" = /tmp/magit-remote-target

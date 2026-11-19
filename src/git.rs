@@ -542,6 +542,18 @@ impl GitRepo {
         self.run(&["tag", "-d", name]).map(|_| ())
     }
 
+    /// Add remote `name` pointing at `url`. Names and URLs are not validated
+    /// here; Git refuses invalid or duplicate names itself.
+    pub fn add_remote(&self, name: &str, url: &str) -> Result<()> {
+        self.run(&["remote", "add", name, url]).map(|_| ())
+    }
+
+    /// Remove remote `name`, leaving Git's refusal of a missing remote to
+    /// surface as its own error.
+    pub fn remove_remote(&self, name: &str) -> Result<()> {
+        self.run(&["remote", "remove", name]).map(|_| ())
+    }
+
     /// Store `description` in Git's configuration for the named branch.
     pub fn set_branch_description(&self, name: &str, description: &str) -> Result<()> {
         let name = self.validate_branch_name(name)?;

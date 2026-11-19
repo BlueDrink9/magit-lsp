@@ -170,6 +170,18 @@ profiles.
 
 Tag release and prune remain planned.
 
+#### 5.4.4 Remote menu: supported subset
+
+Open the remote menu with `M` from status. These menu keys are identical in both
+profiles.
+
+| Keys | Supported action |
+| --- | --- |
+| `a` | Add a remote: prompt for the name, then for its URL |
+| `k` | Remove a remote, leaving Git's refusal of a missing remote as a message |
+
+Remote rename, configure, prune, unshallow and update-default remain planned.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

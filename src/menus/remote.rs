@@ -33,7 +33,7 @@ pub fn definition() -> MenuDef {
             group(
                 "Actions",
                 vec![
-                    action("a", "remote.add", "Add", "magit-remote-add", "R-6.3"),
+                    action("a", "remote.add", "Add", "magit-remote-add", ""),
                     action(
                         "r",
                         "remote.rename",
@@ -41,13 +41,7 @@ pub fn definition() -> MenuDef {
                         "magit-remote-rename",
                         "R-6.3",
                     ),
-                    action(
-                        "k",
-                        "remote.remove",
-                        "Remove",
-                        "magit-remote-remove",
-                        "R-6.3",
-                    ),
+                    action("k", "remote.remove", "Remove", "magit-remote-remove", ""),
                     action(
                         "C",
                         "remote.configure",

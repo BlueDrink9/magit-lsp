@@ -321,6 +321,15 @@ pub enum PromptAction {
     TagCreate,
     /// Delete the answered tag.
     TagDelete,
+    /// Add a remote with the answered name.
+    RemoteAdd,
+    /// Second half of a remote add: point this validated name at the answered URL.
+    RemoteAddUrl {
+        /// The remote name answered at the first prompt.
+        name: String,
+    },
+    /// Remove the answered remote.
+    RemoteRemove,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -595,6 +604,41 @@ pub fn resume_prompt(
             };
             let name = name.trim().to_owned();
             branch_action(ctx, |repo| repo.delete_tag(&name), format!("Deleted tag {name}"))
+        }
+        PromptAction::RemoteAdd => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            let name = name.trim().to_owned();
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt(&format!("URL for remote {name}"), "", "Remote URL"),
+                    PromptAction::RemoteAddUrl { name },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::RemoteAddUrl { name } => {
+            let PromptValue::Text(url) = answer else {
+                return Err(crate::Error::new("Expected a remote URL"));
+            };
+            let url = url.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.add_remote(&name, &url),
+                format!("Added remote {name}"),
+            )
+        }
+        PromptAction::RemoteRemove => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.remove_remote(&name),
+                format!("Removed remote {name}"),
+            )
         }
     }
 }
@@ -909,6 +953,8 @@ fn build() -> Registry {
         command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
         command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a tag at HEAD", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
         command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, effects: &[] },
+        command! { id: "remote.add", scope: Scope::MenuAction, doc: "Add a remote", status: CommandStatus::Implemented, run: remote_add, effects: &[] },
+        command! { id: "remote.remove", scope: Scope::MenuAction, doc: "Remove a remote", status: CommandStatus::Implemented, run: remote_remove, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1470,6 +1516,28 @@ fn tag_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Create tag", "", "New tag name"),
             PromptAction::TagCreate,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the name of a new remote, then for its URL.
+fn remote_add(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Add remote", "", "Remote name"),
+            PromptAction::RemoteAdd,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the remote to remove.
+fn remote_remove(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Remove remote", "", "Remote to remove"),
+            PromptAction::RemoteRemove,
         )),
         ..Default::default()
     })

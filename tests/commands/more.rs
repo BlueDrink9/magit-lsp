@@ -942,3 +942,143 @@ fn branch_description_targets_a_side_branch() {
     );
     assert!(!test.session.has_pending_prompt());
 }
+
+#[test]
+fn remote_add_prompts_for_name_and_url() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.add".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Prompt(prompt) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("origin".into())))
+        .unwrap()
+    else {
+        panic!("expected remote URL prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Text("/tmp/magit-remote-target".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Added remote origin"),
+        "{:?}",
+        result.effects
+    );
+    let remotes = tmp.git(&["remote"]);
+    assert!(remotes.lines().any(|line| line == "origin"), "{remotes}");
+    assert_eq!(
+        tmp.git(&["remote", "get-url", "origin"]).trim(),
+        "/tmp/magit-remote-target"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn remote_remove_drops_an_existing_remote() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["remote", "add", "origin", "/tmp/magit-remote-target"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.remove".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("origin".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Removed remote origin"),
+        "{:?}",
+        result.effects
+    );
+    let remotes = tmp.git(&["remote"]);
+    assert!(!remotes.lines().any(|line| line == "origin"), "{remotes}");
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn remote_remove_of_missing_remote_surfaces_gits_refusal() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.remove".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v9".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.to_lowercase().contains("no such remote")),
+        "{:?}",
+        result.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+}
