@@ -456,6 +456,7 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Verified (description, A4) — implementation, registry-docs and Done commits; `make registry-docs-check` exit 0 with the diff exactly the `branch.configure-description` row in `docs/parity.md` and its `docs/plain-support.md` sibling.
   - Verified (description, A5) — final `git status --porcelain` leaves only the concurrent session's ` M TASKS.md` and ` M clients/vscode/lib/requests.js` plus the five user-owned untracked paths.
   - Early-delivery boundary: the `b C` configure... popup remains Planned R-6.1; the Phase 10 T043 line stays unticked until the full configure scope lands; checkout remains T067.
+  - Done: `a6e5eb8`.
 - [ ] **Early T042 — remote-config-tags (cheap commands).** Deliver the full T042 scope now (TASKS_PART_SEVEN.md:769): lightweight tag create/delete plus remote configuration — verify the exact remote rows in the parity table (add/rename/remove/prune) and implement those. Same template and evidence pattern; tick the Phase 10 T042 line on full verified scope.
 - [ ] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
 
