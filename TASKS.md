@@ -119,7 +119,7 @@ Priority work before further feature execution. Earlier checked Review items are
   - **Constraints:** Test-only change; do not change spin semantics or require additional native evidence for this fixture correction.
   - Verified A1 (2026-11-19): the regression advances `main` with an upstream-only `upstream.txt` commit after divergence, then captures `common_oid` (original `main`/branch point), `source_oid` (`foobar` child) and `upstream_oid` (new `main` tip), asserting all three differ and `merge-base foobar main == common_oid` (`tests/commands/more.rs:2772-2795`); after the spinoff it asserts `foobar == common_oid != upstream_oid`, `spun == source_oid`, HEAD on `spun`, and the tracking/config and unchanged-worktree invariants (`:2796-2833`). An implementation resetting to the upstream tip fails at `:2813-2816` directly rather than through an adjacent path.
   - Verified A2 (2026-11-19): `make test-rust FILTER="--test commands branch_spinoff"` → exit 0 (`ok: rust`); test-only change, spin semantics untouched.
-  - Done: pending.
+  - Done: `997f5d2`.
 
 - [x] **[P0] Prevent prompt operands from becoming Git mutation options** (`src/git.rs:538-576`, `GitRepo::reset_branch`, `create_tag`, `delete_tag`, remote mutation methods)
   - **Problem:** VERIFIED source: `reset_branch` passes both free-text answers directly to `git branch -f` without validation or an option terminator. Consequently a reset target such as `--delete` is parsed as an operation flag rather than a revision, allowing the reset UI to delete the named branch; the newly added tag and remote helpers likewise pass untrusted operands in option position. The destructive outcome is inferred from Git option semantics, not an executed review experiment.
