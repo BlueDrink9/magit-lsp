@@ -178,9 +178,11 @@ profiles.
 | Keys | Supported action |
 | --- | --- |
 | `a` | Add a remote: prompt for the name, then for its URL |
+| `r` | Rename a remote: prompt for the current name, then for the new name |
 | `k` | Remove a remote, leaving Git's refusal of a missing remote as a message |
+| `p` | Prune stale branches of a remote: prompt for its name, then delete local tracking refs the remote no longer has |
 
-Remote rename, configure, prune, unshallow and update-default remain planned.
+Remote configure, prune-refspecs, unshallow and update-default remain planned.
 
 ### 5.5 Commit-message scope
 

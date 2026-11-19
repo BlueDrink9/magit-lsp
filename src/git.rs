@@ -554,6 +554,19 @@ impl GitRepo {
         self.run(&["remote", "remove", name]).map(|_| ())
     }
 
+    /// Rename remote `old` to `new`, leaving Git's refusals (missing source,
+    /// duplicate target) to surface as their own errors.
+    pub fn rename_remote(&self, old: &str, new: &str) -> Result<()> {
+        self.run(&["remote", "rename", old, new]).map(|_| ())
+    }
+
+    /// Delete local tracking refs of remote `name` that no longer exist on it
+    /// without contacting the remote. Git's refusal of a missing remote
+    /// surfaces as its own error.
+    pub fn prune_remote(&self, name: &str) -> Result<()> {
+        self.run(&["remote", "prune", name]).map(|_| ())
+    }
+
     /// Store `description` in Git's configuration for the named branch.
     pub fn set_branch_description(&self, name: &str, description: &str) -> Result<()> {
         let name = self.validate_branch_name(name)?;

@@ -1082,3 +1082,165 @@ fn remote_remove_of_missing_remote_surfaces_gits_refusal() {
     );
     assert!(!test.session.has_pending_prompt());
 }
+
+#[test]
+fn remote_rename_prompts_for_old_and_new_names() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["remote", "add", "origin", "/tmp/magit-remote-target"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.rename".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Prompt(prompt) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("origin".into())))
+        .unwrap()
+    else {
+        panic!("expected new remote name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Text("upstream".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Renamed remote origin to upstream"),
+        "{:?}",
+        result.effects
+    );
+    let remotes = tmp.git(&["remote"]);
+    assert!(remotes.lines().any(|line| line == "upstream"), "{remotes}");
+    assert!(!remotes.lines().any(|line| line == "origin"), "{remotes}");
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn remote_prune_drops_stale_tracking_refs_but_keeps_live_ones() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    use tempfile::TempDir;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let bare = TempDir::new().expect("bare remote");
+    git(bare.path(), &["init", "--bare", "-q"]);
+    let remote_url = bare.path().to_str().expect("utf8 remote");
+    tmp.git(&["branch", "feature"]);
+    tmp.git(&["remote", "add", "origin", remote_url]);
+    tmp.git(&["push", "-q", "origin", "main", "feature"]);
+    tmp.git(&["fetch", "-q", "origin"]);
+    // A fresh bare repository's HEAD names a nonexistent `master`; point it at
+    // the pushed `main` so the side branch is an ordinary merged deletion.
+    git(bare.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    // Delete the side branch on the remote, leaving a stale tracking ref.
+    git(bare.path(), &["branch", "-d", "feature"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.prune".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("origin".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Pruned remote origin"),
+        "{:?}",
+        result.effects
+    );
+    let refs = tmp.git(&["for-each-ref", "refs/remotes/"]);
+    assert!(
+        !refs.contains("refs/remotes/origin/feature"),
+        "stale tracking ref survived: {refs}"
+    );
+    assert!(
+        refs.contains("refs/remotes/origin/main"),
+        "live tracking ref was pruned: {refs}"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn remote_prune_of_missing_remote_surfaces_gits_refusal() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.prune".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected remote name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("nosuch".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let refusal = result.effects.iter().find_map(|effect| match effect {
+        Effect::Message {
+            level: MessageLevel::Warn,
+            text,
+            ..
+        } => Some(text.as_str()),
+        _ => None,
+    });
+    assert!(
+        refusal.is_some_and(|text| text.contains("git remote prune nosuch failed")),
+        "{:?}",
+        result.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+}

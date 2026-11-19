@@ -330,6 +330,15 @@ pub enum PromptAction {
     },
     /// Remove the answered remote.
     RemoteRemove,
+    /// Rename a remote: the answered name is the existing remote.
+    RemoteRename,
+    /// Second half of a remote rename: rename this remote to the answered name.
+    RemoteRenameTarget {
+        /// The existing remote name answered at the first prompt.
+        source: String,
+    },
+    /// Prune stale tracking branches of the answered remote.
+    RemotePrune,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -638,6 +647,45 @@ pub fn resume_prompt(
                 ctx,
                 |repo| repo.remove_remote(&name),
                 format!("Removed remote {name}"),
+            )
+        }
+        PromptAction::RemoteRename => {
+            let PromptValue::Text(source) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            let source = source.trim().to_owned();
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt(
+                        &format!("Rename remote {source} to"),
+                        "",
+                        "New remote name",
+                    ),
+                    PromptAction::RemoteRenameTarget { source },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::RemoteRenameTarget { source } => {
+            let PromptValue::Text(target) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            let target = target.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.rename_remote(&source, &target),
+                format!("Renamed remote {source} to {target}"),
+            )
+        }
+        PromptAction::RemotePrune => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a remote name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.prune_remote(&name),
+                format!("Pruned remote {name}"),
             )
         }
     }
@@ -955,6 +1003,8 @@ fn build() -> Registry {
         command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, effects: &[] },
         command! { id: "remote.add", scope: Scope::MenuAction, doc: "Add a remote", status: CommandStatus::Implemented, run: remote_add, effects: &[] },
         command! { id: "remote.remove", scope: Scope::MenuAction, doc: "Remove a remote", status: CommandStatus::Implemented, run: remote_remove, effects: &[] },
+        command! { id: "remote.rename", scope: Scope::MenuAction, doc: "Rename a remote", status: CommandStatus::Implemented, run: remote_rename, effects: &[] },
+        command! { id: "remote.prune", scope: Scope::MenuAction, doc: "Prune stale tracking branches of a remote", status: CommandStatus::Implemented, run: remote_prune, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1538,6 +1588,28 @@ fn remote_remove(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Remove remote", "", "Remote to remove"),
             PromptAction::RemoteRemove,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the remote to rename, then for its new name.
+fn remote_rename(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Rename remote", "", "Remote to rename"),
+            PromptAction::RemoteRename,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the remote whose stale tracking branches should be pruned.
+fn remote_prune(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Prune remote", "", "Remote to prune"),
+            PromptAction::RemotePrune,
         )),
         ..Default::default()
     })

@@ -1,0 +1,18 @@
+# Early T042: renaming a remote from the status remote menu prompts for both names.
+fixture: modified-two-files
+---
+sh: git init --bare -q /tmp/magit-remote-rename-target
+sh: git remote add origin /tmp/magit-remote-rename-target
+keys: M
+wait
+expect screen contains "Rename"
+keys: r
+wait prompt
+expect screen contains "Rename remote"
+keys: origin Enter
+wait prompt
+expect screen contains "Rename remote origin to"
+keys: upstream Enter
+wait
+expect screen contains "Renamed remote origin to upstream"
+sh: git remote | grep -qx upstream

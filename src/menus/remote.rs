@@ -34,13 +34,7 @@ pub fn definition() -> MenuDef {
                 "Actions",
                 vec![
                     action("a", "remote.add", "Add", "magit-remote-add", ""),
-                    action(
-                        "r",
-                        "remote.rename",
-                        "Rename",
-                        "magit-remote-rename",
-                        "R-6.3",
-                    ),
+                    action("r", "remote.rename", "Rename", "magit-remote-rename", ""),
                     action("k", "remote.remove", "Remove", "magit-remote-remove", ""),
                     action(
                         "C",
@@ -49,13 +43,7 @@ pub fn definition() -> MenuDef {
                         "magit-remote-configure",
                         "R-6.3",
                     ),
-                    action(
-                        "p",
-                        "remote.prune",
-                        "Prune stale branches",
-                        "magit-remote-prune",
-                        "R-6.3",
-                    ),
+                    action("p", "remote.prune", "Prune stale branches", "magit-remote-prune", ""),
                     action(
                         "P",
                         "remote.prune-refspecs",
