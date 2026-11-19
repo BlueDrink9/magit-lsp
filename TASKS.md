@@ -127,12 +127,14 @@ Priority work before further feature execution. Earlier checked Review items are
   - **Done when:** The audit explicitly separates the implemented client-declaration check from the unimplemented handshake and no longer denies the existing error message.
   - **Constraints:** Audit document only, based on `f15c026`; do not implement negotiation, change source, run tests/builds or tick T112.
 
-- [ ] **[P1] Remove modifier downgrading as a replay fix in the audit** (`docs/design/rich-protocol-audit.md:181-202`, item 7)
+- [x] **[P1] Remove modifier downgrading as a replay fix in the audit** (`docs/design/rich-protocol-audit.md:181-202`, item 7)
   - **Problem:** Option (b) recommends `modifiers: basic` as an honest fix for VSCode's replay limitation, but modifier-reporting fidelity is not replay capability (`f15c026:src/protocol.rs:342-355`). `basic_step` still permits unshifted named keys and Ctrl/Alt chords (`src/keymap.rs:287-297`), and static clients do not receive dynamic bindings; filtering server lookup does not remove their installed shortcuts.
   - **Why it matters:** Correctness — this proposal cannot solve non-printable replay and can turn formerly handled static shortcuts into unbound/pass-through input without adding a replay implementation.
   - **Change:** Remove (b) as a solution, or explicitly mark it rejected with the above reasons. Retain bounded explicit replay support or documented limitations as options; distinguish input fidelity, static key capture and fallback replay. Reconcile the risk/effort discussion without deciding T113 policy.
   - **Done when:** Item 7 does not recommend reducing modifier fidelity to fix replay; its alternatives directly address or explicitly accept the actual limitation in `clients/vscode/lib/effects.js:7-35`.
   - **Constraints:** Change only `docs/design/rich-protocol-audit.md`; do not alter capabilities, static bindings or source, run tests/builds, or tick T112. Use baseline `f15c026`.
+  - Verified: `git diff --check -- docs/design/rich-protocol-audit.md` → exit 0. Item 7 now separates modifier reporting fidelity (`f15c026:src/protocol.rs:342-355`), static key capture and fallback replay; `modifiers: 'basic'` is recorded as rejected (it admits unshifted named keys and Ctrl/Alt at `src/keymap.rs:287-297`, installs no replay and can only add pass-throughs), and the remaining options are bounded replay support in `effects.js:7-35` or a documented client limit.
+  - Done: `49d41bc`.
 
 ### Documentation audit review (2026-11-18; base `bec27b3`)
 
@@ -260,7 +262,11 @@ Detailed acceptance/dependencies: [scope specifications](./TASKS_PART_SEVEN.md#p
 
 T022 sign-off above opens this phase in the specification's internal dependency order. Release requires only its explicitly defined protocol subset, not every prototype or stable freeze. Pre-1.0 breaking protocol changes are allowed; no compatibility shim or additive-only promise applies merely because the wire is labeled `v=1`. Preserve negotiation/validation invariants. T113/T119 still own their designated protocol/minimum-Git decisions; no Phase 6A implementation or sign-off is inferred from opening the phase.
 
-- [ ] **T112 — rich-protocol-audit.** [Scope](./TASKS_PART_SEVEN.md#t112-rich-protocol-audit-s).
+- [x] **T112 — rich-protocol-audit.** [Scope](./TASKS_PART_SEVEN.md#t112-rich-protocol-audit-s).
+  - Audit: `docs/design/rich-protocol-audit.md` covers items 1–11 plus W1–W3. Each entry records status (real / not real / unknown), baseline evidence at `f15c026`, a proposal, wire-change classification, risk and effort; the status summary table agrees. No item is unknown, and no source file was changed. The audit is facts-only: T113 owns every decision (`Out of scope` in the audit doc).
+  - Independent review: reviewer `ses_e0cb8e993ffeGg317aEX58yhzM` confirmed all 11+3 item fields and the no-code claim, and found four P1 corrections. All four were fixed in the audit and checked against the baseline: item 4 one retained ack snapshot vs. several in-flight deliveries (`bee06ba`); item 9 standard LSP reads vs. rich versioned commands (`205029e`); item 5 existing strict `v1` rejection vs. the missing bidirectional handshake (`824cf8b`); item 7 modifier reporting fidelity vs. replay capability (`49d41bc`, replacing the rejected `modifiers: 'basic'` proposal).
+  - Verification scope (honest): each correction's queue record cites `git diff --check -- docs/design/rich-protocol-audit.md [TASKS.md]` → exit 0; the audit diff is whitespace-clean only. `make docs-check` passed earlier in this documentation session, but its `DOC_FILES` (`Makefile:37`) does not list `docs/design/rich-protocol-audit.md`, so that target did not check the audit and no audit content lint is claimed. No runtime test, build, UI run or new contract decision is claimed; source and tests were untouched.
+  - Done: `d71b5ac` (audit), with review corrections `bee06ba`, `205029e`, `824cf8b`, `49d41bc`.
 - [ ] **T113 — rich-protocol-decisions.** [Scope](./TASKS_PART_SEVEN.md#t113-rich-protocol-decisions-s).
 - [ ] **T114 — rich-protocol-cleanup.** [Scope](./TASKS_PART_SEVEN.md#t114-rich-protocol-cleanup-m).
 - [ ] **T105 — vscode-f5-cause.** [Scope](./TASKS_PART_SEVEN.md#t105-vscode-f5-cause-s); rescheduled here, not duplicated under Deferred.
