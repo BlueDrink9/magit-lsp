@@ -530,6 +530,13 @@ impl GitRepo {
         self.run(&["branch", "-d", name.as_str()]).map(|_| ())
     }
 
+    /// Store `description` in Git's configuration for the named branch.
+    pub fn set_branch_description(&self, name: &str, description: &str) -> Result<()> {
+        let name = self.validate_branch_name(name)?;
+        let key = format!("branch.{name}.description");
+        self.run(&["config", key.as_str(), description]).map(|_| ())
+    }
+
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
         Self::command_in_with_env(

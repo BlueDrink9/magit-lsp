@@ -151,8 +151,10 @@ both profiles.
 | `n` | Create a branch at `HEAD` without switching to it |
 | `m` | Rename a branch: prompt for the source, then the new name |
 | `k` | Delete a branch, leaving Git's refusal of the checked-out branch as a message |
+| `d` | Set a branch description: prompt for the branch, then for its text |
 
-Checkout, configure, reset and worktree entries remain planned.
+Branch checkout and reset, the `b C` configure popup and worktree entries remain
+planned.
 Creating a branch leaves the current branch checked out; renaming the checked-out
 branch renames it in place.
 

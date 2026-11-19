@@ -32,7 +32,7 @@ pub fn definition() -> MenuDef {
                         "branch.configure-description",
                         "Set the branch description",
                         "magit-branch.<branch>.description",
-                        "R-6.1",
+                        "",
                     ),
                     option(
                         "=u",

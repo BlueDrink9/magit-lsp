@@ -1,0 +1,16 @@
+# Early T043: setting a branch description from the status branch menu writes Git config.
+fixture: modified-two-files
+---
+keys: b
+wait
+expect screen contains "Set the branch description"
+keys: d
+wait prompt
+# The branch prompt pre-fills the current branch; Enter accepts the default.
+keys: Enter
+wait prompt
+# Quote the description: bare words would be split into separate literal tokens.
+keys: "tidy work" Enter
+wait
+expect screen contains "Set description for main"
+sh: test "$(git config branch.main.description)" = "tidy work"

@@ -697,3 +697,118 @@ fn branch_delete_of_current_branch_surfaces_gits_refusal() {
         "Git's refusal must keep the checked-out branch: {branches}"
     );
 }
+
+#[test]
+fn branch_description_prompts_twice_and_writes_config() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.configure-description".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("main".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected description prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &second.prompt_id,
+            Some(PromptValue::Text("tidy work".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Set description for main"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.main.description"]).trim(),
+        "tidy work"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_description_targets_a_side_branch() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "feature"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.configure-description".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("feature".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected description prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &second.prompt_id,
+            Some(PromptValue::Text("side note".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Set description for feature"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.feature.description"]).trim(),
+        "side note"
+    );
+    assert!(!test.session.has_pending_prompt());
+}

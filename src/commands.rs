@@ -310,6 +310,13 @@ pub enum PromptAction {
     },
     /// Delete the answered branch.
     BranchDelete,
+    /// Set a description on the answered branch.
+    BranchDescription,
+    /// Second half of a description set: store it for this validated branch.
+    BranchDescriptionText {
+        /// The branch name answered at the first prompt.
+        name: String,
+    },
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -542,6 +549,34 @@ pub fn resume_prompt(
             };
             let name = name.trim().to_owned();
             branch_action(ctx, |repo| repo.delete_branch(&name), format!("Deleted branch {name}"))
+        }
+        PromptAction::BranchDescription => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let name = name.trim().to_owned();
+            if name.is_empty() {
+                ctx.info("A branch name is required");
+                return Ok(CommandOutcome::default());
+            }
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_description_prompt(&name),
+                    PromptAction::BranchDescriptionText { name },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchDescriptionText { name } => {
+            let PromptValue::Text(description) = answer else {
+                return Err(crate::Error::new("Expected a branch description"));
+            };
+            let description = description.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.set_branch_description(&name, &description),
+                format!("Set description for {name}"),
+            )
         }
     }
 }
@@ -853,6 +888,7 @@ fn build() -> Registry {
         command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch at HEAD", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
+        command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1376,6 +1412,27 @@ fn branch_name_prompt(title: &str, default: &str, placeholder: &str) -> ViewProm
     }
 }
 
+/// Build a single-line text prompt for a branch description.
+fn branch_description_prompt(name: &str) -> ViewPromptParams {
+    ViewPromptParams {
+        prompt_id: String::new(),
+        kind: PromptKind::Text,
+        title: format!("Description for branch {name}"),
+        detail: None,
+        yes_label: None,
+        no_label: None,
+        destructive: None,
+        default: None,
+        placeholder: Some("Branch description".to_string()),
+        secret: None,
+        items: None,
+        allow_custom: None,
+        preselected: None,
+        min: None,
+        max: None,
+    }
+}
+
 /// Prompt for the name of a new branch created at HEAD.
 fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
@@ -1410,6 +1467,20 @@ fn branch_delete(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Delete branch", &current, "Branch to delete"),
             PromptAction::BranchDelete,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the branch whose description to set, then for its text.
+fn branch_configure_description(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let current = GitRepo::open(ctx.repo_path)?
+        .current_branch()
+        .unwrap_or_default();
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Set branch description", &current, "Branch to describe"),
+            PromptAction::BranchDescription,
         )),
         ..Default::default()
     })
