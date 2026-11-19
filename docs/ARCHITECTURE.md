@@ -410,15 +410,19 @@ keys keep them). Implementation per client:
   1. Ship default bindings for our commands on VSCode's default fold keys
      (`ctrl+shift+[`, `ctrl+shift+]`, `ctrl+k ctrl+l`, `ctrl+k ctrl+0`,
      `ctrl+k ctrl+j`, and macOS variants) with `when: magit.active`.
-  2. At activation, best-effort read the user's `keybindings.json` (JSONC) and
-     list entries whose command is `editor.fold*`, `editor.unfold*` or
-     `editor.toggleFold`. If any, offer a command **"Magit: Mirror my fold
-     shortcuts"** that shows (or, with consent, appends) equivalent entries
-     targeting `magit.invoke` with `when: magit.active`.
-     Mirroring is explicit and on-demand: the extension never watches or
-     rewrites the user's file, and a changed `editor.toggleFold` affects only
-     the next explicit mirror run. The shipped default bindings cover users who
-     keep or do not customise the native fold keys.
+  2. On request, read the user's `keybindings.json` (JSONC) and list entries
+     whose command is `editor.fold*`, `editor.unfold*` or `editor.toggleFold`.
+     If any exist, the **"Magit: Mirror my fold shortcuts"** command opens a
+     preview document containing equivalent entries targeting `magit.invoke`
+     with `when: magit.active`, and offers to copy them to the clipboard.
+  3. Mirroring is explicit and manual: the command never edits or writes the
+     user's file and installs, refreshes or removes nothing itself. The user
+     pastes the entries into `keybindings.json`, and after changing a native
+     fold shortcut removes or replaces the old mirrored entries there. Rerunning
+     the command only shows the current mapping; no activation scan or watcher
+     exists.
+  4. The shipped default bindings cover users who keep or do not customise the
+     native fold keys.
 
 **Server-side hard rules**
 - The server validates the merged keymap and reports conflicts when distinct

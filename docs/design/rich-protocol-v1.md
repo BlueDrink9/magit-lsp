@@ -208,13 +208,18 @@ client that cannot present a quick picker may use the core render forms.
 **Fold shortcuts are mirrored explicitly, never intercepted.** The extension
 cannot outrank a user's `editor.toggleFold` binding, so it ships default
 bindings on VS Code's native fold keys for `magit.active` views and offers an
-explicit, consent-based "Magit: Mirror my fold shortcuts" command that reads
-`keybindings.json` and appends equivalent `magit.invoke` entries. It never
-watches or rewrites the user's file automatically. When the user changes
-`editor.toggleFold`, only the next explicit mirror run reflects the change.
+explicit, consent-based "Magit: Mirror my fold shortcuts" command. Running it
+reads `keybindings.json`, opens a preview document listing equivalent
+`magit.invoke` entries scoped to `magit.active`, and offers "Copy to clipboard".
+The command never edits or writes the user's file and installs, refreshes or
+removes nothing itself. The user pastes the entries into `keybindings.json`,
+and after changing a native fold shortcut removes or replaces the now-obsolete
+mirrored entries there by hand. Rerunning the command only shows the current
+mapping; it never updates installed mirrors on its own, and no activation scan
+or watcher of the user's file exists.
 **Reason:** silently editing user configuration is unacceptable, the native
 command acts on VS Code's own folding model rather than the server tree, and an
-on-demand mirror keeps the user in control.
+on-demand preview keeps the user in control of both installation and cleanup.
 
 ## 7. Documentation changed by this ticket
 
