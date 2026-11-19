@@ -492,7 +492,8 @@ User-requested 2026-11-19; work once the Phase 6 push completes. The commits-sec
 
 Post-release; scopes for phases 10–13 remain mandatory in [specifications](./TASKS_PART_SEVEN.md#phases-10-to-13-post-release-tickets), not fresh completion claims. T040/T041 are already in the ledger; their delivered subsets do not close other feature scopes.
 
-- [ ] **T042 — remote-config-tags.**
+- [x] **T042 — remote-config-tags.** Done: `8580fdd`; documentation completion in containing commit. See Early T042 for scope and retained evidence.
+  - Verified: `make docs-check` → exit 0; current integration Rust/native evidence is recorded under Early T042.
 - [ ] **T043 — branch-basics.**
 - [ ] **T044 — notes-ignore.**
 - [ ] **T045 — theming-docs.**
@@ -649,17 +650,20 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Early-delivery boundary: the `b C` configure... popup remains Planned R-6.1; the Phase 10 T043 line stays unticked until the full configure scope lands; checkout remains T067.
   - Done: `a6e5eb8`.
 - [x] **Early T042 — remote-config-tags (cheap commands).** Deliver the full T042 scope now (TASKS_PART_SEVEN.md:769): lightweight tag create/delete plus remote configuration — verify the exact remote rows in the parity table (add/rename/remove/prune) and implement those. Same template and evidence pattern; tick the Phase 10 T042 line on full verified scope.
+  - Done: final integration `8580fdd` on latest base `1c0bf1a`; remote URL configuration, confirmed removal and selected-revision lightweight tags complete T042. Base tag delete/prune support and signing/unsupported-argument guards are preserved; prior delivery records below are retained.
+  - Verified (integration, 2026-11-19): `make test-rust FILTER="--test git_backend --test commands --test menus"` → exit 0; `make ui-file FILE=tests/ui/scenarios/remote-tags.scn` → exit 0 at unchanged `8580fdd` (orchestrator/RUN scout evidence). Covers URL configuration, removal confirmation, selected-revision lightweight tags and native remote/tag lifecycle.
+  - Verified: `make docs-check` → exit 0; KEYMAPS.md §5.4.3–5.4.4 and VIEWS.md document the current workflow, retaining tag deletion and remote pruning. No generated references changed.
   - Verified (tags, part 1/3, A1) — `grep -n 'id: "tag\.' src/commands.rs` → `command!` registrations at `:910`/`:911`; `src/menus/tag.rs:26`/`:33` clear the `t`/`k` markers while `tag.release` (`:27`) and `tag.prune` (`:34`) keep `R-6.3`; KEYMAPS.md §5.4.3 documents `t t` and `t k`.
   - Verified (tags, part 1/3, A2) — `make test-rust FILTER="--test commands"` → exit 0; `make test-rust FILTER="--test commands tag_"` → 3 passed, covering create-at-HEAD without switching, delete of an existing tag, and Git's "not found" refusal for a missing tag.
   - Verified (tags, part 1/3, A3) — `make ui-file FILE=tests/ui/scenarios/tag-create.scn` → exit 0; menu-driven `t t` creates `v1` while `main` stays checked out; no snapshot reflects tag rows, so none changed.
   - Verified (remotes add/remove, part 2/3, A1) — `grep -n 'id: "remote\.' src/commands.rs` → `command!` registrations at `:956`/`:957`; `src/menus/remote.rs:36`/`:44` clear the `a`/`k` markers while the six other remote rows keep `R-6.3`; KEYMAPS.md §5.4.4 documents `M a` and `M k`.
   - Verified (remotes add/remove, part 2/3, A2) — `make test-rust FILTER="--test commands"` → exit 0; `V=1 make test-rust FILTER="--test commands remote_"` → 3 passed, covering the two-prompt add whose `git remote get-url origin` equals the answered path, removal of an existing remote, and Git's "No such remote" refusal.
   - Verified (remotes add/remove, part 2/3, A3) — `make ui-file FILE=tests/ui/scenarios/remote-add.scn` → exit 0; menu-driven `M a` prompts for `origin` then the URL and `git remote get-url origin` matches; no snapshot reflects remote rows, so none changed.
-  - Part 2/3 remote add and remove landed; remote rename/prune and part 3/3 remain; the Phase 10 T042 line stays unticked.
+  - Historical Part 2/3 checkpoint: remote add and remove landed; remote rename/prune and part 3/3 remained; the Phase 10 T042 line stayed unticked.
   - Verified (remotes rename/prune, part 3/3, A1) — `grep -n 'id: "remote\.\(rename\|prune\)"' src/commands.rs` → `command!` registrations at `:1006`/`:1007`; `src/menus/remote.rs:37`/`:46` clear the `r`/`p` markers while the four other planned rows (`:44` configure, `:52` prune-refspecs, `:59` unshallow, `:66` update-default) keep `R-6.3`; KEYMAPS.md §5.4.4 documents `M r` and `M p`.
   - Verified (remotes rename/prune, part 3/3, A2) — `make test-rust FILTER="--test commands"` → exit 0; the three new tests cover the two-prompt rename, prune dropping a stale tracking ref while keeping a live one, and the missing-remote prune refusal surfacing as Git's warn message.
   - Verified (remotes rename/prune, part 3/3, A3) — `make ui-file FILE=tests/ui/scenarios/remote-rename.scn` → exit 0; menu-driven `M r` prompts for `origin` then `upstream` and `git remote` reports `upstream` only; no snapshot reflects remote rows, so none changed.
-  - Early T042 remotes complete; remaining Planned R-6.3: remote.configure, prune-refspecs, unshallow, update-default, tag.release, tag.prune; the Phase 10 T042 line stays unticked.
+  - Historical Part 3/3 checkpoint: Early T042 remotes complete; remaining Planned R-6.3 then: remote.configure, prune-refspecs, unshallow, update-default, tag.release, tag.prune; the Phase 10 T042 line stayed unticked. Integration `8580fdd` now completes remote.configure; the other listed actions remain planned.
   - Done: `0f64083`.
 - [x] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
   - Reset is exactly `git branch -f <name> <target>`: it never checks out the branch and never touches the working tree. That separation is deliberate; file checkout at a revision stays T067.

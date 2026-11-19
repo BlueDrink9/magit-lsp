@@ -176,10 +176,15 @@ profiles.
 
 | Keys | Supported action |
 | --- | --- |
-| `t` | Create a tag at `HEAD` |
+| `t` | Create a lightweight tag: prompt for its name, then the target revision (default `HEAD`) |
 | `k` | Delete a tag, leaving Git's refusal of a missing tag as a message |
 
-Tag release and prune remain planned.
+The revision is resolved to a commit; the tag points directly at that commit,
+without switching branches or creating an annotated tag object, even when Git
+signing is configured. Tag release and prune remain planned; annotated and signed
+tags belong to T071. Displayed annotate/sign/force/edit/local-user arguments are
+not supported by these actions; unsupported arguments are rejected rather than
+silently ignored.
 
 #### 5.4.4 Remote menu: supported subset
 
@@ -190,10 +195,21 @@ profiles.
 | --- | --- |
 | `a` | Add a remote: prompt for the name, then for its URL |
 | `r` | Rename a remote: prompt for the current name, then for the new name |
-| `k` | Remove a remote, leaving Git's refusal of a missing remote as a message |
+| `k` | Remove a remote: prompt for its name, then require destructive confirmation |
+| `C` | Configure an existing remote: prompt for its name, fetch URL, then push URL |
 | `p` | Prune stale branches of a remote: prompt for its name, then delete local tracking refs the remote no longer has |
 
-Remote configure, prune-refspecs, unshallow and update-default remain planned.
+`C` replaces `remote.<name>.url` and `remote.<name>.pushurl`, preserving other
+remote configuration. Both URLs must be non-empty and contain no line breaks;
+entered text is trimmed. `k` asks `Remove remote '<name>'?` with the detail
+`This permanently removes the remote configuration.`, a `Cancel` default and a
+`Remove` confirmation. Cancelling leaves the remote unchanged; Git's refusal of
+a missing remote is shown as a readable message.
+
+Remote prune-refspecs, unshallow and update-default remain planned. Displayed
+fetch-after-add, refspec, tagopt and followRemoteHead arguments are not supported
+by these actions; unsupported arguments are rejected. Configure changes URLs
+through `C`, not the displayed variable arguments.
 
 #### 5.4.5 Reset menu: supported subset
 

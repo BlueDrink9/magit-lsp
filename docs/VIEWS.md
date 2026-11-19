@@ -43,11 +43,23 @@ the repository, full target-to-`HEAD` membership, `HEAD` attachment, and exact i
 | **Bisect** | `magit-bisect` | In-progress section: good/bad/skip log, candidate | good, bad, skip, run, reset | R-8.2 |
 | **Worktrees** | `magit-worktree` | List with branch/path/state | add, checkout, move, delete, visit | R-8.2f |
 | **Submodules** | `magit-submodule` | Modules section and list | add, register, update, sync, fetch, populate, unpopulate | R-8.2 |
-| **Remotes / config** | `magit-remote`, `magit-gitconfig` | Remote list; per-branch/remote config | add, rename, remove, prune, set upstream/pushRemote | R-6.3 |
+| **Remotes / config** | `magit-remote`, `magit-gitconfig` | Remote menu actions from status; no dedicated remote-list or config view yet | add, rename, remove with confirmation, configure fetch/push URLs, prune; set upstream/pushRemote planned | T042; remaining R-6.3 |
 | **Patches** | `w`, `W` | `git am`/`apply`, `format-patch`; in-progress am | apply, continue, skip, abort | R-8.2 |
 | **Notes / ignore / run** | `T`, `i`, `!` | Notes; gitignore targets; run arbitrary git command | per command | R-8.2a |
 | **Repository list** | `magit-list-repositories` | Multi-repo overview | open status | R-9.3 |
 | **Dispatch / help** | `magit-dispatch` | Generated from the command registry and keymap manifest | invoke by key | Completed (§10/archive) |
 | **Menus** | transients | commit, branch, fetch, pull, push, merge, rebase, stash, tag, reset, cherry-pick, revert, bisect, remote, submodule, worktree, diff, log, ignore, patch | §3.11 | R-5.1 / R-5.2 |
+
+The remote menu (`M`) supports add, rename, confirmed removal, configuration of
+an existing remote's fetch/push URLs, and pruning stale tracking refs. URL
+configuration preserves other remote settings; cancelling removal leaves the
+remote unchanged. Prune-refspecs, unshallow and default-branch updates remain
+planned. See [remote menu keys](./KEYMAPS.md#544-remote-menu-supported-subset).
+
+The tag menu (`t`) creates lightweight tags at a prompted revision (default
+`HEAD`), resolved directly to a commit without switching branches or honoring
+signing configuration. Tag deletion remains supported; release and prune remain
+planned, and T071 owns annotated and signed tags. See
+[tag menu keys](./KEYMAPS.md#543-tag-menu-supported-subset).
 
 ---
