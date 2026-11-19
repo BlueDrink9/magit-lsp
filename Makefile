@@ -118,13 +118,17 @@ vscode-deps-refresh:
 	$(call run,vscode-deps-refresh,pnpm --dir clients/vscode install --no-frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
 
 # Fast check before the native VSCode targets: names what is missing instead of
-# failing deep inside a run. Set MAGIT_VSCODE_BIN in local.mk. Xvfb is not
-# needed when DISPLAY is already set.
+# failing deep inside a run. The launcher needs DISPLAY and an editor binary:
+# MAGIT_VSCODE_BIN when set in local.mk, otherwise codium or code on PATH.
 .PHONY: vscode-prereqs
 vscode-prereqs:
 	missing=""; \
-	command -v Xvfb >/dev/null 2>&1 || missing="$$missing Xvfb"; \
-	{ [ -x "$(MAGIT_VSCODE_BIN)" ] || command -v code >/dev/null 2>&1; } || missing="$$missing code(set MAGIT_VSCODE_BIN in local.mk)"; \
+	[ -n "$$DISPLAY" ] || missing="$$missing DISPLAY(set it or run under Xvfb)"; \
+	if [ -n "$(MAGIT_VSCODE_BIN)" ]; then \
+	  [ -x "$(MAGIT_VSCODE_BIN)" ] || missing="$$missing MAGIT_VSCODE_BIN=$(MAGIT_VSCODE_BIN)(not executable; fix local.mk)"; \
+	elif ! command -v codium >/dev/null 2>&1 && ! command -v code >/dev/null 2>&1; then \
+	  missing="$$missing codium-or-code(set MAGIT_VSCODE_BIN in local.mk)"; \
+	fi; \
 	[ -z "$$missing" ] || { printf 'MISSING:%s\n' "$$missing"; exit 1; }
 
 vscode-test: build vscode-deps
