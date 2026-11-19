@@ -752,18 +752,25 @@ class NvimHelperCommandTest(unittest.TestCase):
     def test_plain_preset_teardown_escalates_term_ignoring_descendant(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "ready"
-            sleeper = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+            sleeper = (
+                "import os,pathlib,signal,sys,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+                "time.sleep(60)"
+            )
             script = (
-                "import subprocess,sys,pathlib,signal,time; "
-                "p=subprocess.Popen([sys.executable,'-c',sys.argv[2]]); "
-                "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); "
-                "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+                "import signal,subprocess,sys,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[1]]); "
+                "time.sleep(60)"
             )
             child = subprocess.Popen(
                 [sys.executable, "-c", script, str(marker), sleeper],
                 start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             try:
+                # The parent installs its handler before spawning and the descendant
+                # publishes only after installing its own, so the marker proves both.
                 deadline = time.monotonic() + 5
                 while not marker.exists() and time.monotonic() < deadline:
                     time.sleep(.01)
