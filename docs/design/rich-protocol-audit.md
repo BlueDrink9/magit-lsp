@@ -30,7 +30,7 @@ changed.
 | 6 | `keyModifiers` is read and logged but inert | Not real | No | None |
 | 7 | VS Code cannot replay non-printable/non-clipboard `passThrough` | Real | No | S–M |
 | 8 | Static clients learn mode changes only from `view/render` mode | Real (narrow: menu entry) | No | S |
-| 9 | Positional requests use last-acked tree, or current before first ack | Real (documentation) | No | S |
+| 9 | Standard reads use the acked tree (current before first ack); rich commands bind an exact version with ack exceptions | Real (documentation) | No | S |
 | 10 | Historical prompt wording vs maintained docs and transport | Real (documentation drift) | No | S |
 | 11 | VS Code declares layouts it does not honor | Not real (fixed by T004) | No | None |
 | W1 | `PROTOCOL` omits `view/invoke.version` | Real (documentation) | No | S |
@@ -140,9 +140,9 @@ report was dishonest.
   N+2 becomes the retained snapshot. Each delivery was a normal `view/render`;
   no error or deferral occurred.
 - **Proposal:** Document the actual contract: a view retains one acknowledged
-  tree/version (the edit base for later diffs and the positional-read
-  fallback), not a single in-flight delivery slot; successive renders may be
-  delivered before any ack, and any render whose base is not the retained
+  tree/version (the edit base for later diffs and the source for acknowledged
+  positional reads), not a single in-flight delivery slot; successive renders
+  may be delivered before any ack, and any render whose base is not the retained
   acknowledged version carries full text. Acks are valid only for the current
   version, stale acks are idempotent no-ops, and clients request `view/resync`
   after a lost update rather than acking older versions. The proposed rule
@@ -254,25 +254,57 @@ report was dishonest.
   menu currently changes the wrong view (or an unshowable menu mode).
 - **Effort:** S.
 
-### 9. Positional requests use the last acknowledged tree, or the current tree before the first ack
+### 9. Standard LSP reads and rich command versioning are different policies
 
-- **Status:** Real (undocumented behavior; the behavior itself is coherent).
-- **Evidence:** Invoke resolves the offered/action target against
-  `acked_version`/`acked` first, otherwise the exact current `view.version`
-  and `view.tree`; anything else yields no source
-  (`src/session.rs:1116-1169`, especially `:1122-1126`). The key path passes
-  `Some(params.version)` into the same dispatcher (`src/session.rs:1326-1342`),
-  and the public field documentation says only that the displayed version is
-  required and that the current or last acknowledged tree is retained
-  (`src/protocol.rs:282-289,313-315`). It does not state which tree wins before
-  the first ack or that the exact current version is accepted.
-- **Proposal:** Document the resolution order: exact acknowledged version, then
-  exact current version (first-ack window), otherwise a readable stale-view
-  refusal; omitted versions are refused for positional commands. Keep the
-  behavior.
+- **Status:** Real (documentation). Both behaviors are implemented and
+  coherent, but they are different policies and the maintained protocol
+  reference states neither.
+- **Evidence (standard LSP reads):** `tree_for_positional_request`
+  (`src/server.rs:1533-1536`) calls `Shared::view_tree_for_uri`
+  (`:800-815`), which finds the view published for the URI and returns
+  `PublishedViews::acked_tree_for_uri` (`src/session.rs:172-179`). That tree is
+  fixed when the view is published (`src/session.rs:97-125`, especially
+  `:111-112`): the last acknowledged tree, or the current `view.tree` when no
+  acknowledgement exists yet, and `None` in text mode. The standard providers
+  use it for `textDocument/documentSymbol`, `definition`, `documentLink`,
+  `foldingRange` and `semanticTokens/full`
+  (`src/server/requests.rs:334-355,361-387,388-409,411-422,424-450`), and each
+  returns `null` in text mode before resolving a tree (`:337,365,391,414,427`).
+  Plain provider documents use their own plain-provider snapshot instead. The
+  docstring at `src/server.rs:800-803` says positional requests cannot refer to
+  a render the client has not applied, which overstates the pre-first-ack
+  current-tree fallback.
+- **Evidence (rich invoke/key commands):** `view/invoke` and `view/key` supply
+  `action_target: None` with the client's version (`src/session.rs:1068-1081`,
+  `:1326-1342`) and share `Session::run_versioned_command`
+  (`src/session/commands.rs:17-90`). For positional commands that consume
+  cursor/selection or require an acknowledgement, outside text mode
+  (`:38-67`), resolution accepts the exact acknowledged version (`:69`), the
+  exact current version for commands that do not require an acknowledgement
+  (`:76`; not limited to the first-ack window), and, for a request carrying a
+  validated offer with no acknowledgement yet, the exact current version
+  (`:70-75`). `select.toggle-mark` and a `common.confirm` with a commit
+  selection require the acknowledgement (`:40-41`), so a validated action offer
+  is the one exception before the first ack. Anything else produces the
+  readable stale-view warning (`:79-89`). The `action_target` branch in
+  `Session::dispatch` (`src/session.rs:1117-1169`) is a different path:
+  `action_target` is `Some` only for Plain provider content targets
+  (`src/server/plain_actions.rs:980-983`), while rich invoke and key pass
+  `None`.
+- **Proposal:** Document the two policies separately instead of one
+  "positional" rule. Standard reads: last acknowledged tree, current tree
+  before the first acknowledgement, `null` in text mode. Rich commands: exact
+  acknowledged or exact current version under the acknowledgment and
+  validated-offer rules above. In the maintained reference, add `version?` to
+  the `view/invoke` row and a standard-read resolution note to §4.1 (the
+  maintained gap tracked as W1). `docs/CLIENT_SPEC.md:63,75` and
+  `docs/ARCHITECTURE.md:102-104,130-135` already describe parts of both
+  policies, but `ARCHITECTURE §3.1` omits the pre-ack fallback and
+  `docs/PROTOCOL.md:16` omits the invoke version. Keep the behavior.
 - **Wire change:** No.
-- **Risk:** Low. Clients already send the version they display; the gap is
-  specification clarity for new clients.
+- **Risk:** Low. A new client that implements only "last acknowledged tree"
+  would mishandle pre-first-ack reads, and a protocol reader would not learn
+  that standard reads and rich commands resolve differently.
 - **Effort:** S.
 
 ### 10. Historical prompt wording vs maintained docs and current transport
@@ -326,9 +358,12 @@ report was dishonest.
   `{viewId, command, args?, cursor?, selection?}`; the actual params include
   `version: Option<u64>` and its positional semantics
   (`src/protocol.rs:277-296`). Clients always send it
-  (`clients/vscode/lib/requests.js:64-70`), and the server uses it for
-  positional resolution (`src/session.rs:1122-1126`).
-- **Proposal:** Add `version?` to the §4.1 row and cross-reference item 9.
+  (`clients/vscode/lib/requests.js:64-70`), and rich invoke/key commands use it
+  for positional resolution (`src/session/commands.rs:68-77`;
+  `src/session.rs:1068-1081,1326-1342`); it does not govern standard LSP reads
+  (item 9).
+- **Proposal:** Add `version?` to the §4.1 row and cross-reference item 9,
+  which also covers the standard-read resolution the table omits.
 - **Wire change:** No.
 - **Risk:** Low same as item 10.
 - **Effort:** S.
