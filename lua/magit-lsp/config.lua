@@ -11,6 +11,9 @@ local shared = require('magit-lsp.shared')
 --- The status placements this client implements (R-UI-7).
 M.PLACEMENTS = { 'replace', 'vsplit', 'split', 'tab' }
 
+--- The rich protocol session version this client selects and requires.
+M.PROTOCOL_VERSION = 1
+
 --- The project root containing this module, used for `target/` lookups.
 ---@return string
 function M.project_root()
@@ -53,8 +56,8 @@ end
 --- `target/release/magit-lsp`, `target/debug/magit-lsp` and finally
 --- `magit-lsp` on `$PATH`. There is deliberately no `cargo run` fallback: a
 --- missing or unusable binary is a clear error instead of a surprise build.
----@param cmd string[]|nil the explicit command from `setup()`
----@return string[]|nil command, string|nil error
+---@param cmd string[]|function|nil the explicit command or transport from `setup()`
+---@return string[]|function|nil command, string|nil error
 function M.server_command(cmd)
   if cmd then
     return cmd
@@ -100,7 +103,8 @@ function M.client_capabilities()
   local capabilities = vim.lsp.protocol.make_client_capabilities()
   capabilities.experimental = capabilities.experimental or {}
   capabilities.experimental.magit = {
-    v = 1,
+    v = M.PROTOCOL_VERSION,
+    minimumVersion = M.PROTOCOL_VERSION,
     keys = 'dynamic',
     modifiers = M.key_modifiers(),
     layout = { 'main', 'side', 'bottom', 'float' },

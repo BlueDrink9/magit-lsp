@@ -60,16 +60,20 @@ the legacy unrestricted behavior.
 | `window/workDoneProgress/cancel` | client → server notification | `{token}`; cancel the matching active operation. |
 | `window/showMessage` | server → client notification | `{type,message}` standard LSP message. |
 
-**Version handshake (server side implemented; client changes pending).** The
+**Version handshake (server and Neovim implemented; VS Code pending).** The
 server strictly accepts `v = 1`, accepts an optional `minimumVersion` when it
 is a positive integer not above `v`, and rejects any other declaration with a
 readable initialize error before creating a session or opening a rich view. It
 advertises `capabilities.experimental.magit.protocolVersion = 1` as the version
-of every accepted rich session. The bundled clients do not yet send
-`minimumVersion` or check the advertisement; their declaration changes and
-post-initialize compatibility check are pending the remaining T114 parts, so
-current bundled-client initialize behavior is unchanged. Clients must treat an
-initialize rejection as a hard failure; there is no fallback to Plain.
+of every accepted rich session. Neovim declares `v = 1` and `minimumVersion = 1`
+and requires a matching positive-integer advertisement before opening views or
+sending rich traffic. Missing, malformed or different advertisements produce a
+readable required/advertised-version error and stop the transport. An initialize
+rejection reports the server's explanation and stops the transport, without
+retry or downgrade. The package-version warning remains separate. VS Code's
+declaration and advertisement check are pending the remaining T114 parts.
+Clients must treat an initialize rejection as a hard failure; there is no
+fallback to Plain.
 
 The implemented and advertised standard providers are exactly `textDocument/documentSymbol` (document outline), `textDocument/definition` (tree-backed definition/navigation), `textDocument/documentLink` (links; no resolve), `textDocument/foldingRange`, and `textDocument/semanticTokens/full` (full only; no range or delta). Rich and Plain share these providers, plus advertised code actions, `magit.command` execute command, and document synchronization. Plain code actions/commands are implemented semantic-action dispatch, not future targets. Requests identify a document by URI. Positional lookups use the acknowledged tree, falling back to the current tree before the first acknowledgement; they return `null` in text mode. Draft documents use full sync `{openClose:true, change:1}`. The semantic-token legend includes custom `tokenTypeGroups`. No completion, hover, references, rename, diagnostics, formatting, document-link resolve, semantic-token range or delta providers are implemented. Plain completion candidates and broader Git/workflow providers remain target work. Optional providers are not prerequisites for basic status/staging. See `src/server.rs:4100-4150`.
 

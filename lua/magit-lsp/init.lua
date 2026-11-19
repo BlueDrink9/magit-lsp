@@ -122,6 +122,11 @@ end
 --- and keymap that follow it are applied by the view manager.
 ---@param session table
 local function open_status(session)
+  -- Rich views and traffic require a completed protocol handshake: a rejected
+  -- or still pending initialize must not open a view.
+  if session.protocol ~= 'ok' then
+    return
+  end
   if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
   vim.lsp.buf_attach_client(session.buf, session.client_id)
   view.request(session.buf, session.client_id, 'view/open', {
@@ -354,29 +359,68 @@ function M.setup(opts)
   session.win = vim.api.nvim_get_current_win()
 
   if not session.client_id then
+    -- Handshake state: nil while initialize is in flight, `ok` once the server
+    -- advertised the declared protocol version, `failed` after a readable
+    -- rejection. Only `ok` opens a rich view or sends rich traffic.
+    session.protocol = nil
     session.client_id = vim.lsp.start({
       name = 'magit-lsp',
-      cmd = cmd,
+      cmd = function(dispatchers, client_config)
+        local rpc
+        if type(cmd) == 'function' then
+          rpc = cmd(dispatchers, client_config)
+        else
+          rpc = vim.lsp.rpc.start(cmd, dispatchers, {
+            cwd = client_config.cmd_cwd,
+            env = client_config.cmd_env,
+            detached = client_config.detached,
+          })
+        end
+        local request = rpc.request
+        rpc.request = function(method, params, callback, notify_reply_callback)
+          if method ~= 'initialize' then
+            return request(method, params, callback, notify_reply_callback)
+          end
+          return request(method, params, function(err, result, request_id)
+            local failure = err and ('magit-lsp initialize failed: ' .. error_message(err))
+              or version.protocol_error(result, config.PROTOCOL_VERSION)
+            if failure then
+              session.protocol = 'failed'
+              vim.schedule(function() vim.notify(failure, vim.log.levels.ERROR) end)
+              rpc.terminate()
+              return
+            end
+            callback(nil, result, request_id)
+          end, notify_reply_callback)
+        end
+        return rpc
+      end,
       root_dir = root,
       capabilities = config.client_capabilities(),
       init_options = { profile = profile },
-      on_init = function(_, result)
+      on_init = function(client, result)
+        session.client_id = client.id
         version.check(result and result.serverInfo, cmd)
+        session.protocol = 'ok'
         local capabilities = result and result.capabilities
         local provider = capabilities and capabilities.semanticTokensProvider
         highlights.apply_legend(buffer.filetype, provider and provider.legend)
+        open_status(session)
       end,
       on_exit = function()
         vim.schedule(function() edit.disconnected(session.client_id) end)
       end,
-    }, { bufnr = session.buf })
+    }, { attach = false })
     if not session.client_id then
       vim.notify('Failed to start magit-lsp server', vim.log.levels.ERROR)
       return nil, 'failed to start client'
     end
+    return
   end
 
-  open_status(session)
+  if session.protocol == 'ok' then
+    open_status(session)
+  end
 end
 
 return M

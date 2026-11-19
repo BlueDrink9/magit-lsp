@@ -520,6 +520,7 @@ T['declares exact bundled Neovim capabilities'] = function()
   local shared = child.lua_get("require('magit-lsp.shared')")
   MiniTest.expect.equality(declaration, {
     v = 1,
+    minimumVersion = 1,
     keys = 'dynamic',
     modifiers = child.lua_get("require('magit-lsp.config').key_modifiers()"),
     layout = { 'main', 'side', 'bottom', 'float' },
@@ -536,6 +537,195 @@ T['declares exact bundled Neovim capabilities'] = function()
       fallbackView = true,
     },
   })
+end
+
+T['the rich protocol declaration and a matching advertisement open rich traffic'] = function()
+  -- anchor: lua/magit-lsp/config.lua client_capabilities; real startup below.
+  child.lua([[
+    DECLARED = nil
+    REQUESTS = {}
+    NOTIFICATIONS = {}
+    WARNINGS = {}
+    vim.notify = function(msg, level) table.insert(WARNINGS, { msg = msg, level = level }) end
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, 'p')
+    local client = require('magit-lsp')
+    client.setup({
+      root_dir = root,
+      cmd = function()
+        local rpc = {}
+        function rpc.request(method, params, callback)
+          REQUESTS[#REQUESTS + 1] = method
+          if method == 'initialize' then
+            DECLARED = params.capabilities.experimental.magit
+            callback(nil, {
+              capabilities = { experimental = { magit = { protocolVersion = 1 } } },
+              serverInfo = { version = require('magit-lsp.version').version },
+            })
+          elseif method == 'view/open' then
+            callback(nil, {
+              id = 'fake-status',
+              kind = 'status',
+              uri = 'magit://fake',
+              title = 'Status',
+              placement = 'main',
+              mode = 'interactive',
+              scope = 'status',
+            })
+          end
+          return true, 1
+        end
+        function rpc.notify(method)
+          NOTIFICATIONS[#NOTIFICATIONS + 1] = method
+        end
+        function rpc.is_closing()
+          return false
+        end
+        function rpc.terminate() end
+        return rpc
+      end,
+    })
+    OPENED = vim.wait(5000, function() return client.status_view() ~= nil end, 10)
+  ]])
+  MiniTest.expect.equality(child.lua_get('OPENED'), true, 'the matching advertisement opened a rich view')
+  local declared = child.lua_get('DECLARED')
+  MiniTest.expect.equality(declared.v, 1)
+  MiniTest.expect.equality(declared.minimumVersion, 1)
+  local requests = child.lua_get('REQUESTS')
+  MiniTest.expect.equality(requests[1], 'initialize')
+  MiniTest.expect.equality(vim.tbl_contains(requests, 'view/open'), true, 'rich traffic was sent')
+  MiniTest.expect.equality(child.lua_get('WARNINGS'), {})
+end
+
+T['a missing, malformed or different protocol advertisement is a readable rejection'] = function()
+  local cases = {
+    { value = 'nil', expected = 'server advertised none' },
+    { value = "'1'", expected = 'server advertised "1"' },
+    { value = '0', expected = 'server advertised 0' },
+    { value = '-1', expected = 'server advertised -1' },
+    { value = '1.5', expected = 'server advertised 1.5' },
+    { value = '2', expected = 'server advertised 2' },
+  }
+  for _, case in ipairs(cases) do
+    child.lua(string.format([[
+      NOTIFIES = {}
+      REQUESTS = {}
+      NOTIFICATIONS = {}
+      TERMINATED = false
+      vim.notify = function(msg, level) table.insert(NOTIFIES, { msg = msg, level = level }) end
+      local root = vim.fn.tempname()
+      vim.fn.mkdir(root, 'p')
+      local client = require('magit-lsp')
+      client.setup({
+        root_dir = root,
+        cmd = function()
+          local rpc = {}
+          function rpc.request(method, params, callback)
+            REQUESTS[#REQUESTS + 1] = method
+            if method == 'initialize' then
+              local magit = {}
+              local advertised = %s
+              if advertised ~= nil then magit.protocolVersion = advertised end
+              callback(nil, {
+                capabilities = { experimental = { magit = magit } },
+                serverInfo = { version = require('magit-lsp.version').version },
+              })
+            end
+            return true, 1
+          end
+          function rpc.notify(method) NOTIFICATIONS[#NOTIFICATIONS + 1] = method end
+          function rpc.is_closing() return false end
+          function rpc.terminate() TERMINATED = true end
+          return rpc
+        end,
+      })
+      REJECTED = vim.wait(5000, function() return #NOTIFIES > 0 end, 10)
+      client.open(root)
+      client.setup({ root_dir = root })
+      STATUS = client.status_view()
+    ]], case.value))
+
+    MiniTest.expect.equality(child.lua_get('REJECTED'), true, case.expected)
+    MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1, case.expected)
+    local msg = child.lua_get('NOTIFIES[1].msg')
+    MiniTest.expect.equality(msg:find('rich protocol mismatch', 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(msg:find('required version 1', 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(msg:find(case.expected, 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
+    MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view for ' .. case.expected)
+    MiniTest.expect.equality(child.lua_get('TERMINATED'), true, 'the incompatible transport stopped')
+    MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich traffic for ' .. case.expected)
+    MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications')
+  end
+end
+
+T['an asynchronous initialize rejection reports the server explanation'] = function()
+  -- The real server rejects a declaration that does not select rich v1. The
+  -- client must report that asynchronous initialize RPC error, open no rich
+  -- view and send no rich traffic.
+  child.lua(string.format([[
+    NOTIFIES = {}
+    vim.notify = function(msg, level) table.insert(NOTIFIES, { msg = msg, level = level }) end
+    local config = require('magit-lsp.config')
+    local capabilities = config.client_capabilities
+    config.client_capabilities = function()
+      local declared = capabilities()
+      declared.experimental.magit.v = 2
+      declared.experimental.magit.minimumVersion = 2
+      return declared
+    end
+    local client = require('magit-lsp')
+    REQUESTS = {}
+    NOTIFICATIONS = {}
+    EXITED = false
+    client.setup({ root_dir = %q, cmd = function(dispatchers, cfg)
+      local on_exit = dispatchers.on_exit
+      dispatchers.on_exit = function(...)
+        EXITED = true
+        on_exit(...)
+      end
+      RPC = vim.lsp.rpc.start(config.server_command(), dispatchers, {
+        cwd = cfg.cmd_cwd, env = cfg.cmd_env, detached = cfg.detached,
+      })
+      local request, notify = RPC.request, RPC.notify
+      RPC.request = function(method, ...)
+        REQUESTS[#REQUESTS + 1] = method
+        return request(method, ...)
+      end
+      RPC.notify = function(method, ...)
+        NOTIFICATIONS[#NOTIFICATIONS + 1] = method
+        return notify(method, ...)
+      end
+      return RPC
+    end })
+    REJECTED = vim.wait(10000, function() return #NOTIFIES > 0 end, 20)
+    STOPPED = vim.wait(5000, function()
+      local session = client.sessions[%q]
+      return EXITED and vim.lsp.get_client_by_id(session.client_id) == nil
+    end, 10)
+    STATUS = client.status_view()
+    PROTOCOL = client.sessions[%q] and client.sessions[%q].protocol
+  ]], repo, repo, repo, repo))
+  MiniTest.expect.equality(child.lua_get('REJECTED'), true, 'the rejection was reported')
+  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
+  local msg = child.lua_get('NOTIFIES[1].msg')
+  MiniTest.expect.equality(msg:find('initialize failed', 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(msg:find('unsupported rich protocol version', 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
+  MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view opened')
+  MiniTest.expect.equality(child.lua_get('PROTOCOL'), 'failed', 'the session is not rich')
+  MiniTest.expect.equality(child.lua_get('STOPPED and RPC.is_closing()'), true, 'the real server exited')
+  MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich requests or retry')
+  MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications')
+  MiniTest.expect.equality(child.lua_get([[
+    (function()
+      for _, session in pairs(require('magit-lsp').sessions) do
+        local c = vim.lsp.get_client_by_id(session.client_id)
+        if c and c.initialized then return true end
+      end
+      return false
+    end)()
+  ]]), false, 'the client never initialized')
 end
 
 T['staging a visual line range stages only those lines'] = function()
@@ -1357,48 +1547,30 @@ T['debug.snapshot reports the status view state'] = function()
 end
 
 T['buffers renders that beat the view/open response'] = function()
-  child.lua([[
+  child.lua(string.format([[
     DELAYED_OPEN = false
     RENDER_BEFORE_RESPONSE = false
-    -- The queue resolves the client for every request, so a proxy that delays
-    -- only the `view/open` response proves the render is buffered, not lost.
-    local real_get_client = vim.lsp.get_client_by_id
-    local proxy
-    vim.lsp.get_client_by_id = function(id)
-      local c = real_get_client(id)
-      if not c then
-        return c
-      end
-      if proxy then
-        return proxy
-      end
-      proxy = setmetatable({}, {
-        __index = function(_, key)
-          if key ~= 'request' then
-            return c[key]
-          end
-          return function(self, method, params, handler, bufnr)
-            if method == 'view/open' and type(handler) == 'function' then
-              DELAYED_OPEN = true
-              return c.request(c, method, params, function(err, result, ctx)
-                vim.defer_fn(function()
-                  -- Proves the race: the render was received (and buffered)
-                  -- before the response handler ran.
-                  RENDER_BEFORE_RESPONSE = next(VIEW.pending_render) ~= nil
-                  handler(err, result, ctx)
-                end, 300)
-              end, bufnr)
-            end
-            return c.request(c, method, params, handler, bufnr)
-          end
-        end,
-        __newindex = function(_, key, value)
-          c[key] = value
-        end,
+    local config = require('magit-lsp.config')
+    require('magit-lsp').setup({ root_dir = %q, cmd = function(dispatchers, cfg)
+      local rpc = vim.lsp.rpc.start(config.server_command(), dispatchers, {
+        cwd = cfg.cmd_cwd, env = cfg.cmd_env, detached = cfg.detached,
       })
-      return proxy
-    end
-  ]])
+      local request = rpc.request
+      rpc.request = function(method, params, handler, notify_reply_callback)
+        if method == 'view/open' then
+          DELAYED_OPEN = true
+          return request(method, params, function(err, result, id)
+            vim.defer_fn(function()
+              RENDER_BEFORE_RESPONSE = next(VIEW.pending_render) ~= nil
+              handler(err, result, id)
+            end, 300)
+          end, notify_reply_callback)
+        end
+        return request(method, params, handler, notify_reply_callback)
+      end
+      return rpc
+    end })
+  ]], repo))
   setup_child()
   MiniTest.expect.equality(child.lua_get('DELAYED_OPEN'), true, 'the open response was delayed')
   MiniTest.expect.equality(
