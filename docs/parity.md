@@ -29,7 +29,7 @@
 | `-` | `?` | `open.dispatch` | Implemented | commit |
 | `-` | `-m` | `-` | Implemented | branch |
 | `-` | `-r` | `-` | Implemented | branch |
-| `magit-branch.<branch>.description` | `b d` | `branch.configure-description` | Planned R-6.1 | branch |
+| `magit-branch.<branch>.description` | `b d` | `branch.configure-description` | Implemented | branch |
 | `-` | `=u` | `-` | Implemented | branch |
 | `-` | `=r` | `-` | Implemented | branch |
 | `-` | `=p` | `-` | Implemented | branch |
