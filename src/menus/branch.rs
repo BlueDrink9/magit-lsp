@@ -116,7 +116,7 @@ pub fn definition() -> MenuDef {
                         "branch.spinoff",
                         "new spin-off",
                         "magit-branch-spinoff",
-                        "R-6.1",
+                        "",
                     ),
                     action(
                         "w",
@@ -142,7 +142,7 @@ pub fn definition() -> MenuDef {
                         "branch.spinout",
                         "new spin-out",
                         "magit-branch-spinout",
-                        "R-6.1",
+                        "",
                     ),
                     action(
                         "W",

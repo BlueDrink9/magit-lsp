@@ -1,0 +1,17 @@
+# Early T067: spinning off a tracking branch's unpushed commits.
+fixture: modified-two-files
+---
+sh: git commit -am base && git branch foobar && git checkout foobar && git branch --set-upstream-to=main foobar && echo child >> f.txt && git commit -am child && git rev-parse foobar > .git/spun-before
+keys: b
+wait
+expect screen contains "spin-off"
+snapshot: branch-menu
+keys: s
+wait prompt
+expect screen contains "Spin off"
+keys: spun Enter
+wait
+expect screen contains "Created branch spun"
+sh: test "$(git rev-parse --abbrev-ref HEAD)" = spun
+sh: test "$(git rev-parse spun)" = "$(cat .git/spun-before)" && test "$(git rev-parse foobar)" = "$(git rev-parse main)" && test "$(git rev-parse foobar)" != "$(git rev-parse spun)"
+snapshot: spinoff

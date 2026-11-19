@@ -332,6 +332,10 @@ pub enum PromptAction {
     Revision,
     /// Create a branch with the answered name.
     BranchCreate,
+    /// Spin the current branch's unpushed commits onto the answered branch.
+    BranchSpinoff,
+    /// Spin out the current branch's unpushed commits onto the answered branch.
+    BranchSpinout,
     /// Rename the answered branch to a second answered name.
     BranchRename,
     /// Second half of a rename: move this validated source to the answered name.
@@ -588,6 +592,8 @@ pub fn resume_prompt(
             let name = name.trim().to_owned();
             branch_action(ctx, |repo| repo.create_branch(&name), format!("Created branch {name}"))
         }
+        PromptAction::BranchSpinoff => spin_answered(ctx, answer, SpinMode::Spinoff),
+        PromptAction::BranchSpinout => spin_answered(ctx, answer, SpinMode::Spinout),
         PromptAction::BranchRename => {
             let PromptValue::Text(source) = answer else {
                 return Err(crate::Error::new("Expected a branch name"));
@@ -1108,6 +1114,8 @@ fn build() -> Registry {
         command! { id: "reset.hard", scope: Scope::MenuAction, doc: "Reset HEAD, index and worktree to a revision", status: CommandStatus::Implemented, run: reset_hard, effects: &[] },
         command! { id: "reset.keep", scope: Scope::MenuAction, doc: "Reset HEAD and the index to a revision, keeping local changes", status: CommandStatus::Implemented, run: reset_keep, effects: &[] },
         command! { id: "reset.branch", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
+        command! { id: "branch.spinoff", scope: Scope::MenuAction, doc: "Create a branch from the current branch's unpushed commits and check it out", status: CommandStatus::Implemented, run: branch_spinoff, effects: &[] },
+        command! { id: "branch.spinout", scope: Scope::MenuAction, doc: "Create a branch from the current branch's unpushed commits without switching", status: CommandStatus::Implemented, run: branch_spinout, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1747,6 +1755,141 @@ fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         )),
         ..Default::default()
     })
+}
+
+/// Prompt for the name of a branch spun off from the current branch.
+fn branch_spinoff(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Spin off", "", "New branch name"),
+            PromptAction::BranchSpinoff,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the name of a branch spun out of the current branch.
+fn branch_spinout(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Spin out", "", "New branch name"),
+            PromptAction::BranchSpinout,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Which spin variant an answered branch name applies with.
+enum SpinMode {
+    /// Check out the new branch before moving the source off its commits.
+    Spinoff,
+    /// Stay on the source branch and mixed-reset it to the merge base.
+    Spinout,
+}
+
+/// Create a branch from the answered name and spin the current branch's
+/// unpushed commits onto it, warning instead of acting on an empty answer.
+fn spin_answered(
+    ctx: &mut CommandCtx<'_>,
+    answer: PromptValue,
+    mode: SpinMode,
+) -> Result<CommandOutcome> {
+    let PromptValue::Text(name) = answer else {
+        return Err(crate::Error::new("Expected a branch name"));
+    };
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        ctx.info("A branch name is required");
+        return Ok(CommandOutcome::default());
+    }
+    let repo = match GitRepo::open(ctx.repo_path) {
+        Ok(repo) => repo,
+        Err(err) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, err.to_string()));
+            return Ok(CommandOutcome::default());
+        }
+    };
+    let Some(source) = repo.current_branch() else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Spin requires a checked-out branch",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    let (checkout, note) = match mode {
+        SpinMode::Spinoff => (true, None),
+        SpinMode::Spinout => match repo.is_dirty() {
+            Ok(false) => (false, None),
+            Ok(true) => (
+                true,
+                Some(
+                    "the working tree had changes, so HEAD moved to the new branch like a spin-off",
+                ),
+            ),
+            Err(err) => {
+                ctx.effects
+                    .push(Effect::message(MessageLevel::Warn, err.to_string()));
+                return Ok(CommandOutcome::default());
+            }
+        },
+    };
+    match spin_branch(&repo, &name, &source, checkout, note) {
+        Ok(message) => ctx.info(message),
+        Err(err) => ctx.effects.push(Effect::message(MessageLevel::Warn, err.to_string())),
+    }
+    Ok(CommandOutcome { refresh: true, ..Default::default() })
+}
+
+/// Create `new` at `source` tracking it, then move `source` off its unpushed
+/// commits to the merge base with its upstream.
+///
+/// With nothing to spin off (no upstream, or no unpushed commits) the new
+/// branch is still created and the source is left untouched. `note` is appended
+/// to the message, describing a spin-out falling back to a spin-off.
+fn spin_branch(
+    repo: &GitRepo,
+    new: &str,
+    source: &str,
+    checkout: bool,
+    note: Option<&str>,
+) -> Result<String> {
+    let upstream = repo.upstream_ref(source);
+    let merge_base = upstream
+        .as_deref()
+        .map(|upstream| (upstream, repo.merge_base(source, upstream)));
+    repo.create_tracking_branch(new, source)?;
+    let mut message = format!("Created branch {new} tracking {source}");
+    if let Some(note) = note {
+        message.push_str(&format!("; {note}"));
+    }
+    let merge_base = match merge_base {
+        None => {
+            message.push_str(&format!("; {source} has no upstream, so it was left untouched"));
+            return Ok(message);
+        }
+        Some((upstream, None)) => {
+            message.push_str(&format!(
+                "; {source} has no merge base with {upstream}, so it was left untouched"
+            ));
+            return Ok(message);
+        }
+        Some((_, Some(merge_base))) => merge_base,
+    };
+    if merge_base == repo.resolve_commit(source)? {
+        message.push_str(&format!(
+            "; {source} has no unpushed commits, so it was left untouched"
+        ));
+        return Ok(message);
+    }
+    if checkout {
+        repo.checkout_branch(new)?;
+        repo.reset_branch(source, &merge_base)?;
+    } else {
+        repo.reset_mixed(&merge_base)?;
+    }
+    message.push_str(&format!("; moved {source} to {merge_base}"));
+    Ok(message)
 }
 
 /// Prompt for the branch to reset, then for the revision to reset it to.

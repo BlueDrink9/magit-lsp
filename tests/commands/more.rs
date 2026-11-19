@@ -2203,3 +2203,259 @@ fn reset_revision_answers_cannot_select_git_options() {
         assert!(!test.session.has_pending_prompt());
     }
 }
+
+/// Invoke a single-prompt spin command and answer its branch-name prompt.
+fn spin_invoke(
+    test: &mut TestSession,
+    command: &str,
+    answer: &str,
+) -> magit_lsp::session::Execution {
+    let execution = test
+        .session
+        .start_invoke(&magit_lsp::protocol::ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: command.into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let magit_lsp::session::Execution::Prompt(prompt) = execution else {
+        panic!("{command}: expected a branch name prompt");
+    };
+    test.session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(magit_lsp::protocol::PromptValue::Text(answer.into())),
+        )
+        .unwrap()
+}
+
+/// Fixture with `foobar` checked out, one commit above its upstream `main`.
+fn spin_fixture() -> RepoFixture {
+    let (tmp, _) = RepoFixture::new()
+        .commit("base", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "foobar"]);
+    tmp.git(&["checkout", "foobar"]);
+    tmp.git(&["branch", "--set-upstream-to=main", "foobar"]);
+    std::fs::write(tmp.path().join("base.txt"), "child\n").unwrap();
+    tmp.git(&["commit", "-am", "child"]);
+    tmp
+}
+
+#[test]
+fn branch_spinoff_checks_out_a_tracking_branch_and_moves_the_source_to_the_merge_base() {
+    use magit_lsp::session::Execution;
+    let tmp = spin_fixture();
+    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let source_oid = tmp.git(&["rev-parse", "foobar"]).trim().to_owned();
+    assert_ne!(main_oid, source_oid, "the fixture must commit above its upstream");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = spin_invoke(&mut test, "branch.spinoff", "spun") else {
+        panic!("expected completion");
+    };
+    let expected = format!("Created branch spun tracking foobar; moved foobar to {main_oid}");
+    assert!(
+        message_texts(&result.effects).contains(&expected.as_str()),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "spun");
+    assert_eq!(
+        tmp.git(&["rev-parse", "spun"]).trim(),
+        source_oid,
+        "the new branch must start at the source's captured OID"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "foobar"]).trim(),
+        main_oid,
+        "the source must move to the merge base, not the upstream tip"
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.spun.merge"]).trim(),
+        "refs/heads/foobar",
+        "the new branch must track the source"
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.spun.remote"]).trim(),
+        ".",
+        "tracking the source uses the local dot remote"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "child\n",
+        "a spinoff switches at the same commit and leaves the tree unchanged"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_spinout_stays_on_the_source_and_leaves_the_spun_commit_in_the_worktree() {
+    use magit_lsp::session::Execution;
+    let tmp = spin_fixture();
+    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let source_oid = tmp.git(&["rev-parse", "foobar"]).trim().to_owned();
+    assert_ne!(main_oid, source_oid, "the fixture must commit above its upstream");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = spin_invoke(&mut test, "branch.spinout", "spun") else {
+        panic!("expected completion");
+    };
+    let expected = format!("Created branch spun tracking foobar; moved foobar to {main_oid}");
+    assert!(
+        message_texts(&result.effects).contains(&expected.as_str()),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "foobar",
+        "a spinout stays on the source branch"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "foobar"]).trim(), main_oid);
+    assert_eq!(
+        tmp.git(&["rev-parse", "spun"]).trim(),
+        source_oid,
+        "the new branch must keep the spun-off commit"
+    );
+    assert_eq!(
+        tmp.git(&["diff", "--cached", "--name-only"]).trim(),
+        "",
+        "the mixed reset must clear the index back to the merge base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "child\n",
+        "the spun-off change must stay in the worktree"
+    );
+    assert!(
+        tmp.git(&["status", "--porcelain"])
+            .lines()
+            .any(|line| line.trim() == "M base.txt"),
+        "the spun-off change must be present unstaged: {}",
+        tmp.git(&["status", "--porcelain"])
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_spinout_with_a_dirty_tree_falls_back_to_a_spinoff() {
+    use magit_lsp::session::Execution;
+    let tmp = spin_fixture();
+    std::fs::write(tmp.path().join("base.txt"), "dirty\n").unwrap();
+    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let source_oid = tmp.git(&["rev-parse", "foobar"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = spin_invoke(&mut test, "branch.spinout", "spun") else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("working tree had changes")),
+        "a dirty spinout must say it fell back to a spinoff: {:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "spun",
+        "the fallback must move HEAD to the new branch"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "foobar"]).trim(),
+        main_oid,
+        "the fallback must still move the source to the merge base"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "spun"]).trim(), source_oid);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "dirty\n",
+        "the fallback must keep the uncommitted change in the worktree"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_spinoff_without_an_upstream_creates_the_branch_and_leaves_the_source_untouched() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("base", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let head_oid = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = spin_invoke(&mut test, "branch.spinoff", "spun") else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("main has no upstream, so it was left untouched")),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(tmp.git(&["rev-parse", "spun"]).trim(), head_oid);
+    assert_eq!(
+        tmp.git(&["rev-parse", "main"]).trim(),
+        head_oid,
+        "the source must stay at its commit"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "main",
+        "the edge path must leave the source checked out"
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.spun.merge"]).trim(),
+        "refs/heads/main",
+        "the new branch must still track the source"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_spinoff_without_unpushed_commits_creates_the_branch_and_leaves_the_source_untouched() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("base", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "foobar"]);
+    tmp.git(&["checkout", "foobar"]);
+    tmp.git(&["branch", "--set-upstream-to=main", "foobar"]);
+    let head_oid = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_eq!(
+        tmp.git(&["rev-parse", "main"]).trim(),
+        head_oid,
+        "the fixture must have nothing unpushed"
+    );
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Done(result) = spin_invoke(&mut test, "branch.spinoff", "spun") else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("has no unpushed commits, so it was left untouched")),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(tmp.git(&["rev-parse", "spun"]).trim(), head_oid);
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "foobar",
+        "the edge path must leave the source checked out"
+    );
+    assert_eq!(
+        tmp.git(&["config", "branch.spun.merge"]).trim(),
+        "refs/heads/foobar",
+        "the new branch must track the source"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+

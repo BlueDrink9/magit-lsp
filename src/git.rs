@@ -515,6 +515,50 @@ impl GitRepo {
         self.run(&["branch", name.as_str()]).map(|_| ())
     }
 
+    /// Create branch `new` at `startpoint`, setting `startpoint` as its
+    /// upstream.
+    ///
+    /// Both answers are guarded here: the new name is validated and a
+    /// startpoint Git would parse as an option is refused, so an answer can
+    /// never select a different `git branch` operation.
+    pub fn create_tracking_branch(&self, new: &str, startpoint: &str) -> Result<()> {
+        let new = self.validate_branch_name(new)?;
+        Self::reject_option_like("start point", startpoint)?;
+        self.run(&["branch", "--track", new.as_str(), "--", startpoint])
+            .map(|_| ())
+    }
+
+    /// Switch the worktree to `name` without changing the checked-out commit.
+    ///
+    /// Uses `git switch` rather than `git checkout`, so the validated branch
+    /// name can never be read as a path.
+    pub fn checkout_branch(&self, name: &str) -> Result<()> {
+        let name = self.validate_branch_name(name)?;
+        self.run(&["switch", name.as_str()]).map(|_| ())
+    }
+
+    /// Full ref name of the configured upstream of `branch`, or `None` when it
+    /// has no upstream.
+    pub fn upstream_ref(&self, branch: &str) -> Option<String> {
+        let branch = self.validate_branch_name(branch).ok()?;
+        let spec = format!("{branch}@{{upstream}}");
+        self.run(&["rev-parse", "--symbolic-full-name", &spec])
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
+    /// Most recent commit shared by `left` and `right`, or `None` when Git
+    /// finds no merge base.
+    pub fn merge_base(&self, left: &str, right: &str) -> Option<String> {
+        Self::reject_option_like("revision", left).ok()?;
+        Self::reject_option_like("revision", right).ok()?;
+        self.run(&["merge-base", left, right])
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
     /// Rename `source` to `target` after validating both names.
     pub fn rename_branch(&self, source: &str, target: &str) -> Result<()> {
         let source = self.validate_branch_name(source)?;
