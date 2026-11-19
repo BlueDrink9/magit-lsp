@@ -175,7 +175,7 @@
 | `magit-tag-delete` | `t k` | `tag.delete` | Implemented | tag |
 | `magit-tag-prune` | `t p` | `tag.prune` | Planned R-6.3 | tag |
 | `-` | `?` | `open.dispatch` | Implemented | tag |
-| `magit-branch-reset` | `X b` | `reset.branch` | Planned R-6.3 | reset |
+| `magit-branch-reset` | `X b` | `reset.branch` | Implemented | reset |
 | `magit-file-checkout` | `X f` | `reset.file` | Planned R-6.3 | reset |
 | `magit-reset-mixed` | `X m` | `reset.mixed` | Implemented | reset |
 | `magit-reset-soft` | `X s` | `reset.soft` | Implemented | reset |

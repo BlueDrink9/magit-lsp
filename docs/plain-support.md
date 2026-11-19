@@ -221,7 +221,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `remote.rename` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `remote.unshallow` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.update-default` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `reset.branch` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `reset.branch` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `reset.file` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `reset.hard` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `reset.index` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
