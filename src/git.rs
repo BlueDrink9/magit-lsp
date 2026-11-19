@@ -608,10 +608,13 @@ impl GitRepo {
     }
 
     /// Store `description` in Git's configuration for the named branch.
+    /// The `--` terminator keeps dash-leading prose a stored value instead of
+    /// letting it select a `git config` operation.
     pub fn set_branch_description(&self, name: &str, description: &str) -> Result<()> {
         let name = self.validate_branch_name(name)?;
         let key = format!("branch.{name}.description");
-        self.run(&["config", key.as_str(), description]).map(|_| ())
+        self.run(&["config", "--", key.as_str(), description])
+            .map(|_| ())
     }
 
     /// Check an external author-date expression without changing repository state.

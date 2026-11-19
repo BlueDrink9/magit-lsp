@@ -882,6 +882,68 @@ fn branch_description_prompts_twice_and_writes_config() {
         tmp.git(&["config", "branch.main.description"]).trim(),
         "tidy work"
     );
+    // An option-like answer must be stored literally. Seed a description first
+    // so a misparsed `git config ... --unset` would visibly delete it.
+    tmp.git(&["config", "branch.main.description", "seeded description"]);
+    tmp.git(&["config", "--local", "magit.test.marker", "keep"]);
+    let refs_before = tmp.git(&["for-each-ref"]);
+    let mut describe = |answer: &str| {
+        let Execution::Prompt(first) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: "branch.configure-description".into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected branch name prompt");
+        };
+        let Execution::Prompt(second) = test
+            .session
+            .resume_prompt(
+                &first.prompt_id,
+                Some(PromptValue::Text("main".into())),
+            )
+            .unwrap()
+        else {
+            panic!("expected description prompt");
+        };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(
+                &second.prompt_id,
+                Some(PromptValue::Text(answer.into())),
+            )
+            .unwrap()
+        else {
+            panic!("expected completion");
+        };
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Set description for main")
+    };
+    for answer in ["--unset", "--get"] {
+        assert!(describe(answer), "{answer} must report success");
+        assert_eq!(
+            tmp.git(&["config", "branch.main.description"]).trim(),
+            answer,
+            "an option-like description must be stored literally"
+        );
+    }
+    assert_eq!(
+        tmp.git(&["for-each-ref"]),
+        refs_before,
+        "descriptions must not change refs"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--local", "magit.test.marker"]).trim(),
+        "keep",
+        "unrelated local configuration must be unchanged"
+    );
     assert!(!test.session.has_pending_prompt());
 }
 
