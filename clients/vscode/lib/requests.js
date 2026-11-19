@@ -2,12 +2,10 @@
 
 const vscode = require('vscode');
 
-const render = require('./render');
-const prompt = require('./prompt');
-const pick = require('./pick');
-const effects = require('./effects');
-const menus = require('./menus');
-const views = require('./views');
+const { applyRender } = require('./render');
+const { answerFor: answerPrompt, promptItems, customChoice } = require('./prompt');
+const { answerFor: answerPick, pickItems } = require('./pick');
+const { applyEffects } = require('./effects');
 const { store } = require('./store');
 const { message } = require('./util');
 
@@ -42,7 +40,7 @@ async function press(viewId, key, info) {
     const response = /** @type {import('../types/protocol').ViewInvokeResponse.Root} */ (
       await client.sendRequest('view/key', params)
     );
-    await effects.applyEffects(response && response.effects, viewId);
+    await applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/key ${key} failed: ${message(error)}`);
     vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);
@@ -83,7 +81,7 @@ async function invoke(viewId, command, args, info) {
     const response = /** @type {import('../types/protocol').ViewInvokeResponse.Root} */ (
       await client.sendRequest('view/invoke', params)
     );
-    await effects.applyEffects(response && response.effects, viewId);
+    await applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/invoke ${command} failed: ${message(error)}`);
     vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);
@@ -95,7 +93,11 @@ async function invoke(viewId, command, args, info) {
  *
  * @param {import('../types/protocol').ViewRender.Root} params
  */
-function applyRender(params) {
+function applyRenderNotification(params) {
+  // `menus` and `views` load through this module's consumers, so resolve their
+  // exports after the require cycle has finished initialising.
+  const { updateQuickPick } = require('./menus');
+  const { isMenuKind, activateView, applyCursor } = require('./views');
   if (!params || !params.viewId) {
     return;
   }
@@ -106,7 +108,7 @@ function applyRender(params) {
     return;
   }
 
-  const result = render.applyRender(state.lines, state.version, params);
+  const result = applyRender(state.lines, state.version, params);
   if (result.status === 'resync') {
     void resync(state.id);
     return;
@@ -133,14 +135,14 @@ function applyRender(params) {
   if (result.status === 'full' || result.status === 'edits') {
     store.documentsChanged.fire(state.uri);
   }
-  if (state.menu || views.isMenuKind(state.descriptor.kind)) {
-    menus.updateQuickPick(state);
+  if (state.menu || isMenuKind(state.descriptor.kind)) {
+    updateQuickPick(state);
   }
   if (state.id === store.activeViewId) {
-    views.activateView(state);
+    activateView(state);
   }
   if (params.cursor) {
-    views.applyCursor(state, params.cursor);
+    applyCursor(state, params.cursor);
   }
   const client = store.client;
   if (client) {
@@ -201,16 +203,16 @@ async function promptFor(params) {
       password: Boolean(params.secret),
       ignoreFocusOut: true,
     });
-    return prompt.answerFor(params, value);
+    return answerPrompt(params, value);
   }
 
   if (params.kind === 'confirm' || params.kind === 'choice') {
-    const picked = await vscode.window.showQuickPick(prompt.promptItems(params), {
+    const picked = await vscode.window.showQuickPick(promptItems(params), {
       title: params.title,
       placeHolder: params.detail || params.title,
       ignoreFocusOut: true,
     });
-    const answer = prompt.answerFor(params, picked);
+    const answer = answerPrompt(params, picked);
     if (!answer.custom) {
       return answer;
     }
@@ -219,12 +221,12 @@ async function promptFor(params) {
       placeHolder: params.placeholder || 'Value',
       ignoreFocusOut: true,
     });
-    return prompt.customChoice(text);
+    return customChoice(text);
   }
 
   if (params.kind === 'multiChoice') {
     const preselected = new Set(params.preselected || []);
-    const items = prompt.promptItems(params).map((row) => ({
+    const items = promptItems(params).map((row) => ({
       ...row,
       picked: preselected.has(row.id),
     }));
@@ -234,7 +236,7 @@ async function promptFor(params) {
       canPickMany: true,
       ignoreFocusOut: true,
     });
-    return prompt.answerFor(params, picked);
+    return answerPrompt(params, picked);
   }
 
   // An unknown kind cannot be repaired client-side; cancel it.
@@ -291,12 +293,12 @@ async function pickFor(params) {
     return { cancelled: true, selected: [] };
   }
 
-  const picked = await vscode.window.showQuickPick(pick.pickItems(params), {
+  const picked = await vscode.window.showQuickPick(pickItems(params), {
     title: params.prompt,
     canPickMany: Boolean(params.multi),
     ignoreFocusOut: true,
   });
-  return pick.answerFor(params, picked);
+  return answerPick(params, picked);
 }
 
 /**
@@ -315,7 +317,7 @@ async function resync(viewId) {
       await client.sendRequest('view/resync', { viewId })
     );
     if (result) {
-      applyRender(result);
+      applyRenderNotification(result);
     }
   } catch (error) {
     store.output.appendLine(`view/resync failed: ${message(error)}`);
@@ -324,7 +326,7 @@ async function resync(viewId) {
 
 exports.press = press;
 exports.invoke = invoke;
-exports.applyRender = applyRender;
+exports.applyRender = applyRenderNotification;
 exports.handlePrompt = handlePrompt;
 exports.promptFor = promptFor;
 exports.handlePick = handlePick;
