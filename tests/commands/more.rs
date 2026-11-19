@@ -2441,75 +2441,101 @@ fn reset_hard_on_a_dirty_tree_declines_then_discards_when_confirmed() {
 fn reset_hard_confirmation_refuses_edits_and_a_same_oid_branch_switch() {
     use magit_lsp::protocol::PromptValue;
     use magit_lsp::session::Execution;
-    let (tmp, _) = RepoFixture::new()
-        .commit("init", [("base.txt", "base\n")])
-        .commit("second", [("second.txt", "second\n")])
-        .build();
-    tmp.git(&["branch", "other"]);
-    std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
-    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
-    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
-    test.ack();
-    let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
-        panic!("a dirty tree must ask for confirmation");
-    };
-    // Edit a tracked file and switch to another branch at the same commit while
-    // the destructive confirmation is open.
-    std::fs::write(tmp.path().join("second.txt"), "edited while open\n").unwrap();
-    tmp.git(&["checkout", "other"]);
-    assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), second);
-    assert_eq!(
-        tmp.git(&["symbolic-ref", "HEAD"]).trim(),
-        "refs/heads/other",
-        "the fixture must switch branches without moving HEAD's commit"
-    );
-    let snapshot = |tmp: &RepoFixture| {
-        (
-            tmp.git(&[
-                "for-each-ref",
-                "--format=%(refname) %(objectname)",
-                "refs/heads/",
-                "refs/tags/",
-            ]),
-            tmp.git(&["symbolic-ref", "HEAD"]) + &tmp.git(&["rev-parse", "HEAD"]),
-            tmp.git(&["ls-files", "--stage", "-z"]),
-            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap()
-                + &std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
-        )
-    };
-    let after_change = snapshot(&tmp);
-    let Execution::Done(refused) = test
-        .session
-        .resume_prompt(
-            &confirm.prompt_id,
-            Some(PromptValue::Text("yes".into())),
-        )
-        .unwrap()
-    else {
-        panic!("expected completion");
-    };
-    let texts = message_texts(&refused.effects);
-    assert!(
-        texts.contains(&"Repository changed while the prompt was open; try again"),
-        "{:?}",
-        refused.effects
-    );
-    assert!(
-        !texts.contains(&"Reset to HEAD~1 (hard)"),
-        "a refused confirmation must not report a reset: {:?}",
-        refused.effects
-    );
-    assert_eq!(
-        snapshot(&tmp),
-        after_change,
-        "refusal must preserve the exact post-change refs, index and worktree"
-    );
-    assert_eq!(
-        tmp.git(&["rev-parse", "HEAD"]).trim(),
-        second,
-        "refusal must leave HEAD's commit in place"
-    );
-    assert!(!test.session.has_pending_prompt());
+    // Each case applies exactly one change while the confirmation is open.
+    let cases: [(&str, fn(&RepoFixture)); 2] = [
+        ("edit", |tmp| {
+            std::fs::write(tmp.path().join("second.txt"), "edited while open\n").unwrap();
+        }),
+        ("same-OID branch switch", |tmp| {
+            tmp.git(&["checkout", "other"]);
+        }),
+    ];
+    for (case, change) in cases {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("base.txt", "base\n")])
+            .commit("second", [("second.txt", "second\n")])
+            .build();
+        tmp.git(&["branch", "other"]);
+        std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+        let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
+            panic!("a dirty tree must ask for confirmation ({case})");
+        };
+        let snapshot = |tmp: &RepoFixture| {
+            (
+                tmp.git(&[
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname)",
+                    "refs/heads/",
+                    "refs/tags/",
+                ]),
+                tmp.git(&["symbolic-ref", "HEAD"]) + &tmp.git(&["rev-parse", "HEAD"]),
+                tmp.git(&["ls-files", "--stage", "-z"]),
+                std::fs::read_to_string(tmp.path().join("base.txt")).unwrap()
+                    + &std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+            )
+        };
+        let before_change = snapshot(&tmp);
+        change(&tmp);
+        assert_ne!(
+            snapshot(&tmp),
+            before_change,
+            "{case}: the change under test must take effect"
+        );
+        assert_eq!(
+            tmp.git(&["rev-parse", "HEAD"]).trim(),
+            second,
+            "{case}: the change under test must not move HEAD's commit"
+        );
+        if case == "same-OID branch switch" {
+            assert_eq!(
+                tmp.git(&["symbolic-ref", "HEAD"]).trim(),
+                "refs/heads/other",
+                "the fixture must switch branches without moving HEAD's commit"
+            );
+        } else {
+            assert_eq!(
+                tmp.git(&["symbolic-ref", "HEAD"]).trim(),
+                "refs/heads/main",
+                "{case}: an edit alone must leave the checked-out branch in place"
+            );
+        }
+        let after_change = snapshot(&tmp);
+        let Execution::Done(refused) = test
+            .session
+            .resume_prompt(
+                &confirm.prompt_id,
+                Some(PromptValue::Text("yes".into())),
+            )
+            .unwrap()
+        else {
+            panic!("expected completion ({case})");
+        };
+        let texts = message_texts(&refused.effects);
+        assert!(
+            texts.contains(&"Repository changed while the prompt was open; try again"),
+            "{case}: {:?}",
+            refused.effects
+        );
+        assert!(
+            !texts.contains(&"Reset to HEAD~1 (hard)"),
+            "{case}: a refused confirmation must not report a reset: {:?}",
+            refused.effects
+        );
+        assert_eq!(
+            snapshot(&tmp),
+            after_change,
+            "{case}: refusal must preserve the exact post-change refs, index and worktree"
+        );
+        assert_eq!(
+            tmp.git(&["rev-parse", "HEAD"]).trim(),
+            second,
+            "{case}: refusal must leave HEAD's commit in place"
+        );
+        assert!(!test.session.has_pending_prompt(), "{case}");
+    }
 }
 
 #[test]

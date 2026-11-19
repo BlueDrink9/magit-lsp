@@ -422,8 +422,6 @@ pub enum PromptAction {
         label: String,
         /// The commit `label` resolved to when the confirmation was presented.
         commit: String,
-        /// HEAD's symbolic ref when the confirmation was presented; `None` when detached.
-        head: Option<String>,
         /// Repository content captured when the confirmation was presented.
         fingerprint: RepositoryFingerprint,
     },
@@ -898,7 +896,6 @@ pub fn resume_prompt(
         PromptAction::ResetHardConfirm {
             label,
             commit,
-            head,
             fingerprint,
         } => {
             let PromptValue::Text(answer) = answer else {
@@ -909,8 +906,7 @@ pub fn resume_prompt(
                 return Ok(CommandOutcome::default());
             }
             let repo = GitRepo::open(ctx.repo_path)?;
-            let (_, current_head) = repo.head_identity()?;
-            if current_head != head || RepositoryFingerprint::capture(&repo)? != fingerprint {
+            if RepositoryFingerprint::capture(&repo)? != fingerprint {
                 ctx.info("Repository changed while the prompt was open; try again");
                 return Ok(CommandOutcome::default());
             }
@@ -1794,7 +1790,6 @@ fn reset_answered(
                         return Ok(CommandOutcome::default());
                     }
                 };
-                let (_, head) = repo.head_identity()?;
                 let fingerprint = RepositoryFingerprint::capture(&repo)?;
                 return Ok(CommandOutcome {
                     prompt: Some((
@@ -1802,7 +1797,6 @@ fn reset_answered(
                         PromptAction::ResetHardConfirm {
                             label: revision,
                             commit,
-                            head,
                             fingerprint,
                         },
                     )),
