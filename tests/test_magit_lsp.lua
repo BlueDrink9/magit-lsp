@@ -2103,7 +2103,7 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
   MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
 end
 
-T['shared render vectors apply through the Lua view adapter'] = function()
+T['shared client contract vectors apply through the Neovim adapter'] = function()
   local fixture = vim.json.decode(table.concat(vim.fn.readfile('tests/data/client-contracts.json'), '\n'))
   child.lua(string.format('VECTORS = %s', vim.inspect(fixture.renders)))
   local results = child.lua([[
@@ -2152,6 +2152,19 @@ T['shared render vectors apply through the Lua view adapter'] = function()
     else
       MiniTest.expect.equality(result.ack, nil, vector.name .. ': no ACK')
       MiniTest.expect.equality(result.resync, vector.render.viewId, vector.name .. ': resync')
+    end
+  end
+  local version = require('magit-lsp.version')
+  for _, vector in ipairs(fixture.advertisements) do
+    local err = version.protocol_error(vector.result, vector.required)
+    if vector.accepted then
+      MiniTest.expect.equality(err, nil, vector.name .. ': accepted advertisement')
+    else
+      MiniTest.expect.equality(type(err), 'string', vector.name .. ': rejected advertisement')
+      for _, fragment in ipairs(vector.errorContains) do
+        MiniTest.expect.equality(err ~= nil and err:find(fragment, 1, true) ~= nil, true,
+          vector.name .. ': error contains ' .. fragment)
+      end
     end
   end
 end
