@@ -1,8 +1,17 @@
 # magit-lsp
 
+[![GitHub last commit](https://img.shields.io/github/last-commit/BlueDrink9/magit-lsp?label=last%20commit)](https://github.com/BlueDrink9/magit-lsp)
+[![Licensing: GPL-3.0-only / Apache-2.0](https://img.shields.io/badge/licensing-GPL--3.0--only%20%2F%20Apache--2.0-blue)](LICENSING.md)
+
 An LSP-based Git interface: a server-owned structured status document with
 Neovim and VSCode clients. Features and native workflow limitations are listed
 below; this is not a claim of release or registry readiness.
+
+The purpose is a Git interface whose state, structure, rendering and keys live
+in the server, so a client only displays server-rendered text, forwards input
+and acknowledges versions. That gives every client the same behaviour and gives
+other editors one specification to implement. Like Magit and Neogit, repository
+work shells out to the `git` CLI rather than using a native Git library.
 
 See [client installation and quickstart](docs/CLIENT_INSTALL.md),
 [native screenshot capture/manual fallback](docs/SCREENSHOTS.md), and the
@@ -59,7 +68,55 @@ supports. The tested clients are the bundled Neovim client (Lua and UI scenarios
 `make test`) and the VS Code extension (`make vscode-test`). The Helix TOML in
 the specification is a reference configuration, not a tested client.
 
+## Quickstart
+
+Both clients launch an external server. Nothing is published yet: there is no
+GitHub Release asset, Marketplace, Open VSX or registry install, and the VS Code
+extension is built from source or a locally packaged VSIX (`make vscode-package`).
+Full native-package, lazy.nvim and source-extension steps are in
+[client installation and quickstart](docs/CLIENT_INSTALL.md).
+
+Build the server from a checkout first; binary users do not need Rust once an
+approved asset exists.
+
+```sh
+git clone https://github.com/BlueDrink9/magit-lsp.git
+cd magit-lsp
+cargo build --release --locked
+```
+
+### Neovim (0.11+)
+
+Run Neovim inside a Git repository and start the client from the same checkout;
+server discovery finds `target/release/magit-lsp`:
+
+```vim
+:lua require('magit-lsp').setup()
+```
+
+`status` opens in place and `g r` refreshes it in the default `vim` profile.
+For a native package or lazy.nvim install (a clone under your Neovim data
+directory, with `cmd` pointing at the installed binary), copy the tested snippets
+in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages).
+
+### VS Code (1.85+)
+
+Install the locked extension dependencies (Node.js 22+ and pnpm) and start an
+Extension Development Host on a repository:
+
+```sh
+npm --prefix clients/vscode ci
+code --new-window --extensionDevelopmentPath="$PWD/clients/vscode" /absolute/path/to/repo
+```
+
+Then set `magit-lsp.server.path` to the absolute server executable (or
+`magit-lsp.server.source` to `system`/`managed`) and run **Magit: Open Status**
+from the Command Palette. See the
+[VS Code source quickstart](docs/CLIENT_INSTALL.md#vscode-source-quickstart-no-published-install).
+
 ## Features
+
+### Implemented today
 
 - **Status buffer**: branch header plus `Staged changes`, `Unstaged changes`,
   and `Untracked files` sections (with counts), each file expandable into its
@@ -115,6 +172,24 @@ the specification is a reference configuration, not a tested client.
   filters. In the log menu, `c` opens a select-and-copy picker; use `Enter` to
   confirm and copy the selected commit ID, or `Escape`/`q` to cancel and return
   without copying. Selection supports the configured multi-selection controls.
+
+### Planned
+
+The generated [parity reference](docs/parity.md) is the authoritative
+implemented-versus-Planned list: every Magit menu item that is not built still
+appears in its menu, greyed out, and reports its roadmap item when pressed.
+Planned work is not advertised above. In summary:
+
+- read views for revisions, diffs, refs, reflog and line history
+  (R-5.1–R-5.4; T049–T057 in [TASKS.md](TASKS.md#7-numbered-implementation-queue));
+- most branch, push, pull, fetch, merge, rebase, cherry-pick and stash actions —
+  `docs/parity.md` marks each remaining row `Planned` with its roadmap item;
+- blame, submodule, worktree, bisect, patch and ignore workflows (R-8.x);
+- optional [Plain keys](docs/plain-support.md) for editors that cannot bind code
+  actions to single keys (Phase 9; T034–T039).
+
+Menus already show these as `Planned`, so a missing action is visible in the UI
+rather than implied to work.
 
 ## Requirements
 
@@ -494,6 +569,48 @@ rebind in `config.toml`.
 | `Escape`, `ctrl+c` | Cancel                                           |
 | `q`        | Quit                                                     |
 
+## Compared with Neogit and Edamagit
+
+[Neogit](https://github.com/NeogitOrg/neogit) is a Neovim Git interface inspired
+by Magit: a Lua plugin, MIT-licensed, that shells out to the `git` executable and
+offers popups for commit, branch, rebase, stash, tag and more. Its menus can use
+Telescope, fzf-lua, mini.pick, snacks.nvim or `vim.ui.select` for selection, and
+its README notes that many popups use the item under the cursor or the visual
+selection. [Edamagit](https://github.com/kahole/edamagit) is a keyboard-driven VS
+Code extension, "Magit for VSCode", published on the VS Code Marketplace and Open
+VSX, with popups, a dispatch menu, VSCodeVim support and Forge features; its
+README lists remaining work such as more diffing and logging, bisect, patches and
+subtrees.
+
+Both are established, editor-specific interfaces with much broader implemented
+action coverage than magit-lsp's current parity table. Comparing them fairly
+means evaluating the three candidate differences rather than asserting an
+advantage:
+
+- **Key-handling speed.** magit-lsp's keymap lives in the server: the client
+  forwards each key as a `view/key` step and renders the result. Neogit and
+  Edamagit resolve keys in the editor process, so magit-lsp adds an LSP round
+  trip per key. No benchmark in this repository compares the three and no speed
+  claim is made; the design benefit is identical key semantics in every client,
+  not lower latency.
+- **Scriptable command interface.** `magit-lsp keymap` and `magit-lsp parity`
+  print the keymap manifest and the Magit parity table without speaking LSP, and
+  the running server exposes actions as `view/invoke`/`view/key` requests.
+  Neogit and Edamagit are driven through their editor's API (Lua API and VS Code
+  commands). That is a difference in where the interface lives, not a measured
+  advantage.
+- **Commit at the cursor.** Neogit documents that popups consume the item under
+  the cursor or a visual selection. magit-lsp's log currently offers
+  select-and-copy of a commit ID, while most commit actions that would consume a
+  commit at point are still `Planned` (R-4.1 in `docs/parity.md`). This is not an
+  advantage today.
+
+For Neovim specifically, Neogit is the more complete choice today and needs no
+external process. magit-lsp's reason to exist is the shared server and the other
+clients, not a Neovim-only feature: if you work across Neovim and VS Code, or
+want to implement another client against one specification, that is the case it
+is built for.
+
 ## Command parity
 
 Every Magit menu item we have not built yet is still listed in its menu with
@@ -523,3 +640,22 @@ are Apache-2.0-licensed; see [LICENSING.md](LICENSING.md) and
 [LICENCES/Apache-2.0](LICENCES/Apache-2.0). Third-party dependencies retain their own licenses.
 
 Inspired by Magit for Emacs. This project is an independent implementation and is not affiliated with the Magit project.
+
+## How this code was made and tested
+
+I direct this project: I set the requirements, made the design decisions,
+reviewed the changes and ran the release checks. The code was written with
+substantial AI-agent assistance under that direction, and nothing lands without
+my review.
+
+Testing is automated where it can be: Rust unit and integration suites, native
+Neovim tests through mini.test, Node tests for the VS Code extension, real
+interactive Neovim UI scenarios for user-visible behaviour, and release-contract
+checks for the installer and package layout (see [TESTING.md](docs/TESTING.md)).
+Native verification is done by a person and is Linux-only today; Windows and
+macOS are not verified locally, and checks for them remain follow-up work. The
+[release gates](docs/RELEASING.md) list what is still unproven.
+
+These tests catch regressions; they are not a substitute for human review. A
+green suite does not make the project correct, and the known limits are listed
+rather than hidden.
