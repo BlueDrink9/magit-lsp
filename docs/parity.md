@@ -43,11 +43,11 @@
 | `magit-branch-and-checkout` | `b c` | `branch.create-and-checkout` | Planned R-6.1 | branch |
 | `magit-branch-spinoff` | `b s` | `branch.spinoff` | Planned R-6.1 | branch |
 | `magit-worktree-checkout` | `b w` | `branch.worktree-checkout` | Planned R-6.1 | branch |
-| `magit-branch-create` | `b n` | `branch.create` | Planned R-6.1 | branch |
+| `magit-branch-create` | `b n` | `branch.create` | Implemented | branch |
 | `magit-branch-spinout` | `b S` | `branch.spinout` | Planned R-6.1 | branch |
 | `magit-worktree-branch` | `b W` | `branch.worktree-create` | Planned R-6.1 | branch |
 | `magit-branch-configure` | `b C` | `branch.configure` | Planned R-6.1 | branch |
-| `magit-branch-rename` | `b m` | `branch.rename` | Planned R-6.1 | branch |
+| `magit-branch-rename` | `b m` | `branch.rename` | Implemented | branch |
 | `magit-branch-reset` | `b x` | `branch.reset` | Planned R-6.1 | branch |
 | `magit-branch-delete` | `b k` | `branch.delete` | Planned R-6.1 | branch |
 | `magit-branch-shelve` | `b h` | `branch.shelve` | Planned R-6.1 | branch |

@@ -24,11 +24,11 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `branch.checkout-remote` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.configure` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.configure-description` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.create` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.create` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.create-and-checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.delete` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.orphan` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.rename` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.rename` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.reset` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.shelve` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.spinoff` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
