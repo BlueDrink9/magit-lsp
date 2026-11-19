@@ -15,9 +15,9 @@ importers:
         specifier: ^9.0.1
         version: 9.0.1
     devDependencies:
-      '@johnnymorganz/stylua-bin':
-        specifier: 2.6.0
-        version: 2.6.0
+      '@oxc-parser/binding-linux-x64-gnu':
+        specifier: ^0.159.0
+        version: 0.159.0
       '@types/node':
         specifier: ^20.19.43
         version: 20.19.43
@@ -44,36 +44,6 @@ packages:
 
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
-
-  '@johnnymorganz/stylua-bin-darwin-arm64@2.6.0':
-    resolution: {integrity: sha512-1ZNdL7CV/dvxslxL31g+6EZnmBkU1SCP1tIItYoBJa2VlCkZMD615IqDybwlRWV6+ezeGd7ThZnQXotC6v6E9g==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@johnnymorganz/stylua-bin-darwin-x64@2.6.0':
-    resolution: {integrity: sha512-t7H7ppnMXTjGBMCth5x1WnzCMCVi9yUy0swuftoD0q9y+0GUClW4nolrqXqZY+GuXjPe8aJHxdWtVJHVai/n+g==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@johnnymorganz/stylua-bin-linux-arm64@2.6.0':
-    resolution: {integrity: sha512-y1LrXAUPxK549l8yiOMLmlddyLrQGDWKMbIMAumHNoBxYqe2jjBBfJ4hyATRsCqldxGLYFNjeJdcdiBxlM8nrw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@johnnymorganz/stylua-bin-linux-x64@2.6.0':
-    resolution: {integrity: sha512-VxwSG6XqTvwe6ELV0YwWEo/PASR0tqwUhHWfBxhY4bBtYR7OB6PxJMXsFAl7m5MZKnFFl1TzUCcXY3au6gSGTA==}
-    cpu: [x64]
-    os: [linux]
-
-  '@johnnymorganz/stylua-bin-win32-x64@2.6.0':
-    resolution: {integrity: sha512-XGzxXAXgbUdiAZNZFKgU8M3jfsTkNv+YbnfJnC2OL3ZG/sfS2FqJeIU0g+PhdLyubbdaQPMjBQYdjh+PI2ITpw==}
-    cpu: [x64]
-    os: [win32]
-
-  '@johnnymorganz/stylua-bin@2.6.0':
-    resolution: {integrity: sha512-cg3vKROljsCbPGIIxOuo+zNAulOjzarSzC6jijT8x3Y69NdFPjFktV8l3pxUBOh8hM9lRJheJ71qGCQVzBFQQw==}
-    engines: {node: '>=10'}
-    hasBin: true
 
   '@napi-rs/wasm-runtime@1.2.7':
     resolution: {integrity: sha512-zJccwplOAbgfZju95IUHazLnx9RAPtPN2YGJXI6UbrgeaR9QfPjGrQL6ERkSAtnVCA4Q+83ApGyaX5zdpCaKkQ==}
@@ -162,6 +132,12 @@ packages:
 
   '@oxc-parser/binding-linux-x64-gnu@0.156.0':
     resolution: {integrity: sha512-jRfwpN4xKrsEpC+SgrUPY5k0mINYZn7aLrt22I3uQFoumiSgHgsLYgS9f84ntbkvSydH4HiwGuDa2b1XCHaJzw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    cpu: [x64]
+    os: [linux]
+
+  '@oxc-parser/binding-linux-x64-gnu@0.159.0':
+    resolution: {integrity: sha512-dH2vcVJi2sqSd2S51WB/LXyoJKho+TL7UoCDOuMZ+0mggFF9Gf4fjspo89hZnT/KrINBJg3UsGlfogHGHUmQNA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
@@ -440,29 +416,6 @@ snapshots:
       tslib: 2.9.1
     optional: true
 
-  '@johnnymorganz/stylua-bin-darwin-arm64@2.6.0':
-    optional: true
-
-  '@johnnymorganz/stylua-bin-darwin-x64@2.6.0':
-    optional: true
-
-  '@johnnymorganz/stylua-bin-linux-arm64@2.6.0':
-    optional: true
-
-  '@johnnymorganz/stylua-bin-linux-x64@2.6.0':
-    optional: true
-
-  '@johnnymorganz/stylua-bin-win32-x64@2.6.0':
-    optional: true
-
-  '@johnnymorganz/stylua-bin@2.6.0':
-    optionalDependencies:
-      '@johnnymorganz/stylua-bin-darwin-arm64': 2.6.0
-      '@johnnymorganz/stylua-bin-darwin-x64': 2.6.0
-      '@johnnymorganz/stylua-bin-linux-arm64': 2.6.0
-      '@johnnymorganz/stylua-bin-linux-x64': 2.6.0
-      '@johnnymorganz/stylua-bin-win32-x64': 2.6.0
-
   '@napi-rs/wasm-runtime@1.2.7(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
     dependencies:
       '@emnapi/core': 1.11.2
@@ -511,6 +464,8 @@ snapshots:
 
   '@oxc-parser/binding-linux-x64-gnu@0.156.0':
     optional: true
+
+  '@oxc-parser/binding-linux-x64-gnu@0.159.0': {}
 
   '@oxc-parser/binding-linux-x64-musl@0.156.0':
     optional: true
