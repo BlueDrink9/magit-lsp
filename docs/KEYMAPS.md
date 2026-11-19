@@ -158,6 +158,18 @@ planned.
 Creating a branch leaves the current branch checked out; renaming the checked-out
 branch renames it in place.
 
+#### 5.4.3 Tag menu: supported subset
+
+Open the tag menu with `t` from status. These menu keys are identical in both
+profiles.
+
+| Keys | Supported action |
+| --- | --- |
+| `t` | Create a tag at `HEAD` |
+| `k` | Delete a tag, leaving Git's refusal of a missing tag as a message |
+
+Tag release and prune remain planned.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

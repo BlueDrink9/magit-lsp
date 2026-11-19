@@ -530,6 +530,18 @@ impl GitRepo {
         self.run(&["branch", "-d", name.as_str()]).map(|_| ())
     }
 
+    /// Create a tag at HEAD. Tag names are not validated here; Git refuses
+    /// invalid or duplicate names itself.
+    pub fn create_tag(&self, name: &str) -> Result<()> {
+        self.run(&["tag", name]).map(|_| ())
+    }
+
+    /// Delete `name`, leaving Git's refusal of a missing tag to surface as its
+    /// own error.
+    pub fn delete_tag(&self, name: &str) -> Result<()> {
+        self.run(&["tag", "-d", name]).map(|_| ())
+    }
+
     /// Store `description` in Git's configuration for the named branch.
     pub fn set_branch_description(&self, name: &str, description: &str) -> Result<()> {
         let name = self.validate_branch_name(name)?;

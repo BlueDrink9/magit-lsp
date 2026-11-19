@@ -1,0 +1,14 @@
+# Early T042: creating a tag from the status tag menu stays on HEAD.
+fixture: modified-two-files
+---
+keys: t
+wait
+expect screen contains "git tag"
+keys: t
+wait prompt
+expect screen contains "Create tag"
+keys: v1 Enter
+wait
+expect screen contains "Created tag v1"
+sh: test "$(git tag --list)" = v1
+sh: test "$(git rev-parse --abbrev-ref HEAD)" = main

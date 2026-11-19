@@ -464,6 +464,10 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Early-delivery boundary: the `b C` configure... popup remains Planned R-6.1; the Phase 10 T043 line stays unticked until the full configure scope lands; checkout remains T067.
   - Done: `a6e5eb8`.
 - [ ] **Early T042 — remote-config-tags (cheap commands).** Deliver the full T042 scope now (TASKS_PART_SEVEN.md:769): lightweight tag create/delete plus remote configuration — verify the exact remote rows in the parity table (add/rename/remove/prune) and implement those. Same template and evidence pattern; tick the Phase 10 T042 line on full verified scope.
+  - Verified (tags, part 1/3, A1) — `grep -n 'id: "tag\.' src/commands.rs` → `command!` registrations at `:910`/`:911`; `src/menus/tag.rs:26`/`:33` clear the `t`/`k` markers while `tag.release` (`:27`) and `tag.prune` (`:34`) keep `R-6.3`; KEYMAPS.md §5.4.3 documents `t t` and `t k`.
+  - Verified (tags, part 1/3, A2) — `make test-rust FILTER="--test commands"` → exit 0; `make test-rust FILTER="--test commands tag_"` → 3 passed, covering create-at-HEAD without switching, delete of an existing tag, and Git's "not found" refusal for a missing tag.
+  - Verified (tags, part 1/3, A3) — `make ui-file FILE=tests/ui/scenarios/tag-create.scn` → exit 0; menu-driven `t t` creates `v1` while `main` stays checked out; no snapshot reflects tag rows, so none changed.
+  - Part 2/3 (remote configuration: add/rename/remove/prune) and part 3/3 remain; the Phase 10 T042 line stays unticked.
 - [ ] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
 
 ## Completed work

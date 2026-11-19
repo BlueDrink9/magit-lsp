@@ -23,14 +23,14 @@ pub fn definition() -> MenuDef {
             group(
                 "Create",
                 vec![
-                    action("t", "tag.create", "tag", "magit-tag-create", "R-6.3"),
+                    action("t", "tag.create", "tag", "magit-tag-create", ""),
                     action("r", "tag.release", "release", "magit-tag-release", "R-6.3"),
                 ],
             ),
             group(
                 "Do",
                 vec![
-                    action("k", "tag.delete", "delete", "magit-tag-delete", "R-6.3"),
+                    action("k", "tag.delete", "delete", "magit-tag-delete", ""),
                     action("p", "tag.prune", "prune", "magit-tag-prune", "R-6.3"),
                 ],
             ),

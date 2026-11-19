@@ -531,6 +531,136 @@ fn branch_create_prompts_and_creates_branch_without_switching() {
 }
 
 #[test]
+fn tag_create_prompts_and_creates_tag_at_head() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "tag.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected tag name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v1".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Created tag v1"),
+        "{:?}",
+        result.effects
+    );
+    let tags = tmp.git(&["tag", "--list"]);
+    assert!(tags.lines().any(|line| line == "v1"), "{tags}");
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
+        "creating a tag must not switch HEAD"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn tag_delete_removes_an_existing_tag() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["tag", "v1"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "tag.delete".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected tag name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v1".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Deleted tag v1"),
+        "{:?}",
+        result.effects
+    );
+    let tags = tmp.git(&["tag", "--list"]);
+    assert!(!tags.lines().any(|line| line == "v1"), "{tags}");
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn tag_delete_of_missing_tag_surfaces_gits_refusal() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "tag.delete".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected tag name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("v9".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.to_lowercase().contains("not found")),
+        "{:?}",
+        result.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
 fn branch_rename_prompts_twice_and_moves_the_ref() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;

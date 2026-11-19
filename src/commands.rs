@@ -317,6 +317,10 @@ pub enum PromptAction {
         /// The branch name answered at the first prompt.
         name: String,
     },
+    /// Create a tag with the answered name.
+    TagCreate,
+    /// Delete the answered tag.
+    TagDelete,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -577,6 +581,20 @@ pub fn resume_prompt(
                 |repo| repo.set_branch_description(&name, &description),
                 format!("Set description for {name}"),
             )
+        }
+        PromptAction::TagCreate => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a tag name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(ctx, |repo| repo.create_tag(&name), format!("Created tag {name}"))
+        }
+        PromptAction::TagDelete => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a tag name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(ctx, |repo| repo.delete_tag(&name), format!("Deleted tag {name}"))
         }
     }
 }
@@ -889,6 +907,8 @@ fn build() -> Registry {
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
         command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
+        command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a tag at HEAD", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
+        command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1439,6 +1459,28 @@ fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Create branch", "", "New branch name"),
             PromptAction::BranchCreate,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the name of a tag created at HEAD.
+fn tag_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Create tag", "", "New tag name"),
+            PromptAction::TagCreate,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the tag to delete.
+fn tag_delete(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Delete tag", "", "Tag to delete"),
+            PromptAction::TagDelete,
         )),
         ..Default::default()
     })
