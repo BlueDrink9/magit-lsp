@@ -26,7 +26,7 @@ changed.
 | 2 | `view/render` sends zero or one edit; multi-edit rules unwritten | Real (documentation) | No | S |
 | 3 | Draft `runId` keymaps may be dead after real-file cutover | Not real | No | None |
 | 4 | One acknowledgement snapshot vs. several outstanding renders is unwritten | Real (documentation) | No | S |
-| 5 | No protocol version check or readable mismatch error | Real | Yes | M |
+| 5 | No bidirectional rich protocol version handshake (strict `v1` rejection exists) | Real (missing negotiation) | Yes | M |
 | 6 | `keyModifiers` is read and logged but inert | Not real | No | None |
 | 7 | VS Code cannot replay non-printable/non-clipboard `passThrough` | Real | No | S–M |
 | 8 | Static clients learn mode changes only from `view/render` mode | Real (narrow: menu entry) | No | S |
@@ -159,25 +159,50 @@ report was dishonest.
 - **Effort:** S (documentation). Adding flow control would be M and needs its
   own design.
 
-### 5. No protocol version check; mismatches have no readable error
+### 5. No bidirectional rich protocol version handshake; `v1` declarations are strictly validated
 
-- **Status:** Real.
-- **Evidence:** The rich declaration validates only `v == 1` through a custom
-  deserializer (`src/presentation/mod.rs:37-77`, especially `:58-60`). The
-  initialize result returns standard capabilities plus
-  `serverInfo {name, version}` and negotiated `experimental.magit.effective`;
-  it carries no protocol version or minimum-client-version field
-  (`src/server/requests.rs:256-297`). A malformed or future version is rejected
-  as a capability-declaration error, and an older client that omits fields gets
-  the same generic validation path (`src/presentation/mod.rs:42-43`).
-- **Proposal:** Add an explicit handshake: server reports its rich protocol
-  version in the initialize result; client reports the minimum it needs; either
-  side emits a readable `Effect::Message`/error when they do not match. Pre-1.0
-  may make this a breaking addition.
+- **Status:** Real (missing negotiation), and narrower than first reported. The
+  client-declaration version check and a readable initialize error already
+  exist; what is missing is a server-advertised protocol version plus a
+  client-required minimum (the two-way handshake).
+- **Evidence (implemented rejection):** A rich declaration's `v` is parsed by
+  `deserialize_v1`, which rejects any value other than `1` with
+  `unsupported rich protocol version` (`src/presentation/mod.rs:163-171`).
+  `invalid()` prefixes the text with `capabilities.experimental.magit`
+  (`:227-229`); `negotiate` propagates the error
+  (`src/server/requests.rs:186-187`) and the dispatcher converts it through
+  `error_response` (`src/server/requests.rs:142-145`,
+  `src/server.rs:1746-1760`). An `initialize` whose declaration says `v: 2`
+  therefore fails with that readable RPC message instead of proceeding
+  silently. A declaration omitting required fields or carrying unknown fields
+  fails the same strict parse (`src/presentation/mod.rs:54-77`, especially
+  `:56,59-60`); it is not a silent accept.
+- **Evidence (missing handshake):** The initialize result returns standard
+  capabilities plus `serverInfo {name, version}` and negotiated
+  `experimental.magit.effective`; it carries no rich protocol version or
+  minimum-client-protocol field (`src/server/requests.rs:256-297`). A client
+  cannot check compatibility before declaring, and the server cannot state the
+  minimum it requires; only the client's single `v` value is checked.
+- **Not protocol negotiation:** VS Code's "magit-lsp version mismatch" warning
+  compares the extension *package* version with `serverInfo.version`
+  (`clients/vscode/lib/version.js:36-39`, used at
+  `clients/vscode/lib/session.js:146`). That is release-alignment diagnostics,
+  not a rich-protocol check, and it neither advertises nor enforces protocol
+  compatibility.
+- **Proposal:** Add the missing handshake: the server reports its rich protocol
+  version and minimum required client protocol in the initialize result; the
+  client reports the minimum it requires; either side emits a readable
+  `Effect::Message`/error when they do not match. Pre-1.0 may make this a
+  breaking addition. Do not duplicate or replace the existing strict
+  declaration check.
 - **Wire change:** Yes (initialize result and/or capability declaration fields).
-- **Risk:** Medium. The change is small, but every rich client must report and
-  read it; a wrong default recreates the silent mismatch.
-- **Effort:** M.
+- **Risk:** Medium. The strict declaration check already rejects unsupported
+  `v` values with a readable initialize error; the residual risk is that a
+  client declaring a supported `v` but requiring newer optional behavior, or a
+  future multi-version server, has nothing to negotiate with, and a wrong
+  default recreates the silent mismatch.
+- **Effort:** M for the advertised version/minimum negotiation (wire plus both
+  rich clients). The existing declaration rejection needs no work.
 
 ### 6. `keyModifiers` is read and logged but does not change behavior
 
@@ -412,7 +437,10 @@ report was dishonest.
   describes a field that does change behavior; item 11's declaration now
   matches honored layout.
 - **Real but documentation-only:** items 1, 2, 4, 9, 10, W1-W3.
-- **Real with behavior work:** items 5, 7, 8.
+- **Real with behavior work:** items 7, 8, and item 5's missing advertised
+  version/client-minimum handshake only (its strict `v1` declaration rejection
+  and readable initialize error already exist; VS Code's package-version warning
+  is not protocol negotiation).
 - **Unknown:** none. If a future check cannot establish a claim, label it
   **unknown** rather than inferring a defect; the baseline read did not leave
   one.
