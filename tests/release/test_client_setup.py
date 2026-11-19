@@ -84,3 +84,47 @@ end
                     cwd=repo, env=env, text=True, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('setup smoke: ' + mode, result.stdout + result.stderr)
+
+    def test_documented_lazy_spec_contract(self):
+        """The documented lazy spec is valid Lua with no opts/config/build hooks."""
+        document = (ROOT / 'docs/CLIENT_INSTALL.md').read_text()
+        match = re.search(
+            r'```lua\n(-- lazy\.nvim plugin spec\n.*?)\n```', document, re.S)
+        self.assertIsNotNone(
+            match, 'docs/CLIENT_INSTALL.md has no lazy.nvim plugin spec block')
+        snippet = match.group(1)
+        for key in ('opts', 'config', 'build'):
+            self.assertNotRegex(
+                snippet, rf'\b{key}\s*=',
+                f'documented lazy spec must not set {key}')
+        nvim = shutil.which('nvim')
+        if not nvim:
+            return
+        with tempfile.TemporaryDirectory(prefix='magit-lazy-spec-') as temporary:
+            base = Path(temporary)
+            spec = base / 'spec.lua'
+            spec.write_text(snippet)
+            check = base / 'check.lua'
+            check.write_text('''local ok, err = xpcall(function()
+  local chunk = assert(loadfile(vim.env.SETUP_SPEC))
+  local spec = chunk()
+  assert(spec.lazy, 'documented lazy spec must be lazy')
+  assert(spec.opts == nil, 'documented lazy spec must not set opts')
+  assert(spec.config == nil, 'documented lazy spec must not set config')
+  assert(spec.build == nil, 'documented lazy spec must not set build')
+end, debug.traceback)
+if not ok then
+  io.stderr:write(err .. '\\n')
+  vim.cmd('cquit 1')
+else
+  print('lazy spec contract: ok')
+  vim.cmd('qa!')
+end
+''')
+            result = subprocess.run(
+                [nvim, '--headless', '-u', 'NONE', '-i', 'NONE',
+                 '-c', 'lua dofile(vim.env.SETUP_CHECK)'],
+                env=dict(os.environ, SETUP_SPEC=str(spec), SETUP_CHECK=str(check)),
+                text=True, capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('lazy spec contract: ok', result.stdout + result.stderr)

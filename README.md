@@ -6,8 +6,9 @@ below; this is not a claim of release or registry readiness.
 
 See [client installation and quickstart](docs/CLIENT_INSTALL.md),
 [native screenshot capture/manual fallback](docs/SCREENSHOTS.md), and the
-[external client specification](docs/CLIENT_SPEC.md). Community clients for
-Helix, Zed and JetBrains are welcome; no first-party implementations are promised.
+[external client specification](docs/CLIENT_SPEC.md). Helix, Zed and JetBrains
+adapters are welcome as COMMUNITY clients through that specification; no
+first-party implementations are promised.
 
 ## Binary release installation (not yet published)
 
@@ -44,7 +45,8 @@ Two processes talking over LSP (JSON-RPC on stdio):
   renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
   buffer, and forwards keys as `view/key` steps against the server's keymap.
 - **VSCode client (`clients/vscode`).** Launches an external server and displays
-  its views; currently available as source, not a published Marketplace/VSIX install.
+  its views; currently available as source or a locally packaged VSIX
+  (`make vscode-package`), not a published Marketplace/Open VSX install.
 
 The server is designed to do as much as possible so that clients are thin and
 easy to build for other editors. See [CLIENT_SPEC](docs/CLIENT_SPEC.md) for the
@@ -201,7 +203,7 @@ printf 'untracked\n' > "$repo/new.txt"
 mkdir -p "$repo/.vscode"
 cat > "$repo/.vscode/settings.json" <<EOF
 {
-  "magit-lsp.serverPath": "$server",
+  "magit-lsp.server.path": "$server",
   "magit-lsp.profile": "standard"
 }
 EOF
@@ -210,10 +212,13 @@ code --new-window --extensionDevelopmentPath="$extension" "$repo"
 
 In the Extension Development Host window, open the Command Palette and run
 **Magit: Open Status**. The extension starts the configured `magit-lsp` binary
-with no arguments; `magit-lsp.serverPath` defaults to `magit-lsp` on `PATH`,
-and `magit-lsp.profile` defaults to `standard` (`standard` or `vim`). No
-`.vscode/launch.json` or F5 launch setup is provided; the `code` command above
-starts the host directly. Delete the temporary repository when finished.
+with no arguments. `magit-lsp.server.path` is an absolute executable file;
+`magit-lsp.server.source` defaults to `auto` (explicit path, then a
+version-matching `magit-lsp` on `PATH`, then the pinned managed download), and
+`system` avoids downloading. `magit-lsp.profile` defaults to `standard`
+(`standard` or `vim`). No `.vscode/launch.json` or F5 launch setup is provided;
+the `code` command above starts the host directly. Delete the temporary
+repository when finished.
 
 Manual smoke checklist:
 
