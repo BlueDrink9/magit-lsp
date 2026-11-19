@@ -5,17 +5,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { LanguageClient } = require('vscode-languageclient/node');
 
-const commands = require('./commands');
-const edits = require('./edits');
-const drafts = require('./drafts');
-const effects = require('./effects');
-const requests = require('./requests');
-const semantic = require('./semantic');
-const shared = require('../types/shared-lists');
-const views = require('./views');
+const {
+  openStatus,
+  pressCommand,
+  invokeCommand,
+  mirrorFoldShortcuts,
+} = require('./commands');
+const {
+  confirmEditCommand,
+  cancelEditCommand,
+  onDocumentClosed,
+  onActiveEditorChanged,
+} = require('./edits');
+const { close, current, disconnect, handleInvoke, onChanged, setup } = require('./drafts');
+const { applyEffects } = require('./effects');
+const { applyRender, handlePrompt, handlePick } = require('./requests');
+const { register } = require('./semantic');
+const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
+const { activateView, stateForUri } = require('./views');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
-const version = require('./version');
+const { resolveCommand, warning } = require('./version');
 const extensionVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')).version;
 
 /**
@@ -36,7 +46,7 @@ function createClient() {
       documentSelector: [{ scheme: SCHEME }],
       initializationOptions: { profile },
       uriConverters: {
-        code2Protocol: (uri) => views.stateForUri(uri)?.descriptor.uri || uri.toString(),
+        code2Protocol: (uri) => stateForUri(uri)?.descriptor.uri || uri.toString(),
         protocol2Code: (uri) => Array.from(store.views.values())
           .find((state) => state.descriptor.uri === uri)?.uri || vscode.Uri.parse(uri),
       },
@@ -54,8 +64,8 @@ function createClient() {
         keys: 'static',
         modifiers: 'full',
         layout: ['main'],
-        effects: [...shared.optionalEffects],
-        prompts: [...shared.optionalPromptKinds],
+        effects: [...optionalEffects],
+        prompts: [...optionalPromptKinds],
         pick: {
           multi: true,
           freeText: false,
@@ -90,56 +100,56 @@ function activate(context) {
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, {
       onDidChange: store.documentsChanged.event,
       provideTextDocumentContent(uri) {
-        const state = views.stateForUri(uri);
+        const state = stateForUri(uri);
         return state ? state.lines.join('\n') : '';
       },
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('magit.open', commands.openStatus),
-    vscode.commands.registerCommand('magit.key', commands.pressCommand),
+    vscode.commands.registerCommand('magit.open', openStatus),
+    vscode.commands.registerCommand('magit.key', pressCommand),
      vscode.commands.registerCommand('magit.invoke', async (args) => {
-       if (drafts.current()) return drafts.handleInvoke(args);
-       return commands.invokeCommand(args);
+       if (current()) return handleInvoke(args);
+       return invokeCommand(args);
      }),
-    vscode.commands.registerCommand('magit.confirmEdit', edits.confirmEditCommand),
-     vscode.commands.registerCommand('magit.cancelEdit', edits.cancelEditCommand),
+    vscode.commands.registerCommand('magit.confirmEdit', confirmEditCommand),
+     vscode.commands.registerCommand('magit.cancelEdit', cancelEditCommand),
      vscode.commands.registerCommand('magit.closeEdit', () => {
-       const draft = drafts.current();
-       if (draft) return drafts.close(draft);
+       const draft = current();
+       if (draft) return close(draft);
      }),
-    vscode.commands.registerCommand('magit.mirrorFoldShortcuts', commands.mirrorFoldShortcuts),
-     vscode.workspace.onDidCloseTextDocument(edits.onDocumentClosed),
-     vscode.workspace.onDidChangeTextDocument(drafts.onChanged),
-    vscode.window.onDidChangeActiveTextEditor(edits.onActiveEditorChanged)
+    vscode.commands.registerCommand('magit.mirrorFoldShortcuts', mirrorFoldShortcuts),
+     vscode.workspace.onDidCloseTextDocument(onDocumentClosed),
+     vscode.workspace.onDidChangeTextDocument(onChanged),
+    vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged)
    );
 
-   drafts.setup(context);
+   setup(context);
 
   store.client = createClient();
   const client = store.client;
   const command = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
-  const executable = version.resolveCommand(command);
-  client.onNotification('view/render', requests.applyRender);
-   client.onNotification('view/prompt', requests.handlePrompt);
-  client.onNotification('view/pick', requests.handlePick);
+  const executable = resolveCommand(command);
+  client.onNotification('view/render', applyRender);
+   client.onNotification('view/prompt', handlePrompt);
+  client.onNotification('view/pick', handlePick);
    // The explicit full-sync stream excludes the draft scheme from the language
    // client's automatic document selector, avoiding duplicate native versions.
    if (client.onDidChangeState) context.subscriptions.push(client.onDidChangeState((event) => {
-     if (event.newState === 1) drafts.disconnect('the server disconnected; copy your text before reopening');
+     if (event.newState === 1) disconnect('the server disconnected; copy your text before reopening');
    }));
   client.onNotification('view/effects', (params) => {
-    void effects.applyEffects(params && params.effects, store.activeViewId);
+    void applyEffects(params && params.effects, store.activeViewId);
   });
   store.clientReady = client.start().then(() => {
-    const warning = version.warning(extensionVersion,
+    const versionWarning = warning(extensionVersion,
       client.initializeResult?.serverInfo?.version, executable);
-    if (warning) vscode.window.showWarningMessage(warning);
-    store.semanticChanged = semantic.register(
+    if (versionWarning) vscode.window.showWarningMessage(versionWarning);
+    store.semanticChanged = register(
       vscode,
       client,
-      views.stateForUri,
+      stateForUri,
       context.subscriptions
     );
   }).catch((error) => {
@@ -147,7 +157,7 @@ function activate(context) {
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
   });
 
-  views.activateView(undefined);
+  activateView(undefined);
 }
 
 /**
@@ -155,7 +165,7 @@ function activate(context) {
  */
 async function deactivate() {
   store.disposing = true;
-  drafts.disconnect('the editor session is closing; copy your text before reopening');
+  disconnect('the editor session is closing; copy your text before reopening');
   if (store.client) {
     await store.client.stop();
     store.client = undefined;

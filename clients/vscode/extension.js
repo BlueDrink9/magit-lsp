@@ -1,5 +1,5 @@
 'use strict';
 
-const session = require('./lib/session');
+const { activate, deactivate } = require('./lib/session');
 
-module.exports = { activate: session.activate, deactivate: session.deactivate };
+module.exports = { activate, deactivate };

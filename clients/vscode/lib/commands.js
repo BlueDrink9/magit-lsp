@@ -6,11 +6,11 @@ const path = require('node:path');
 
 const vscode = require('vscode');
 
-const edits = require('./edits');
-const foldkeys = require('./foldkeys');
-const menus = require('./menus');
-const requests = require('./requests');
-const views = require('./views');
+const { currentEdit, confirmEditCommand, cancelEditCommand } = require('./edits');
+const { mapFoldKeys } = require('./foldkeys');
+const { queueSteps } = require('./menus');
+const { press, invoke } = require('./requests');
+const { focusView, ensureView, showView, activeState, isMenuKind } = require('./views');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
 
@@ -65,7 +65,7 @@ async function openStatus() {
       (state) => state.repo === repo && state.descriptor.kind === 'status'
     );
     if (existing) {
-      await views.focusView(existing.id);
+      await focusView(existing.id);
       return;
     }
     const opening = (async () => {
@@ -74,10 +74,10 @@ async function openStatus() {
       args: { repo_path: repo },
       viewport: viewport(),
       });
-      const state = views.ensureView(descriptor);
+      const state = ensureView(descriptor);
       state.repo = repo;
       state.rootId = state.id;
-      await views.showView(descriptor);
+      await showView(descriptor);
     })();
     store.statusOpens.set(repo, opening);
     try {
@@ -111,18 +111,18 @@ async function pressCommand(args) {
     return;
   }
 
-  const state = views.activeState();
+  const state = activeState();
   if (!state) {
     return;
   }
 
-  if (state.quickPick || views.isMenuKind(state.descriptor.kind)) {
-    menus.queueSteps(state, [key]);
+  if (state.quickPick || isMenuKind(state.descriptor.kind)) {
+    queueSteps(state, [key]);
     return;
   }
 
   state.pressQueue = state.pressQueue
-    .then(() => requests.press(state.id, key, editorInfo()))
+    .then(() => press(state.id, key, editorInfo()))
     .catch((error) => {
       store.output.appendLine(`key failed: ${message(error)}`);
     });
@@ -141,20 +141,20 @@ async function invokeCommand(args) {
   }
   // The focused edit document has no Magit view; generated command IDs still
   // identify the server-owned edit actions.
-  const currentEdit = edits.currentEdit();
-  if (currentEdit && currentEdit.effect.scope) {
-    if (command === 'common.confirm') await edits.confirmEditCommand();
-    else if (command === 'common.cancel') await edits.cancelEditCommand();
+  const edit = currentEdit();
+  if (edit && edit.effect.scope) {
+    if (command === 'common.confirm') await confirmEditCommand();
+    else if (command === 'common.cancel') await cancelEditCommand();
     return;
   }
-  const state = views.activeState();
+  const state = activeState();
   if (!state) {
     return;
   }
 
   const info = state.quickPick ? { cursor: { line: 0, column: 0 } } : editorInfo();
   state.pressQueue = state.pressQueue
-    .then(() => requests.invoke(
+    .then(() => invoke(
       state.id,
       command,
       typeof args === 'object' ? args.args : undefined,
@@ -182,7 +182,7 @@ async function mirrorFoldShortcuts() {
 
   let entries;
   try {
-    entries = foldkeys.mapFoldKeys(text);
+    entries = mapFoldKeys(text);
   } catch (error) {
     vscode.window.showErrorMessage(`magit-lsp: cannot read ${file}: ${message(error)}`);
     return;
