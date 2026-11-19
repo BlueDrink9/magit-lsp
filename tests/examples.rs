@@ -1349,19 +1349,45 @@ fn action_capture_rejects_unrelated_payload_changes() {
     assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted changed response ID");
 }
 
-/// Prepare both fragments without changing their existing line boundaries.
+/// Every maintained logical recording, in replay/regeneration order.
+const MAINTAINED_RECORDINGS: [&str; 6] = [
+    "plain-open.jsonl",
+    "rich-lifecycle.jsonl",
+    "plain-code-action.jsonl",
+    "plain-document-prompt.jsonl",
+    "commit-edit-abort.jsonl",
+    "commit-edit-confirm.jsonl",
+];
+
+/// Artifact files that make up one maintained logical recording, in order.
+///
+/// The commit-edit exchanges stay split across their two existing fragments;
+/// every other recording is one monolithic file named after itself.
+fn regeneration_artifacts(name: &str) -> Result<Vec<&'static str>, String> {
+    let artifacts: &[&str] = match name {
+        "commit-edit-abort.jsonl" => &["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"],
+        "commit-edit-confirm.jsonl" => &["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"],
+        "plain-open.jsonl" => &["plain-open.jsonl"],
+        "rich-lifecycle.jsonl" => &["rich-lifecycle.jsonl"],
+        "plain-code-action.jsonl" => &["plain-code-action.jsonl"],
+        "plain-document-prompt.jsonl" => &["plain-document-prompt.jsonl"],
+        _ => return Err(format!("refusing to regenerate unrelated recording {name}")),
+    };
+    Ok(artifacts.to_vec())
+}
+
+/// Split regenerated lines across the exact artifacts that recorded them.
 fn regenerated_fragments(name: &str, lines: &[String]) -> Result<Vec<(std::path::PathBuf, String)>, String> {
-    if !matches!(name, "commit-edit-abort.jsonl" | "commit-edit-confirm.jsonl") {
-        return Err(format!("refusing to regenerate unrelated recording {name}"));
-    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLES_DIR);
-    let stem = name.strip_suffix(".jsonl").unwrap();
+    let artifacts = regeneration_artifacts(name)?;
     let mut fragments = Vec::new();
     let mut offset = 0;
-    for index in 1..=2 {
-        let path = root.join(format!("{stem}-{index:02}.jsonl"));
+    for artifact in &artifacts {
+        let path = root.join(artifact);
         let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let end = offset + original.lines().count();
+        // Fragmented recordings keep their recorded line boundaries; a
+        // monolithic recording owns every remaining line.
+        let end = if artifacts.len() == 1 { lines.len() } else { offset + original.lines().count() };
         let content = lines.get(offset..end).ok_or("missing fragment lines")?.join("\n") + "\n";
         if content.len() >= 100_000 { return Err(format!("fragment too large: {} bytes", content.len())); }
         fragments.push((path, content));
@@ -1382,24 +1408,35 @@ fn capture_preserves_fragments_and_rejects_overflow() {
         lines[0] = "x".repeat(100_000);
         assert!(regenerated_fragments(name, &lines).unwrap_err().contains("fragment too large"));
     }
-    assert!(regenerated_fragments("plain-open.jsonl", &[]).is_err());
+    assert!(regenerated_fragments("unrelated.jsonl", &[]).is_err());
+}
+
+/// Regeneration maps every maintained recording to its exact artifact files.
+#[test]
+fn regeneration_keeps_fragment_mapping_and_rejects_unrelated_names() {
+    for name in MAINTAINED_RECORDINGS {
+        let lines: Vec<String> = example_lines(name).into_iter().map(|line| line.raw).collect();
+        let fragments = regenerated_fragments(name, &lines).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let artifacts = fragments.iter().map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(artifacts, regeneration_artifacts(name).unwrap(), "{name} maps to its own artifacts");
+        assert_eq!(fragments.iter().map(|(_, content)| content.lines().count()).sum::<usize>(), lines.len(), "{name} covers every recorded line exactly once");
+        for (path, content) in fragments {
+            assert_eq!(content, fs::read_to_string(&path).unwrap(), "{name} keeps {} byte-identical", path.display());
+        }
+    }
+    assert_eq!(regeneration_artifacts("commit-edit-abort.jsonl").unwrap(), ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"]);
+    assert_eq!(regeneration_artifacts("plain-open.jsonl").unwrap(), ["plain-open.jsonl"]);
+    for unrelated in ["example.jsonl", "plain-open-03.jsonl", "commit-edit-abort-01.jsonl"] {
+        let error = regenerated_fragments(unrelated, &[]).expect_err("unrelated recording must be refused");
+        assert!(error.contains("refusing to regenerate unrelated recording"), "{unrelated}: {error}");
+    }
 }
 
 /// Replay every example file, Plain and rich, against a real server and fixture.
 #[test]
 fn plain_examples_replay_against_the_real_binary() {
-    let names = if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
-        vec!["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"]
-    } else { vec![
-        "plain-open.jsonl",
-        "rich-lifecycle.jsonl",
-        "plain-code-action.jsonl",
-        "plain-document-prompt.jsonl",
-        "commit-edit-abort.jsonl",
-        "commit-edit-confirm.jsonl",
-    ] };
     let mut fragments = Vec::new();
-    for name in names {
+    for name in MAINTAINED_RECORDINGS {
         let lines = example_lines(name);
         let captured = replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
         if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
