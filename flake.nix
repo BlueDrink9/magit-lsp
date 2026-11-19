@@ -60,6 +60,7 @@
               cargo-machete
               lua51Packages.luacheck
               # jscpd.packages.${system}.default
+              actionlint # Check github action workflows
             ];
 
             shellHook = ''
