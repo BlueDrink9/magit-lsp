@@ -111,6 +111,5 @@ for (let level = 1; level <= 7; level += 1) {
 
 module.exports = {
   parseJsonc,
-  mapFoldCommand,
   mapFoldKeys,
 };

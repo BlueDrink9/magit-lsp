@@ -159,6 +159,5 @@ function queueSteps(state, steps) {
 
 exports.showMenu = showMenu;
 exports.updateQuickPick = updateQuickPick;
-exports.menuItems = menuItems;
 exports.hideMenu = hideMenu;
 exports.queueSteps = queueSteps;

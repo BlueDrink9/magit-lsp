@@ -121,5 +121,3 @@ async function applyEffects(effectList, originViewId) {
 }
 
 exports.applyEffects = applyEffects;
-exports.showMessage = showMessage;
-exports.replay = replay;

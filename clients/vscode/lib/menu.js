@@ -132,7 +132,5 @@ function routeTyped(value) {
 module.exports = {
   quickPickItems,
   quickPickItem,
-  describeItem,
   routeTyped,
-  charToKey,
 };
