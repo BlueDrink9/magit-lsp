@@ -238,8 +238,6 @@ function keybindingsPath() {
 }
 
 exports.openStatus = openStatus;
-exports.viewport = viewport;
 exports.pressCommand = pressCommand;
 exports.invokeCommand = invokeCommand;
 exports.mirrorFoldShortcuts = mirrorFoldShortcuts;
-exports.keybindingsPath = keybindingsPath;

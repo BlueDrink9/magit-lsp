@@ -51,4 +51,4 @@ function inactiveContext() {
   };
 }
 
-module.exports = { deriveContext, inactiveContext, staticScope };
+module.exports = { deriveContext, inactiveContext };
