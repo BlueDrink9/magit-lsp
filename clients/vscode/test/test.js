@@ -6,20 +6,20 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const context = require('../lib/context');
-const render = require('../lib/render');
-const menu = require('../lib/menu');
-const foldkeys = require('../lib/foldkeys');
-const prompt = require('../lib/prompt');
-const pick = require('../lib/pick');
-const edit = require('../lib/edit');
+const { deriveContext, inactiveContext } = require('../lib/context');
+const { applyRender } = require('../lib/render');
+const { quickPickItems, routeTyped } = require('../lib/menu');
+const { parseJsonc, mapFoldKeys } = require('../lib/foldkeys');
+const { promptItems, answerFor: answerPrompt, customChoice } = require('../lib/prompt');
+const { pickItems, answerFor: answerPick } = require('../lib/pick');
+const { isEditEffect, editingContext, draftAction } = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
 const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
-const versions = require('../lib/version');
+const { warning, resolveCommand } = require('../lib/version');
 const { createVersionFixture } = require('./e2e/version-fixture');
 const { selectSuiteMode, withSuiteMode } = require('./e2e/focused-mode');
-const launcherResult = require('./e2e/launcher-result');
+const { suiteResult, failureText } = require('./e2e/launcher-result');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -87,12 +87,12 @@ test('version warning target selects version suite branch instead of generic evi
 
 test('native launcher preserves suite exception and reports original failure details', () => {
   const error = new Error('suite exploded');
-  const result = launcherResult.suiteResult(error);
+  const result = suiteResult(error);
   assert.equal(result.status, 1);
   assert.equal(result.error.message, 'suite exploded');
   assert.match(result.error.stack, /suite exploded/);
-  assert.match(launcherResult.failureText(result), /suite exploded/);
-  assert.match(launcherResult.failureText(result), /Error: suite exploded/);
+  assert.match(failureText(result), /suite exploded/);
+  assert.match(failureText(result), /Error: suite exploded/);
 });
 
 test('mismatched extension fixture isolates manifest version, runtime and cleanup', () => {
@@ -125,7 +125,7 @@ test('mismatched extension fixture isolates manifest version, runtime and cleanu
 // lib/context.js -----------------------------------------------------------
 
 test('a status descriptor derives the status scope', () => {
-  const keys = context.deriveContext(
+  const keys = deriveContext(
     { id: 'v1', scope: 'status', capture: false },
     'interactive'
   );
@@ -138,7 +138,7 @@ test('a status descriptor derives the status scope', () => {
 });
 
 test('a menu descriptor uses the shared menu scope and keeps capture', () => {
-  const keys = context.deriveContext(
+  const keys = deriveContext(
     { id: 'v2', scope: 'menu.commit', capture: true },
     'interactive'
   );
@@ -148,7 +148,7 @@ test('a menu descriptor uses the shared menu scope and keeps capture', () => {
 });
 
 test('text mode turns capture off', () => {
-  const keys = context.deriveContext(
+  const keys = deriveContext(
     { id: 'v3', scope: 'menu.rebase', capture: true },
     'text'
   );
@@ -158,20 +158,20 @@ test('text mode turns capture off', () => {
 });
 
 test('no descriptor means inactive', () => {
-  assert.deepEqual(context.deriveContext(undefined, 'interactive'), {
+  assert.deepEqual(deriveContext(undefined, 'interactive'), {
     'magit.active': false,
     'magit.scope': '',
     'magit.textMode': false,
     'magit.capture': false,
   });
-  assert.equal(context.inactiveContext()['magit.active'], false);
+  assert.equal(inactiveContext()['magit.active'], false);
 });
 
 // lib/render.js ------------------------------------------------------------
 
 for (const vector of renderVectors) {
   test(`render contract: ${vector.name}`, () => {
-    const result = render.applyRender(vector.initialLines, vector.initialVersion, vector.render);
+    const result = applyRender(vector.initialLines, vector.initialVersion, vector.render);
     assert.deepEqual(result.lines, vector.expectedLines);
     assert.equal(result.version, vector.expectedVersion);
     assert.equal(result.status, vector.outcome === 'resync' ? 'resync' : vector.render.text ? 'full' : vector.render.edits ? 'edits' : 'none');
@@ -231,7 +231,7 @@ const MENU_MODEL = {
 };
 
 test('QuickPick rows follow the menu groups', () => {
-  const rows = menu.quickPickItems(MENU_MODEL);
+  const rows = quickPickItems(MENU_MODEL);
   assert.equal(rows.length, 6);
 
   assert.equal(rows[0].kind, 'separator');
@@ -259,13 +259,13 @@ test('QuickPick rows follow the menu groups', () => {
 });
 
 test('typed characters become canonical key steps', () => {
-  assert.deepEqual(menu.routeTyped('c'), ['c']);
-  assert.deepEqual(menu.routeTyped('-a'), ['-', 'a']);
-  assert.deepEqual(menu.routeTyped('=A'), ['=', 'A']);
-  assert.deepEqual(menu.routeTyped('?'), ['?']);
-  assert.deepEqual(menu.routeTyped(' '), ['Space']);
-  assert.deepEqual(menu.routeTyped('+'), ['Plus']);
-  assert.deepEqual(menu.routeTyped(undefined), []);
+  assert.deepEqual(routeTyped('c'), ['c']);
+  assert.deepEqual(routeTyped('-a'), ['-', 'a']);
+  assert.deepEqual(routeTyped('=A'), ['=', 'A']);
+  assert.deepEqual(routeTyped('?'), ['?']);
+  assert.deepEqual(routeTyped(' '), ['Space']);
+  assert.deepEqual(routeTyped('+'), ['Plus']);
+  assert.deepEqual(routeTyped(undefined), []);
 });
 
 test('QuickPick rows preserve server activation steps for every canonical shape', () => {
@@ -276,22 +276,22 @@ test('QuickPick rows preserve server activation steps for every canonical shape'
   for (const [key, activationSteps] of cases) {
     const item = { kind: 'action', key, activationSteps, label: 'Planned',
       status: { status: 'planned', roadmapId: 'R-4.1' } };
-    const row = menu.quickPickItems({ groups: [{ title: 'Actions', items: [item] }] })[1];
+    const row = quickPickItems({ groups: [{ title: 'Actions', items: [item] }] })[1];
     assert.equal(row.key, key);
     assert.equal(row.activationSteps, activationSteps, 'no client parsing or conversion');
     assert.equal(row.status, 'planned');
     assert.equal(row.roadmapId, 'R-4.1');
   }
-  assert.deepEqual(menu.routeTyped('ctrl+t'), ['c', 't', 'r', 'l', 'Plus', 't']);
-  assert.deepEqual(menu.routeTyped('g l'), ['g', 'Space', 'l']);
-  assert.deepEqual(menu.routeTyped('Enter'), ['E', 'n', 't', 'e', 'r']);
+  assert.deepEqual(routeTyped('ctrl+t'), ['c', 't', 'r', 'l', 'Plus', 't']);
+  assert.deepEqual(routeTyped('g l'), ['g', 'Space', 'l']);
+  assert.deepEqual(routeTyped('Enter'), ['E', 'n', 't', 'e', 'r']);
 });
 
 // lib/foldkeys.js ----------------------------------------------------------
 
 test('generated and mirrored bindings require editor focus and exclude widgets', () => {
   const generated = require('../package.json').contributes.keybindings;
-  const mirrored = foldkeys.mapFoldKeys([{ key: 'ctrl+k ctrl+l', command: 'editor.toggleFold' }]);
+  const mirrored = mapFoldKeys([{ key: 'ctrl+k ctrl+l', command: 'editor.toggleFold' }]);
   for (const entry of [...generated, ...mirrored]) {
     const terms = entry.when.split(' && ');
     for (const term of ['magit.active', 'editorTextFocus', '!quickInputVisible',
@@ -410,14 +410,14 @@ test('one generic dispatcher carries every contributed action binding', () => {
 test('managed draft effects accept only the exact full-sync announcement', () => {
   const effect = { type: 'editDocument', mode: 'realFile', runId: 'run-1',
     uri: 'file:///repo/.git/COMMIT_EDITMSG', version: 1, text: 'exact\r\n', kind: 'commit-message' };
-  assert(edit.isEditEffect(effect));
+  assert(isEditEffect(effect));
   for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'unsupported' },
     { ...effect, uri: 'magit-commit://other/message' }, { ...effect, version: 2 },
-    { ...effect, requestId: 4 }]) assert(!edit.isEditEffect(invalid));
-  assert.equal(edit.editingContext(effect)['magit.active'], false, 'native typing is not a view keymap');
-  assert.equal(edit.draftAction('common.quit'), 'close');
-  assert.equal(edit.draftAction('commit-message.history-prev'), undefined);
-  assert.equal(edit.draftAction('commit-message.history-next'), undefined);
+    { ...effect, requestId: 4 }]) assert(!isEditEffect(invalid));
+  assert.equal(editingContext(effect)['magit.active'], false, 'native typing is not a view keymap');
+  assert.equal(draftAction('common.quit'), 'close');
+  assert.equal(draftAction('commit-message.history-prev'), undefined);
+  assert.equal(draftAction('commit-message.history-next'), undefined);
 });
 
 const KEYBINDINGS_JSONC = `[
@@ -437,19 +437,19 @@ const KEYBINDINGS_JSONC = `[
 ]`;
 
 test('JSONC comments and trailing commas are stripped', () => {
-  const parsed = foldkeys.parseJsonc(KEYBINDINGS_JSONC);
+  const parsed = parseJsonc(KEYBINDINGS_JSONC);
   assert.equal(parsed.length, 6);
   assert.equal(parsed[5].command, 'editor.foldRecursively');
 });
 
 test('JSONC parser preserves comment-like escaped strings and rejects malformed input', () => {
-  const parsed = foldkeys.parseJsonc('[{"key":"x\\\"//text","command":"editor.fold","note":"/* text */",},]');
+  const parsed = parseJsonc('[{"key":"x\\\"//text","command":"editor.fold","note":"/* text */",},]');
   assert.equal(parsed[0].key, 'x"//text');
-  assert.throws(() => foldkeys.parseJsonc('[{"command":]'), /Invalid JSONC.*line/);
+  assert.throws(() => parseJsonc('[{"command":]'), /Invalid JSONC.*line/);
 });
 
 test('native fold shortcuts map to magit.invoke entries', () => {
-  const entries = foldkeys.mapFoldKeys(KEYBINDINGS_JSONC);
+  const entries = mapFoldKeys(KEYBINDINGS_JSONC);
   assert.equal(entries.length, 5);
 
   assert.deepEqual(entries[0], {
@@ -472,7 +472,7 @@ test('native fold shortcuts map to magit.invoke entries', () => {
 });
 
 test('fold levels become detail changes', () => {
-  const entries = foldkeys.mapFoldKeys([
+  const entries = mapFoldKeys([
     { key: 'ctrl+k ctrl+1', command: 'editor.foldLevel1' },
   ]);
   assert.equal(entries.length, 1);
@@ -486,23 +486,23 @@ test('shared prompt vectors preserve protocol answer semantics', () => {
     const params = vector.params;
     let answer;
     if (params.kind === 'confirm') {
-      const items = prompt.promptItems(params);
+      const items = promptItems(params);
       if (vector.focus) {
         assert.deepEqual(items.map((item) => item.label), vector.focus, vector.name);
       }
-      answer = prompt.answerFor(params, vector.response === null
+      answer = answerPrompt(params, vector.response === null
         ? undefined : { id: vector.response });
     } else if (params.kind === 'text') {
-      answer = prompt.answerFor(params, vector.response);
+      answer = answerPrompt(params, vector.response);
     } else if (params.kind === 'choice') {
       answer = vector.response === '__custom__'
-        ? prompt.customChoice(vector.customResponse)
-        : prompt.answerFor(params, vector.response === null
+        ? customChoice(vector.customResponse)
+        : answerPrompt(params, vector.response === null
           ? undefined : { id: vector.response });
     } else {
       answer = vector.response === null
         ? { cancelled: true }
-        : prompt.answerFor(params, vector.response.map((id) => ({ id })));
+        : answerPrompt(params, vector.response.map((id) => ({ id })));
     }
     assert.deepEqual(answer, vector.answer, vector.name);
   }
@@ -513,18 +513,18 @@ test('shared prompt vectors preserve protocol answer semantics', () => {
 test('shared pick vectors answer view/pickRespond exactly', () => {
   for (const vector of pickVectors) {
     const params = vector.params;
-    const items = pick.pickItems(params);
+    const items = pickItems(params);
     assert.deepEqual(items.map((item) => item.label), params.items.map((item) => item.label),
       vector.name);
     if (vector.response === null) {
-      assert.deepEqual(pick.answerFor(params, undefined), vector.expected, vector.name);
+      assert.deepEqual(answerPick(params, undefined), vector.expected, vector.name);
       continue;
     }
     let picked = items[vector.response - 1];
     if (params.multi) {
       picked = [picked];
     }
-    assert.deepEqual(pick.answerFor(params, picked), vector.expected, vector.name);
+    assert.deepEqual(answerPick(params, picked), vector.expected, vector.name);
   }
 });
 
@@ -536,20 +536,20 @@ test('pick items carry preselection, description and detail', () => {
     ],
     preselection: ['b'],
   };
-  assert.deepEqual(pick.pickItems(params), [
+  assert.deepEqual(pickItems(params), [
     { id: 'a', label: 'A', description: 'first', detail: 'detail a', picked: false },
     { id: 'b', label: 'B', description: undefined, detail: undefined, picked: true },
   ]);
 });
 
 test('cancelling a pick answers an empty selection', () => {
-  assert.deepEqual(pick.answerFor({}, undefined), { cancelled: true, selected: [] });
-  assert.deepEqual(pick.answerFor({}, null), { cancelled: true, selected: [] });
+  assert.deepEqual(answerPick({}, undefined), { cancelled: true, selected: [] });
+  assert.deepEqual(answerPick({}, null), { cancelled: true, selected: [] });
 });
 
 test('a multi pick maps every picked row to its id', () => {
   assert.deepEqual(
-    pick.answerFor({ multi: true }, [{ id: 'a' }, { id: 'c' }]),
+    answerPick({ multi: true }, [{ id: 'a' }, { id: 'c' }]),
     { cancelled: false, selected: ['a', 'c'] }
   );
 });
@@ -557,16 +557,16 @@ test('a multi pick maps every picked row to its id', () => {
 // summary ------------------------------------------------------------------
 
 test('startup version warnings distinguish matching, mismatched and missing metadata', () => {
-  assert.equal(versions.warning('1.2.3', '1.2.3', '/bin/magit-lsp'), undefined);
-  assert.match(versions.warning('1.2.3', '2.0.0', '/bin/magit-lsp'), /1\.2\.3.*2\.0\.0.*\/bin\/magit-lsp/);
-  assert.match(versions.warning('1.2.3', undefined, '/bin/magit-lsp'), /1\.2\.3.*unknown.*\/bin\/magit-lsp/);
+  assert.equal(warning('1.2.3', '1.2.3', '/bin/magit-lsp'), undefined);
+  assert.match(warning('1.2.3', '2.0.0', '/bin/magit-lsp'), /1\.2\.3.*2\.0\.0.*\/bin\/magit-lsp/);
+  assert.match(warning('1.2.3', undefined, '/bin/magit-lsp'), /1\.2\.3.*unknown.*\/bin\/magit-lsp/);
 });
 
 test('PATH command resolution selects executable and preserves unresolved command', () => {
   const path = require('node:path');
   const executable = path.basename(process.execPath);
-  assert.equal(versions.resolveCommand(executable, { PATH: path.dirname(process.execPath) }), process.execPath);
-  assert.equal(versions.resolveCommand('missing-tool', { PATH: '' }), 'missing-tool');
+  assert.equal(resolveCommand(executable, { PATH: path.dirname(process.execPath) }), process.execPath);
+  assert.equal(resolveCommand('missing-tool', { PATH: '' }), 'missing-tool');
 });
 
 test('Unix PATH resolution skips non-executables and returns absolute paths', () => {
@@ -582,10 +582,10 @@ test('Unix PATH resolution skips non-executables and returns absolute paths', ()
     fs.writeFileSync(path.join(second, 'tool'), '');
     fs.chmodSync(path.join(first, 'tool'), 0o010);
     fs.chmodSync(path.join(second, 'tool'), 0o755);
-    assert.equal(versions.resolveCommand('tool', { PATH: `${first}:${second}` }, 'linux'), path.join(second, 'tool'));
-    assert.equal(versions.resolveCommand('tool', { PATH: path.relative(process.cwd(), second) }, 'linux'), path.join(second, 'tool'));
-    assert.equal(versions.resolveCommand(path.join(first, 'tool'), { PATH: '' }, 'linux'), path.join(first, 'tool'));
-    assert.equal(versions.resolveCommand('unknown', { PATH: '' }, 'linux'), 'unknown');
+    assert.equal(resolveCommand('tool', { PATH: `${first}:${second}` }, 'linux'), path.join(second, 'tool'));
+    assert.equal(resolveCommand('tool', { PATH: path.relative(process.cwd(), second) }, 'linux'), path.join(second, 'tool'));
+    assert.equal(resolveCommand(path.join(first, 'tool'), { PATH: '' }, 'linux'), path.join(first, 'tool'));
+    assert.equal(resolveCommand('unknown', { PATH: '' }, 'linux'), 'unknown');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -596,7 +596,7 @@ test('Windows PATH resolution does not duplicate an existing PATHEXT suffix', ()
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-version-win-'));
   try {
     fs.writeFileSync(path.join(root, 'node.exe'), '');
-    assert.equal(versions.resolveCommand('node.EXE', { PATH: root, PATHEXT: '.EXE;.CMD' }, 'win32'), path.join(root, 'node.exe'));
+    assert.equal(resolveCommand('node.EXE', { PATH: root, PATHEXT: '.EXE;.CMD' }, 'win32'), path.join(root, 'node.exe'));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

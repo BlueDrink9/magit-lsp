@@ -13,9 +13,9 @@
  * consumes it.
  */
 
-const render = require('../lib/render');
-const menu = require('../lib/menu');
-const prompt = require('../lib/prompt');
+const { applyRender } = require('../lib/render');
+const { quickPickItems, quickPickItem } = require('../lib/menu');
+const { promptItems, answerFor } = require('../lib/prompt');
 
 /** A full status render as the server sends it. @type {import('../types/protocol').ViewRender.Root} */
 const fullRender = {
@@ -36,8 +36,8 @@ const editRender = {
 };
 
 /** The production render handler accepts the generated payload types. */
-render.applyRender([], 7, fullRender);
-render.applyRender(['# status'], 7, editRender);
+applyRender([], 7, fullRender);
+applyRender(['# status'], 7, editRender);
 
 /** A serialized menu as `view/render` carries it, including `activationSteps`. @type {import('../types/protocol').Menu.Root} */
 const menuPayload = {
@@ -62,7 +62,7 @@ const menuPayload = {
 };
 
 /** The production menu handler consumes the generated menu declaration. */
-menu.quickPickItems(menuPayload);
+quickPickItems(menuPayload);
 
 /** A confirm prompt as `view/prompt` sends it. @type {import('../types/protocol').ViewPromptParams.Root} */
 const confirmPrompt = {
@@ -73,16 +73,16 @@ const confirmPrompt = {
 };
 
 /** The production prompt handlers consume the generated prompt declaration. */
-prompt.promptItems(confirmPrompt);
-prompt.answerFor(confirmPrompt, { id: 'yes', label: 'Yes' });
+promptItems(confirmPrompt);
+answerFor(confirmPrompt, { id: 'yes', label: 'Yes' });
 
 /**
  * Malformed menu item: the wire requires `activationSteps` on every serialized
  * item beside the switch/option/action combinator.
  */
 // @ts-expect-error activationSteps is required on every serialized menu item
-menu.quickPickItem({ kind: 'action', key: 'l', label: 'Log', command: 'log', status: { status: 'implemented' } });
+quickPickItem({ kind: 'action', key: 'l', label: 'Log', command: 'log', status: { status: 'implemented' } });
 
 /** Malformed render: `mode` is a closed union and `grid` is not a wire value. */
 // @ts-expect-error grid is not a ViewMode
-render.applyRender([], 7, { viewId: 'status:repo', version: 8, mode: 'grid', text: [] });
+applyRender([], 7, { viewId: 'status:repo', version: 8, mode: 'grid', text: [] });
