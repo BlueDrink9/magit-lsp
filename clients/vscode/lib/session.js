@@ -25,7 +25,7 @@ const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists'
 const { activateView, stateForUri } = require('./views');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
-const { resolveCommand, warning } = require('./version');
+const { PROTOCOL_VERSION, protocolError, resolveCommand, warning } = require('./version');
 const extensionVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')).version;
 
 /**
@@ -60,7 +60,8 @@ function createClient() {
     fillClientCapabilities(capabilities) {
       capabilities.experimental = capabilities.experimental || {};
       capabilities.experimental.magit = {
-        v: 1,
+        v: PROTOCOL_VERSION,
+        minimumVersion: PROTOCOL_VERSION,
         keys: 'static',
         modifiers: 'full',
         layout: ['main'],
@@ -146,6 +147,8 @@ function activate(context) {
     const versionWarning = warning(extensionVersion,
       client.initializeResult?.serverInfo?.version, executable);
     if (versionWarning) vscode.window.showWarningMessage(versionWarning);
+    const protocolFailure = protocolError(client.initializeResult, PROTOCOL_VERSION);
+    if (protocolFailure) throw new Error(protocolFailure);
     store.semanticChanged = register(
       vscode,
       client,
@@ -155,7 +158,11 @@ function activate(context) {
   }).catch((error) => {
     store.output.appendLine(`language client failed: ${message(error)}`);
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
+    throw error;
   });
+  // A user may never open a view; keep the failed readiness observable without
+  // reporting it as an unhandled rejection.
+  store.clientReady.catch(() => {});
 
   activateView(undefined);
 }

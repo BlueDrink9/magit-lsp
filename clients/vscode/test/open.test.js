@@ -2,9 +2,44 @@
 
 const assert = require('node:assert/strict');
 const Module = require('node:module');
+const path = require('node:path');
+
+/**
+ * Load the extension against one harness's editor and language-client fakes.
+ *
+ * Evicting the cached extension modules lets each harness bind the fakes it
+ * constructs, so one test's client and editor state never leak into another.
+ *
+ * @param {object} vscode the editor fake
+ * @param {Function} LanguageClient the language-client fake
+ * @returns {object} the extension module
+ */
+function loadExtension(vscode, LanguageClient) {
+  const root = path.join(__dirname, '..');
+  const owned = [path.join(root, 'extension.js'), path.join(root, 'package.json')];
+  const prefixes = [path.join(root, 'lib') + path.sep, path.join(root, 'types') + path.sep];
+  for (const key of Object.keys(require.cache)) {
+    if (owned.includes(key) || prefixes.some((prefix) => key.startsWith(prefix))) {
+      delete require.cache[key];
+    }
+  }
+  let extension;
+  const originalLoad = Module._load;
+  Module._load = function load(request, parent, isMain) {
+    if (request === 'vscode') return vscode;
+    if (request === 'vscode-languageclient/node') return { LanguageClient };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    extension = require('../extension');
+  } finally {
+    Module._load = originalLoad;
+  }
+  return extension;
+}
 
 /** Exercise status opening through the registered VSCode command and provider. */
-module.exports = async function testStatusOpenLifecycle() {
+async function testStatusOpenLifecycle() {
   const commands = new Map();
   const providers = new Map();
   const notifications = new Map();
@@ -113,9 +148,12 @@ module.exports = async function testStatusOpenLifecycle() {
       this.handlers = notifications;
       this.features = [];
       this.options = options;
-       this.initializeResult = { serverInfo: { version: require('../package.json').version }, capabilities: { semanticTokensProvider: {
-        legend: { tokenTypes: ['magit.section'], tokenModifiers: [] },
-      } } };
+      this.initializeResult = { serverInfo: { version: require('../package.json').version }, capabilities: {
+        semanticTokensProvider: {
+          legend: { tokenTypes: ['magit.section'], tokenModifiers: [] },
+        },
+        experimental: { magit: { protocolVersion: 1 } },
+      } };
     }
     // anchor: vscode-languageclient 9.0.1 StaticFeature (features.d.ts), production session.js and native VSCodium evidence: docs/evidence/typed-capability-declarations.md; this fake only accepts registration and does not model initialization.
     registerFeature(feature) { this.features.push(feature); }
@@ -155,24 +193,20 @@ module.exports = async function testStatusOpenLifecycle() {
     sendNotification(method) { assert.notEqual(method, 'view/close'); }
   }
 
-  const originalLoad = Module._load;
-  Module._load = function load(request, parent, isMain) {
-    if (request === 'vscode') return vscode;
-    if (request === 'vscode-languageclient/node') return { LanguageClient };
-    return originalLoad.call(this, request, parent, isMain);
-  };
-  let extension;
-  try {
-    extension = require('../extension');
-  } finally {
-    Module._load = originalLoad;
-  }
+  const extension = loadExtension(vscode, LanguageClient);
 
   const context = { subscriptions: [] };
   extension.activate(context);
+  const startedClient = require('../lib/store').store.client;
+  const declaration = { experimental: {} };
+  startedClient.features[0].fillClientCapabilities(declaration);
+  assert.equal(declaration.experimental.magit.v, 1, 'client declares rich session version 1');
+  assert.equal(declaration.experimental.magit.minimumVersion, 1, 'client requires minimum rich version 1');
   await commands.get('magit.open')();
   assert.equal(warnings.length, 0, 'matching server metadata emits no startup warning');
   assert.equal(openCount, 1);
+  assert.notEqual(require('../lib/store').store.semanticChanged, undefined,
+    'matching advertisement registers the rich session');
   assert.equal(tabs.length, 1);
   assert.match(tabs[0].uri.path, /Status$/);
   const firstText = renderPayloads[0].text.join('\n');
@@ -319,4 +353,183 @@ module.exports = async function testStatusOpenLifecycle() {
   await commands.get('magit.open')();
   assert.equal(store.views.size, 1, 'status can be reopened after quit');
   await extension.deactivate();
-};
+}
+
+/** Resolve once pending promise callbacks and rejection reporting have run. */
+function settle() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Build one admission harness: a minimal editor fake, a client fake and the
+ * scripted initialize result or start rejection.
+ *
+ * @param {{startError?: string, protocolVersion?: unknown, includeProtocol?: boolean}} options
+ */
+function admissionHarness(options) {
+  const commands = new Map();
+  const errorMessages = [];
+  const warnings = [];
+  const output = [];
+  const requests = [];
+  const notifications = [];
+  let semanticRegistrations = 0;
+  const vscode = {
+    Uri: { from: (parts) => parts, parse: (value) => value },
+    EventEmitter: class {
+      constructor() { this.event = () => {}; }
+      fire() {}
+      dispose() {}
+    },
+    workspace: {
+      workspaceFolders: [{ uri: { fsPath: '/repo' } }],
+      getConfiguration: () => ({ get: () => undefined }),
+      registerTextDocumentContentProvider: () => ({ dispose() {} }),
+      onDidCloseTextDocument: () => ({ dispose() {} }),
+      onDidChangeTextDocument: () => ({ dispose() {} }),
+    },
+    window: {
+      createOutputChannel: () => ({
+        appendLine(text) { output.push(text); },
+        dispose() {},
+      }),
+      onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+      showErrorMessage: (text) => { errorMessages.push(text); },
+      showWarningMessage: (text) => { warnings.push(text); },
+      tabGroups: {
+        get all() { return []; },
+        onDidChangeTabs: () => ({ dispose() {} }),
+      },
+    },
+    commands: {
+      registerCommand: (name, callback) => {
+        commands.set(name, callback);
+        return { dispose() {} };
+      },
+      executeCommand: async () => {},
+    },
+    languages: {
+      registerDocumentSemanticTokensProvider: () => {
+        semanticRegistrations += 1;
+        return { dispose() {} };
+      },
+    },
+    SemanticTokensLegend: class {},
+  };
+  class LanguageClient {
+    constructor() {
+      this.features = [];
+      this.handlers = new Map();
+      this.initializeResult = {
+        serverInfo: { version: require('../package.json').version },
+        capabilities: {
+          semanticTokensProvider: {
+            legend: { tokenTypes: [], tokenModifiers: [] },
+          },
+          experimental: {
+            magit: options.includeProtocol === false
+              ? {}
+              : { protocolVersion: options.protocolVersion },
+          },
+        },
+      };
+    }
+    registerFeature(feature) { this.features.push(feature); }
+    onNotification(name, handler) { this.handlers.set(name, handler); }
+    start() {
+      return options.startError
+        ? Promise.reject(new Error(options.startError))
+        : Promise.resolve();
+    }
+    stop() { return Promise.resolve(); }
+    async sendRequest(method, params) {
+      requests.push({ method, params });
+      return {};
+    }
+    async sendNotification(method, params) {
+      notifications.push({ method, params });
+    }
+  }
+  return {
+    vscode, LanguageClient, commands, errorMessages, warnings, output, requests,
+    notifications, semanticRegistrations: () => semanticRegistrations,
+  };
+}
+
+/**
+ * Protocol admission: no advertisement variant or initialize rejection may
+ * open a rich view, register semantic tokens or send rich traffic, including
+ * on repeated open attempts, and every failure must reach the user readably.
+ */
+async function testProtocolAdmission() {
+  const unhandled = [];
+  const onUnhandled = (reason) => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  let harness;
+  try {
+    const variants = [
+      { name: 'missing', includeProtocol: false, advertised: 'none' },
+      { name: 'string', protocolVersion: '1', advertised: '"1"' },
+      { name: 'zero', protocolVersion: 0, advertised: '0' },
+      { name: 'negative', protocolVersion: -1, advertised: '-1' },
+      { name: 'fraction', protocolVersion: 1.5, advertised: '1.5' },
+      { name: 'different', protocolVersion: 2, advertised: '2' },
+    ];
+    for (const variant of variants) {
+      harness = admissionHarness(variant);
+      const extension = loadExtension(harness.vscode, harness.LanguageClient);
+      extension.activate({ subscriptions: [] });
+      await settle();
+      assert.equal(harness.semanticRegistrations(), 0, `${variant.name}: no semantic registration`);
+      assert.equal(
+        harness.errorMessages.some((text) => text.includes('required version 1')
+          && text.includes(`server advertised ${variant.advertised}`)),
+        true,
+        `${variant.name}: readable required/advertised error`
+      );
+      assert.equal(
+        harness.output.some((text) => text.includes('language client failed')),
+        true,
+        `${variant.name}: startup failure is not swallowed into readiness`
+      );
+      const { store } = require('../lib/store');
+      await harness.commands.get('magit.open')();
+      await harness.commands.get('magit.open')();
+      assert.equal(harness.requests.length, 0, `${variant.name}: no rich requests on repeated open`);
+      assert.equal(harness.notifications.length, 0, `${variant.name}: no rich notifications on repeated open`);
+      assert.equal(store.views.size, 0, `${variant.name}: no rich view opened`);
+      assert.equal(store.semanticChanged, undefined, `${variant.name}: no semantic invalidation channel`);
+      await extension.deactivate();
+    }
+
+    const rejection = 'capabilities.experimental.magit unsupported rich protocol version';
+    harness = admissionHarness({ startError: rejection });
+    const extension = loadExtension(harness.vscode, harness.LanguageClient);
+    extension.activate({ subscriptions: [] });
+    await settle();
+    assert.equal(
+      harness.errorMessages.some((text) => text.includes(rejection)),
+      true,
+      'initialize rejection reaches the user with the server explanation'
+    );
+    const { store } = require('../lib/store');
+    await harness.commands.get('magit.open')();
+    await harness.commands.get('magit.open')();
+    assert.equal(harness.requests.length, 0, 'rejected start sends no rich requests');
+    assert.equal(harness.notifications.length, 0, 'rejected start sends no rich notifications');
+    assert.equal(store.views.size, 0, 'rejected start opens no rich view');
+    assert.equal(
+      harness.errorMessages.filter((text) => text.includes(rejection)).length >= 3,
+      true,
+      'repeated opens keep reporting the readable rejection'
+    );
+    await extension.deactivate();
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled);
+  }
+  await settle();
+  assert.deepEqual(unhandled, [], 'admission failures never leave an unhandled rejection');
+}
+
+module.exports = testStatusOpenLifecycle;
+module.exports.protocolAdmission = testProtocolAdmission;

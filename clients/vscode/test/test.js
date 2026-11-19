@@ -611,7 +611,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-require('./open.test')().then(() => {
+require('./open.test')().then(async () => {
+  await require('./open.test').protocolAdmission();
   console.log(`ok ${passed} tests`);
 }).catch((error) => {
   console.error(error && error.stack ? error.stack : error);

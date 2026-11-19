@@ -60,18 +60,20 @@ the legacy unrestricted behavior.
 | `window/workDoneProgress/cancel` | client → server notification | `{token}`; cancel the matching active operation. |
 | `window/showMessage` | server → client notification | `{type,message}` standard LSP message. |
 
-**Version handshake (server and Neovim implemented; VS Code pending).** The
+**Version handshake (server, Neovim and VS Code implemented).** The
 server strictly accepts `v = 1`, accepts an optional `minimumVersion` when it
 is a positive integer not above `v`, and rejects any other declaration with a
 readable initialize error before creating a session or opening a rich view. It
 advertises `capabilities.experimental.magit.protocolVersion = 1` as the version
 of every accepted rich session. Neovim declares `v = 1` and `minimumVersion = 1`
 and requires a matching positive-integer advertisement before opening views or
-sending rich traffic. Missing, malformed or different advertisements produce a
-readable required/advertised-version error and stop the transport. An initialize
+sending rich traffic. VS Code declares `v = 1` and `minimumVersion = 1`, and in
+its `client.start()` success path requires the same matching advertisement
+before registering semantic tokens, opening views or sending rich traffic.
+Missing, malformed or different advertisements produce a readable
+required/advertised-version error and stop the transport. An initialize
 rejection reports the server's explanation and stops the transport, without
-retry or downgrade. The package-version warning remains separate. VS Code's
-declaration and advertisement check are pending the remaining T114 parts.
+retry or downgrade. The package-version warning remains separate.
 Clients must treat an initialize rejection as a hard failure; there is no
 fallback to Plain.
 

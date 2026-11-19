@@ -3,6 +3,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+/** Rich protocol session version this client declares and requires. */
+const PROTOCOL_VERSION = 1;
+
 /** Resolve a diagnostic command through PATH without changing the launch command. */
 function resolveCommand(command, env = process.env, platform = process.platform) {
   if (command.includes('/') || command.includes('\\')) return command;
@@ -39,5 +42,33 @@ function warning(extensionVersion, serverVersion, executable) {
   return `magit-lsp version mismatch: extension ${extensionVersion}, server ${serverVersion || 'unknown'} (${executable})`;
 }
 
+/**
+ * Report an incompatible rich protocol advertisement, if any.
+ *
+ * The advertisement is the version of every accepted rich session, so it must
+ * be a positive integer equal to the session version this client declared. A
+ * missing, malformed or different value is a compatibility failure: there is
+ * no fallback, default or retry.
+ *
+ * @param {any} result initialize result
+ * @param {number} required the rich protocol session version this client declared
+ * @returns {string|undefined} readable mismatch naming required and advertised versions
+ */
+function protocolError(result, required) {
+  const advertised = result?.capabilities?.experimental?.magit?.protocolVersion;
+  if (Number.isInteger(advertised) && advertised > 0 && advertised === required) {
+    return undefined;
+  }
+  let shown = 'none';
+  if (advertised !== undefined) {
+    shown = Number.isInteger(advertised)
+      ? String(advertised)
+      : JSON.stringify(advertised) ?? String(advertised);
+  }
+  return `rich protocol mismatch: required version ${required}, server advertised ${shown}`;
+}
+
+exports.PROTOCOL_VERSION = PROTOCOL_VERSION;
+exports.protocolError = protocolError;
 exports.resolveCommand = resolveCommand;
 exports.warning = warning;

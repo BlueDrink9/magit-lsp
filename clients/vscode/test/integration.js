@@ -235,7 +235,7 @@ async function run() {
     const declaration = client.requests.find((request) => request.method === 'initialize').params.capabilities.experimental.magit;
     const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
     assert.deepEqual(declaration, {
-      v: 1, keys: 'static', modifiers: 'full', layout: ['main'],
+      v: 1, minimumVersion: 1, keys: 'static', modifiers: 'full', layout: ['main'],
       effects: [...optionalEffects],
       prompts: [...optionalPromptKinds],
       pick: {
@@ -252,6 +252,8 @@ async function run() {
 
     // 1. Open the status view and display the server's text verbatim.
     await commands.get('magit.open')();
+    assert.equal(client.initializeResult.capabilities.experimental.magit.protocolVersion, 1,
+      'server advertises the declared rich protocol version');
     await waitFor(
       () => __test.activeEditor
         && /Unstaged changes/.test(__test.activeEditor.document.getText()),
