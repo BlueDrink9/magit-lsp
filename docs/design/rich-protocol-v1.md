@@ -24,7 +24,7 @@ it declares. It is frozen at protocol 1.0.
 | --- | --- |
 | The capability block (declaration, effective capabilities, quirks) | Current |
 | `view/open` and `view/close` | Current |
-| The three `view/render` forms: full `text`; one or more `edits`; state/mode-only (neither `text` nor `edits`) | Current |
+| The three `view/render` forms: full `text`; a present `edits` array with zero or more non-overlapping edits (including `edits: []` for an acknowledged unchanged refresh); state/mode-only (neither `text` nor `edits`) | Current |
 | Acknowledgement (`view/rendered`) and `view/resync` | Current |
 | `view/key` and `view/invoke` | Current |
 | `view/keymap` (dynamic delivery; static clients generate the same bindings) | Current |
@@ -162,7 +162,7 @@ no code or wire change.
 | Finding | Status | Disposition | Decision and reason | Wire change |
 | --- | --- | --- | --- | --- |
 | 1. Keymap `version` reuses the render version; draft keymaps use `0` | Real (ambiguity) | Document | Keep the field. `view/keymap.version` is the advisory render generation the bindings belong to and is never acknowledged; `0` identifies a draft/edit keymap keyed by `runId`. Clients already ignore it for acknowledgement, so renaming or removing it would add work without changing behavior. Documented in PROTOCOL §4.2 and ARCHITECTURE §3.9. | No |
-| 2. `view/render` sends zero or one edit; multi-edit rules unwritten | Real (documentation) | Document | Keep the type. The server currently emits at most one edit. If a future server emits several, they do not overlap, `endLine` is exclusive, and clients apply them bottom-up (descending `startLine`). Both shipped clients already implement that order; the gap was only the written contract. | No |
+| 2. `view/render` sends zero or one edit; multi-edit rules unwritten | Real (documentation) | Document | Keep the type. A present `edits` array may be empty: an acknowledged refresh with unchanged text sends `edits: []` with a base and a new version, and the client validates the base, retains its text, and adopts and acknowledges the delivered version; only a render with neither `text` nor `edits` is mode/state-only (W3). The server currently emits at most one edit. If a future server emits several, they do not overlap, `endLine` is exclusive, and clients apply them bottom-up (descending `startLine`). Both shipped clients already implement that order; the gap was only the written contract. | No |
 | 3. Draft `runId` keymaps may be dead after the real-file cutover | Not real | Reject removal | No dead field or path is removed. `EditDocumentMode` has only `RealFile`, and the edit keymap is delivered to dynamic clients on the same path as the render. A future static client wanting draft keys is new work, not a cleanup. | No |
 | 4. One acknowledgement snapshot vs. several outstanding renders is unwritten | Real (documentation) | Document; reject flow control | Document current behavior: a view retains one acknowledged tree/version, successive renders may be delivered before any ack, and a render whose base is not the retained acknowledged version carries full text. Stale acks are no-ops; a lost update needs `view/resync`. Reject "at most one outstanding delivered version": it is not baseline behavior and would add server-side deferral or rejection with new concurrency risk that neither client needs. | No |
 | 5. No bidirectional rich protocol version handshake | Real (missing negotiation) | Fix (planned) | Add the decision 3 handshake; keep the existing strict `v` rejection and readable initialize error. The audit's residual gap was that a client cannot check compatibility before declaring and the server cannot state a minimum. | Yes (initialize result and declaration) |
@@ -174,7 +174,7 @@ no code or wire change.
 | 11. VS Code declares layouts it does not honor | Not real (fixed by T004) | Reject change | Keep `layout: ["main"]`. T004 made the declaration strict and checked; a future client that honors more placements declares them as new work. | No |
 | W1. `PROTOCOL` omits `view/invoke.version` | Real (documentation) | Fix documentation | Add `version?` to the §4.1 row and cross-reference the read policy in finding 9. Clients already send it and rich commands use it for positional resolution. | No |
 | W2. `PROTOCOL` lists nonexistent keymap binding fields | Real (documentation) | Fix documentation | The wire binding is `{command, keys, modes, label, status}`. Remove `doc` and `group` from the documentation only; they never existed on the wire, so no wire field is deleted. Corrected in PROTOCOL §4.2 and ARCHITECTURE §3.9. | No |
-| W3. A mode-only render reuses the current version | Real (minor ambiguity) | Document | A mode-only render is the third render form: it carries no `text` or `edits` and does not advance `version`. Clients must apply `mode` regardless of render status. Advancing the version would make entering text mode look like a document update and neither client needs it. Documented in PROTOCOL §4.2. | No |
+| W3. A mode-only render reuses the current version | Real (minor ambiguity) | Document | A mode-only render is the third render form: it carries no `text` or `edits` and does not advance `version`. This is distinct from an empty `edits` array (finding 2), which carries a base and a new version and must be adopted and acknowledged. Clients must apply `mode` regardless of render status. Advancing the version would make entering text mode look like a document update and neither client needs it. Documented in PROTOCOL §4.2. | No |
 
 **No false dead-field removals.** Findings 3, 6 and 11 are not real, so no field
 or code path is removed for them: the draft `runId` keymap path and
@@ -225,10 +225,11 @@ on-demand mirror keeps the user in control.
 - PROTOCOL §4.1: `view/invoke.version?`, the standard-read vs. rich-command
   policy (finding 9, W1), and the planned version negotiation marked as not
   implemented (decision 3).
-- PROTOCOL §4.2: the three render forms and multi-edit order (finding 2, W3),
-  one retained acknowledgement and `view/resync` (finding 4), keymap fields and
-  `version` (finding 1, W2), prompt notification and `view/promptRespond`
-  (finding 10), and the static-client `passThrough` limit (finding 7).
+- PROTOCOL §4.2: the three render forms (including `edits: []`) and multi-edit
+  order (finding 2, W3), one retained acknowledgement and `view/resync`
+  (finding 4), keymap fields and `version` (finding 1, W2), prompt
+  notification and `view/promptRespond` (finding 10), and the static-client
+  `passThrough` limit (finding 7).
 
 The new decision record is not in the Makefile `DOC_FILES` list; `make
 docs-check` checks the two edited reference files and the link to this record,

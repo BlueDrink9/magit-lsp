@@ -58,11 +58,16 @@ advertises no protocol version.
 | `view/prompt` (notification) | See [Architecture §3.6](ARCHITECTURE.md#36-prompts-what-each-kind-means) and the [detailed client contract](CLIENT_SPEC.md); the client answers with the `view/promptRespond` request (`{promptId, cancelled, value?}`) |
 | standard server requests/notifications | `window/showDocument`, `window/showMessage`, `$/progress` |
 
-`view/render` has three forms: full `text` (no `edits`), one or more `edits`
-against `baseVersion`, or a state/mode-only render with neither `text` nor
-`edits` that does not advance `version`. The server currently emits at most one
-edit; if a future server emits several, they do not overlap, `endLine` is
-exclusive, and clients apply them bottom-up (descending `startLine`).
+`view/render` has three forms: full `text` (no `edits`), a present `edits`
+array with zero or more non-overlapping edits against `baseVersion`, or a
+state/mode-only render with neither `text` nor `edits` that does not advance
+`version`. An empty `edits` array is the incremental form with nothing to
+change: an acknowledged refresh whose text is unchanged sends `edits: []` with a
+base and a new version, so the client validates the base, retains its text, and
+adopts and acknowledges the delivered version. Only the absence of both `text`
+and `edits` is mode/state-only. The server currently emits at most one edit; if
+a future server emits several, they do not overlap, `endLine` is exclusive, and
+clients apply them bottom-up (descending `startLine`).
 
 A view retains one acknowledged tree/version, which is the edit base and the
 source for standard positional reads. Successive renders may be delivered before
