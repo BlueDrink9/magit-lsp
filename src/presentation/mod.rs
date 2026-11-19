@@ -41,6 +41,15 @@ pub fn negotiate(params: &Value) -> Result<Presentation, CapabilityError> {
     };
     let declaration: MagitCapabilities =
         serde_json::from_value(block.clone()).map_err(|error| invalid(&error.to_string()))?;
+    let minimum = declaration
+        .minimum_version
+        .unwrap_or(u64::from(declaration.v));
+    if minimum > u64::from(declaration.v) {
+        return Err(invalid(&format!(
+            "minimumVersion {minimum} exceeds selected rich protocol version {}",
+            declaration.v
+        )));
+    }
     Ok(Presentation::Rich(RichCapabilities {
         keys: declaration.keys,
         modifiers: declaration.modifiers,
@@ -58,6 +67,16 @@ pub struct MagitCapabilities {
     /// Rich protocol version.
     #[serde(deserialize_with = "deserialize_v1")]
     pub v: u8,
+    /// Oldest server session version the client can use; absent means `v`.
+    ///
+    /// A present value must be a positive integer no greater than `v`.
+    #[serde(
+        default,
+        rename = "minimumVersion",
+        deserialize_with = "deserialize_minimum_version",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub minimum_version: Option<u64>,
     /// Client keymap delivery strategy.
     pub keys: crate::protocol::KeymapDelivery,
     /// Client key modifier fidelity.
@@ -139,6 +158,11 @@ pub struct RichCapabilityDeclaration {
     #[serde(deserialize_with = "deserialize_v1")]
     #[schemars(extend("const" = 1))]
     pub v: u8,
+    /// Oldest server session version the client can use; absent means `v`.
+    ///
+    /// A present value must be a positive integer no greater than `v`.
+    #[serde(default, rename = "minimumVersion", skip_serializing_if = "Option::is_none")]
+    pub minimum_version: Option<u64>,
     /// Client keymap delivery strategy.
     pub keys: crate::protocol::KeymapDelivery,
     /// Client key modifier fidelity.
@@ -168,6 +192,18 @@ fn deserialize_v1<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u
         ));
     }
     Ok(version)
+}
+
+/// Parse a present `minimumVersion` as a positive integer without clamping.
+fn deserialize_minimum_version<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    match Value::deserialize(deserializer)?.as_u64() {
+        Some(version) if version > 0 => Ok(Some(version)),
+        _ => Err(serde::de::Error::custom(
+            "minimumVersion must be a positive integer",
+        )),
+    }
 }
 
 fn deserialize_names<'de, D: serde::Deserializer<'de>>(

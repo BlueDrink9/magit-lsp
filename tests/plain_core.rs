@@ -875,3 +875,46 @@ fn malformed_or_unknown_rich_declarations_are_rejected() {
         assert!(negotiate(&initialize(Some(block))).is_err());
     }
 }
+
+#[test]
+fn rich_protocol_version_minimum_is_validated_without_selecting_below_it() {
+    let accepted = |block: Value| match negotiate(&initialize(Some(block))) {
+        Ok(Presentation::Rich(_)) => {}
+        other => panic!("expected rich acceptance: {other:?}"),
+    };
+    // Omission selects `v`, and a matching minimum of 1 is accepted.
+    accepted(rich_block());
+    let mut matching = rich_block();
+    matching["minimumVersion"] = json!(1);
+    accepted(matching);
+
+    let rejected = |block: Value| negotiate(&initialize(Some(block))).expect_err("rejection").0;
+
+    let mut unsupported = rich_block();
+    unsupported["v"] = json!(2);
+    assert!(
+        rejected(unsupported).contains("unsupported rich protocol version"),
+        "an unsupported selected version keeps the existing readable error"
+    );
+
+    for invalid in [json!(0), json!(-1), json!(1.5), json!("2")] {
+        let mut block = rich_block();
+        block["minimumVersion"] = invalid.clone();
+        let message = rejected(block);
+        assert!(
+            message.contains("capabilities.experimental.magit")
+                && message.contains("minimumVersion must be a positive integer"),
+            "{invalid}: {message}"
+        );
+    }
+
+    // A minimum above the selected version names both numbers and is never clamped.
+    let mut too_high = rich_block();
+    too_high["minimumVersion"] = json!(2);
+    let message = rejected(too_high);
+    assert!(
+        message.contains("minimumVersion 2")
+            && message.contains("selected rich protocol version 1"),
+        "{message}"
+    );
+}

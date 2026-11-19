@@ -286,6 +286,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 .filter_map(|id| crate::quirks::REGISTRY.iter().find(|q| q.id == *id))
                 .map(|q| serde_json::json!({"id":q.id,"model":q.model,"workaround":q.workaround}))
                 .collect();
+            server_caps["experimental"]["magit"]["protocolVersion"] = serde_json::json!(1);
             server_caps["experimental"]["magit"]["effective"] =
                 serde_json::json!({"capabilities":effective_caps,"quirks":enabled});
             Ok(Dispatched::with(

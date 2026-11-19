@@ -260,3 +260,50 @@ fn template_refresh_mixed_fallback_chain_and_progress_cancel() {
 fn preset_name(preset: editor_model::presets::Preset) -> &'static str {
     match preset { editor_model::presets::Preset::StockNeovim => "stock-neovim", editor_model::presets::Preset::Helix => "helix", editor_model::presets::Preset::BundledNeovim => "bundled-neovim", editor_model::presets::Preset::BundledVsCode => "bundled-vscode" }
 }
+
+fn rich_protocol_declaration() -> Value {
+    json!({"v":1,"keys":"dynamic","modifiers":"full","layout":["main"],"effects":[],"prompts":[]})
+}
+
+#[test]
+fn rich_protocol_version_initialize_wire_advertises_and_rejects_before_rich_open() {
+    // The accepted session advertises exactly the version it speaks.
+    let mut server = stdio::TestServer::spawn(&[]);
+    let response = server.initialize(json!({"experimental":{"magit":rich_protocol_declaration()}}));
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(
+        response["result"]["capabilities"]["experimental"]["magit"]["protocolVersion"],
+        json!(1)
+    );
+    server.shutdown_and_exit();
+
+    // A minimum above the selected version is a readable initialize error, not a session.
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut declaration = rich_protocol_declaration();
+    declaration["minimumVersion"] = json!(2);
+    let response = server.initialize(json!({"experimental":{"magit":declaration}}));
+    let message = response["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("readable rejection expected: {response}"));
+    assert!(
+        message.contains("minimumVersion 2")
+            && message.contains("selected rich protocol version 1"),
+        "{message}"
+    );
+    assert!(response["result"].is_null(), "rejection must open no rich session: {response}");
+    server.shutdown_and_exit();
+
+    // Plain initialization still negotiates and reports only standard capability state.
+    let mut server = stdio::TestServer::spawn(&[]);
+    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
+    assert!(response["error"].is_null(), "{response}");
+    assert_eq!(
+        response["result"]["capabilities"]["experimental"]["magit"]["protocolVersion"],
+        json!(1)
+    );
+    let effective =
+        &response["result"]["capabilities"]["experimental"]["magit"]["effective"]["capabilities"];
+    assert!(effective.get("applyEdit").is_some(), "Plain keeps standard capabilities: {effective}");
+    assert!(effective.get("keys").is_none(), "Plain must not gain rich capabilities: {effective}");
+    server.shutdown_and_exit();
+}
