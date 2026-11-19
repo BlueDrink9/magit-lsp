@@ -41,10 +41,10 @@
 | `magit-branch-orphan` | `b o` | `branch.orphan` | Planned R-6.1 | branch |
 | `magit-checkout-remote-ref` | `b r` | `branch.checkout-remote` | Planned R-6.1 | branch |
 | `magit-branch-and-checkout` | `b c` | `branch.create-and-checkout` | Planned R-6.1 | branch |
-| `magit-branch-spinoff` | `b s` | `branch.spinoff` | Planned R-6.1 | branch |
+| `magit-branch-spinoff` | `b s` | `branch.spinoff` | Implemented | branch |
 | `magit-worktree-checkout` | `b w` | `branch.worktree-checkout` | Planned R-6.1 | branch |
 | `magit-branch-create` | `b n` | `branch.create` | Implemented | branch |
-| `magit-branch-spinout` | `b S` | `branch.spinout` | Planned R-6.1 | branch |
+| `magit-branch-spinout` | `b S` | `branch.spinout` | Implemented | branch |
 | `magit-worktree-branch` | `b W` | `branch.worktree-create` | Planned R-6.1 | branch |
 | `magit-branch-configure` | `b C` | `branch.configure` | Planned R-6.1 | branch |
 | `magit-branch-rename` | `b m` | `branch.rename` | Implemented | branch |

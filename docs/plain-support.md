@@ -31,8 +31,8 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `branch.rename` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.reset` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.shelve` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.spinoff` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.spinout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.spinoff` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `branch.spinout` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.unshelve` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.update-default` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.worktree-checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
