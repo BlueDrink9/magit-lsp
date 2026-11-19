@@ -634,6 +634,10 @@ pub fn resume_prompt(
                 return Err(crate::Error::new("Expected a revision"));
             };
             let target = target.trim().to_owned();
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if repo.current_branch().as_deref() == Some(source.as_str()) {
+                return reset_answered(ctx, PromptValue::Text(target), ResetMode::Hard);
+            }
             branch_action(
                 ctx,
                 |repo| repo.reset_branch(&source, &target),
@@ -1103,6 +1107,7 @@ fn build() -> Registry {
         command! { id: "reset.soft", scope: Scope::MenuAction, doc: "Move HEAD to a revision", status: CommandStatus::Implemented, run: reset_soft, effects: &[] },
         command! { id: "reset.hard", scope: Scope::MenuAction, doc: "Reset HEAD, index and worktree to a revision", status: CommandStatus::Implemented, run: reset_hard, effects: &[] },
         command! { id: "reset.keep", scope: Scope::MenuAction, doc: "Reset HEAD and the index to a revision, keeping local changes", status: CommandStatus::Implemented, run: reset_keep, effects: &[] },
+        command! { id: "reset.branch", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,

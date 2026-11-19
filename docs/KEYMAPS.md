@@ -152,11 +152,12 @@ both profiles.
 | `m` | Rename a branch: prompt for the source, then the new name |
 | `k` | Delete a branch, leaving Git's refusal of the checked-out branch as a message |
 | `d` | Set a branch description: prompt for the branch, then for its text |
-| `x` | Reset a branch to a revision: prompt for the branch, then the target revision |
+| `x` | Reset a branch to a revision: prompt for the branch, then the target revision; a non-current branch is force-moved, while the current branch is hard-reset, confirming when the working tree is dirty |
 
 Branch checkout, the `b C` configure popup and worktree entries remain planned.
-Resetting force-moves the named branch without checking it out or touching the
-working tree.
+Resetting a non-current branch force-moves it without checking it out. Resetting
+the current branch hard-resets it, so uncommitted changes are discarded after
+confirmation.
 Creating a branch leaves the current branch checked out; renaming the checked-out
 branch renames it in place.
 
@@ -197,11 +198,12 @@ are identical in both profiles.
 | `X s` | Soft reset: move `HEAD` to a prompted revision, leaving index and working tree alone |
 | `X h` | Hard reset: move `HEAD` and reset the index and working tree to a prompted revision, confirming when the working tree is dirty |
 | `X k` | Keep reset: move `HEAD` and reset the index to a prompted revision, keeping uncommitted changes intact |
+| `X b` | Reset a branch: prompt for the branch, then the target revision; identical to `b x`, including the current-branch hard reset and its dirty-tree confirmation |
 
 Each row prompts once for the target revision; a free-text target never reaches
 Git in option position. `X h` asking for confirmation on a dirty tree is a
-deliberate deviation from Magit, which hard-resets without asking. `X b` (reset
-a branch) and `X f/i/w` (path-scoped) remain planned.
+deliberate deviation from Magit, which hard-resets without asking. `X f/i/w`
+(path-scoped) remain planned.
 
 ### 5.5 Commit-message scope
 

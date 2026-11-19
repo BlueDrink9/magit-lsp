@@ -1316,6 +1316,12 @@ fn branch_reset_moves_a_side_branch_to_a_revision_without_switching() {
         .commit("second", [("second.txt", "second\n")])
         .build();
     tmp.git(&["branch", "feature", "HEAD~1"]);
+    let feature_before = tmp.git(&["rev-parse", "feature"]).trim().to_owned();
+    let head_before = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(
+        feature_before, head_before,
+        "the fixture must start the branch and target at distinct commits"
+    );
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let Execution::Prompt(first) = test
@@ -1355,7 +1361,14 @@ fn branch_reset_moves_a_side_branch_to_a_revision_without_switching() {
     );
     let feature = tmp.git(&["rev-parse", "feature"]).trim().to_owned();
     let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
-    assert_eq!(feature, head, "reset must move feature to HEAD");
+    assert_eq!(
+        feature, head_before,
+        "reset must move feature to the captured target OID"
+    );
+    assert_eq!(
+        head, head_before,
+        "force-moving a side branch must leave the current branch in place"
+    );
     assert!(
         tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
         "reset must not check the branch out"
@@ -1364,13 +1377,16 @@ fn branch_reset_moves_a_side_branch_to_a_revision_without_switching() {
 }
 
 #[test]
-fn branch_reset_of_current_branch_surfaces_gits_refusal() {
+fn branch_reset_of_current_branch_hard_resets_to_a_distinct_commit() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("base.txt", "base\n")])
         .commit("second", [("second.txt", "second\n")])
         .build();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let Execution::Prompt(first) = test
@@ -1387,7 +1403,7 @@ fn branch_reset_of_current_branch_surfaces_gits_refusal() {
     else {
         panic!("expected branch name prompt");
     };
-    let Execution::Prompt(second) = test
+    let Execution::Prompt(target) = test
         .session
         .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
         .unwrap()
@@ -1396,23 +1412,183 @@ fn branch_reset_of_current_branch_surfaces_gits_refusal() {
     };
     let Execution::Done(result) = test
         .session
-        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .resume_prompt(&target.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("a clean tree must not ask for confirmation");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Reset to HEAD~1 (hard)"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "resetting the current branch must hard-reset HEAD to the captured parent OID"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "main"]).trim(),
+        parent,
+        "the current branch ref must move with HEAD"
+    );
+    assert!(
+        !tmp.path().join("second.txt").exists(),
+        "the current-branch reset must remove the child commit's file from the worktree"
+    );
+    assert_eq!(tmp.git(&["status", "--porcelain"]).trim(), "");
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_reset_of_current_branch_declines_a_dirty_tree_then_discards_when_confirmed() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let invoke = |test: &mut TestSession| {
+        let Execution::Prompt(first) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: "branch.reset".into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("expected branch name prompt");
+        };
+        let Execution::Prompt(target) = test
+            .session
+            .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
+            .unwrap()
+        else {
+            panic!("expected reset target prompt");
+        };
+        let Execution::Prompt(confirm) = test
+            .session
+            .resume_prompt(&target.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+            .unwrap()
+        else {
+            panic!("a dirty tree must ask for confirmation");
+        };
+        confirm.prompt_id
+    };
+    let confirm_id = invoke(&mut test);
+    let Execution::Done(declined) = test
+        .session
+        .resume_prompt(&confirm_id, Some(PromptValue::Text("no".into())))
         .unwrap()
     else {
         panic!("expected completion");
     };
-    let texts = message_texts(&result.effects);
     assert!(
-        texts.iter().any(|text| {
-            let text = text.to_lowercase();
-            text.contains("cannot force update the branch") && text.contains("main")
-        }),
+        message_texts(&declined.effects).contains(&"Hard reset to HEAD~1 cancelled"),
+        "{:?}",
+        declined.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        second,
+        "declining must leave the current branch at its captured OID"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        "dirty\n",
+        "declining must leave the worktree in place"
+    );
+    let confirm_id = invoke(&mut test);
+    let Execution::Done(confirmed) = test
+        .session
+        .resume_prompt(&confirm_id, Some(PromptValue::Text("yes".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&confirmed.effects).contains(&"Reset to HEAD~1 (hard)"),
+        "{:?}",
+        confirmed.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "confirming must hard-reset the current branch to the captured parent OID"
+    );
+    assert!(
+        !tmp.path().join("second.txt").exists(),
+        "confirming must discard the child commit's file"
+    );
+    assert_eq!(
+        tmp.git(&["status", "--porcelain"]).trim(),
+        "",
+        "confirming must leave a clean tree behind"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_branch_menu_id_drives_the_same_hard_reset_flow() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(parent, second, "the fixture must have two distinct commits");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "reset.branch".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(target) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
+        .unwrap()
+    else {
+        panic!("expected reset target prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&target.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("the X b id must drive the same clean current-branch reset");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Reset to HEAD~1 (hard)"),
         "{:?}",
         result.effects
     );
-    let main = tmp.git(&["rev-parse", "main"]).trim().to_owned();
-    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
-    assert_eq!(main, head, "Git's refusal must leave main at HEAD");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "the registered reset.branch id must move HEAD to the captured parent OID"
+    );
     assert!(!test.session.has_pending_prompt());
 }
 

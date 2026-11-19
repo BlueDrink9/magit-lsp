@@ -1,7 +1,7 @@
-# Early T070: resetting a branch force-moves it without checking it out.
+# Early T070: resetting a side branch force-moves it to a distinct commit without checking it out.
 fixture: modified-two-files
 ---
-sh: git branch feature
+sh: git commit -am second && git branch feature && git rev-parse HEAD~1 > .git/reset-target
 keys: b
 wait
 expect screen contains "reset"
@@ -12,9 +12,8 @@ expect screen contains "Reset branch"
 keys: feature Enter
 wait prompt
 expect screen contains "Reset to"
-keys: HEAD Enter
+keys: HEAD~1 Enter
 wait
-expect screen contains "Reset branch feature to HEAD"
-sh: test "$(git rev-parse feature)" = "$(git rev-parse HEAD)"
-sh: test "$(git rev-parse --abbrev-ref HEAD)" = main
+expect screen contains "Reset branch feature to HEAD~1"
+sh: test "$(git rev-parse feature)" = "$(cat .git/reset-target)" && test "$(git rev-parse feature)" != "$(git rev-parse HEAD)" && test "$(git rev-parse --abbrev-ref HEAD)" = main
 snapshot: reset

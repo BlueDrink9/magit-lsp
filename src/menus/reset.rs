@@ -12,7 +12,7 @@ pub fn definition() -> MenuDef {
             group(
                 "Reset",
                 vec![
-                    action("b", "reset.branch", "branch", "magit-branch-reset", "R-6.3"),
+                    action("b", "reset.branch", "branch", "magit-branch-reset", ""),
                     action("f", "reset.file", "file", "magit-file-checkout", "R-6.3"),
                 ],
             ),
