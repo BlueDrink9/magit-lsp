@@ -507,6 +507,7 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Verified (remotes rename/prune, part 3/3, A2) — `make test-rust FILTER="--test commands"` → exit 0; the three new tests cover the two-prompt rename, prune dropping a stale tracking ref while keeping a live one, and the missing-remote prune refusal surfacing as Git's warn message.
   - Verified (remotes rename/prune, part 3/3, A3) — `make ui-file FILE=tests/ui/scenarios/remote-rename.scn` → exit 0; menu-driven `M r` prompts for `origin` then `upstream` and `git remote` reports `upstream` only; no snapshot reflects remote rows, so none changed.
   - Early T042 remotes complete; remaining Planned R-6.3: remote.configure, prune-refspecs, unshallow, update-default, tag.release, tag.prune; the Phase 10 T042 line stays unticked.
+  - Done: `0f64083`.
 - [ ] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
 
 ## Completed work
