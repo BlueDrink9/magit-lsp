@@ -34,6 +34,14 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 
 ## Bugfix
 
+- [ ] **T022 hygiene — retire unused pickFor export**
+  - check: remove only the redundant external export, preserving module-local picker behavior and its real `handlePick` caller. Verify VSCode suite, then hygiene separately; do not add suppressions or artificial consumers.
+  - Research (2026-11-19, `54c3e66`): requests.js:259 calls module-local pickFor (:285); only export is :333. Repository search finds no external consumer. Earlier note that integration.js consumes pickFor is historical and no longer true after its concurrent cleanup.
+  - Phase gate evidence at `245316c`: narrow Plain/dispatch tests, `make ui-test`, `make ui-tour`, `make registry-docs-check` passed. `make hygiene` report-only exit 0: cargo-machete/Luacheck clean; Knip only unused pickFor. Size reports remain soft-policy exceptions; marker inventory needs final review disposition. Full `make test` still blocked on missing ps.
+  - Verified A1 (2026-11-19, base `54c3e66`): only the `exports.pickFor = pickFor;` binding was removed. Repository sweep `rg -n -F pickFor clients/vscode test tests docs lua src Makefile` retains just `clients/vscode/lib/requests.js:259` (real `handlePick` call) and `:285` (module-local declaration); no external consumer or export remains, with no suppression or artificial consumer added.
+  - Verified A2: `CI=true make vscode-test` exited 0 (`ok: build`, `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode`, `ok: keybindings`), preserving `view/pick` handling through module-local `pickFor` and its `view/pickRespond` reply.
+  - Verified A3: evidence recorded here and committed with the source change by explicit path; the T022 parent checkbox stays unchecked (Part 1/2).
+
 - [ ] **T022 gate — restore process-check prerequisite**
   - check: `make test` can execute its existing process ownership assertions; install/expose `ps` on PATH (human environment prerequisite; workers must not install or substitute tools).
   - Verified: gate at `a5d8e27`, `make test` failed in `build/test-logs/rust.OGGcWl`; two server_async process checks cannot spawn `ps`. `command -v ps` returns no path. Do not weaken orphan assertions.
