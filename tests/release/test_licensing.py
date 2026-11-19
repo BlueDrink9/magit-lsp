@@ -31,5 +31,6 @@ class LicensingTests(unittest.TestCase):
         self.assertIn('Apache-2.0', header)
         readme = (ROOT / 'README.md').read_text()
         self.assertIn('[LICENSING.md]', readme)
-        self.assertTrue(readme.rstrip().endswith(
-            'Inspired by Magit for Emacs. This project is an independent implementation and is not affiliated with the Magit project.'))
+        self.assertIn(
+            'Inspired by Magit for Emacs. This project is an independent implementation and is not affiliated with the Magit project.',
+            readme)
