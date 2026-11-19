@@ -16,6 +16,7 @@ const BINARY = Buffer.from('#!/bin/sh\nexit 0\n');
 const RUNTIME = { platform: 'linux', arch: 'x64', glibc: '2.36' };
 const FIXTURE_PROGRAM = path.join(__dirname, '..', '..', '..', 'scripts', 'test_release_archive_fixture.py');
 const PROCESS_FIXTURE = path.join(__dirname, 'server-download-process.js');
+const RELEASE_BASE = `https://github.com/BlueDrink9/magit-lsp/releases/download/v${VERSION}`;
 
 /** Create a temporary cache root; the caller removes it. */
 function temporaryRoot() {
@@ -347,6 +348,110 @@ function assertNoInstall(entry) {
   assert.equal(fs.existsSync(path.join(entry, 'manifest.json')), false, 'no manifest published');
   const leftovers = fs.existsSync(entry) ? fs.readdirSync(entry) : [];
   assert.deepEqual(leftovers, [], 'failed download leaves no partial files');
+}
+
+/**
+ * Build a response body that records whether the downloader released it.
+ *
+ * @param {object} [options]
+ * @param {Buffer[]} [options.chunks] fragments yielded to a reader
+ * @param {boolean} [options.failCancel] make cancellation itself throw
+ * @param {boolean} [options.stall] never yield a fragment until aborted
+ * @param {AbortSignal} [options.signal] clock signal that errors a stalled body
+ * @returns {{stream: ReadableStream, cancelled: () => boolean, cancelFailure: () => unknown, delivered: () => number}}
+ */
+function trackedBody(options = {}) {
+  const chunks = options.chunks ?? [];
+  let index = 0;
+  let cancelled = false;
+  /** @type {unknown} */
+  let cancelFailure;
+  const stream = new ReadableStream({
+    start(controller) {
+      if (!options.signal) return;
+      const stop = () => {
+        try {
+          controller.error(options.signal?.reason ?? new Error('aborted'));
+        } catch {}
+      };
+      if (options.signal.aborted) stop();
+      else options.signal.addEventListener('abort', stop, { once: true });
+    },
+    pull(controller) {
+      if (options.stall) return;
+      if (index >= chunks.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(new Uint8Array(chunks[index]));
+      index += 1;
+    },
+    cancel() {
+      cancelled = true;
+      if (options.failCancel) {
+        cancelFailure = new Error('body cancellation failed');
+        throw cancelFailure;
+      }
+    },
+  });
+  return {
+    stream,
+    cancelled: () => cancelled,
+    cancelFailure: () => cancelFailure,
+    delivered: () => index,
+  };
+}
+
+/**
+ * Run one scenario against the real production download transport.
+ *
+ * Only the fetch boundary and the production request clock are replaced, so the
+ * real redirect, size and abort logic still runs. Both globals are restored even
+ * when the scenario throws, and an unhandled rejection fails it.
+ *
+ * @param {(url: URL, signal: AbortSignal) => Promise<Response>} respond
+ * @param {(control: {calls: string[], controllers: AbortController[]}) => Promise<void>} body
+ * @returns {Promise<void>}
+ */
+async function withProductionFetch(respond, body) {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  /** @type {string[]} */
+  const calls = [];
+  /** @type {AbortController[]} */
+  const controllers = [];
+  /** @type {unknown[]} */
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  globalThis.fetch = (url, init = {}) => {
+    calls.push(String(url));
+    return respond(url, init.signal);
+  };
+  AbortSignal.timeout = () => {
+    const controller = new AbortController();
+    controllers.push(controller);
+    return controller.signal;
+  };
+  process.on('unhandledRejection', onRejection);
+  try {
+    await body({ calls, controllers });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(rejections.map(String), [], 'no unhandled rejection escapes the downloader');
+  } finally {
+    globalThis.fetch = originalFetch;
+    AbortSignal.timeout = originalTimeout;
+    process.off('unhandledRejection', onRejection);
+  }
+}
+
+/**
+ * Resolve one version through the production fetch transport.
+ *
+ * @param {string} root cache root
+ * @returns {Promise<{executable: string, version: string}>}
+ */
+function resolveProduction(root) {
+  return resolveServer({ version: VERSION, cacheRoot: root, runtime: RUNTIME });
 }
 
 /**
@@ -867,6 +972,234 @@ async function run() {
       assertNoInstall(entryOf(root));
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport follows relative HTTPS redirects and cancels the redirect body', async () => {
+    const root = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('stale redirect payload')] });
+          bodies.push(body);
+          if (bodies.length === 1) {
+            return new Response(body.stream, { status: 302, headers: { location: '/moved' } });
+          }
+          return new Response(body.stream, { status: 200 });
+        },
+        async ({ calls }) => {
+          await rejects(resolveProduction(root), /invalid checksum sidecar/);
+          assert.deepEqual(calls, [`${RELEASE_BASE}/${archiveNameOf()}.sha256`, 'https://github.com/moved']);
+          assert.equal(bodies[0].cancelled(), true, 'redirect body is released');
+          assert.equal(bodies[1].cancelled(), false, 'the body that was read is not cancelled');
+          assertNoInstall(entryOf(root));
+        },
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport never fetches a downgrade target and cancels the redirect body', async () => {
+    const root = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('redirect body')] });
+          bodies.push(body);
+          return new Response(body.stream, { status: 302, headers: { location: 'http://example.test/archive' } });
+        },
+        async ({ calls }) => {
+          await rejects(resolveProduction(root), /refusing non-HTTPS download/);
+          assert.equal(calls.length, 1, 'the downgraded target is never fetched');
+          assert.equal(bodies[0].cancelled(), true, 'refused redirect body is released');
+          assertNoInstall(entryOf(root));
+        },
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport cancels every redirect body and stops at the redirect bound', async () => {
+    const root = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('hop')] });
+          bodies.push(body);
+          return new Response(body.stream, { status: 302, headers: { location: '/loop' } });
+        },
+        async ({ calls }) => {
+          await rejects(resolveProduction(root), /too many redirects/);
+          assert.equal(calls.length, LIMITS.redirects + 1, 'stops at the redirect bound without another fetch');
+          assert.equal(bodies.length, calls.length, 'one response per hop');
+          assert.deepEqual(bodies.map((body) => body.cancelled()), bodies.map(() => true), 'every hop body released');
+          assertNoInstall(entryOf(root));
+        },
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport cancels a redirect body that has no location', async () => {
+    const root = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('no location')] });
+          bodies.push(body);
+          return new Response(body.stream, { status: 302 });
+        },
+        async ({ calls }) => {
+          await rejects(resolveProduction(root), /redirect without a location/);
+          assert.equal(calls.length, 1);
+          assert.equal(bodies[0].cancelled(), true, 'locationless redirect body is released');
+          assertNoInstall(entryOf(root));
+        },
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport cancels non-OK bodies and keeps the HTTP diagnostic when cancel fails', async () => {
+    const root = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('error page')], failCancel: true });
+          bodies.push(body);
+          return new Response(body.stream, { status: 503 });
+        },
+        async () => {
+          await assert.rejects(resolveProduction(root), (error) => {
+            assert.equal(error.name, 'ServerDownloadError', `readable failure: ${error.message}`);
+            assert.match(error.message, /HTTP 503/);
+            assert.equal(error.message.includes('body cancellation failed'), false, 'primary diagnostic survives');
+            return true;
+          });
+          assert.notEqual(bodies[0].cancelFailure(), undefined, 'the scenario exercised a failing cancellation');
+          assert.equal(bodies[0].cancelled(), true, 'the refusal still attempts cancellation');
+          assertNoInstall(entryOf(root));
+        },
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport cancels advertised and streamed oversized bodies', async () => {
+    const advertised = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: [Buffer.from('x')] });
+          bodies.push(body);
+          return new Response(body.stream, {
+            status: 200,
+            headers: { 'content-length': String(LIMITS.sidecarBytes + 1) },
+          });
+        },
+        async () => {
+          await rejects(resolveProduction(advertised), /exceeds the \d+-byte limit/);
+          assert.equal(bodies[0].cancelled(), true, 'advertised oversize body is released unread');
+          assertNoInstall(entryOf(advertised));
+        },
+      );
+    } finally {
+      fs.rmSync(advertised, { recursive: true, force: true });
+    }
+
+    const streamed = temporaryRoot();
+    const chunk = Buffer.alloc(1024, 0x61);
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      await withProductionFetch(
+        async () => {
+          const body = trackedBody({ chunks: Array.from({ length: 50 }, () => chunk) });
+          bodies.push(body);
+          return new Response(body.stream, { status: 200 });
+        },
+        async () => {
+          await rejects(resolveProduction(streamed), /exceeds the \d+-byte limit/);
+          assert.equal(bodies[0].cancelled(), true, 'streamed oversize body is released');
+          assert.equal(bodies[0].delivered() < 50, true, 'the stream is not drained past the limit');
+          assertNoInstall(entryOf(streamed));
+        },
+      );
+    } finally {
+      fs.rmSync(streamed, { recursive: true, force: true });
+    }
+  });
+
+  await check('real transport honours the request clock while awaiting headers and body', async () => {
+    const headersRoot = temporaryRoot();
+    try {
+      /** @type {() => void} */
+      let startedHeaders;
+      const headersStarted = new Promise((resolve) => {
+        startedHeaders = () => resolve(undefined);
+      });
+      await withProductionFetch(
+        (url, signal) =>
+          new Promise((resolve, reject) => {
+            startedHeaders();
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          }),
+        async ({ controllers }) => {
+          const rejection = rejects(resolveProduction(headersRoot), /download failed/, /request clock expired/);
+          await headersStarted;
+          controllers.forEach((controller) => controller.abort(new Error('request clock expired')));
+          await rejection;
+          assertNoInstall(entryOf(headersRoot));
+        },
+      );
+    } finally {
+      fs.rmSync(headersRoot, { recursive: true, force: true });
+    }
+
+    const bodyRoot = temporaryRoot();
+    try {
+      /** @type {ReturnType<typeof trackedBody>[]} */
+      const bodies = [];
+      /** @type {() => void} */
+      let startedBody;
+      const bodyStarted = new Promise((resolve) => {
+        startedBody = () => resolve(undefined);
+      });
+      await withProductionFetch(
+        async (url, signal) => {
+          const body = trackedBody({ stall: true, signal });
+          bodies.push(body);
+          startedBody();
+          return new Response(body.stream, { status: 200 });
+        },
+        async ({ controllers }) => {
+          const rejection = rejects(resolveProduction(bodyRoot), /cannot install magit-lsp/, /request clock expired/);
+          await bodyStarted;
+          controllers.forEach((controller) => controller.abort(new Error('request clock expired')));
+          await rejection;
+          assert.equal(bodies[0].cancelled(), false, 'the aborted body is errored, not drained');
+          assertNoInstall(entryOf(bodyRoot));
+        },
+      );
+    } finally {
+      fs.rmSync(bodyRoot, { recursive: true, force: true });
     }
   });
 

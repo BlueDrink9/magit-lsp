@@ -531,10 +531,30 @@ function extractBinary(archive, stem) {
 }
 
 /**
+ * Release a response body this download will not read.
+ *
+ * Cancellation is best effort: a transport that fails to cancel must never
+ * replace the readable reason the response is being rejected for.
+ *
+ * @param {Response} response unused response
+ * @returns {Promise<void>}
+ */
+async function discardResponse(response) {
+  const body = response.body;
+  if (!body) return;
+  try {
+    await body.cancel();
+  } catch {}
+}
+
+/**
  * Download one URL over HTTPS with redirect, size and time bounds.
  *
  * This is the production transport. Redirects are followed manually so every
  * hop is required to stay on HTTPS, bounded in number and bounded in time.
+ * Every response whose body is not returned is cancelled before the redirect is
+ * followed or the refusal is reported, so no socket or background transfer
+ * outlives the decision.
  *
  * @param {string} url release URL from this repository
  * @param {number} limit maximum accepted bytes
@@ -556,6 +576,7 @@ async function fetchBytes(url, limit) {
     }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
+      await discardResponse(response);
       if (!location) fail(`redirect without a location for ${current.href}`);
       try {
         current = new URL(location, current);
@@ -564,9 +585,13 @@ async function fetchBytes(url, limit) {
       }
       continue;
     }
-    if (!response.ok) fail(`download failed: HTTP ${response.status} for ${current.href}`);
+    if (!response.ok) {
+      await discardResponse(response);
+      fail(`download failed: HTTP ${response.status} for ${current.href}`);
+    }
     const advertised = Number(response.headers.get('content-length'));
     if (Number.isFinite(advertised) && advertised > limit) {
+      await discardResponse(response);
       fail(`download exceeds the ${limit}-byte limit for ${current.href}`);
     }
     /** @type {Buffer[]} */
@@ -574,9 +599,11 @@ async function fetchBytes(url, limit) {
     let total = 0;
     for await (const chunk of /** @type {any} */ (response.body)) {
       total += chunk.length;
-      if (total > limit) fail(`download exceeds the ${limit}-byte limit for ${current.href}`);
+      // Stopping early releases the stream through the iterator's cancellation.
+      if (total > limit) break;
       chunks.push(Buffer.from(chunk));
     }
+    if (total > limit) fail(`download exceeds the ${limit}-byte limit for ${current.href}`);
     return Buffer.concat(chunks, total);
   }
   fail(`too many redirects for ${url}`);
