@@ -509,10 +509,35 @@ impl GitRepo {
             .filter(|value| !value.is_empty())
     }
 
-    /// Create a branch at HEAD without switching to it.
-    pub fn create_branch(&self, name: &str) -> Result<()> {
-        let name = self.validate_branch_name(name)?;
-        self.run(&["branch", name.as_str()]).map(|_| ())
+    /// Whether `name` is an existing local branch.
+    pub fn is_local_branch(&self, name: &str) -> bool {
+        if Self::reject_option_like("branch name", name).is_err() || name.is_empty() {
+            return false;
+        }
+        self.run(&[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ])
+        .is_ok()
+    }
+
+    /// Create branch `new` at `startpoint` without switching to it.
+    ///
+    /// A startpoint that names a local branch becomes the new branch's
+    /// upstream via explicit tracking; any other startpoint creates the branch
+    /// at that revision. Neither answer can select a different `git branch`
+    /// operation: the new name is validated and an option-like startpoint is
+    /// refused here.
+    pub fn create_branch_at(&self, new: &str, startpoint: &str) -> Result<()> {
+        let new = self.validate_branch_name(new)?;
+        Self::reject_option_like("start point", startpoint)?;
+        if self.is_local_branch(startpoint) {
+            return self.create_tracking_branch(&new, startpoint);
+        }
+        self.run(&["branch", new.as_str(), "--", startpoint])
+            .map(|_| ())
     }
 
     /// Create branch `new` at `startpoint`, setting `startpoint` as its

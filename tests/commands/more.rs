@@ -479,15 +479,16 @@ fn select_mode_stale_selection_keeps_the_picker_and_refuses() {
 }
 
 #[test]
-fn branch_create_prompts_and_creates_branch_without_switching() {
+fn branch_create_tracks_local_branch_startpoint_without_switching() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
         .build();
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
-    let Execution::Prompt(prompt) = test
+    let Execution::Prompt(start) = test
         .session
         .start_invoke(&ViewInvokeParams {
             view_id: test.view_id().to_string(),
@@ -499,14 +500,18 @@ fn branch_create_prompts_and_creates_branch_without_switching() {
         })
         .unwrap()
     else {
-        panic!("expected branch name prompt");
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("main".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
     };
     let Execution::Done(result) = test
         .session
-        .resume_prompt(
-            &prompt.prompt_id,
-            Some(PromptValue::Text("feature".into())),
-        )
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("feature".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -518,14 +523,187 @@ fn branch_create_prompts_and_creates_branch_without_switching() {
         "{:?}",
         result.effects
     );
-    let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
-    assert!(
-        branches.lines().any(|line| line == "feature"),
-        "{branches}"
+    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    assert_eq!(
+        tmp.git(&["rev-parse", "feature"]).trim(),
+        main_oid,
+        "the branch must start at the startpoint's commit"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--get", "branch.feature.merge"]).trim(),
+        "refs/heads/main",
+        "a local-branch startpoint must become the new branch's upstream"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--get", "branch.feature.remote"]).trim(),
+        ".",
+        "a local-branch startpoint tracks a local branch"
     );
     assert!(
         tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
         "create must not switch HEAD"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_create_from_revision_startpoint_does_not_track() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let earlier = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(start) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Created branch feature"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "feature"]).trim(),
+        earlier,
+        "a revision startpoint must be the new branch's commit"
+    );
+    assert_ne!(earlier, head, "fixture must have two distinct commits");
+    assert_eq!(
+        tmp.git(&[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            "refs/heads/feature",
+        ])
+        .trim(),
+        "",
+        "a revision startpoint must not set an upstream"
+    );
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
+        "create must not switch HEAD"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_create_refuses_option_like_answers() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let before = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    let head = tmp.git(&["symbolic-ref", "HEAD"]);
+
+    let Execution::Prompt(start) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Done(refused_start) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("-D".into())))
+        .unwrap()
+    else {
+        panic!("an option-like starting point must be refused");
+    };
+    assert!(
+        message_texts(&refused_start.effects)
+            .iter()
+            .any(|text| text.contains("cannot begin with '-'")),
+        "{:?}",
+        refused_start.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+
+    // The option-like name is refused at the Git boundary after the startpoint.
+    let Execution::Prompt(start) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(refused_name) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("-D".into())))
+        .unwrap()
+    else {
+        panic!("an option-like branch name must be refused");
+    };
+    assert!(
+        refused_name
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Warn, .. })),
+        "{:?}",
+        refused_name.effects
+    );
+    assert_eq!(
+        tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]),
+        before,
+        "refused answers must not create a branch"
+    );
+    assert_eq!(
+        tmp.git(&["symbolic-ref", "HEAD"]),
+        head,
+        "refused answers must not move HEAD"
     );
     assert!(!test.session.has_pending_prompt());
 }

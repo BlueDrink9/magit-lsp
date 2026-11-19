@@ -148,7 +148,7 @@ both profiles.
 
 | Keys | Supported action |
 | --- | --- |
-| `n` | Create a branch at `HEAD` without switching to it |
+| `n` | Create a branch: prompt for the starting point (branch or revision), then the new name; a local-branch startpoint becomes the new branch's upstream. Never switches to the new branch |
 | `m` | Rename a branch: prompt for the source, then the new name |
 | `k` | Delete a branch, leaving Git's refusal of the checked-out branch as a message |
 | `d` | Set a branch description: prompt for the branch, then for its text |

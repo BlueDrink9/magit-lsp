@@ -330,8 +330,13 @@ pub enum PromptAction {
     },
     /// Resolve a revision for the originating selection view.
     Revision,
-    /// Create a branch with the answered name.
-    BranchCreate,
+    /// New branch flow: the answered starting point, then the name.
+    BranchCreateStart,
+    /// Second half of a create: create at this validated startpoint.
+    BranchCreateTarget {
+        /// The starting point answered at the first prompt.
+        startpoint: String,
+    },
     /// Spin the current branch's unpushed commits onto the answered branch.
     BranchSpinoff,
     /// Spin out the current branch's unpushed commits onto the answered branch.
@@ -585,12 +590,37 @@ pub fn resume_prompt(
                 ..Default::default()
             })
         }
-        PromptAction::BranchCreate => {
+        PromptAction::BranchCreateStart => {
+            let PromptValue::Text(startpoint) = answer else {
+                return Err(crate::Error::new("Expected a starting point"));
+            };
+            let startpoint = startpoint.trim().to_owned();
+            if startpoint.is_empty() {
+                ctx.info("A starting point is required");
+                return Ok(CommandOutcome::default());
+            }
+            if startpoint.starts_with('-') {
+                ctx.info("A starting point cannot begin with '-'");
+                return Ok(CommandOutcome::default());
+            }
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Create branch", "", "New branch name"),
+                    PromptAction::BranchCreateTarget { startpoint },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchCreateTarget { startpoint } => {
             let PromptValue::Text(name) = answer else {
                 return Err(crate::Error::new("Expected a branch name"));
             };
             let name = name.trim().to_owned();
-            branch_action(ctx, |repo| repo.create_branch(&name), format!("Created branch {name}"))
+            branch_action(
+                ctx,
+                |repo| repo.create_branch_at(&name, &startpoint),
+                format!("Created branch {name}"),
+            )
         }
         PromptAction::BranchSpinoff => spin_answered(ctx, answer, SpinMode::Spinoff),
         PromptAction::BranchSpinout => spin_answered(ctx, answer, SpinMode::Spinout),
@@ -1098,7 +1128,7 @@ fn build() -> Registry {
             run: stage,
             effects: &[],
         },
-        command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch at HEAD", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
+        command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch from a starting point", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, effects: &[] },
         command! { id: "branch.reset", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
@@ -1746,12 +1776,12 @@ fn branch_description_prompt(name: &str) -> ViewPromptParams {
     }
 }
 
-/// Prompt for the name of a new branch created at HEAD.
+/// Prompt for the starting point of a new branch.
 fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         prompt: Some((
-            branch_name_prompt("Create branch", "", "New branch name"),
-            PromptAction::BranchCreate,
+            branch_name_prompt("Starting point", "", "Branch or revision"),
+            PromptAction::BranchCreateStart,
         )),
         ..Default::default()
     })
