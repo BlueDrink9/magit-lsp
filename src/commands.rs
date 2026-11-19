@@ -394,8 +394,14 @@ pub enum PromptAction {
     ResetHard,
     /// Second half of a hard reset: the revision accepted after the dirty-tree warning.
     ResetHardConfirm {
-        /// The revision answered at the first prompt.
-        revision: String,
+        /// The revision text shown when the confirmation was presented.
+        label: String,
+        /// The commit `label` resolved to when the confirmation was presented.
+        commit: String,
+        /// HEAD's symbolic ref when the confirmation was presented; `None` when detached.
+        head: Option<String>,
+        /// Repository content captured when the confirmation was presented.
+        fingerprint: RepositoryFingerprint,
     },
     /// Reset HEAD and the index to the answered revision, keeping local changes.
     ResetKeep,
@@ -807,18 +813,29 @@ pub fn resume_prompt(
         PromptAction::ResetSoft => reset_answered(ctx, answer, ResetMode::Soft),
         PromptAction::ResetHard => reset_answered(ctx, answer, ResetMode::Hard),
         PromptAction::ResetKeep => reset_answered(ctx, answer, ResetMode::Keep),
-        PromptAction::ResetHardConfirm { revision } => {
+        PromptAction::ResetHardConfirm {
+            label,
+            commit,
+            head,
+            fingerprint,
+        } => {
             let PromptValue::Text(answer) = answer else {
                 return Err(crate::Error::new("Expected a confirmation"));
             };
             if answer.trim() != "yes" {
-                ctx.info(format!("Hard reset to {revision} cancelled"));
+                ctx.info(format!("Hard reset to {label} cancelled"));
+                return Ok(CommandOutcome::default());
+            }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            let (_, current_head) = repo.head_identity()?;
+            if current_head != head || RepositoryFingerprint::capture(&repo)? != fingerprint {
+                ctx.info("Repository changed while the prompt was open; try again");
                 return Ok(CommandOutcome::default());
             }
             branch_action(
                 ctx,
-                |repo| repo.reset_hard(&revision),
-                format!("Reset to {revision} (hard)"),
+                |repo| repo.reset_hard(&commit),
+                format!("Reset to {label} (hard)"),
             )
         }
     }
@@ -1686,10 +1703,25 @@ fn reset_answered(
         let repo = GitRepo::open(ctx.repo_path)?;
         match repo.is_dirty() {
             Ok(true) => {
+                let commit = match repo.resolve_commit(&revision) {
+                    Ok(commit) => commit,
+                    Err(err) => {
+                        ctx.effects
+                            .push(Effect::message(MessageLevel::Warn, err.to_string()));
+                        return Ok(CommandOutcome::default());
+                    }
+                };
+                let (_, head) = repo.head_identity()?;
+                let fingerprint = RepositoryFingerprint::capture(&repo)?;
                 return Ok(CommandOutcome {
                     prompt: Some((
                         hard_reset_confirm_prompt(&revision),
-                        PromptAction::ResetHardConfirm { revision },
+                        PromptAction::ResetHardConfirm {
+                            label: revision,
+                            commit,
+                            head,
+                            fingerprint,
+                        },
                     )),
                     ..Default::default()
                 });

@@ -2408,6 +2408,212 @@ fn reset_hard_on_a_dirty_tree_declines_then_discards_when_confirmed() {
 }
 
 #[test]
+fn reset_hard_confirmation_refuses_edits_and_a_same_oid_branch_switch() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "other"]);
+    std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "HEAD~1") else {
+        panic!("a dirty tree must ask for confirmation");
+    };
+    // Edit a tracked file and switch to another branch at the same commit while
+    // the destructive confirmation is open.
+    std::fs::write(tmp.path().join("second.txt"), "edited while open\n").unwrap();
+    tmp.git(&["checkout", "other"]);
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), second);
+    assert_eq!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/other",
+        "the fixture must switch branches without moving HEAD's commit"
+    );
+    let snapshot = |tmp: &RepoFixture| {
+        (
+            tmp.git(&[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/heads/",
+                "refs/tags/",
+            ]),
+            tmp.git(&["symbolic-ref", "HEAD"]) + &tmp.git(&["rev-parse", "HEAD"]),
+            tmp.git(&["ls-files", "--stage", "-z"]),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap()
+                + &std::fs::read_to_string(tmp.path().join("second.txt")).unwrap(),
+        )
+    };
+    let after_change = snapshot(&tmp);
+    let Execution::Done(refused) = test
+        .session
+        .resume_prompt(
+            &confirm.prompt_id,
+            Some(PromptValue::Text("yes".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    let texts = message_texts(&refused.effects);
+    assert!(
+        texts.contains(&"Repository changed while the prompt was open; try again"),
+        "{:?}",
+        refused.effects
+    );
+    assert!(
+        !texts.contains(&"Reset to HEAD~1 (hard)"),
+        "a refused confirmation must not report a reset: {:?}",
+        refused.effects
+    );
+    assert_eq!(
+        snapshot(&tmp),
+        after_change,
+        "refusal must preserve the exact post-change refs, index and worktree"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        second,
+        "refusal must leave HEAD's commit in place"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_hard_confirmation_resets_the_captured_commit_when_the_target_ref_moves() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "target", "HEAD~1"]);
+    let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let second = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(confirm) = reset_invoke(&mut test, "reset.hard", "target") else {
+        panic!("a dirty tree must ask for confirmation");
+    };
+    // Move the entered ref to the tip while the confirmation is open.
+    tmp.git(&["branch", "-f", "target", "HEAD"]);
+    assert_eq!(tmp.git(&["rev-parse", "target"]).trim(), second);
+    let Execution::Done(confirmed) = test
+        .session
+        .resume_prompt(
+            &confirm.prompt_id,
+            Some(PromptValue::Text("yes".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&confirmed.effects).contains(&"Reset to target (hard)"),
+        "{:?}",
+        confirmed.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        parent,
+        "approval must reset the commit captured before the prompt, not the moved ref"
+    );
+    assert!(
+        !tmp.path().join("second.txt").exists(),
+        "the captured commit must discard the child commit's file"
+    );
+    assert_eq!(
+        tmp.git(&["status", "--porcelain"]).trim(),
+        "",
+        "the approved reset must leave a clean tree behind"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "target"]).trim(),
+        second,
+        "the moved ref itself must be left untouched"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn reset_confirmation_is_shared_by_all_three_reset_commands() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for command in ["reset.hard", "branch.reset", "reset.branch"] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("base.txt", "base\n")])
+            .commit("second", [("second.txt", "second\n")])
+            .build();
+        let parent = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+        std::fs::write(tmp.path().join("second.txt"), "dirty\n").unwrap();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let confirmation = if command == "reset.hard" {
+            reset_invoke(&mut test, command, "HEAD~1")
+        } else {
+            let Execution::Prompt(branch) = test
+                .session
+                .start_invoke(&ViewInvokeParams {
+                    view_id: test.view_id().to_string(),
+                    command: command.into(),
+                    version: Some(test.version()),
+                    cursor: None,
+                    selection: None,
+                    args: None,
+                })
+                .unwrap()
+            else {
+                panic!("{command}: expected branch name prompt");
+            };
+            let Execution::Prompt(target) = test
+                .session
+                .resume_prompt(&branch.prompt_id, Some(PromptValue::Text("main".into())))
+                .unwrap()
+            else {
+                panic!("{command}: expected reset target prompt");
+            };
+            test.session
+                .resume_prompt(&target.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+                .unwrap()
+        };
+        let Execution::Prompt(confirm) = confirmation else {
+            panic!("{command}: a dirty tree must ask for confirmation");
+        };
+        let Execution::Done(confirmed) = test
+            .session
+            .resume_prompt(&confirm.prompt_id, Some(PromptValue::Text("yes".into())))
+            .unwrap()
+        else {
+            panic!("{command}: expected completion");
+        };
+        assert!(
+            message_texts(&confirmed.effects).contains(&"Reset to HEAD~1 (hard)"),
+            "{command}: {:?}",
+            confirmed.effects
+        );
+        assert_eq!(
+            tmp.git(&["rev-parse", "HEAD"]).trim(),
+            parent,
+            "{command}: an unchanged approval must reset the captured commit"
+        );
+        assert!(
+            !tmp.path().join("second.txt").exists(),
+            "{command}: the approved reset must discard the child commit's file"
+        );
+        assert_eq!(
+            tmp.git(&["status", "--porcelain"]).trim(),
+            "",
+            "{command}: the approved reset must leave a clean tree behind"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+}
+
+#[test]
 fn reset_keep_surfaces_gits_refusal_when_local_changes_would_be_lost() {
     use magit_lsp::session::Execution;
     let (tmp, _) = RepoFixture::new()

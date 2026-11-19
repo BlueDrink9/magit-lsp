@@ -640,7 +640,8 @@ impl GitRepo {
 
     /// Reset the current branch, index and worktree to `revision`.
     ///
-    /// Git refuses the operation itself when local changes would be lost.
+    /// Git discards staged and unstaged changes to tracked files here; it does
+    /// not refuse the operation when those changes would be lost.
     pub fn reset_hard(&self, revision: &str) -> Result<()> {
         Self::reject_option_like("revision", revision)?;
         self.run(&["reset", "--hard", revision]).map(|_| ())
