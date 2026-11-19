@@ -1,6 +1,7 @@
 # magit-lsp — Roadmap
 Stop after: user-requested Phase 6 completion as far as possible, plus release tasks and blockers (2026-11-19). This supersedes the documentation-only execution restriction; Phase 6A still requires T022 sign-off and release still requires explicit human approval. Do not modify pre-existing untracked user files.
 Last review: `4045289`; documented gate HEAD `ec0bbbc`. T022 remains unchecked; report-only hygiene exit 0 is not sign-off. No release or Phase 6A approval is granted here.
+Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-file changes since review `4045289` (VSCode lifecycle/export cleanup, native harness teardown, docs and hygiene); user accepted combined commit `b96e132` and continuation without history rewriting.
 
 ## Audit findings and work order (2026-11-18)
 
@@ -30,6 +31,16 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 7. [Numbered implementation queue](#7-numbered-implementation-queue) and [scope specifications](./TASKS_PART_SEVEN.md)
 8. [Testing strategy](docs/TESTING.md#8-testing-strategy)
 9. [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions)
+
+## Bugfix
+
+- [ ] **T022 gate — restore process-check prerequisite**
+  - check: `make test` can execute its existing process ownership assertions; install/expose `ps` on PATH (human environment prerequisite; workers must not install or substitute tools).
+  - Verified: gate at `a5d8e27`, `make test` failed in `build/test-logs/rust.OGGcWl`; two server_async process checks cannot spawn `ps`. `command -v ps` returns no path. Do not weaken orphan assertions.
+- [x] **T022 gate — diagnose instant-rebase bounded wait**
+  - test: `dispatched_instant_fixup_conflict_can_be_resolved_and_continued` must observe the actual stopped rebase and complete resolve/continue without timeout-only changes or weaker assertions.
+  - Verified: `make test` at `a5d8e27` failed at `tests/server_async.rs:401`, `instant rebase did not stop in bounded wait`; log `build/test-logs/rust.OGGcWl`. Independence from missing `ps` is not established.
+  - Verified: `make test-rust FILTER="--test server_async dispatched_instant_fixup_conflict_can_be_resolved_and_continued"` → `ok: rust`; three consecutive runs of `--test server_async instant` → `ok: rust`. The bounded wait now drains queued and incoming frames and requires both the caller render and the exact `Instant autosquash stopped during autosquash; marker ...` error effect under one deadline; a timeout reports the confirm response, observed frames and render versions, HEAD, status, unmerged paths and rebase directories. The original 20s stall did not reproduce and no source defect was found; this path has no `ps` dependency (`ps` appears only in process-check tests, not `src`). Remaining risk: the original stall cause is unproven and may be load-related.
 
 ## Review
 

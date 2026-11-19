@@ -386,24 +386,70 @@ fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
             if message["method"] == "view/render" { render = true; version = message["params"]["version"].as_u64(); }
             keymap |= message["method"] == "view/keymap";
         }}
-        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version.unwrap()}}));
+        let version = version.unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
+        version
     };
     let menu = pushed(&press(&mut server, 3, &status, "c", 0)); opened(&mut server, &menu);
-    let selector = pushed(&press(&mut server, 4, &menu, "F", 0)); opened(&mut server, &selector);
+    let selector = pushed(&press(&mut server, 4, &menu, "F", 0));
+    let selector_version = opened(&mut server, &selector);
     let mut target_line = None;
     for line in 0..100 { server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":selector,"command":"common.copy-value","version":1,"cursor":{"line":line,"column":0}}}));
         if server.response_with_id(5)["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "clipboard" && e["text"] == target) { target_line = Some(line); break; }
     }
-    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":1,"cursor":{"line":target_line.expect("target oid"),"column":0}}}));
-    assert!(server.response_with_id(6)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":selector_version,"cursor":{"line":target_line.expect("target oid"),"column":0}}}));
+    let selected = server.response_with_id(6);
+    assert!(selected["error"].is_null(), "{selected}");
+    let mut pending = std::mem::take(&mut server.notifications).into_iter();
+    let mut caller = None;
+    let mut stopped = None;
     let deadline = Instant::now() + Duration::from_secs(20);
-    while tmp.git(&["status", "--porcelain"]) != "UU file\n" {
-        assert!(Instant::now() < deadline, "instant rebase did not stop in bounded wait");
-        thread::sleep(Duration::from_millis(10));
+    let mut actual = Vec::new();
+    let mut render_versions = Vec::new();
+    let readiness_diagnostics = |actual: &[Value], render_versions: &[u64]| format!(
+        "confirm={selected}; selected_oid={target}; actual={actual:?}; render_versions={render_versions:?}; HEAD={}; status={}; unmerged={}; rebase_merge={}; rebase_apply={}",
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        tmp.git(&["status", "--porcelain"]),
+        tmp.git(&["diff", "--name-only", "--diff-filter=U"]),
+        tmp.path().join(".git/rebase-merge").exists(),
+        tmp.path().join(".git/rebase-apply").exists(),
+    );
+    while caller.is_none() || stopped.is_none() {
+        assert!(Instant::now() < deadline, "{}", readiness_diagnostics(&actual, &render_versions));
+        let message = if let Some(message) = pending.next() {
+            message
+        } else {
+            server.recv_timeout = deadline.saturating_duration_since(Instant::now());
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv()))
+                .unwrap_or_else(|_| panic!("{}", readiness_diagnostics(&actual, &render_versions)))
+        };
+        actual.push(message.clone());
+        if message["method"] == "view/render" {
+            if let Some(version) = message["params"]["version"].as_u64() { render_versions.push(version); }
+        }
+        if message["method"] == "view/render"
+            && message["params"]["viewId"] == status
+        {
+            caller = Some(message.clone());
+        }
+        if message["method"] == "view/effects"
+            && message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|effect|
+                effect["type"] == "message"
+                    && effect["text"].as_str().is_some_and(|text| text.starts_with("Instant autosquash stopped during autosquash; marker "))))
+        {
+            stopped = Some(message);
+        }
     }
+    let caller = caller.unwrap();
+    let stopped = stopped.unwrap();
+    assert!(stopped["params"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["level"] == "error"), "{stopped}");
+    let marker = tmp.git(&["rev-parse", "refs/heads/main"]).trim().to_owned();
+    let stopped_text = stopped["params"]["effects"].as_array().unwrap().iter()
+        .find(|effect| effect["type"] == "message" && effect["level"] == "error").unwrap()["text"].as_str().unwrap();
+    assert!(stopped_text.starts_with(&format!("Instant autosquash stopped during autosquash; marker {marker} retained: ")), "{stopped_text}");
     assert_eq!(tmp.git(&["status", "--porcelain"]), "UU file\n");
     assert!(std::fs::read_to_string(tmp.path().join("file")).unwrap().contains("<<<<<<<"));
-    let caller = loop { let message = server.recv(); if message["method"] == "view/render" && message["params"]["viewId"] == status { break message; } };
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":status,"version":caller["params"]["version"]}}));
     std::fs::write(tmp.path().join("file"), "resolved\n").unwrap();
     tmp.git(&["add", "file"]);
