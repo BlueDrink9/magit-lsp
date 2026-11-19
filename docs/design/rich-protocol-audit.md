@@ -25,7 +25,7 @@ changed.
 | 1 | Keymap reuses render version; draft keymaps use 0 | Real (ambiguity) | No if documented; yes if removed | S |
 | 2 | `view/render` sends zero or one edit; multi-edit rules unwritten | Real (documentation) | No | S |
 | 3 | Draft `runId` keymaps may be dead after real-file cutover | Not real | No | None |
-| 4 | "One unacked version per view" is unwritten | Real (documentation) | No | S |
+| 4 | One acknowledgement snapshot vs. several outstanding renders is unwritten | Real (documentation) | No | S |
 | 5 | No protocol version check or readable mismatch error | Real | Yes | M |
 | 6 | `keyModifiers` is read and logged but inert | Not real | No | None |
 | 7 | VS Code cannot replay non-printable/non-clipboard `passThrough` | Real | No | S–M |
@@ -111,31 +111,53 @@ report was dishonest.
   that is new work, not a dead path.
 - **Effort:** None.
 
-### 4. "One unacked version per view" is not written
+### 4. One acknowledgement snapshot vs. several outstanding renders is not written
 
-- **Status:** Real (documentation gap; the implementation has exactly one
-  acknowledgement slot).
+- **Status:** Real (documentation gap; the implementation retains exactly one
+  acknowledgement snapshot, but that does not bound outstanding deliveries).
 - **Evidence:** `OpenView` stores one `acked: Option<Tree>`, one
   `request_tree`, and one `acked_version: Option<u64>`
-  (`src/session.rs:201-210,330-339,369-382`). `Session::ack` records the ack only
-  when `view.version == version`; a stale or future ack is silently ignored and
-  still returns `Ok(())` (`src/session.rs:991-1003`). Delivery uses the last
-  acknowledged version as the edit base (`src/session.rs:436-446`). Clients
-  ack the render they applied (`lua/magit-lsp/view.lua:394-401`;
+  (`src/session.rs:201-210,330-339,369-382`). `OpenView::render_tree_with_delivery`
+  increments `version` and returns the render without waiting for an ack
+  (`src/session.rs:418-460`); nothing tracks or limits pending deliveries. The
+  retained acknowledgement only selects the edit base: edits are emitted when
+  `self.acked_version == Some(old_version)`, otherwise the render carries full
+  `text` and no edits (`:436-446`, `:448-455`). `Session::ack` records the ack
+  only when `view.version == version`; a stale or future ack is silently
+  ignored and still returns `Ok(())` (`src/session.rs:991-1003`). Clients ack
+  the render they applied (`lua/magit-lsp/view.lua:394-401`;
   `clients/vscode/lib/requests.js:147-155`). The historical BUG-READ-1 wording
-  about "several unacked versions" (`TASKS_PART_SEVEN.md:479`) is not a current
-  multi-version store; no code path retains more than the latest acknowledged
-  tree.
-- **Proposal:** Write the rule: each view has at most one outstanding delivered
-  version; acks are valid only for the current version; stale acks are no-ops;
-  clients request `view/resync` after a lost update rather than acking older
-  versions. Decide whether a stale ack should become a readable error; the
-  narrowest current-compatible option is to keep it an idempotent no-op.
-- **Wire change:** No (documentation). A stale-ack error would be a behavior
-  change, not a wire shape change.
-- **Risk:** Low. The silent no-op can hide a client bug, but both shipped
-  clients ack the applied latest version.
-- **Effort:** S.
+  about "several unacked versions" (`TASKS_PART_SEVEN.md:479`) is still not a
+  multi-version store — no code path retains more than the latest acknowledged
+  tree — but it is not accurate to conclude that only one version can be
+  delivered and unacked at a time.
+- **Sequence (baseline, one view):** the client acks version N
+  (`acked_version = Some(N)`); the server renders N+1 with edits based on N and
+  `version` becomes N+1 while `acked_version` stays `Some(N)`; the server
+  renders N+2 before any ack, `acked_version` is still `Some(N)`, so
+  `base_version` is `None` and N+2 carries full text (`:438-455`); an ack of
+  N+1 now finds `view.version == N+2` and is ignored (`:996-1000`); an ack of
+  N+2 becomes the retained snapshot. Each delivery was a normal `view/render`;
+  no error or deferral occurred.
+- **Proposal:** Document the actual contract: a view retains one acknowledged
+  tree/version (the edit base for later diffs and the positional-read
+  fallback), not a single in-flight delivery slot; successive renders may be
+  delivered before any ack, and any render whose base is not the retained
+  acknowledged version carries full text. Acks are valid only for the current
+  version, stale acks are idempotent no-ops, and clients request `view/resync`
+  after a lost update rather than acking older versions. The proposed rule
+  "each view has at most one outstanding delivered version" is not baseline
+  behavior; adopting it would require server-side flow control (deferring or
+  rejecting renders until ack) and is a behavior change needing implementation,
+  not an existing rule to document.
+- **Wire change:** No for documenting baseline semantics. Single-outstanding
+  delivery would be a behavior change, not a wire shape change.
+- **Risk:** Low for the documentation correction. The silent stale-ack no-op
+  can hide a client bug, and an out-of-order ack forces the next render to full
+  text; both shipped clients ack the applied latest version. Flow control would
+  carry its own concurrency risk and design work.
+- **Effort:** S (documentation). Adding flow control would be M and needs its
+  own design.
 
 ### 5. No protocol version check; mismatches have no readable error
 
@@ -347,8 +369,9 @@ report was dishonest.
 ## Fixed, historical, not real, and unknown
 
 - **Fixed / historical:** item 11 (T004 completed the declaration work); the
-  "several unacked versions" wording in item 4 (BUG-READ-1 history, not a
-  current multi-version store); the old TASKS prompt wording in item 10 (a
+  "several unacked versions" wording in item 4 (BUG-READ-1 history: no
+  multi-version store is retained, though several delivered versions can be
+  unacked at once — see item 4); the old TASKS prompt wording in item 10 (a
   historical premise, not proof of a current defect).
 - **Not real:** items 3, 6, 11. Item 3 has no remaining cutover mode; item 6
   describes a field that does change behavior; item 11's declaration now
