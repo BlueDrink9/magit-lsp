@@ -1,10 +1,11 @@
 name: Publish release artifacts
 
 # Manual-only publication. There is no push, tag or pull request trigger, so no
-# commit can publish on its own. Precondition: the workflow "Release artifact
-# build (no publication)" has already produced the checksummed archive and
-# sidecar as the Actions artifact named linux-x86_64-gnu-release-candidate;
-# pass that completed run's id to this dispatch. Nothing is rebuilt here.
+# commit can publish on its own. Precondition: the tracked build workflow
+# `.github/workflows/release.yml` ("Release artifact build (no publication)")
+# has already produced the checksummed archive and sidecar as the Actions
+# artifact named linux-x86_64-gnu-release-candidate; pass that completed run's
+# id to this dispatch. Nothing is rebuilt here.
 
 on:
   workflow_dispatch:

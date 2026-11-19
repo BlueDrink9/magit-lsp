@@ -1,36 +1,41 @@
 #!/usr/bin/env python3
-"""Check the manual release-publication workflow and Cargo publish metadata.
+"""Check the release build/publication workflows and Cargo publish metadata.
 
 The default mode is a static, line-oriented check (PyYAML is not available) of
-``.github/workflows/publish.yml`` plus `cargo package --list`, so an accidental
-auto-publish or an incomplete crate cannot land unnoticed. The two helper modes
-are invoked by the workflow itself: ``--validate-artifacts`` verifies the
-downloaded release archive/sidecar and version triple, and ``--print-version``
-emits the ``RELEASE_VERSION`` environment line for later jobs.
+``.github/workflows/release.yml`` and ``.github/workflows/publish.yml`` plus
+`cargo package --list`, so an accidental auto-publish, a publication step in the
+build workflow or an incomplete crate cannot land unnoticed. The helper modes
+are invoked by the workflows themselves: ``--validate-release-ref`` validates
+the version pair and tag ref for a build run, ``--validate-artifacts`` verifies
+the downloaded release archive/sidecar and version triple, and
+``--print-version`` emits the ``RELEASE_VERSION`` environment line for later
+jobs.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 WORKFLOW = Path('.github/workflows/publish.yml')
+BUILD_WORKFLOW = Path('.github/workflows/release.yml')
 CARGO_MANIFEST = Path('Cargo.toml')
 EXTENSION_MANIFEST = Path('clients/vscode/package.json')
 ARTIFACT_NAME = 'linux-x86_64-gnu-release-candidate'
 ASSET = 'x86_64-unknown-linux-gnu'
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
-# Paths owned by the local operator, never by this workflow.
+# Paths owned by the local operator, never by the workflows they build here.
 UNTRACKED_PATHS = (
-    '.github/workflows/release.yml',
     'scripts/package-release.sh',
     'scripts/install.sh',
     'scripts/ci-local.sh',
     '.envrc',
 )
+RELEASE_FORBIDDEN_PATHS = ('.envrc', 'scripts/ci-local.sh')
 SECRETS = ('VSCE_PAT', 'OVSX_PAT', 'CARGO_REGISTRY_TOKEN')
 PUBLISH_COMMANDS = ('vsce publish', 'ovsx publish', 'cargo publish --locked')
 
@@ -128,25 +133,10 @@ def check_workflow():
         fail('workflow: top-level permissions must be `contents: read`')
 
     # Pinned actions: every `uses:` needs a full sha and a version comment.
-    for number, line in enumerate(lines, 1):
-        match = re.match(r'^\s*(?:-\s*)?uses:\s*(\S+)(.*)$', line)
-        if not match:
-            continue
-        reference, rest = match.groups()
-        if not re.fullmatch(r'[\w.\-]+/[\w.\-]+@[0-9a-f]{40}', reference):
-            fail(f'workflow:{number}: action {reference!r} is not pinned to a full sha')
-        if not re.search(r'#\s*v\d+\.\d+\.\d+\s*$', rest):
-            fail(f'workflow:{number}: pinned action needs a `# vX.Y.Z` comment')
+    check_pinned_actions(lines, 'workflow')
 
     # No inline step may carry more than ten lines of script.
-    for index, line in enumerate(lines):
-        if not re.match(r'^\s*(?:-\s*)?run:\s*[|>]', line):
-            continue
-        owner = indent_of(line)
-        body = block_after(lines, index, owner)
-        script = [entry for entry in body if entry.strip() and not entry.strip().startswith('#')]
-        if len(script) > 10:
-            fail(f'workflow:{index + 1}: inline script has {len(script)} lines (max 10)')
+    check_inline_scripts(lines, 'workflow')
 
     # Untracked operator files must never be referenced.
     for forbidden in UNTRACKED_PATHS:
@@ -217,6 +207,112 @@ def require_job(lines, name):
     return block
 
 
+def check_pinned_actions(lines, context):
+    """Every `uses:` needs a full action sha plus a `# vX.Y.Z` comment."""
+    for number, line in enumerate(lines, 1):
+        match = re.match(r'^\s*(?:-\s*)?uses:\s*(\S+)(.*)$', line)
+        if not match:
+            continue
+        reference, rest = match.groups()
+        if not re.fullmatch(r'[\w.\-]+/[\w.\-]+@[0-9a-f]{40}', reference):
+            fail(f'{context}:{number}: action {reference!r} is not pinned to a full sha')
+        if not re.search(r'#\s*v\d+\.\d+\.\d+\s*$', rest):
+            fail(f'{context}:{number}: pinned action needs a `# vX.Y.Z` comment')
+
+
+def check_inline_scripts(lines, context):
+    """No inline `run:` block step may carry more than ten lines of script."""
+    for index, line in enumerate(lines):
+        if not re.match(r'^\s*(?:-\s*)?run:\s*[|>]', line):
+            continue
+        owner = indent_of(line)
+        body = block_after(lines, index, owner)
+        script = [entry for entry in body if entry.strip() and not entry.strip().startswith('#')]
+        if len(script) > 10:
+            fail(f'{context}:{index + 1}: inline script has {len(script)} lines (max 10)')
+
+
+def step_artifact_name(lines, action, context):
+    """Return the `name:` of the first step that uses ``action``."""
+    for index, line in enumerate(lines):
+        if f'uses: {action}' not in line:
+            continue
+        for candidate in lines[index + 1:]:
+            if candidate.strip() and indent_of(candidate) <= indent_of(line):
+                break
+            match = re.match(r'^\s*name:\s*(\S+)\s*$', candidate)
+            if match:
+                return match.group(1)
+        fail(f'{context}: {action} step has no artifact `name:`')
+    fail(f'{context}: missing {action}')
+
+
+def check_build_workflow():
+    """Structure-check the tracked build workflow: dispatch/tag triggers, no publishing."""
+    lines = read_lines(BUILD_WORKFLOW)
+    text = '\n'.join(lines)
+
+    find_line(lines, 'name: Release artifact build (no publication)', 'build workflow')
+
+    try:
+        on_index = lines.index('on:')
+    except ValueError:
+        fail('build workflow: missing top-level `on:`')
+    trigger_block = block_after(lines, on_index, 0)
+    triggers = [line.strip()[:-1] for line in trigger_block
+                if indent_of(line) == 2 and line.strip().endswith(':')]
+    if sorted(triggers) != ['push', 'workflow_dispatch']:
+        fail('build workflow: triggers must be workflow_dispatch plus push tags, '
+             f'found {triggers}')
+    push_index = next(i for i, line in enumerate(lines) if line == '  push:')
+    push_block = block_after(lines, push_index, 2)
+    tags = next((line.strip() for line in push_block
+                 if line.strip().startswith('tags:')), None)
+    if tags is None or "'v*'" not in tags:
+        fail("build workflow: push trigger must filter `tags: ['v*']`")
+    for line in lines:
+        if line.lstrip().startswith('#'):
+            continue
+        if re.match(r'^\s*(pull_request|pull_request_target|release|schedule|workflow_run):',
+                    line):
+            fail(f'build workflow: forbidden automatic trigger {line.strip()!r}')
+
+    top_permissions = block_after(
+        lines, find_line(lines, 'permissions:', 'build workflow') - 1, 0)
+    if '  contents: read' not in top_permissions:
+        fail('build workflow: top-level permissions must be `contents: read`')
+    if 'contents: write' in text:
+        fail('build workflow: must stay read-only (`contents: write` found)')
+
+    check_pinned_actions(lines, 'build workflow')
+    check_inline_scripts(lines, 'build workflow')
+
+    # Build-only: no publication step and no publishing credential.
+    for command in PUBLISH_COMMANDS + ('gh release create',):
+        if command in text:
+            fail(f'build workflow: publication step {command!r} is not allowed')
+    if re.search(r'\bsecrets\.', text):
+        fail('build workflow: must not read publishing secrets')
+    for forbidden in RELEASE_FORBIDDEN_PATHS:
+        if forbidden in text:
+            fail(f'build workflow: references operator-owned path {forbidden!r}')
+
+
+def check_artifact_consistency():
+    """The build workflow must upload exactly the artifact the publish workflow downloads."""
+    uploaded = step_artifact_name(
+        read_lines(BUILD_WORKFLOW), 'actions/upload-artifact@', 'build workflow')
+    downloaded = step_artifact_name(
+        read_lines(WORKFLOW), 'actions/download-artifact@', 'publish workflow')
+    if uploaded != ARTIFACT_NAME:
+        fail(f'build workflow: uploads {uploaded!r}, expected {ARTIFACT_NAME!r}')
+    if downloaded != ARTIFACT_NAME:
+        fail(f'publish workflow: downloads {downloaded!r}, expected {ARTIFACT_NAME!r}')
+    if uploaded != downloaded:
+        fail(f'artifact name mismatch: release.yml uploads {uploaded!r} but '
+             f'publish.yml downloads {downloaded!r}')
+
+
 def check_metadata():
     package = cargo_versions()
     for field in ('description', 'license', 'repository', 'readme'):
@@ -275,6 +371,33 @@ def release_versions():
     return version
 
 
+def validate_release_ref():
+    """Validate the version pair and tag ref for a build run (writes $GITHUB_ENV).
+
+    Same semantics as the build workflow's original inline check: the Cargo
+    version is stable ``X.Y.Z``, the extension version equals it, and a tag run
+    must be ``refs/tags/v<version>``. Workflow-dispatch runs skip the tag rule.
+    """
+    package = cargo_versions()
+    cargo = package.get('version', '')
+    extension = json.loads(EXTENSION_MANIFEST.read_text(encoding='utf-8'))['version']
+    if not VERSION_PATTERN.fullmatch(cargo):
+        fail(f'expected stable X.Y.Z version, found {cargo!r}')
+    if cargo != extension:
+        fail(f'Cargo and extension versions differ ({cargo} vs {extension})')
+    ref = os.environ.get('RELEASE_REF', '')
+    if not ref:
+        fail('RELEASE_REF is not set')
+    if ref.startswith('refs/tags/') and ref != 'refs/tags/v' + cargo:
+        fail(f'tag must match Cargo and extension versions: {ref} is not v{cargo}')
+    target = os.environ.get('GITHUB_ENV')
+    if not target:
+        fail('GITHUB_ENV is not set')
+    with open(target, 'a', encoding='utf-8') as out:
+        out.write('RELEASE_VERSION=' + cargo + '\n')
+    print(f'ok: RELEASE_VERSION={cargo} (ref {ref})')
+
+
 def validate_artifacts(directory):
     version = release_versions()
     root = Path(directory)
@@ -303,6 +426,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--validate-artifacts', metavar='DIR',
                         help='verify the downloaded release archive and sidecar')
+    parser.add_argument('--validate-release-ref', action='store_true',
+                        help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
                         help='print RELEASE_VERSION=<X.Y.Z> for $GITHUB_ENV')
     args = parser.parse_args()
@@ -310,15 +435,20 @@ def main():
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)
             return 0
+        if args.validate_release_ref:
+            validate_release_ref()
+            return 0
         if args.print_version:
             print(f'RELEASE_VERSION={release_versions()}')
             return 0
         check_workflow()
+        check_build_workflow()
+        check_artifact_consistency()
         check_metadata()
     except CheckError as error:
         print(f'FAILED: {error}', file=sys.stderr)
         return 1
-    print('ok: publish workflow guards and Cargo package metadata')
+    print('ok: release build/publish workflow guards and Cargo package metadata')
     return 0
 
 
