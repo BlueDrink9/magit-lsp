@@ -23,14 +23,20 @@ end
 --- be a positive integer equal to the session version this client declared. A
 --- missing, malformed or different value is a compatibility failure: there is
 --- no fallback, default or retry.
----@param result table|nil initialize result
+---@param result any decoded initialize result; a non-table container is malformed
 ---@param required integer the rich protocol session version this client declared
 ---@return string|nil error readable mismatch naming required and advertised versions
 function M.protocol_error(result, required)
-  local capabilities = result and result.capabilities
-  local experimental = capabilities and capabilities.experimental
-  local magit = experimental and experimental.magit
-  local advertised = magit and magit.protocolVersion
+  -- Every container comes from decoded JSON: a boolean, number or JSON null
+  -- where an object belongs is malformed input, not an indexing error.
+  local function member(container, key)
+    if type(container) ~= 'table' or container == vim.NIL then return nil end
+    return container[key]
+  end
+  local capabilities = member(result, 'capabilities')
+  local experimental = member(capabilities, 'experimental')
+  local magit = member(experimental, 'magit')
+  local advertised = member(magit, 'protocolVersion')
   if type(advertised) == 'number' and advertised > 0 and advertised % 1 == 0
     and advertised == required then
     return nil

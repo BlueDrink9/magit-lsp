@@ -598,15 +598,11 @@ T['the rich protocol declaration and a matching advertisement open rich traffic'
 end
 
 T['a missing, malformed or different protocol advertisement is a readable rejection'] = function()
-  local cases = {
-    { value = 'nil', expected = 'server advertised none' },
-    { value = "'1'", expected = 'server advertised "1"' },
-    { value = '0', expected = 'server advertised 0' },
-    { value = '-1', expected = 'server advertised -1' },
-    { value = '1.5', expected = 'server advertised 1.5' },
-    { value = '2', expected = 'server advertised 2' },
-  }
-  for _, case in ipairs(cases) do
+  -- anchor: lua/magit-lsp/version.lua protocol_error; the real initialize wrapper
+  -- in lua/magit-lsp/init.lua is exercised below. External containers are
+  -- arbitrary JSON, so a malformed one must take this same readable path
+  -- instead of throwing out of the initialize callback.
+  local function reject(result_expression, expected, label)
     child.lua(string.format([[
       NOTIFIES = {}
       REQUESTS = {}
@@ -623,13 +619,7 @@ T['a missing, malformed or different protocol advertisement is a readable reject
           function rpc.request(method, params, callback)
             REQUESTS[#REQUESTS + 1] = method
             if method == 'initialize' then
-              local magit = {}
-              local advertised = %s
-              if advertised ~= nil then magit.protocolVersion = advertised end
-              callback(nil, {
-                capabilities = { experimental = { magit = magit } },
-                serverInfo = { version = require('magit-lsp.version').version },
-              })
+              callback(nil, %s)
             end
             return true, 1
           end
@@ -643,19 +633,52 @@ T['a missing, malformed or different protocol advertisement is a readable reject
       client.open(root)
       client.setup({ root_dir = root })
       STATUS = client.status_view()
-    ]], case.value))
+    ]], result_expression))
 
-    MiniTest.expect.equality(child.lua_get('REJECTED'), true, case.expected)
-    MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1, case.expected)
+    MiniTest.expect.equality(child.lua_get('REJECTED'), true, label)
+    MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1, label)
     local msg = child.lua_get('NOTIFIES[1].msg')
     MiniTest.expect.equality(msg:find('rich protocol mismatch', 1, true) ~= nil, true, msg)
     MiniTest.expect.equality(msg:find('required version 1', 1, true) ~= nil, true, msg)
-    MiniTest.expect.equality(msg:find(case.expected, 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(msg:find(expected, 1, true) ~= nil, true, msg)
     MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
-    MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view for ' .. case.expected)
-    MiniTest.expect.equality(child.lua_get('TERMINATED'), true, 'the incompatible transport stopped')
-    MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich traffic for ' .. case.expected)
-    MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications')
+    MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view for ' .. label)
+    MiniTest.expect.equality(child.lua_get('TERMINATED'), true, 'the rejected transport stopped for ' .. label)
+    MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich traffic for ' .. label)
+    MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications for ' .. label)
+  end
+
+  local versions = {
+    { value = 'nil', expected = 'server advertised none' },
+    { value = "'1'", expected = 'server advertised "1"' },
+    { value = '0', expected = 'server advertised 0' },
+    { value = '-1', expected = 'server advertised -1' },
+    { value = '1.5', expected = 'server advertised 1.5' },
+    { value = '2', expected = 'server advertised 2' },
+  }
+  for _, case in ipairs(versions) do
+    reject(string.format(
+      '{ capabilities = { experimental = { magit = { protocolVersion = %s } } } }',
+      case.value
+    ), case.expected, case.expected)
+  end
+
+  local malformed = {
+    { name = 'boolean initialize result', result = 'true' },
+    { name = 'numeric initialize result', result = '42' },
+    { name = 'null initialize result', result = 'vim.NIL' },
+    { name = 'boolean capabilities', result = '{ capabilities = true }' },
+    { name = 'numeric capabilities', result = '{ capabilities = 42 }' },
+    { name = 'null capabilities', result = '{ capabilities = vim.NIL }' },
+    { name = 'boolean experimental', result = '{ capabilities = { experimental = true } }' },
+    { name = 'numeric experimental', result = '{ capabilities = { experimental = 42 } }' },
+    { name = 'null experimental', result = '{ capabilities = { experimental = vim.NIL } }' },
+    { name = 'boolean magit', result = '{ capabilities = { experimental = { magit = true } } }' },
+    { name = 'numeric magit', result = '{ capabilities = { experimental = { magit = 42 } } }' },
+    { name = 'null magit', result = '{ capabilities = { experimental = { magit = vim.NIL } } }' },
+  }
+  for _, case in ipairs(malformed) do
+    reject(case.result, 'server advertised none', case.name)
   end
 end
 
