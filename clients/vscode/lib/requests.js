@@ -256,7 +256,21 @@ async function handlePick(params) {
   /** @type {{cancelled: boolean, selected: string[]}} */
   let answer = { cancelled: true, selected: [] };
   try {
-    answer = await pickFor(params);
+    const items = params.items || [];
+    if (params.allowFreeText || items.some((item) => item.group)) {
+      const reason = params.allowFreeText
+        ? 'free-text answers are not supported'
+        : 'grouped items are not supported';
+      store.output.appendLine(`view/pick "${params.prompt}" cancelled: ${reason}`);
+      vscode.window.showWarningMessage(`magit-lsp: pick cancelled, ${reason}`);
+    } else {
+      const picked = await vscode.window.showQuickPick(pickItems(params), {
+        title: params.prompt,
+        canPickMany: Boolean(params.multi),
+        ignoreFocusOut: true,
+      });
+      answer = answerPick(params, picked);
+    }
   } catch (error) {
     store.output.appendLine(`view/pick "${params.prompt}" failed: ${message(error)}`);
   }
@@ -271,34 +285,6 @@ async function handlePick(params) {
   } catch (error) {
     store.output.appendLine(`view/pickRespond failed: ${message(error)}`);
   }
-}
-
-/**
- * Show one pick with the matching VSCode widget.
- *
- * Free text and grouped items are not declared client capabilities, so they
- * warn and cancel rather than presenting a shape the server cannot read.
- *
- * @param {import('../types/protocol').ViewPickParams.Root} params `view/pick` params
- * @returns {Promise<{cancelled: boolean, selected: string[]}>}
- */
-async function pickFor(params) {
-  const items = params.items || [];
-  if (params.allowFreeText || items.some((item) => item.group)) {
-    const reason = params.allowFreeText
-      ? 'free-text answers are not supported'
-      : 'grouped items are not supported';
-    store.output.appendLine(`view/pick "${params.prompt}" cancelled: ${reason}`);
-    vscode.window.showWarningMessage(`magit-lsp: pick cancelled, ${reason}`);
-    return { cancelled: true, selected: [] };
-  }
-
-  const picked = await vscode.window.showQuickPick(pickItems(params), {
-    title: params.prompt,
-    canPickMany: Boolean(params.multi),
-    ignoreFocusOut: true,
-  });
-  return answerPick(params, picked);
 }
 
 /**
