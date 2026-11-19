@@ -1,0 +1,44 @@
+---
+# PREPARED UPSTREAM SUBMISSION — NOT YET SUBMITTED.
+#
+# This file is a ready-to-copy artifact for https://github.com/mason-org/mason-registry:
+# fork that repository, copy this file to packages/magit-lsp/package.yaml and
+# open a pull request. Admission is external and not promised here: the
+# registry applies its own review and popularity/integration thresholds.
+#
+# Version bumps must update this file together with Cargo.toml and
+# clients/vscode/package.json; `make mason-package-check` enforces that the purl
+# version, the asset filename and the Cargo/extension versions stay in step.
+#
+# Mirrored upstream schema facts (checked 2026-11-19): the document starts with
+# `---`; required top-level keys are name, description, homepage, licenses,
+# languages, categories and source; a GitHub-release source needs `id` and
+# `asset` and must not declare `supported_platforms`; the schema has no
+# `install` stanza and no `checksum` field.
+#
+# ASSUMPTION: whether a Linux-only asset needs the optional `ci_skip` field was
+# not settled against a real registry package within the lookup budget. It is
+# omitted: every declared target has a matching asset, so the registry's
+# per-target CI can exercise this Linux target directly. Revisit before
+# upstream submission.
+name: magit-lsp
+description: A Git repository interface for editors over the Language Server Protocol
+homepage: https://github.com/BlueDrink9/magit-lsp
+licenses:
+  - GPL-3.0-only
+languages: []
+categories:
+  - LSP
+
+source:
+  id: pkg:github/BlueDrink9/magit-lsp@v0.1.0
+  asset:
+    - target: linux_x64_gnu
+      file: magit-lsp-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+      # The release archive places its files under a top-level directory, like
+      # golangci-lint's tarballs (packages/golangci-lint/package.yaml): bin is
+      # the path inside the extracted archive, not a bare filename.
+      bin: magit-lsp-v0.1.0-x86_64-unknown-linux-gnu/magit-lsp
+
+bin:
+  magit-lsp: "{{source.asset.bin}}"

@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -157,6 +157,12 @@ vscode-package:
 # runs `cargo package --list` offline to catch an incomplete crate.
 release-automation-check:
 	$(call run,release-automation-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py)
+
+# Static guard for the prepared (not submitted) Mason registry package. PyYAML
+# is absent, so clients/mason/package.yaml is checked line by line against
+# Cargo.toml and the release archive contract.
+mason-package-check:
+	$(call run,mason-package-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_mason_package.py)
 
 vscode-version-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-version-startup,MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs)
