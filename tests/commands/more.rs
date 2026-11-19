@@ -2769,15 +2769,36 @@ fn spin_fixture() -> RepoFixture {
 fn branch_spinoff_checks_out_a_tracking_branch_and_moves_the_source_to_the_merge_base() {
     use magit_lsp::session::Execution;
     let tmp = spin_fixture();
-    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let common_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    // Advance the upstream with a commit the source does not contain, so the
+    // merge base and the upstream tip are distinct commits.
+    tmp.git(&["checkout", "main"]);
+    std::fs::write(tmp.path().join("upstream.txt"), "upstream\n").unwrap();
+    tmp.git(&["add", "upstream.txt"]);
+    tmp.git(&["commit", "-m", "upstream"]);
+    tmp.git(&["checkout", "foobar"]);
+    let upstream_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
     let source_oid = tmp.git(&["rev-parse", "foobar"]).trim().to_owned();
-    assert_ne!(main_oid, source_oid, "the fixture must commit above its upstream");
+    assert_ne!(
+        common_oid, upstream_oid,
+        "the upstream must have moved past the merge base"
+    );
+    assert_ne!(
+        common_oid, source_oid,
+        "the source must commit above the merge base"
+    );
+    assert_ne!(source_oid, upstream_oid, "the source and upstream must diverge");
+    assert_eq!(
+        tmp.git(&["merge-base", "foobar", "main"]).trim(),
+        common_oid,
+        "the common ancestor must stay the original branch point"
+    );
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let Execution::Done(result) = spin_invoke(&mut test, "branch.spinoff", "spun") else {
         panic!("expected completion");
     };
-    let expected = format!("Created branch spun tracking foobar; moved foobar to {main_oid}");
+    let expected = format!("Created branch spun tracking foobar; moved foobar to {common_oid}");
     assert!(
         message_texts(&result.effects).contains(&expected.as_str()),
         "{:?}",
@@ -2791,7 +2812,7 @@ fn branch_spinoff_checks_out_a_tracking_branch_and_moves_the_source_to_the_merge
     );
     assert_eq!(
         tmp.git(&["rev-parse", "foobar"]).trim(),
-        main_oid,
+        common_oid,
         "the source must move to the merge base, not the upstream tip"
     );
     assert_eq!(
