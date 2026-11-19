@@ -29,7 +29,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `branch.delete` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.orphan` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.rename` | menu-action | Implemented | — | — | Available | Available | Available | — |
-| `branch.reset` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.reset` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.shelve` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.spinoff` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.spinout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |

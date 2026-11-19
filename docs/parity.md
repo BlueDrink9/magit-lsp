@@ -48,7 +48,7 @@
 | `magit-worktree-branch` | `b W` | `branch.worktree-create` | Planned R-6.1 | branch |
 | `magit-branch-configure` | `b C` | `branch.configure` | Planned R-6.1 | branch |
 | `magit-branch-rename` | `b m` | `branch.rename` | Implemented | branch |
-| `magit-branch-reset` | `b x` | `branch.reset` | Planned R-6.1 | branch |
+| `magit-branch-reset` | `b x` | `branch.reset` | Implemented | branch |
 | `magit-branch-delete` | `b k` | `branch.delete` | Implemented | branch |
 | `magit-branch-shelve` | `b h` | `branch.shelve` | Planned R-6.1 | branch |
 | `magit-branch-unshelve` | `b H` | `branch.unshelve` | Planned R-6.1 | branch |
