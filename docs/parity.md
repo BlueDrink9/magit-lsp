@@ -227,10 +227,10 @@
 | `-` | `=O` | `-` | Implemented | remote |
 | `-` | `=h` | `-` | Implemented | remote |
 | `magit-remote-add` | `M a` | `remote.add` | Implemented | remote |
-| `magit-remote-rename` | `M r` | `remote.rename` | Planned R-6.3 | remote |
+| `magit-remote-rename` | `M r` | `remote.rename` | Implemented | remote |
 | `magit-remote-remove` | `M k` | `remote.remove` | Implemented | remote |
 | `magit-remote-configure` | `M C` | `remote.configure` | Planned R-6.3 | remote |
-| `magit-remote-prune` | `M p` | `remote.prune` | Planned R-6.3 | remote |
+| `magit-remote-prune` | `M p` | `remote.prune` | Implemented | remote |
 | `magit-remote-prune-refspecs` | `M P` | `remote.prune-refspecs` | Planned R-6.3 | remote |
 | `magit-remote-unshallow` | `M z` | `remote.unshallow` | Planned R-6.3 | remote |
 | `magit-update-default-branch` | `M d u` | `remote.update-default` | Planned R-6.3 | remote |
