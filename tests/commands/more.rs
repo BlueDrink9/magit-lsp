@@ -715,6 +715,10 @@ fn tag_create_prompts_and_creates_tag_at_head() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("base.txt", "base\n")])
         .build();
+    tmp.git(&["config", "tag.gpgSign", "true"]);
+    tmp.git(&["config", "core.editor", "false"]);
+    tmp.git(&["config", "gpg.program", "false"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]);
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let Execution::Prompt(prompt) = test
@@ -747,11 +751,68 @@ fn tag_create_prompts_and_creates_tag_at_head() {
     );
     let tags = tmp.git(&["tag", "--list"]);
     assert!(tags.lines().any(|line| line == "v1"), "{tags}");
+    assert_eq!(
+        tmp.git(&["cat-file", "-t", "v1"]).trim(),
+        "commit",
+        "a signing default must not turn the tag into an annotated object"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "v1"]).trim(),
+        head.trim(),
+        "the lightweight tag must point at the captured HEAD"
+    );
+    assert_eq!(tmp.git(&["config", "tag.gpgSign"]).trim(), "true");
+    assert_eq!(tmp.git(&["config", "gpg.program"]).trim(), "false");
     assert!(
         tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
         "creating a tag must not switch HEAD"
     );
     assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn tag_create_refuses_selected_menu_arguments() {
+    use magit_lsp::protocol::ViewInvokeParams;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let refs = tmp.git(&["for-each-ref", "--format=%(refname)"]);
+    let config = tmp.git(&["config", "--list", "--local"]);
+    let Execution::Done(result) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "tag.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: Some(serde_json::json!({"switches": ["-s"], "options": {"=u": "Alice"}})),
+        })
+        .unwrap()
+    else {
+        panic!("selected unsupported arguments must refuse, not prompt");
+    };
+    let messages = message_texts(&result.effects);
+    assert!(
+        messages.iter().any(|text| text.contains("tag.create")
+            && text.contains("-s")
+            && text.contains("=u")),
+        "{messages:?}"
+    );
+    assert!(!test.session.has_pending_prompt());
+    assert_eq!(
+        tmp.git(&["for-each-ref", "--format=%(refname)"]),
+        refs,
+        "a refused tag create must not add a ref"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--list", "--local"]),
+        config,
+        "a refused tag create must not change local configuration"
+    );
 }
 
 #[test]
@@ -1237,6 +1298,51 @@ fn remote_add_prompts_for_name_and_url() {
         "/tmp/magit-remote-target"
     );
     assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn remote_add_refuses_selected_menu_arguments() {
+    use magit_lsp::protocol::ViewInvokeParams;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let remotes = tmp.git(&["remote", "-v"]);
+    let config = tmp.git(&["config", "--list", "--local"]);
+    let Execution::Done(result) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "remote.add".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: Some(serde_json::json!({"switches": ["-f"], "options": {"=u": "file:///tmp/x"}})),
+        })
+        .unwrap()
+    else {
+        panic!("selected unsupported arguments must refuse, not prompt");
+    };
+    let messages = message_texts(&result.effects);
+    assert!(
+        messages
+            .iter()
+            .any(|text| text.contains("remote.add") && text.contains("-f") && text.contains("=u")),
+        "{messages:?}"
+    );
+    assert!(!test.session.has_pending_prompt());
+    assert_eq!(
+        tmp.git(&["remote", "-v"]),
+        remotes,
+        "a refused remote add must not add or change a remote"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--list", "--local"]),
+        config,
+        "a refused remote add must not change local configuration"
+    );
 }
 
 #[test]

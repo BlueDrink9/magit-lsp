@@ -1933,8 +1933,39 @@ fn branch_reset(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
+/// Refuse menu arguments `command` cannot honour, naming the selected keys.
+///
+/// Returns `true` after queuing a warning when any switch or option value was
+/// selected, so the caller can return without prompting or mutating.
+fn refuse_unsupported_args(ctx: &mut CommandCtx<'_>, command: &str) -> Result<bool> {
+    let args: crate::menu::Args = match ctx.args.filter(|value| !value.is_null()) {
+        Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+            crate::Error::new(format!(
+                "Expected {command} switches and option values: {error}"
+            ))
+        })?,
+        None => crate::menu::Args::default(),
+    };
+    let mut selected = args.switches;
+    selected.extend(args.options.into_keys());
+    if selected.is_empty() {
+        return Ok(false);
+    }
+    ctx.effects.push(Effect::message(
+        MessageLevel::Warn,
+        format!(
+            "{command} does not support the selected arguments: {}",
+            selected.join(", ")
+        ),
+    ));
+    Ok(true)
+}
+
 /// Prompt for the name of a tag created at HEAD.
-fn tag_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn tag_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "tag.create")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Create tag", "", "New tag name"),
@@ -1945,7 +1976,10 @@ fn tag_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// Prompt for the name of a new remote, then for its URL.
-fn remote_add(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn remote_add(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "remote.add")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Add remote", "", "Remote name"),
@@ -1956,7 +1990,10 @@ fn remote_add(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// Prompt for the remote to remove.
-fn remote_remove(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn remote_remove(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "remote.remove")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Remove remote", "", "Remote to remove"),
@@ -1967,7 +2004,10 @@ fn remote_remove(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// Prompt for the remote to rename, then for its new name.
-fn remote_rename(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn remote_rename(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "remote.rename")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Rename remote", "", "Remote to rename"),
@@ -1978,7 +2018,10 @@ fn remote_rename(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// Prompt for the remote whose stale tracking branches should be pruned.
-fn remote_prune(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn remote_prune(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "remote.prune")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Prune remote", "", "Remote to prune"),
@@ -2021,7 +2064,10 @@ fn reset_keep(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// Prompt for the tag to delete.
-fn tag_delete(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+fn tag_delete(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "tag.delete")? {
+        return Ok(CommandOutcome::default());
+    }
     Ok(CommandOutcome {
         prompt: Some((
             branch_name_prompt("Delete tag", "", "Tag to delete"),

@@ -669,12 +669,15 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Create a tag at HEAD. An option-like name is refused at this boundary so
-    /// it cannot select a different `git tag` mode; Git refuses invalid or
-    /// duplicate names itself.
+    /// Create a lightweight tag at HEAD. Tag signing is disabled for this
+    /// invocation only, so a `tag.gpgSign` default cannot turn it into an
+    /// annotated, signed tag; the repository configuration is left untouched.
+    /// An option-like name is refused at this boundary so it cannot select a
+    /// different `git tag` mode; Git refuses invalid or duplicate names itself.
     pub fn create_tag(&self, name: &str) -> Result<()> {
         Self::reject_option_like("tag name", name)?;
-        self.run(&["tag", "--", name]).map(|_| ())
+        self.run(&["-c", "tag.gpgSign=false", "tag", "--", name])
+            .map(|_| ())
     }
 
     /// Delete `name`, leaving Git's refusal of a missing tag to surface as its
@@ -709,10 +712,11 @@ impl GitRepo {
         self.run(&["remote", "rename", "--", old, new]).map(|_| ())
     }
 
-    /// Delete local tracking refs of remote `name` that no longer exist on it
-    /// without contacting the remote. Git's refusal of a missing remote
-    /// surfaces as its own error; an option-like name is refused at this
-    /// boundary.
+    /// Delete local tracking refs of remote `name` that no longer exist on it.
+    /// Git contacts the remote to discover its current refs and then deletes
+    /// the stale local tracking refs without fetching new objects. Git's
+    /// refusal of a missing remote surfaces as its own error; an option-like
+    /// name is refused at this boundary.
     pub fn prune_remote(&self, name: &str) -> Result<()> {
         Self::reject_option_like("remote name", name)?;
         self.run(&["remote", "prune", "--", name]).map(|_| ())
