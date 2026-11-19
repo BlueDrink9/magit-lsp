@@ -2055,8 +2055,8 @@
       "properties": {
         "magit-lsp.serverPath": {
           "type": "string",
-          "default": "magit-lsp",
-          "description": "Path to the magit-lsp executable."
+          "default": "",
+          "description": "Path to the magit-lsp executable. Leave empty to download the release matching this extension version into extension storage. Set a PATH name or absolute path to start your own server instead and skip the download."
         },
         "magit-lsp.profile": {
           "type": "string",

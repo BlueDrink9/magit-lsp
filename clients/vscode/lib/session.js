@@ -21,6 +21,7 @@ const { close, current, disconnect, handleInvoke, onChanged, setup } = require('
 const { applyEffects } = require('./effects');
 const { applyRender, handlePrompt, handlePick } = require('./requests');
 const { register } = require('./semantic');
+const { resolveServer } = require('./server-download');
 const { optionalEffects, optionalPromptKinds } = require('../types/shared-lists');
 const { activateView, stateForUri } = require('./views');
 const { SCHEME, store } = require('./store');
@@ -31,13 +32,11 @@ const extensionVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../pac
 /**
  * Create the LSP client with the static key-delivery capabilities.
  *
+ * @param {string} command executable or PATH name the client starts
+ * @param {string} profile keymap profile sent as an initialization option
  * @returns {LanguageClient}
  */
-function createClient() {
-  const config = vscode.workspace.getConfiguration('magit-lsp');
-  const command = config.get('serverPath') || 'magit-lsp';
-  const profile = config.get('profile') || 'standard';
-
+function createClient(command, profile) {
   const client = new LanguageClient(
     'magit-lsp',
     'magit-lsp',
@@ -128,10 +127,58 @@ function activate(context) {
 
    setup(context);
 
-  store.client = createClient();
-  const client = store.client;
-  const command = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
+  store.clientReady = startClient(context).catch((error) => {
+    store.output.appendLine(`language client failed: ${message(error)}`);
+    vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
+    throw error;
+  });
+  // A user may never open a view; keep the failed readiness observable without
+  // reporting it as an unhandled rejection.
+  store.clientReady.catch(() => {});
+
+  activateView(undefined);
+}
+
+/**
+ * Resolve the server executable the client should start.
+ *
+ * A nonempty `magit-lsp.serverPath` always wins, so PATH names and absolute
+ * paths are started exactly as configured and nothing is downloaded. Otherwise
+ * the release pinned to this extension's manifest version is resolved below the
+ * extension's own global storage.
+ *
+ * @param {vscode.ExtensionContext} context
+ * @param {string} configured `magit-lsp.serverPath` setting
+ * @returns {Promise<string>} launched command
+ */
+async function resolveServerCommand(context, configured) {
+  if (configured) return configured;
+  const resolved = await resolveServer({
+    version: extensionVersion,
+    cacheRoot: context.globalStorageUri?.fsPath,
+  });
+  return resolved.executable;
+}
+
+/**
+ * Resolve the server, then construct, start and admit the language client.
+ *
+ * Resolution precedes construction so a failed download never constructs or
+ * starts a transport, and version diagnostics name the executable that was
+ * actually chosen.
+ *
+ * @param {vscode.ExtensionContext} context
+ */
+async function startClient(context) {
+  const config = vscode.workspace.getConfiguration('magit-lsp');
+  const profile = config.get('profile') || 'standard';
+  const command = await resolveServerCommand(context, config.get('serverPath') || '');
+  // Deactivation may have happened while a download was in flight; never start
+  // a transport the editor is no longer able to stop.
+  if (store.disposing) return;
   const executable = resolveCommand(command);
+  const client = createClient(command, profile);
+  store.client = client;
   client.onNotification('view/render', applyRender);
    client.onNotification('view/prompt', handlePrompt);
   client.onNotification('view/pick', handlePick);
@@ -143,36 +190,26 @@ function activate(context) {
   client.onNotification('view/effects', (params) => {
     void applyEffects(params && params.effects, store.activeViewId);
   });
-  store.clientReady = client.start().then(async () => {
-    const versionWarning = warning(extensionVersion,
-      client.initializeResult?.serverInfo?.version, executable);
-    if (versionWarning) vscode.window.showWarningMessage(versionWarning);
-    const protocolFailure = protocolError(client.initializeResult, PROTOCOL_VERSION);
-    if (protocolFailure) {
-      const rejection = new Error(protocolFailure);
-      try {
-        await client.stop();
-      } catch (cleanupError) {
-        store.output.appendLine(`language client cleanup failed: ${message(cleanupError)}`);
-      }
-      throw rejection;
+  await client.start();
+  const versionWarning = warning(extensionVersion,
+    client.initializeResult?.serverInfo?.version, executable);
+  if (versionWarning) vscode.window.showWarningMessage(versionWarning);
+  const protocolFailure = protocolError(client.initializeResult, PROTOCOL_VERSION);
+  if (protocolFailure) {
+    const rejection = new Error(protocolFailure);
+    try {
+      await client.stop();
+    } catch (cleanupError) {
+      store.output.appendLine(`language client cleanup failed: ${message(cleanupError)}`);
     }
-    store.semanticChanged = register(
-      vscode,
-      client,
-      stateForUri,
-      context.subscriptions
-    );
-  }).catch((error) => {
-    store.output.appendLine(`language client failed: ${message(error)}`);
-    vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
-    throw error;
-  });
-  // A user may never open a view; keep the failed readiness observable without
-  // reporting it as an unhandled rejection.
-  store.clientReady.catch(() => {});
-
-  activateView(undefined);
+    throw rejection;
+  }
+  store.semanticChanged = register(
+    vscode,
+    client,
+    stateForUri,
+    context.subscriptions
+  );
 }
 
 /**

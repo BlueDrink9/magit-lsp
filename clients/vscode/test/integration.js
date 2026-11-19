@@ -12,6 +12,7 @@
 
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -186,11 +187,142 @@ function createRepository() {
 }
 
 /**
+ * Hex SHA-256 of bytes.
+ *
+ * @param {Buffer} bytes
+ * @returns {string}
+ */
+function digest(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Build a release archive around the real server binary with the packager's
+ * Python tarfile settings.
+ *
+ * @param {string} binary path to `magit-lsp`
+ * @param {string} stem versioned archive directory
+ * @param {string} archiveName published archive file name
+ * @returns {Buffer} gzip release archive bytes
+ */
+function packagedArchive(binary, stem, archiveName) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-lsp-integration-archive-'));
+  try {
+    const binaryPath = path.join(directory, 'magit-lsp');
+    fs.copyFileSync(binary, binaryPath);
+    const archivePath = path.join(directory, archiveName);
+    execFileSync('python3', [
+      path.resolve(here, '../../../scripts/test_release_archive_fixture.py'),
+      archivePath, stem, binaryPath,
+    ], { stdio: 'pipe' });
+    return fs.readFileSync(archivePath);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Open the status view with the default empty server path.
+ *
+ * The cache is populated by the real download helper from a fixture release
+ * archive containing the real server binary, so resolution, launch and the
+ * initialize handshake are exercised without any network access.
+ *
+ * @param {string} binary path to `magit-lsp`
+ * @returns {Promise<void>}
+ */
+async function automaticStartup(binary) {
+  const version = require('../package.json').version;
+  const asset = 'x86_64-unknown-linux-gnu';
+  const stem = `magit-lsp-v${version}-${asset}`;
+  const archiveName = `${stem}.tar.gz`;
+  const base = `https://github.com/BlueDrink9/magit-lsp/releases/download/v${version}`;
+  const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-lsp-vscode-storage-'));
+  const repo = createRepository();
+  try {
+    const archive = packagedArchive(binary, stem, archiveName);
+    const { resolveServer } = require('../lib/server-download');
+    const resolved = await resolveServer({
+      version,
+      cacheRoot,
+      runtime: { platform: 'linux', arch: 'x64', glibc: '2.36' },
+      transport: async (url) => {
+        if (url === `${base}/${archiveName}.sha256`) {
+          return Buffer.from(`${digest(archive)}  ${archiveName}\n`);
+        }
+        if (url === `${base}/${archiveName}`) return archive;
+        throw new Error(`unexpected download ${url}`);
+      },
+    });
+
+    __test.reset();
+    workspace.registerFileSystemProvider('file', {
+      readFile: (uri) => fs.readFileSync(uri.fsPath),
+      writeFile: (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
+    });
+    __test.setWorkspaceFolder(repo);
+    __test.setConfiguration({ 'magit-lsp.profile': 'standard' });
+    assert.equal(workspace.getConfiguration('magit-lsp').get('serverPath'), undefined,
+      'the automatic startup leaves the server path unset');
+
+    const extension = loadExtension();
+    extension.activate({
+      subscriptions: [],
+      globalStorageUri: vscodeModule.Uri.file(cacheRoot),
+    });
+    let client;
+    try {
+      await require('../lib/store').store.clientReady;
+      client = instances.at(-1);
+      assert(client, 'the extension started a language client');
+      assert.equal(client.serverOptions.command, resolved.executable,
+        'the resolved release executable is launched');
+      assert.equal(resolved.executable.startsWith(cacheRoot), true,
+        'the executable is installed in extension global storage');
+      await __test.commands.get('magit.open')();
+      await waitFor(
+        () => __test.activeEditor
+          && /Unstaged changes/.test(__test.activeEditor.document.getText()),
+        'status view from the downloaded server'
+      );
+      assert.equal(client.initializeResult.capabilities.experimental.magit.protocolVersion, 1,
+        'the downloaded server completes the matching handshake');
+      assert.deepEqual(
+        __test.messages.filter((notice) => notice.level === 'error'),
+        [],
+        'automatic startup reports no error'
+      );
+    } finally {
+      await extension.deactivate();
+    }
+    const exited = await Promise.race([
+      client.exited.then(() => true),
+      delay(5000).then(() => false),
+    ]);
+    assert(exited, 'the downloaded language server exited after deactivate');
+  } finally {
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+/**
  * Load `extension.js` with the fake editor modules installed.
+ *
+ * Evicting the extension modules lets this test activate twice: once with the
+ * downloaded release and once with an explicitly configured server path.
  *
  * @returns {object} the extension module
  */
 function loadExtension() {
+  const root = path.join(__dirname, '..');
+  const owned = [path.join(root, 'extension.js'), path.join(root, 'package.json')];
+  const prefixes = [path.join(root, 'lib') + path.sep, path.join(root, 'types') + path.sep];
+  for (const key of Object.keys(require.cache)) {
+    if (owned.includes(key) || prefixes.some((prefix) => key.startsWith(prefix))) {
+      delete require.cache[key];
+    }
+  }
   const originalLoad = Module._load;
   Module._load = function load(request, parent, isMain) {
     if (request === 'vscode') return vscodeModule;
@@ -212,6 +344,8 @@ async function run() {
     throw new Error(`missing ${binary}; run \`cargo build\` or \`make build\` first`);
   }
 
+  await automaticStartup(binary);
+
   const repo = createRepository();
   __test.reset();
   workspace.registerFileSystemProvider('file', {
@@ -230,6 +364,7 @@ async function run() {
 
   try {
     const commands = __test.commands;
+    await require('../lib/store').store.clientReady;
     const client = instances.at(-1);
     assert(client, 'the extension started a language client');
     const declaration = client.requests.find((request) => request.method === 'initialize').params.capabilities.experimental.magit;

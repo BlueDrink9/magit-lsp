@@ -45,8 +45,10 @@ function editorInfo() {
  * Open the status view for the first workspace folder.
  */
 async function openStatus() {
-  const client = store.client;
-  if (!client) {
+  // The client is created once server resolution finishes, so wait for
+  // readiness before deciding whether a client exists. A failed resolution
+  // rejects here and is reported on every later open without retrying it.
+  if (!store.clientReady) {
     return;
   }
   const folders = vscode.workspace.workspaceFolders;
@@ -57,6 +59,10 @@ async function openStatus() {
 
   try {
     await store.clientReady;
+    const client = store.client;
+    if (!client) {
+      return;
+    }
     const repo = folders[0].uri.fsPath;
     if (store.statusOpens.has(repo)) {
       await store.statusOpens.get(repo);

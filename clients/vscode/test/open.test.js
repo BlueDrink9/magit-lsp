@@ -12,9 +12,10 @@ const path = require('node:path');
  *
  * @param {object} vscode the editor fake
  * @param {Function} LanguageClient the language-client fake
+ * @param {{resolveServer: Function}} [serverDownload] injected server resolution
  * @returns {object} the extension module
  */
-function loadExtension(vscode, LanguageClient) {
+function loadExtension(vscode, LanguageClient, serverDownload) {
   const root = path.join(__dirname, '..');
   const owned = [path.join(root, 'extension.js'), path.join(root, 'package.json')];
   const prefixes = [path.join(root, 'lib') + path.sep, path.join(root, 'types') + path.sep];
@@ -28,6 +29,7 @@ function loadExtension(vscode, LanguageClient) {
   Module._load = function load(request, parent, isMain) {
     if (request === 'vscode') return vscode;
     if (request === 'vscode-languageclient/node') return { LanguageClient };
+    if (request === './server-download' && serverDownload) return serverDownload;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -82,7 +84,9 @@ async function testStatusOpenLifecycle() {
     TextEditorRevealType: { InCenterIfOutsideViewport: 0 },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: '/repo' } }],
-      getConfiguration: () => ({ get: () => undefined }),
+      getConfiguration: () => ({
+        get: (name) => (name === 'serverPath' ? 'magit-lsp' : undefined),
+      }),
       registerTextDocumentContentProvider: (scheme, provider) => {
         providers.set(scheme, provider);
         return { dispose() {} };
@@ -197,6 +201,7 @@ async function testStatusOpenLifecycle() {
 
   const context = { subscriptions: [] };
   extension.activate(context);
+  await require('../lib/store').store.clientReady;
   const startedClient = require('../lib/store').store.client;
   const declaration = { experimental: {} };
   startedClient.features[0].fillClientCapabilities(declaration);
@@ -364,7 +369,7 @@ function settle() {
  * Build one admission harness: a minimal editor fake, a client fake and the
  * scripted initialize result or start rejection.
  *
- * @param {{startError?: string, stopError?: string, protocolVersion?: unknown, includeProtocol?: boolean}} options
+ * @param {{startError?: string, stopError?: string, protocolVersion?: unknown, includeProtocol?: boolean, settings?: object, globalStorage?: string, events?: string[]}} options
  */
 function admissionHarness(options) {
   const commands = new Map();
@@ -374,9 +379,21 @@ function admissionHarness(options) {
   const requests = [];
   const notifications = [];
   const lifecycle = [];
+  const events = options.events || [];
+  const settings = options.settings || { 'magit-lsp.serverPath': 'magit-lsp' };
+  const providers = new Map();
+  const opened = [];
+  const instances = [];
+  let constructions = 0;
   let semanticRegistrations = 0;
   const vscode = {
-    Uri: { from: (parts) => parts, parse: (value) => value },
+    Uri: {
+      from: (parts) => ({
+        ...parts,
+        toString() { return `${this.scheme}://${this.authority}${this.path}`; },
+      }),
+      parse: (value) => value,
+    },
     EventEmitter: class {
       constructor() { this.event = () => {}; }
       fire() {}
@@ -384,8 +401,25 @@ function admissionHarness(options) {
     },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: '/repo' } }],
-      getConfiguration: () => ({ get: () => undefined }),
-      registerTextDocumentContentProvider: () => ({ dispose() {} }),
+      getConfiguration: () => ({
+        get: (name, fallback) => (Object.hasOwn(settings, `magit-lsp.${name}`)
+          ? settings[`magit-lsp.${name}`]
+          : fallback),
+      }),
+      registerTextDocumentContentProvider: (scheme, provider) => {
+        providers.set(scheme, provider);
+        return { dispose() {} };
+      },
+      async openTextDocument(uri) {
+        const document = {
+          uri,
+          getText: () => providers.get(uri.scheme)?.provideTextDocumentContent(uri) || '',
+          lineCount: 1,
+          lineAt: () => ({ text: '' }),
+        };
+        opened.push(document);
+        return document;
+      },
       onDidCloseTextDocument: () => ({ dispose() {} }),
       onDidChangeTextDocument: () => ({ dispose() {} }),
     },
@@ -397,6 +431,8 @@ function admissionHarness(options) {
       onDidChangeActiveTextEditor: () => ({ dispose() {} }),
       showErrorMessage: (text) => { errorMessages.push(text); },
       showWarningMessage: (text) => { warnings.push(text); },
+      showTextDocument: async (document) => ({ document, selection: { isEmpty: true } }),
+      visibleTextEditors: [],
       tabGroups: {
         get all() { return []; },
         onDidChangeTabs: () => ({ dispose() {} }),
@@ -414,11 +450,16 @@ function admissionHarness(options) {
         semanticRegistrations += 1;
         return { dispose() {} };
       },
+      setTextDocumentLanguage: async (document) => document,
     },
     SemanticTokensLegend: class {},
   };
   class LanguageClient {
-    constructor() {
+    constructor(_id, _name, serverOptions) {
+      constructions += 1;
+      instances.push(this);
+      this.serverOptions = serverOptions;
+      events.push('construct');
       this.features = [];
       this.handlers = new Map();
       this.initializeResult = {
@@ -439,6 +480,7 @@ function admissionHarness(options) {
     onNotification(name, handler) { this.handlers.set(name, handler); }
     start() {
       lifecycle.push('start');
+      events.push('start');
       return options.startError
         ? Promise.reject(new Error(options.startError))
         : Promise.resolve().then(() => { lifecycle.push('started'); });
@@ -453,7 +495,19 @@ function admissionHarness(options) {
     }
     async sendRequest(method, params) {
       requests.push({ method, params });
-      return {};
+      if (method !== 'view/open') return {};
+      const descriptor = {
+        id: 'status-1', kind: 'status', uri: 'magit://status/repo',
+        title: 'Status', mode: 'interactive', scope: 'status', capture: false,
+      };
+      const payload = {
+        viewId: descriptor.id,
+        version: 1,
+        text: ['Status for /repo', 'Working tree clean'],
+        mode: 'interactive',
+      };
+      if (this.handlers.has('view/render')) this.handlers.get('view/render')(payload);
+      return descriptor;
     }
     async sendNotification(method, params) {
       notifications.push({ method, params });
@@ -461,7 +515,10 @@ function admissionHarness(options) {
   }
   return {
     vscode, LanguageClient, commands, errorMessages, warnings, output, requests,
-    notifications, lifecycle, semanticRegistrations: () => semanticRegistrations,
+    notifications, lifecycle, events, opened,
+    constructions: () => constructions,
+    serverOptions: () => instances.at(-1),
+    semanticRegistrations: () => semanticRegistrations,
   };
 }
 
@@ -582,5 +639,113 @@ async function testProtocolAdmission() {
   assert.deepEqual(unhandled, [], 'admission failures never leave an unhandled rejection');
 }
 
+/**
+ * Server resolution and startup: the default empty path resolves the pinned
+ * manifest version in extension storage before the client is constructed and
+ * launched, explicit overrides bypass resolution, and a resolver failure is
+ * readable, inert and never retried.
+ */
+async function testServerStartup() {
+  const { ServerDownloadError } = require('../lib/server-download');
+  const manifestVersion = require('../package.json').version;
+  const unhandled = [];
+  const onUnhandled = (reason) => { unhandled.push(reason); };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    // Default unset and explicit empty both resolve the pinned release.
+    for (const settings of [{}, { 'magit-lsp.serverPath': '' }]) {
+      const events = [];
+      const calls = [];
+      const executable = '/storage/server/v0.1.0/x86_64-unknown-linux-gnu/magit-lsp';
+      const harness = admissionHarness({
+        settings, globalStorage: '/storage', events, protocolVersion: 1,
+      });
+      const extension = loadExtension(harness.vscode, harness.LanguageClient, {
+        resolveServer: async (options) => {
+          events.push('resolve');
+          calls.push(options);
+          return { executable, version: manifestVersion };
+        },
+      });
+      extension.activate({
+        subscriptions: [],
+        globalStorageUri: { fsPath: '/storage' },
+      });
+      await require('../lib/store').store.clientReady;
+      assert.deepEqual(calls, [{ version: manifestVersion, cacheRoot: '/storage' }],
+        'pinned manifest version resolved in extension global storage');
+      assert.deepEqual(events.slice(0, 2), ['resolve', 'construct'],
+        'resolution precedes client construction');
+      assert.equal(harness.constructions(), 1);
+      assert.equal(harness.serverOptions().serverOptions.command, executable,
+        'the returned executable is the launched command');
+      assert.deepEqual(harness.warnings, [], 'matching handshake reports no version warning');
+      await harness.commands.get('magit.open')();
+      assert.equal(harness.requests[0].method, 'view/open');
+      assert.equal(harness.opened.length, 1, 'matching handshake opens the status document');
+      assert.match(harness.opened[0].getText(), /Working tree clean/);
+      await extension.deactivate();
+    }
+
+    // A nonempty PATH name or absolute path is launched as configured and never
+    // consults the download resolver.
+    for (const configured of ['/opt/magit-lsp/bin/magit-lsp', 'magit-lsp']) {
+      const events = [];
+      let resolutions = 0;
+      const harness = admissionHarness({
+        settings: { 'magit-lsp.serverPath': configured }, events, protocolVersion: 1,
+      });
+      const extension = loadExtension(harness.vscode, harness.LanguageClient, {
+        resolveServer: async () => {
+          resolutions += 1;
+          throw new Error('configured server paths must never be downloaded');
+        },
+      });
+      extension.activate({ subscriptions: [] });
+      await require('../lib/store').store.clientReady;
+      assert.equal(resolutions, 0, `${configured}: resolution is skipped`);
+      assert.deepEqual(events, ['construct', 'start'], `${configured}: starts the configured command`);
+      assert.equal(harness.serverOptions().serverOptions.command, configured,
+        `${configured}: configured command is launched unchanged`);
+      await extension.deactivate();
+    }
+
+    // A resolver failure is readable, constructs nothing and is never retried.
+    let resolutions = 0;
+    const harness = admissionHarness({ settings: {}, globalStorage: '/storage' });
+    const guidance = 'no release asset for linux-arm64: only x86_64-unknown-linux-gnu is published; '
+      + 'set "magit-lsp.serverPath" to a magit-lsp executable instead';
+    const extension = loadExtension(harness.vscode, harness.LanguageClient, {
+      resolveServer: async () => {
+        resolutions += 1;
+        throw new ServerDownloadError(guidance.slice('magit-lsp: '.length));
+      },
+    });
+    extension.activate({ subscriptions: [], globalStorageUri: { fsPath: '/storage' } });
+    await settle();
+    assert.equal(harness.constructions(), 0, 'failed download never constructs a client');
+    assert.deepEqual(harness.lifecycle, [], 'failed download never starts a transport');
+    const guidanceMessages = () => harness.errorMessages
+      .filter((text) => text.includes('magit-lsp.serverPath'));
+    assert.equal(guidanceMessages().length, 1, 'readable download/manual-override guidance');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await harness.commands.get('magit.open')();
+    }
+    assert.equal(resolutions, 1, 'repeated opens never retry the download');
+    assert.equal(harness.constructions(), 0, 'repeated opens construct nothing');
+    assert.equal(harness.requests.length, 0, 'repeated opens send no requests');
+    assert.equal(harness.notifications.length, 0, 'repeated opens send no notifications');
+    assert.equal(require('../lib/store').store.views.size, 0, 'repeated opens open no view');
+    assert.equal(guidanceMessages().length, 3, 'repeated opens keep reporting the readable failure');
+    await extension.deactivate();
+    assert.equal(harness.constructions(), 0, 'deactivate never starts the failed client');
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled);
+  }
+  await settle();
+  assert.deepEqual(unhandled, [], 'download failure never leaves an unhandled rejection');
+}
+
 module.exports = testStatusOpenLifecycle;
 module.exports.protocolAdmission = testProtocolAdmission;
+module.exports.serverStartup = testServerStartup;
