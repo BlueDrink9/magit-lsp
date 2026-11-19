@@ -644,6 +644,8 @@ User-directed 2026-11-19: implement now, on current infrastructure, the cheapest
   - Verified (A3) — `make ui-file FILE=tests/ui/scenarios/branch-create.scn` → `ok: build`, `ok: ui-file`; the scenario answers `HEAD~1` then `feature`, and its oracle asserts `git rev-parse feature` equals the captured `HEAD~1` OID, differs from `HEAD`, and `HEAD` is still `main`.
   - Cleanup — `rg -n "create_branch\b" src tests` reported only the now-unused definition `src/git.rs:513`; it was deleted (no-shims rule) and the Rust suite re-ran green.
   - Verified (A4) — `make registry-docs-check` → exit 0 (no registry docs drift, so no regeneration commit).
+  - Verified (A5) — at this final commit `git status --porcelain` reports only the concurrent session's `Makefile` and `clients/vscode/` edits (including ` M clients/vscode/lib/requests.js`) plus the five user-owned untracked paths (`.envrc`, `.github/workflows/release.yml`, `scripts/ci-local.sh`, `scripts/install.sh`, `scripts/package-release.sh`); none staged or committed.
+  - Done: `98a6ae9`.
 
 ## Completed work
 
