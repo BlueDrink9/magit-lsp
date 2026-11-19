@@ -110,7 +110,6 @@ function inactiveContext() {
 }
 
 module.exports = {
-  KIND,
   SCHEME,
   draftAction,
   editingContext,

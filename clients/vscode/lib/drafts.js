@@ -390,25 +390,6 @@ function acknowledged(result, type, record, version) {
 }
 
 /**
- * Checkpoint the exact applied live version without confirming anything.
- *
- * @param {object} record
- * @returns {Promise<boolean>}
- */
-async function checkpoint(record) {
-  const version = record.version;
-  const text = record.text;
-  if (!(await record.document.save()) || record.document.getText() !== text) {
-    fail(record, 'the commit message changed while saving');
-    return false;
-  }
-  record.savedVersion = version;
-  record.savedText = text;
-  recover(record);
-  return true;
-}
-
-/**
  * Close a draft's tab without treating the close event as user intent.
  *
  * @param {object} record
@@ -550,25 +531,6 @@ async function confirm(record) {
     }
     fail(record, 'the commit draft changed while confirming; save or retry confirm');
     return false;
-  });
-}
-
-/**
- * Native save: checkpoint only, keep the editor and Git's helper pending.
- *
- * @param {object} record
- * @returns {Promise<boolean>}
- */
-async function save(record, expectedText) {
-  return operate(record, async () => {
-    if (!(await flush(record))) {
-      return false;
-    }
-    if (expectedText !== undefined && record.text !== expectedText) {
-      fail(record, 'the draft changed before saving; retry the save');
-      return false;
-    }
-    return checkpoint(record);
   });
 }
 
@@ -864,6 +826,5 @@ exports.onChanged = onChanged;
 exports.onClosed = onClosed;
 exports.onTabsChanged = onTabsChanged;
 exports.open = open;
-exports.save = save;
 exports.setContext = setContext;
 exports.setup = setup;
