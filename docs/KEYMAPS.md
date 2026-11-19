@@ -141,6 +141,20 @@ entries remain planned, including reflogs, other/related revisions and matching
 refs. In a normal log, `/` and motion keys stay native to Neovim; `q` returns to
 the caller. No new revision or reflog view is implied by these variants.
 
+#### 5.4.2 Branch menu: supported subset
+
+Open the branch menu with `b` from status. These menu keys are identical in
+both profiles.
+
+| Keys | Supported action |
+| --- | --- |
+| `n` | Create a branch at `HEAD` without switching to it |
+| `m` | Rename a branch: prompt for the source, then the new name |
+
+Checkout, configure, reset, delete and worktree entries remain planned.
+Creating a branch leaves the current branch checked out; renaming the checked-out
+branch renames it in place.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

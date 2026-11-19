@@ -1,0 +1,15 @@
+# Early T043: creating a branch from the status branch menu stays on HEAD.
+fixture: modified-two-files
+---
+keys: b
+wait
+expect screen contains "new branch"
+snapshot: branch-menu
+keys: n
+wait prompt
+keys: feature Enter
+wait
+expect screen contains "Created branch feature"
+sh: test "$(git rev-parse --abbrev-ref HEAD)" = main
+sh: test "$(git for-each-ref --format='%(refname:short)' refs/heads/feature)" = feature
+snapshot: created

@@ -491,6 +491,38 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Validate a branch name at the Git boundary without changing repository state.
+    pub fn validate_branch_name(&self, name: &str) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::new("A branch name is required."));
+        }
+        self.run(&["check-ref-format", "--branch", name])?;
+        Ok(name.to_owned())
+    }
+
+    /// Name of the branch HEAD points at, or `None` when HEAD is detached.
+    pub fn current_branch(&self) -> Option<String> {
+        self.run(&["symbolic-ref", "--short", "--quiet", "HEAD"])
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
+    /// Create a branch at HEAD without switching to it.
+    pub fn create_branch(&self, name: &str) -> Result<()> {
+        let name = self.validate_branch_name(name)?;
+        self.run(&["branch", name.as_str()]).map(|_| ())
+    }
+
+    /// Rename `source` to `target` after validating both names.
+    pub fn rename_branch(&self, source: &str, target: &str) -> Result<()> {
+        let source = self.validate_branch_name(source)?;
+        let target = self.validate_branch_name(target)?;
+        self.run(&["branch", "-m", source.as_str(), target.as_str()])
+            .map(|_| ())
+    }
+
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
         Self::command_in_with_env(

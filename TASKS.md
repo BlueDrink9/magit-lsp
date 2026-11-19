@@ -246,6 +246,13 @@ Release prerequisites include phases 1–6 and the specified Phase 6A protocol s
 
 ## Optional and unscheduled
 
+### Feature — User-requested small features (2026-11-19; scheduled after Phase 6)
+
+User-requested 2026-11-19; work once the Phase 6 push completes. The commits-sections ticket deliberately delivers only a display-first subset — the full interactive scopes remain T060 (status-history-sections) and T061 (unpulled-and-headers), and per queue precedent a delivered subset does not close those scopes.
+
+- [ ] **Status view: unpushed and recent commits sections.** Magit-style server-rendered sections in the main status view: commits the remote lacks ("Unpushed to <upstream>") and a short recent-commits list; an "Unpulled from <upstream>" sibling may ride along if the same plumbing makes it trivial. New reads behind `src/git.rs`; rendering/structure in `src/status_view.rs` under the server-owned tree rules (no text re-parsing, no client recomposition, identity never by index); labeled fallbacks for no-upstream, detached and unborn repositories. Extend the nearest existing status-view tests/snapshots; update VIEWS.md §6; KEYMAPS.md §5 only if keys are added. Out of scope (stays in T060/T061): commit navigation into a revision view, lazy `More` groups, fold persistence, header lines.
+- [ ] **Backspace in a submenu returns to the previous menu.** `?F<BS>` ends back at the `?` popup: opening a submenu pushes the parent onto a menu stack; `<BS>` in a submenu pops one level and reopens the parent in its prior state. First map every current `<BS>` binding and keep it — flag toggling/clearing in transient menus and multi-key command sequences retain their existing meaning; the pop applies only where `<BS>` is otherwise unbound in a submenu. Likely menu-stack state in `src/session.rs`, handling in `src/menu.rs`/`src/keyhandler.rs`. Menu state tests for push/pop plus regressions proving flag-`<BS>` and multi-key-`<BS>` unchanged; KEYMAPS.md §5 update.
+
 ### Feature — Phase 9: Plain keys (optional; starts after T022)
 
 - [ ] **T034 — key-edit-shapes.** [Scope](./TASKS_PART_SEVEN.md#t034-key-edit-shapes-s-gate).
@@ -395,6 +402,18 @@ Knip 6.45.1 does not credit CommonJS member-access usage (`const m = require("./
   - Verified A3 — `CI=true make hygiene` → exit 0 with `cargo machete: CLEAN (exit 0)`, `knip: NONZERO (exit 1)` `Unused exports (1)` (`pickFor lib/requests.js:333:9`), `luacheck: CLEAN (exit 0)`; unchanged from the 1-flag baseline (no increase), and the destructure introduces no new dead export.
   - Verified A5 — code commit `245316c` changes only `clients/vscode/test/integration.js` (73+/65−); this bookkeeping commit stages only the rebuilt TASKS.md hunk, leaving the concurrent session's unstaged TASKS.md hunks untouched in the worktree.
   - Done: `245316c`.
+
+### Cheap missing commands (2026-11-19; user-directed early delivery)
+
+User-directed 2026-11-19: implement now, on current infrastructure, the cheapest magit-parity commands still marked Planned — pulled forward from their post-release phases. Identification (scout at base `e42301c`): template `status.stage` — registration `src/commands.rs:793-799`, handler/menu binding `src/menus/dispatch.rs:48`, state tests `tests/commands/cases.rs`, parity rows auto-flip from menu roadmap markers (`src/commands.rs:1154-1172`, `src/menus/mod.rs:217`) and regenerate via `make registry-docs-generate`. Deliberately not ad hoc, despite trivial-looking parity rows (each is sequenced behind real design): stash (T072/T073 need a stable stash identity first — `stash@{n}` is forbidden index addressing), revert/cherry-pick (T076 sequencer state; a bare revert can strand a repository mid-sequence), bisect (T087 is a workflow, not bare commands), branch checkout (T067 unsafe-operation reporting), fetch/pull/push/merge (T068/T069 network seam). Unverified candidates for follow-up tickets: `clean`, discard-all (absence SUSPECTED, plumbing unproven).
+
+- [ ] **Early T043 — branch-basics (cheap commands).** Deliver the full T043 scope now (TASKS_PART_SEVEN.md:770): branch configure, create, rename and delete; checkout stays in T067. Per command: one `src/git.rs` method, handler + menu/key wiring per the `status.stage` template, state tests in `tests/commands/`, a conformance scenario for menu-driven application, KEYMAPS.md §5 rows for any bound keys; flip the parity rows to Implemented and regenerate via `make registry-docs-generate`, committing generated docs separately with the contract change and command named. On full verified scope, also tick the Phase 10 T043 line with a Done cross-reference to this item.
+  - Verified A1 — `grep -n 'id: "branch\.\(create\|rename\)"' src/commands.rs` → `command!` registrations at `:844`/`:845`; `src/menus/branch.rs:138`/`:171` carry empty markers on the `n` and `m` rows, and the four checkout rows keep `R-6.1` (`branch.checkout` `:79`, `branch.checkout-local` `:86`, `branch.orphan` `:93`, `branch.checkout-remote` `:100`); KEYMAPS.md §5.4.2 documents `n` (new branch) and `m` (rename).
+  - Verified A2 — `make test-rust FILTER="--test commands"` → exit 0; create-then-no-switch and rename-two-prompt cover the new prompt actions and `src/git.rs` methods.
+  - Verified A3 — `make ui-file FILE=tests/ui/scenarios/branch-create.scn` → exit 0, menu-driven `b n` creation leaves `main` checked out.
+  - Verified A4 — this implementation commit plus the separately generated registry-docs commit flipping the create and rename parity rows; `make registry-docs-check` exit 0.
+- [ ] **Early T042 — remote-config-tags (cheap commands).** Deliver the full T042 scope now (TASKS_PART_SEVEN.md:769): lightweight tag create/delete plus remote configuration — verify the exact remote rows in the parity table (add/rename/remove/prune) and implement those. Same template and evidence pattern; tick the Phase 10 T042 line on full verified scope.
+- [ ] **Early T070 — branch-reset (cheap commands).** Deliver the full T070 scope now (TASKS_PART_SEVEN.md:807): branch reset, kept separate from file checkout at a revision, with the target chosen through the existing prompt/pick infrastructure. Same template and evidence pattern; tick the Phase 12 T070 line on full verified scope.
 
 ## Completed work
 

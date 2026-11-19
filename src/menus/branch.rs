@@ -135,7 +135,7 @@ pub fn definition() -> MenuDef {
                         "branch.create",
                         "new branch",
                         "magit-branch-create",
-                        "R-6.1",
+                        "",
                     ),
                     action(
                         "S",
@@ -168,7 +168,7 @@ pub fn definition() -> MenuDef {
                         "branch.rename",
                         "rename",
                         "magit-branch-rename",
-                        "R-6.1",
+                        "",
                     ),
                     action("x", "branch.reset", "reset", "magit-branch-reset", "R-6.1"),
                     action(

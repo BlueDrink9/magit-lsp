@@ -299,6 +299,15 @@ pub enum PromptAction {
     },
     /// Resolve a revision for the originating selection view.
     Revision,
+    /// Create a branch with the answered name.
+    BranchCreate,
+    /// Rename the answered branch to a second answered name.
+    BranchRename,
+    /// Second half of a rename: move this validated source to the answered name.
+    BranchRenameTarget {
+        /// The branch name answered at the first prompt.
+        source: String,
+    },
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -489,6 +498,41 @@ pub fn resume_prompt(
                 selected_commits: Some(vec![oid]),
                 ..Default::default()
             })
+        }
+        PromptAction::BranchCreate => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(ctx, |repo| repo.create_branch(&name), format!("Created branch {name}"))
+        }
+        PromptAction::BranchRename => {
+            let PromptValue::Text(source) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let source = source.trim().to_owned();
+            if source.is_empty() {
+                ctx.info("A branch name is required");
+                return Ok(CommandOutcome::default());
+            }
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Rename branch to", &source, "New branch name"),
+                    PromptAction::BranchRenameTarget { source },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchRenameTarget { source } => {
+            let PromptValue::Text(target) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let target = target.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.rename_branch(&source, &target),
+                format!("Renamed branch {source} to {target}"),
+            )
         }
     }
 }
@@ -797,6 +841,8 @@ fn build() -> Registry {
             run: stage,
             effects: &[],
         },
+        command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch at HEAD", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
+        command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! {
             id: "status.unstage",
             scope: Scope::Status,
@@ -1278,6 +1324,71 @@ fn rebase_action(ctx: &mut CommandCtx<'_>, action: impl FnOnce(&GitRepo) -> Resu
         ctx.effects.push(Effect::Message { level: MessageLevel::Warn, text: err.to_string(), hint: None, detail: None });
     }
     Ok(CommandOutcome { refresh: true, ..Default::default() })
+}
+
+/// Run a branch operation, reporting Git failures as a readable message.
+fn branch_action(
+    ctx: &mut CommandCtx<'_>,
+    action: impl FnOnce(&GitRepo) -> Result<()>,
+    success: String,
+) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    match action(&repo) {
+        Ok(()) => ctx.info(success),
+        Err(err) => ctx.effects.push(Effect::Message {
+            level: MessageLevel::Warn,
+            text: err.to_string(),
+            hint: None,
+            detail: None,
+        }),
+    }
+    Ok(CommandOutcome { refresh: true, ..Default::default() })
+}
+
+/// Build a single-line text prompt for a branch name.
+fn branch_name_prompt(title: &str, default: &str, placeholder: &str) -> ViewPromptParams {
+    ViewPromptParams {
+        prompt_id: String::new(),
+        kind: PromptKind::Text,
+        title: title.to_string(),
+        detail: None,
+        yes_label: None,
+        no_label: None,
+        destructive: None,
+        default: (!default.is_empty()).then(|| Value::String(default.to_string())),
+        placeholder: Some(placeholder.to_string()),
+        secret: None,
+        items: None,
+        allow_custom: None,
+        preselected: None,
+        min: None,
+        max: None,
+    }
+}
+
+/// Prompt for the name of a new branch created at HEAD.
+fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Create branch", "", "New branch name"),
+            PromptAction::BranchCreate,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the branch to rename, then for its new name.
+fn branch_rename(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let current = GitRepo::open(ctx.repo_path)?
+        .current_branch()
+        .unwrap_or_default();
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Rename branch", &current, "Branch to rename"),
+            PromptAction::BranchRename,
+        )),
+        ..Default::default()
+    })
 }
 
 fn log_load_more(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

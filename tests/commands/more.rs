@@ -477,3 +477,121 @@ fn select_mode_stale_selection_keeps_the_picker_and_refuses() {
     assert!(test.view_ids().contains(&picker));
     assert!(test.view_ids().contains(&caller));
 }
+
+#[test]
+fn branch_create_prompts_and_creates_branch_without_switching() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.create".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Text("feature".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Created branch feature"),
+        "{:?}",
+        result.effects
+    );
+    let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(
+        branches.lines().any(|line| line == "feature"),
+        "{branches}"
+    );
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("main"),
+        "create must not switch HEAD"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_rename_prompts_twice_and_moves_the_ref() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(first) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.rename".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected branch name prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("main".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected rename target prompt");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &second.prompt_id,
+            Some(PromptValue::Text("renamed".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| *text == "Renamed branch main to renamed"),
+        "{:?}",
+        result.effects
+    );
+    let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(
+        !branches.lines().any(|line| line == "main"),
+        "{branches}"
+    );
+    assert!(
+        branches.lines().any(|line| line == "renamed"),
+        "{branches}"
+    );
+    assert!(
+        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("renamed"),
+        "rename must move the checked-out ref"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
