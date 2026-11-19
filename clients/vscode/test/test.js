@@ -16,11 +16,12 @@ const { isEditEffect, editingContext, draftAction } = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
 const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
-const { warning, resolveCommand } = require('../lib/version');
+const { warning, resolveCommand, protocolError } = require('../lib/version');
 const { createVersionFixture } = require('./e2e/version-fixture');
 const { selectSuiteMode, withSuiteMode } = require('./e2e/focused-mode');
 const { suiteResult, failureText } = require('./e2e/launcher-result');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
+const advertisementVectors = require('../../../tests/data/client-contracts.json').advertisements;
 
 const failures = [];
 let passed = 0;
@@ -555,6 +556,24 @@ test('a multi pick maps every picked row to its id', () => {
 });
 
 // summary ------------------------------------------------------------------
+
+test('shared advertisement vectors drive the VSCode protocol admission validator', () => {
+  for (const vector of advertisementVectors) {
+    const diagnostic = protocolError(vector.result, vector.required);
+    if (vector.accepted) {
+      assert.equal(diagnostic, undefined, `${vector.name}: accepted advertisement is silent`);
+      continue;
+    }
+    assert.equal(typeof diagnostic, 'string', `${vector.name}: rejected advertisement is reported`);
+    for (const fragment of vector.errorContains) {
+      assert.equal(
+        diagnostic.includes(fragment),
+        true,
+        `${vector.name}: diagnostic names ${JSON.stringify(fragment)}: ${diagnostic}`
+      );
+    }
+  }
+});
 
 test('startup version warnings distinguish matching, mismatched and missing metadata', () => {
   assert.equal(warning('1.2.3', '1.2.3', '/bin/magit-lsp'), undefined);
