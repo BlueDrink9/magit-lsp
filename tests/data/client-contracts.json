@@ -28,5 +28,25 @@
     {"name":"single-selected","params":{"pickId":"pick-single","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"},{"id":"main","label":"main"}]},"response":2,"expected":{"cancelled":false,"selected":["main"]}},
     {"name":"single-cancelled","params":{"pickId":"pick-cancel","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"}]},"response":null,"expected":{"cancelled":true,"selected":[]}},
     {"name":"two-item-single-select","params":{"pickId":"pick-two","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"},{"id":"main","label":"main"}]},"response":1,"expected":{"cancelled":false,"selected":["head"]}}
+  ],
+  "declarations": [
+    {"name":"minimum-absent-selects-v1","capabilities":{"experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"rich"},
+    {"name":"minimum-one-selects-v1","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":1,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"rich"},
+    {"name":"unsupported-v-zero","capabilities":{"experimental":{"magit":{"v":0,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["unsupported rich protocol version"]},
+    {"name":"unsupported-v-two","capabilities":{"experimental":{"magit":{"v":2,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["unsupported rich protocol version"]},
+    {"name":"minimum-null","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":null,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["minimumVersion"]},
+    {"name":"minimum-zero","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":0,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["minimumVersion"]},
+    {"name":"minimum-fraction","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":1.5,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["minimumVersion"]},
+    {"name":"minimum-string","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":"2","keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["minimumVersion"]},
+    {"name":"minimum-above-selected-v","capabilities":{"experimental":{"magit":{"v":1,"minimumVersion":2,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}},"outcome":"reject","errorContains":["minimumVersion 2","version 1"]}
+  ],
+  "advertisements": [
+    {"name":"matching-v1","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":1}}}},"required":1,"accepted":true},
+    {"name":"absent-advertisement","result":{"capabilities":{"experimental":{"magit":{}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised none"]},
+    {"name":"string-advertisement","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":"1"}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised "]},
+    {"name":"zero-advertisement","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":0}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised 0"]},
+    {"name":"negative-advertisement","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":-1}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised -1"]},
+    {"name":"fractional-advertisement","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":1.5}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised 1.5"]},
+    {"name":"different-advertisement","result":{"capabilities":{"experimental":{"magit":{"protocolVersion":2}}}},"required":1,"accepted":false,"errorContains":["rich protocol mismatch","required version 1","server advertised 2"]}
   ]
 }

@@ -49,6 +49,45 @@ fn shared_prompt_vectors_derive_answers_and_focus() {
 }
 
 #[test]
+fn shared_declaration_vectors_match_production_server_admission() {
+    #[derive(serde::Deserialize)]
+    struct Vector {
+        name: String,
+        capabilities: Value,
+        outcome: String,
+        #[serde(default, rename = "errorContains")]
+        error_contains: Vec<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Contracts { declarations: Vec<Vector> }
+    let mut seen = std::collections::BTreeSet::new();
+    let contracts = serde_json::from_str::<Contracts>(include_str!("data/client-contracts.json")).unwrap();
+    for vector in contracts.declarations {
+        assert!(seen.insert(vector.name.clone()), "duplicate declaration vector {}", vector.name);
+        let negotiated = magit_lsp::presentation::negotiate(&json!({"capabilities": vector.capabilities}));
+        match vector.outcome.as_str() {
+            "rich" => {
+                assert!(vector.error_contains.is_empty(), "{}: an admitted declaration carries no error", vector.name);
+                let presentation = negotiated.unwrap_or_else(|error| panic!("{}: expected rich admission, got {error}", vector.name));
+                assert!(matches!(presentation, magit_lsp::presentation::Presentation::Rich(_)), "{}: a declared v=1 must select the rich session", vector.name);
+            }
+            "reject" => {
+                assert!(!vector.error_contains.is_empty(), "{}: a rejected declaration must name the readable error", vector.name);
+                let error = negotiated.expect_err(&format!("{}: expected initialization rejection", vector.name)).to_string();
+                assert!(error.starts_with("capabilities.experimental.magit "), "{}: {error}", vector.name);
+                for fragment in &vector.error_contains {
+                    assert!(error.contains(fragment), "{}: error {error:?} does not mention {fragment:?}", vector.name);
+                }
+            }
+            other => panic!("{}: unknown declaration outcome {other}", vector.name),
+        }
+    }
+    for required in ["minimum-absent-selects-v1", "minimum-one-selects-v1"] {
+        assert!(seen.contains(required), "the contract's {required} acceptance case must stay covered");
+    }
+}
+
+#[test]
 fn queued_prompt_routing_uses_unique_correlated_request_ids() {
     let prompt_module = editor_model::Module { declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#), behaves: &[] };
     // anchor: rich text-prompt contract in tests/data/client-contracts.json and stdio evidence in tests/server_async.rs.
