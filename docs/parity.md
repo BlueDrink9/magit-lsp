@@ -177,10 +177,10 @@
 | `-` | `?` | `open.dispatch` | Implemented | tag |
 | `magit-branch-reset` | `X b` | `reset.branch` | Planned R-6.3 | reset |
 | `magit-file-checkout` | `X f` | `reset.file` | Planned R-6.3 | reset |
-| `magit-reset-mixed` | `X m` | `reset.mixed` | Planned R-6.3 | reset |
-| `magit-reset-soft` | `X s` | `reset.soft` | Planned R-6.3 | reset |
-| `magit-reset-hard` | `X h` | `reset.hard` | Planned R-6.3 | reset |
-| `magit-reset-keep` | `X k` | `reset.keep` | Planned R-6.3 | reset |
+| `magit-reset-mixed` | `X m` | `reset.mixed` | Implemented | reset |
+| `magit-reset-soft` | `X s` | `reset.soft` | Implemented | reset |
+| `magit-reset-hard` | `X h` | `reset.hard` | Implemented | reset |
+| `magit-reset-keep` | `X k` | `reset.keep` | Implemented | reset |
 | `magit-reset-index` | `X i` | `reset.index` | Planned R-6.3 | reset |
 | `magit-reset-worktree` | `X w` | `reset.worktree` | Planned R-6.3 | reset |
 | `-` | `?` | `open.dispatch` | Implemented | reset |

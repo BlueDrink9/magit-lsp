@@ -223,11 +223,11 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `remote.update-default` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `reset.branch` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `reset.file` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `reset.hard` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `reset.hard` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `reset.index` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `reset.keep` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `reset.mixed` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `reset.soft` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `reset.keep` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `reset.mixed` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `reset.soft` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `reset.worktree` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `revert.changes` | menu-action | Planned (R-7.2) | — | — | Planned (R-7.2) | Planned (R-7.2) | Planned (R-7.2) | — |
 | `revert.commit` | menu-action | Planned (R-7.2) | — | — | Planned (R-7.2) | Planned (R-7.2) | Planned (R-7.2) | — |
