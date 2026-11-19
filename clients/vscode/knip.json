@@ -1,6 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
+    "test/types.js",
     "test/open.test.js",
     "test/e2e/suite.js",
     "test/e2e/real-file-spike.mjs",
