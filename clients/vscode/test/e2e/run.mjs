@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -66,8 +66,19 @@ if (!existsSync(`${root}/target/debug/magit-lsp`)) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
   process.exit(strictFocused ? 1 : 0);
 }
-if (process.env.MAGIT_VSCODE_A06_ONLY === '1' && !resolveCommand('xdotool')) {
-  console.log('FAIL e2e: xdotool is required for the A06 physical refresh check');
+// resolveCommand returns the bare command name when lookup fails, so require an
+// absolute resolved path that is executable before accepting the prerequisite.
+function resolvedExecutable(command) {
+  if (!isAbsolute(command)) return false;
+  try {
+    accessSync(command, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (process.env.MAGIT_VSCODE_A06_ONLY === '1' && !resolvedExecutable(resolveCommand('xdotool'))) {
+  console.log('FAIL e2e: xdotool is required for the A06 physical refresh check; install it or add it to PATH');
   process.exit(1);
 }
 
