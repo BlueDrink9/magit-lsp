@@ -152,6 +152,13 @@ vscode-version-warning: build vscode-deps
 vscode-e2e: build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
+# Focused native F5 check: physical F5 on the focused status view must dispatch
+# and render common.refresh, recording key/modifier events and the request or
+# its absence. Fails honestly when the contributed binding produces no refresh.
+.PHONY: vscode-f5
+vscode-f5: vscode-prereqs build vscode-deps
+	$(call run,vscode-f5,MAGIT_VSCODE_SUITE_MODE=f5 node clients/vscode/test/e2e/run.mjs)
+
 update-schema:
 	$(call run,update-schema,cargo run -q --bin generate-schema)
 

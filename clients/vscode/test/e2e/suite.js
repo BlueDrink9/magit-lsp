@@ -365,6 +365,36 @@ async function run() {
     );
     const firstCheckpoint = checkpoint('r-vs-2-first-open.json');
 
+    // Focused native F5 check: physically press the second canonical refresh
+    // default on the focused status view and record the host's key/modifier
+    // events plus the refresh request/render outcome. A contributed status
+    // binding that produces no refresh fails the run; nothing is simulated.
+    if (suiteMode === 'f5') {
+      const key = async (name) => {
+        // Xvfb-only runs have no window manager to service `windowactivate`;
+        // set the X input focus directly so XTEST keystrokes still reach the
+        // owned host window.
+        try {
+          execFileSync('xdotool', ['windowactivate', '--sync', windowId]);
+        } catch {
+          execFileSync('xdotool', ['windowfocus', '--sync', windowId]);
+        }
+        execFileSync('xdotool', ['key', '--clearmodifiers', name]);
+      };
+      const focusStatus = async () => {
+        await vscode.window.showTextDocument(editor.document,
+          { preview: false, preserveFocus: false });
+        await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+      };
+      await require('./f5-refresh').runF5Probe({
+        vscode, fs, execFileSync, path, repo, editor, requests, evidence, checkpoint, observe,
+        quickInputState, startKeyProbe, stopKeyProbe, key, focusStatus, settle, waitFor,
+        contributed: extension.packageJSON.contributes,
+      });
+      return;
+    }
+
     if (process.env.MAGIT_VSCODE_EDIT_ONLY === '1') {
       await require('./real-file-native').run({ extension, evidence, repo, cdp, waitFor, checkpoint,
         requests, draftNotes });

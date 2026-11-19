@@ -52,7 +52,8 @@ const suiteMode = selectSuiteMode(process.env);
 const focusedEdit = suiteMode === 'edit';
 const focusedHead = suiteMode === 'head';
 const focusedVersion = suiteMode === 'version';
-const strictFocused = focusedEdit || focusedHead || focusedVersion
+const focusedF5 = suiteMode === 'f5';
+const strictFocused = focusedEdit || focusedHead || focusedVersion || focusedF5
   || ['A06', 'A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
@@ -77,8 +78,9 @@ function resolvedExecutable(command) {
     return false;
   }
 }
-if (process.env.MAGIT_VSCODE_A06_ONLY === '1' && !resolvedExecutable(resolveCommand('xdotool'))) {
-  console.log('FAIL e2e: xdotool is required for the A06 physical refresh check; install it or add it to PATH');
+if ((focusedF5 || process.env.MAGIT_VSCODE_A06_ONLY === '1')
+  && !resolvedExecutable(resolveCommand('xdotool'))) {
+  console.log('FAIL e2e: xdotool is required for the physical refresh checks; install it or add it to PATH');
   process.exit(1);
 }
 
@@ -227,9 +229,14 @@ if (existsSync(`${directory}/failure.txt`)) {
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
 const headEvidence = focusedHead && existsSync(`${directory}/head-operations-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/head-operations-evidence.json`, 'utf8')) : null;
+// The F5 evidence records failures too, so readiness requires an explicit pass.
+const f5Evidence = focusedF5 && existsSync(`${directory}/f5-evidence.json`)
+  ? JSON.parse(readFileSync(`${directory}/f5-evidence.json`, 'utf8')) : null;
 const evidenceReady = focusedVersion ? existsSync(`${directory}/version-warning-evidence.json`)
   : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
+  : focusedF5
+  ? f5Evidence?.status === 'pass'
   : process.env.MAGIT_VSCODE_A34_ONLY === '1'
   ? existsSync(`${directory}/a34-evidence.json`)
   : process.env.MAGIT_VSCODE_A33_ONLY === '1'
@@ -249,6 +256,8 @@ if (!evidenceReady) {
       ? 'Missing complete native HEAD operations evidence; see the isolated evidence directory above.'
       : focusedEdit
       ? 'Missing production real-file native evidence; see the isolated evidence directory above.'
+      : focusedF5
+      ? 'Missing native F5 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A34_ONLY === '1'
       ? 'Missing A34 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A33_ONLY === '1'
