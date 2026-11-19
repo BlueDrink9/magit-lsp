@@ -17,3 +17,26 @@ wait
 expect screen contains "Reset branch feature to HEAD~1"
 sh: test "$(git rev-parse feature)" = "$(cat .git/reset-target)" && test "$(git rev-parse feature)" != "$(git rev-parse HEAD)" && test "$(git rev-parse --abbrev-ref HEAD)" = main
 snapshot: reset
+
+# Resetting the checked-out branch discards local changes, so it asks for
+# confirmation; a tracked-file edit while that confirmation is open must be
+# refused instead of resetting whatever HEAD/worktree exists when "yes" arrives.
+sh: printf 'reset-pending\n' >> f.txt && git rev-parse HEAD > .git/head-before && git rev-parse main > .git/main-before
+keys: b
+wait
+expect screen contains "reset"
+keys: x
+wait prompt
+expect screen contains "Reset branch"
+keys: main Enter
+wait prompt
+expect screen contains "Reset to"
+keys: HEAD~1 Enter
+wait prompt
+expect screen contains "hard reset to HEAD~1 discards them"
+sh: printf 'edited-during-confirmation\n' > f.txt
+keys: yes Enter
+wait screen contains "Repository changed while the prompt was open; try again"
+expect screen not-contains "Reset to HEAD~1 (hard)"
+snapshot: refused
+sh: test "$(cat f.txt)" = edited-during-confirmation && test "$(git rev-parse HEAD)" = "$(cat .git/head-before)" && test "$(git rev-parse main)" = "$(cat .git/main-before)" && test "$(git rev-parse feature)" = "$(cat .git/reset-target)" && test "$(git rev-parse --abbrev-ref HEAD)" = main && test "$(git status --porcelain)" = " M f.txt"
