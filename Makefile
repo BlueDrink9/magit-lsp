@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -112,6 +112,10 @@ update-snapshots:
 
 vscode-deps:
 	$(call run,vscode-deps,pnpm --dir clients/vscode install --frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
+
+# Regenerate clients/vscode/pnpm-lock.yaml after a dependency change.
+vscode-deps-refresh:
+	$(call run,vscode-deps-refresh,pnpm --dir clients/vscode install --no-frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
 
 # Fast check before the native VSCode targets: names what is missing instead of
 # failing deep inside a run. Set MAGIT_VSCODE_BIN in local.mk. Xvfb is not
