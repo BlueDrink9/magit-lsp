@@ -1,9 +1,13 @@
 # Release foundation (R-REL-1, not release approval)
 
-This is a build-only foundation. It creates no GitHub Release, uploads no release
-assets, uses no publishing credentials and publishes to no registry. GitHub
-Actions artifacts are short-lived CI outputs, **not** GitHub Release assets.
-R-REL-1 and the release go/no-go remain open.
+This is a prepared release foundation, not an approved release. Two tracked
+workflows cover the automation boundary: `.github/workflows/release.yml` builds
+and packages the release candidate, and `.github/workflows/publish.yml` is a
+manual, dispatch-only publication workflow that defaults to a validation-only
+dry run and gates its registry lanes on human-provided credentials. Neither
+has been run, no tag has been pushed, no credential is configured and nothing
+has been published. GitHub Actions artifacts are short-lived CI outputs, **not**
+GitHub Release assets. R-REL-1 and the release go/no-go remain open.
 
 Client setup/discovery and on-demand Neovim examples are in
 [CLIENT_INSTALL](CLIENT_INSTALL.md); human-only README image guidance is in
@@ -17,7 +21,7 @@ text/structured evidence and do not capture screenshots. See the
 [no-vision policy](../AGENTS.md).
 
 - [x] **Bounded R-REL-1 foundation:** offline packaging/download contracts,
-  read-only build workflow, safe installer and local actual-binary launch smoke.
+  `contents: read` build workflow, safe installer and local actual-binary launch smoke.
   The verification command below passed locally on 2026-10-28, including the
   actual-binary test and shellcheck. Hosted CI and publication are not checked.
 - [ ] Parent R-REL-1 and release gates: remaining evidence/approvals listed below.
@@ -65,11 +69,37 @@ git diff --check
 
 Use the matching Cargo/extension version, not the future proposed v0.2.0.
 The packager checks both versions and the supplied binary's `--version`.
-The workflow also checks any tag equals `v<Cargo version>`; manual runs use the
-checked-out version. Inputs enter shell through quoted environment variables,
-never expression interpolation. Only `contents: read` is granted. Checkout and
-artifact actions are revision-pinned; Rust is fixed at 1.94.0. Update pins through
-review. Regular CI runs offline contract tests, not expensive release builds.
+The build workflow also checks any tag equals `v<Cargo version>`; manual runs use
+the checked-out version. Inputs enter shell through quoted environment variables,
+never expression interpolation. The build workflow grants only `contents: read`;
+checkout and artifact actions are revision-pinned and Rust is fixed at 1.94.1.
+Update pins through review. Regular CI runs offline contract tests, not expensive
+release builds.
+
+## Tracked workflows and local checks
+
+`.github/workflows/release.yml` runs on manual dispatch and on `v*` tags. It
+installs Rust 1.94.1, builds the locked `x86_64-unknown-linux-gnu` target on the
+Ubuntu 22.04 baseline, packages and smoke-tests the binary, and uploads the
+`linux-x86_64-gnu-release-candidate` artifact (14-day retention). It publishes
+nothing and holds no credentials.
+
+`.github/workflows/publish.yml` is `workflow_dispatch`-only, so no push or tag
+can publish on its own. Its inputs are a required `build_run_id` naming a
+completed build-workflow run and a `mode` choice defaulting to `dry-run`. The
+`validate` job re-checks that run's archive, sidecar and version triple and
+rebuilds the offline VSIX; only a `publish`-mode dispatch continues, creating the
+GitHub Release `v<version>` from the validated assets (refusing an existing
+release) and publishing the VSIX to the VS Code Marketplace (`VSCE_PAT`), Open
+VSX (`OVSX_PAT`) and the crate to crates.io (`CARGO_REGISTRY_TOKEN`). Each of
+those three registry lanes is gated on its own human-provided secret and skips
+with a notice when that secret is absent.
+
+Three local targets guard this automation: `make workflows-check` (actionlint
+syntax, expression and `run:` shell lint over every workflow),
+`make release-automation-check` (workflow structure, lane gating and Cargo
+packaging) and `make release-contract-check` (shellcheck plus the offline
+release suite).
 
 For version X.Y.Z the two exact release assets are:
 
@@ -110,7 +140,7 @@ binary with `--version`; regular CI otherwise uses a synthetic executable.
 ## Platform evidence and limits
 
 Only Linux x86_64 GNU is in scope. Hosted build baseline is Ubuntu 22.04,
-glibc 2.35, Rust 1.94.0, target `x86_64-unknown-linux-gnu`. This is a proposed
+glibc 2.35, Rust 1.94.1, target `x86_64-unknown-linux-gnu`. This is a proposed
 build/runtime baseline, **pending a successful hosted workflow and clean-machine
 runtime evidence**. The installer enforces glibc >=2.35 but that alone is not a
 claim that every distribution is tested. Git must be installed separately;
@@ -145,18 +175,23 @@ Focused licensing/release verification on 2026-10-28 passed: 16 unittest tests,
 gates.
 
 After those gates and explicit human approval, an authorized maintainer should
-review the exact commit and aligned versions, protect the release tag and use a
-protected environment with required reviewers for any future publication job.
-Keep each registry credential minimally scoped and separate from PR/build jobs.
-There is deliberately no such credential or job in this foundation.
+review the exact commit and aligned versions, protect the release tag and require
+reviewers on the environment used for any publication dispatch. Each registry
+credential (`VSCE_PAT`, `OVSX_PAT`, `CARGO_REGISTRY_TOKEN`) is human-provided,
+minimally scoped and kept out of build jobs; none is configured today and no
+publication has occurred.
 
-Run the build-only workflow at the approved commit, inspect logs and checksums,
-download the CI artifact, verify its actual Ubuntu-baseline binary on a clean
-machine, and retain install/launch evidence. Only then may an approved separate
-manual publication procedure attach the two exact assets to the matching GitHub
-Release. Never mark a release successful merely because the build job passed.
-Re-download published assets and smoke both latest and pinned installation;
-verify all registry and client deliverables separately.
+Run `release.yml` at the approved commit (dispatch, or an approved `v*` tag),
+inspect logs and checksums, download the CI artifact, verify its actual
+Ubuntu-baseline binary on a clean machine, and retain install/launch evidence.
+Only then may an approved maintainer dispatch `publish.yml` with that run's
+`build_run_id`: a `dry-run` dispatch validates the artifact and packaged VSIX
+without touching any channel, while a `publish` dispatch creates the GitHub
+Release with the validated archive and sidecar and publishes each registry
+deliverable only where that registry's credential is present. Never mark a
+release successful merely
+because the build job passed. Re-download published assets and smoke both latest
+and pinned installation; verify all registry and client deliverables separately.
 
 For recovery, inventory which channels and asset hashes actually exist first.
 Rerunning this build workflow is safe (CI artifacts only); it does not repair

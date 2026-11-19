@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -164,6 +164,14 @@ release-automation-check:
 # instead of silently skipping the lint half.
 release-contract-check:
 	$(call run,release-contract-check,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-check: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/release -p 'test_*.py')
+
+# Syntax, expression and `run:` shell lint for every tracked workflow.
+# release-automation-check asserts structure as text; actionlint is the parse
+# layer (malformed `${{ }}`, unknown job/output references, shell defects).
+# It is in the flake dev shell, so a missing tool fails readably, never skips;
+# when shellcheck is also on PATH actionlint lints the shell snippets too.
+workflows-check:
+	$(call run,workflows-check,command -v actionlint >/dev/null 2>&1 || { echo 'workflows-check: actionlint is required (install it or add it to the flake dev shell)' >&2; exit 1; }; actionlint .github/workflows/*.yml)
 
 # Static guard for the prepared (not submitted) Mason registry package. PyYAML
 # is absent, so clients/mason/package.yaml is checked line by line against
