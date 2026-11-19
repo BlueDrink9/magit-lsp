@@ -31,12 +31,22 @@ record.
 
 **Planned version negotiation (T113 decision; not implemented).** The
 initialize result will report
-`capabilities.experimental.magit.protocolVersion`, and a rich declaration will
-carry `minimumVersion` beside `v`. A server rejects an unsupported `v` (already
-implemented) or a `minimumVersion` above its `protocolVersion` with a readable
-initialize error; a client that receives a lower `protocolVersion` than it
-requires shows a readable message and does not open rich views. The current
-contract checks only `v = 1` and advertises no protocol version.
+`capabilities.experimental.magit.protocolVersion`, the version of every
+accepted rich session (currently `1`), not a maximum. A rich declaration will
+carry `v`, the single session version it selects, and `minimumVersion`, the
+oldest server session version it can use; `minimumVersion` defaults to `v`,
+must be a positive integer and must not exceed `v`. The server accepts a
+session only when `minimumVersion <= v == protocolVersion`, rejects `v != 1`
+with the existing readable error, and rejects an invalid `minimumVersion` with
+a readable initialize error naming the values. It never clamps, downgrades,
+retries or substitutes a version. A client that receives a missing, malformed
+or different `protocolVersion` shows a readable message, opens no rich view and
+sends no rich traffic; it does not treat the advertisement as `1` or fall back
+to Plain. Initialize rejections reach the user through the language client's
+start error (VS Code) or a failed-client notification (Neovim); post-initialize
+failures use each client's existing notification channel. The decision record
+tabulates every outcome. The current contract checks only `v = 1` and
+advertises no protocol version.
 
 ### 4.2 Server → client
 

@@ -97,30 +97,62 @@ version warning is release alignment, not protocol negotiation.
 
 - The initialize result reports
   `capabilities.experimental.magit.protocolVersion` (integer, currently `1`).
-- A rich client declaration carries `v` (the protocol version the session will
-  use) and `minimumVersion` (the oldest server protocol version it requires).
-  An absent `minimumVersion` means `v`.
+  It is the version of every accepted rich session, not a maximum and not the
+  start of a supported range. The server supports exactly one version and
+  reports that value.
+- A rich client declaration carries `v` (the single session version it selects)
+  and `minimumVersion` (the oldest server session version it can use). Both are
+  integers. `v` is accepted only when it is `1` (the existing strict check).
+  An absent `minimumVersion` means `v`; a present `minimumVersion` is a
+  positive integer and must not exceed `v`. A declaration that violates either
+  rule is a readable initialize error. The server never clamps, downgrades,
+  retries or substitutes a version.
+- The server accepts a session only when `minimumVersion <= v ==
+  protocolVersion`. Since `v` is the session version, the accepted session can
+  never be below the client's minimum. The server rejects `v != 1` with the
+  existing `capabilities.experimental.magit unsupported rich protocol version`
+  error and `minimumVersion > v` with a readable initialize error naming both
+  numbers; neither opens a session.
+- After initialize the client checks the advertisement itself: the reported
+  `protocolVersion` must be a positive integer equal to the `v` it declared. A
+  missing, malformed or different advertisement is a client-side compatibility
+  failure — a readable message naming the required and advertised versions, no
+  rich view opened and no rich traffic sent. The client never treats a missing
+  advertisement as `1`, falls back to Plain, retries with another version or
+  installs a compatibility shim.
+- An initialize rejection is an RPC error and reaches the user before any
+  session exists: VS Code shows it through the rejected `client.start()`
+  (`clients/vscode/lib/session.js:154-157`: output channel plus
+  `showErrorMessage`); Neovim observes a failed/stopped LSP client rather than
+  a response callback (`lua/magit-lsp/init.lua:369-375`), so T114 must report
+  the readable error there. A post-initialize failure is handled where each
+  client already holds the initialize result — VS Code in the `client.start()`
+  success path (`clients/vscode/lib/session.js:145-153`), Neovim in `on_init`
+  (`lua/magit-lsp/init.lua:360-367`) — using that client's existing
+  notification channel; neither opens a rich view.
 - A server that predates this handshake fails the strict parse of
   `minimumVersion`; that is a readable initialize error. No compatibility with
-  pre-T114 peers is promised before 1.0.
-- The server rejects an unsupported `v` with the existing readable error. It
-  also rejects `minimumVersion > protocolVersion` with a readable initialize
-  error naming both numbers. An accepted session speaks the accepted `v`.
-- After initialize, the client compares `protocolVersion` with its
-  `minimumVersion`. A missing `protocolVersion` is treated as `1` for this
-  comparison (an older server). If the advertised version is lower, the client
-  shows a readable message and does not open rich views; it never proceeds
-  silently.
-- A mismatch detected after a session exists is reported as a readable
-  `Effect::Message`, not as raw JSON. Server-side initialize failures remain
-  readable initialize errors.
-- The existing strict `v` check is kept and is not duplicated or replaced.
+  pre-T114 peers is promised before 1.0, and the existing strict `v` check is
+  kept rather than duplicated or replaced.
+
+**Outcome table.**
+
+| Declaration and advertisement | Check | Result |
+| --- | --- | --- |
+| `v = 1`, `minimumVersion` absent or `1`, server advertises `1` | matching | accept; the session speaks `1`; rich traffic allowed |
+| `v` present but not `1` (including `0`) | server strict `v` parse | initialize error `capabilities.experimental.magit unsupported rich protocol version`; no session, no rich traffic |
+| `minimumVersion` above the selected version (`v = 1`, `minimumVersion = 2`) | server compares with `v` and `protocolVersion` | readable initialize error naming both numbers; no session, no rich traffic |
+| `minimumVersion` not an integer or not positive (for example `0`, `1.5`, `"2"`) | server strict parse | readable initialize error; no session, no rich traffic |
+| server result omits `protocolVersion`, carries a non-integer, or advertises a value other than the declared `v` | client post-initialize check | readable client error naming required and advertised versions; no rich view opened, no rich traffic, no fallback to `1` |
 
 **Reason:** today a client cannot check compatibility before declaring, and a
-server cannot state the minimum it requires. Reporting one version and one
-minimum covers both directions with two integers, preserves the existing
-readable rejection, and gives a client with newer optional requirements a way
-to stop with an explanation instead of failing later.
+server cannot state the minimum it requires. Making `protocolVersion` the
+accepted session version and constraining both numbers to the one selected
+version closes the gap where `v = 1, minimumVersion = 2` passed both written
+checks, without adding negotiation, downgrade or legacy fallback. Reporting one
+version and one minimum covers both directions with two integers, preserves the
+existing readable rejection, and gives a client with newer optional
+requirements a way to stop with an explanation instead of failing later.
 
 ## 4. Audit wart dispositions
 
