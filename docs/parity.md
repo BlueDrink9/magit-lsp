@@ -226,9 +226,9 @@
 | `-` | `=S` | `-` | Implemented | remote |
 | `-` | `=O` | `-` | Implemented | remote |
 | `-` | `=h` | `-` | Implemented | remote |
-| `magit-remote-add` | `M a` | `remote.add` | Planned R-6.3 | remote |
+| `magit-remote-add` | `M a` | `remote.add` | Implemented | remote |
 | `magit-remote-rename` | `M r` | `remote.rename` | Planned R-6.3 | remote |
-| `magit-remote-remove` | `M k` | `remote.remove` | Planned R-6.3 | remote |
+| `magit-remote-remove` | `M k` | `remote.remove` | Implemented | remote |
 | `magit-remote-configure` | `M C` | `remote.configure` | Planned R-6.3 | remote |
 | `magit-remote-prune` | `M p` | `remote.prune` | Planned R-6.3 | remote |
 | `magit-remote-prune-refspecs` | `M P` | `remote.prune-refspecs` | Planned R-6.3 | remote |

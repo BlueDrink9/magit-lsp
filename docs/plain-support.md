@@ -213,11 +213,11 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.todo-squash` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
 | `rebase.todo-submit` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
 | `rebase.todo-up` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
-| `remote.add` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `remote.add` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `remote.configure` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.prune` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.prune-refspecs` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
-| `remote.remove` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `remote.remove` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `remote.rename` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.unshallow` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.update-default` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
