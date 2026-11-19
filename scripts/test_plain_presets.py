@@ -22,36 +22,51 @@ PRESETS = {
 }
 
 
+def group_exists(pgid: int) -> bool:
+    """Report whether any process, including an unreaped zombie, owns `pgid`."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def teardown(child: subprocess.Popen[bytes], deadline_seconds: float = 5) -> None:
-    """Stop and reap an editor and every process in its owned session."""
+    """Stop and reap an editor and every process in its owned session.
+
+    Reaps the direct child during the TERM grace period so its zombie cannot
+    keep the group alive, escalates to SIGKILL only after that deadline, and
+    then waits separately and boundedly for both the child and the group to
+    disappear before reporting survivors.
+    """
     pgid = child.pid
-    deadline = time.monotonic() + deadline_seconds
+    term_deadline = time.monotonic() + deadline_seconds
     errors = []
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
         pass
-    while time.monotonic() < deadline:
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
+    while time.monotonic() < term_deadline:
+        child.poll()
+        if not group_exists(pgid):
             break
-        time.sleep(min(.02, max(0, deadline - time.monotonic())))
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        pass
+        time.sleep(min(.02, max(0, term_deadline - time.monotonic())))
     else:
-        os.killpg(pgid, signal.SIGKILL)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # the group disappeared between the probe and the signal
+        completion_deadline = time.monotonic() + deadline_seconds
+        while time.monotonic() < completion_deadline:
+            child.poll()
+            if not group_exists(pgid):
+                break
+            time.sleep(min(.02, max(0, completion_deadline - time.monotonic())))
     try:
         child.wait(timeout=max(.01, deadline_seconds))
     except subprocess.TimeoutExpired:
         errors.append("editor child was not reaped")
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        pass
-    else:
+    if group_exists(pgid):
         errors.append("owned process group remains alive")
     if errors:
         raise RuntimeError("; ".join(errors))

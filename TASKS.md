@@ -1,5 +1,5 @@
 # magit-lsp — Roadmap
-Stop after: completion of this user-requested documentation audit/compaction. Do not execute backlog work in this session. Prior standing authorization permits independent work around blocked tickets only; it does not override holds, release approval or the prohibition on starting Phase 6A.
+Stop after: user-requested Phase 6 completion as far as possible, plus release tasks and blockers (2026-11-19). This supersedes the documentation-only execution restriction; Phase 6A still requires T022 sign-off and release still requires explicit human approval. Do not modify pre-existing untracked user files.
 Last review: `4045289`; documented gate HEAD `ec0bbbc`. T022 remains unchecked; report-only hygiene exit 0 is not sign-off. No release or Phase 6A approval is granted here.
 
 ## Audit findings and work order (2026-11-18)
@@ -49,6 +49,7 @@ Priority work before further feature execution. Earlier checked Review items are
   - **Change:** In `teardown`, reap/poll the direct child while observing group disappearance during the TERM grace period. If escalation is required, tolerate the group disappearing between the probe and SIGKILL, then use a separate bounded completion wait for both direct-child reaping and group disappearance before reporting survivors. Extend the existing cleanup tests with controlled process-state transitions proving delayed post-KILL disappearance is awaited, plus a TERM-ignoring owned descendant to exercise escalation. Put fixture cleanup in `finally` so a readiness/assertion failure cannot leak the test's own processes.
   - **Done when:** TERM-responsive cleanup returns without exhausting the grace period solely because the direct child is a zombie; escalation waits for observable group disappearance and reports a genuine timeout only after the completion deadline; primary exceptions remain preserved; `make ui-unit` and `make plain-presets` pass.
   - **Constraints:** Keep this follow-up within `scripts/test_plain_presets.py` and `tests/ui/test_driver.py`. Do not replace group ownership with name-based signaling, remove survivor checks, use fixed sleeps as proof of completion, or claim non-Linux verification. Earlier Done/Verified entries above are historical evidence, not completion of this reopened boundary.
+  - Verified (reopened follow-up): `make ui-unit` → exit 0 (`ok: ui-unit`; 273 tests). Covers reaping the TERM-responsive direct child during grace (no full-deadline zombie wait), delayed post-KILL group disappearance after a probe/SIGKILL race, genuine timeout only after the completion deadline, and real SIGKILL escalation for a TERM-ignoring descendant with fixtures cleaned in `finally`. Linux only; native preset verification remains Part 2.
 
 ### Documentation audit review (2026-11-18; base `bec27b3`)
 

@@ -10,6 +10,7 @@ import pty
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -653,14 +654,127 @@ class NvimHelperCommandTest(unittest.TestCase):
                 [sys.executable, "-c", "import subprocess,sys,time,pathlib; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(60)", str(marker)],
                 start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            deadline = time.monotonic() + 5
-            while not marker.exists() and time.monotonic() < deadline:
-                time.sleep(.01)
-            self.assertTrue(marker.exists(), "descendant readiness deadline expired")
-            descendant = int(marker.read_text())
-            test_plain_presets.teardown(child)
-            with self.assertRaises(ProcessLookupError):
-                os.kill(descendant, 0)
+            try:
+                deadline = time.monotonic() + 5
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(marker.exists(), "descendant readiness deadline expired")
+                descendant = int(marker.read_text())
+                test_plain_presets.teardown(child)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(descendant, 0)
+            finally:
+                test_plain_presets.teardown_preserving_primary(child, sys.exc_info()[1])
+
+    def test_plain_preset_teardown_reaps_term_responsive_child_without_full_grace(self) -> None:
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            started = time.monotonic()
+            test_plain_presets.teardown(child, deadline_seconds=5)
+            elapsed = time.monotonic() - started
+        finally:
+            test_plain_presets.teardown_preserving_primary(child, sys.exc_info()[1])
+        self.assertLess(elapsed, 2.0, "zombie direct child consumed the TERM grace period")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child.pid, 0)
+
+    def test_plain_preset_teardown_tolerates_kill_race_and_awaits_completion(self) -> None:
+        killed = False
+        post_kill_probes = 0
+
+        def killpg(pgid: int, sig: int) -> None:
+            nonlocal killed, post_kill_probes
+            if sig == signal.SIGKILL:
+                killed = True
+                raise ProcessLookupError  # group vanished between probe and signal
+            if sig == 0 and killed:
+                post_kill_probes += 1
+                if post_kill_probes > 2:
+                    raise ProcessLookupError
+
+        class FakeChild:
+            pid = 4242
+            returncode = -signal.SIGKILL
+            polls = 0
+
+            def poll(self) -> None:
+                self.polls += 1
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        clock = [0.0]
+        child = FakeChild()
+        with (
+            patch.object(test_plain_presets.os, "killpg", side_effect=killpg),
+            patch.object(test_plain_presets.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(
+                test_plain_presets.time,
+                "sleep",
+                side_effect=lambda seconds: clock.__setitem__(0, clock[0] + .01),
+            ),
+        ):
+            test_plain_presets.teardown(child, deadline_seconds=1)  # type: ignore[arg-type]
+        self.assertTrue(killed)
+        self.assertEqual(post_kill_probes, 4)  # three completion probes plus final check
+        self.assertGreaterEqual(child.polls, 3)
+
+    def test_plain_preset_teardown_reports_timeout_after_completion_deadline(self) -> None:
+        class FakeChild:
+            pid = 4243
+            returncode = None
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise subprocess.TimeoutExpired(["editor"], timeout or 0)
+
+        clock = [0.0]
+        with (
+            patch.object(test_plain_presets.os, "killpg", return_value=None),
+            patch.object(test_plain_presets.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(
+                test_plain_presets.time,
+                "sleep",
+                side_effect=lambda seconds: clock.__setitem__(0, clock[0] + .01),
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as caught:
+                test_plain_presets.teardown(FakeChild(), deadline_seconds=1)  # type: ignore[arg-type]
+        self.assertGreaterEqual(clock[0], 2.0)
+        self.assertIn("editor child was not reaped", str(caught.exception))
+        self.assertIn("owned process group remains alive", str(caught.exception))
+
+    def test_plain_preset_teardown_escalates_term_ignoring_descendant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            sleeper = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+            script = (
+                "import subprocess,sys,pathlib,signal,time; "
+                "p=subprocess.Popen([sys.executable,'-c',sys.argv[2]]); "
+                "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+            )
+            child = subprocess.Popen(
+                [sys.executable, "-c", script, str(marker), sleeper],
+                start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(marker.exists(), "descendant readiness deadline expired")
+                descendant = int(marker.read_text())
+                test_plain_presets.teardown(child, deadline_seconds=.5)
+                self.assertEqual(child.returncode, -signal.SIGKILL)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(descendant, 0)
+            finally:
+                test_plain_presets.teardown_preserving_primary(child, sys.exc_info()[1])
 
     def test_rpc_helper_is_headless_and_has_no_terminal_input(self) -> None:
         result = subprocess.CompletedProcess([], 0, stdout="1", stderr="")
