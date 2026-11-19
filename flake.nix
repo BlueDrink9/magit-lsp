@@ -54,6 +54,7 @@
               rustfmt
               stylua
               typescript-language-server
+              ps  # used for tests to check child processes
 
               # Development-only checking tools
               cargo-machete
