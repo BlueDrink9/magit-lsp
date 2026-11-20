@@ -108,6 +108,11 @@
 | `magit-merge-squash` | `m s` | `merge.squash` | Planned R-7.1 | merge |
 | `magit-merge-dissolve` | `m d` | `merge.dissolve` | Planned R-7.1 | merge |
 | `-` | `?` | `open.dispatch` | Implemented | merge |
+| `-` | `r` | `notes.read` | Implemented | notes |
+| `-` | `a` | `notes.add` | Implemented | notes |
+| `magit-notes-edit` | `e` | `notes.edit` | Implemented | notes |
+| `magit-notes-remove` | `k` | `notes.remove` | Implemented | notes |
+| `-` | `?` | `open.dispatch` | Implemented | notes |
 | `-` | `-k` | `-` | Implemented | rebase |
 | `-` | `-p` | `-` | Implemented | rebase |
 | `-` | `-r` | `-` | Implemented | rebase |
@@ -253,14 +258,14 @@
 | `magit-worktree-delete` | `Z k` | `worktree.delete` | Planned R-8.2 | worktree |
 | `magit-worktree-status` | `Z g` | `worktree.visit` | Planned R-8.2 | worktree |
 | `-` | `?` | `open.dispatch` | Implemented | worktree |
-| `magit-gitignore-in-topdir` | `i t` | `ignore.topdir` | Planned R-8.2 | ignore |
-| `magit-gitignore-in-subdir` | `i s` | `ignore.subdir` | Planned R-8.2 | ignore |
-| `magit-gitignore-in-gitdir` | `i p` | `ignore.gitdir` | Planned R-8.2 | ignore |
-| `magit-gitignore-on-system` | `i g` | `ignore.system` | Planned R-8.2 | ignore |
-| `magit-skip-worktree` | `i w` | `ignore.skip-worktree` | Planned R-8.2 | ignore |
-| `magit-no-skip-worktree` | `i W` | `ignore.no-skip-worktree` | Planned R-8.2 | ignore |
-| `magit-assume-unchanged` | `i u` | `ignore.assume-unchanged` | Planned R-8.2 | ignore |
-| `magit-no-assume-unchanged` | `i U` | `ignore.no-assume-unchanged` | Planned R-8.2 | ignore |
+| `magit-gitignore-in-topdir` | `i t` | `ignore.topdir` | Implemented | ignore |
+| `magit-gitignore-in-subdir` | `i s` | `ignore.subdir` | Implemented | ignore |
+| `magit-gitignore-in-gitdir` | `i p` | `ignore.gitdir` | Implemented | ignore |
+| `magit-gitignore-on-system` | `i g` | `ignore.system` | Implemented | ignore |
+| `magit-skip-worktree` | `i w` | `ignore.skip-worktree` | Implemented | ignore |
+| `magit-no-skip-worktree` | `i W` | `ignore.no-skip-worktree` | Implemented | ignore |
+| `magit-assume-unchanged` | `i u` | `ignore.assume-unchanged` | Implemented | ignore |
+| `magit-no-assume-unchanged` | `i U` | `ignore.no-assume-unchanged` | Implemented | ignore |
 | `-` | `?` | `open.dispatch` | Implemented | ignore |
 | `-` | `=n` | `-` | Implemented | log |
 | `-` | `=a` | `-` | Implemented | log |

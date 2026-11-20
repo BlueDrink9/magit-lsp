@@ -105,14 +105,14 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `fetch.modules` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
 | `fetch.other` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
 | `fetch.refspec` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
-| `ignore.assume-unchanged` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.gitdir` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.no-assume-unchanged` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.no-skip-worktree` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.skip-worktree` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.subdir` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.system` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `ignore.topdir` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
+| `ignore.assume-unchanged` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.gitdir` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.no-assume-unchanged` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.no-skip-worktree` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.skip-worktree` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.subdir` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.system` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `ignore.topdir` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.all-branches` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.all-references` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.current` | menu-action | Implemented | — | — | Available | Available | Available | — |
@@ -141,6 +141,10 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `merge.plain` | menu-action | Planned (R-7.1) | — | — | Planned (R-7.1) | Planned (R-7.1) | Planned (R-7.1) | — |
 | `merge.preview` | menu-action | Planned (R-7.1) | — | — | Planned (R-7.1) | Planned (R-7.1) | Planned (R-7.1) | — |
 | `merge.squash` | menu-action | Planned (R-7.1) | — | — | Planned (R-7.1) | Planned (R-7.1) | Planned (R-7.1) | — |
+| `notes.add` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `notes.edit` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `notes.read` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `notes.remove` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `open.bisect` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.branch` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.cherries` | status | Planned (R-7.2) | — | — | Planned (R-7.2) | Planned (R-7.2) | Planned (R-7.2) | — |
@@ -152,6 +156,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `open.ignore` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.log` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.merge` | status | Implemented | — | — | Available | Available | Available | — |
+| `open.notes` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.patch-apply` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.patch-create` | status | Implemented | — | — | Available | Available | Available | — |
 | `open.process-log` | status | Implemented | — | — | Available | Available | Available | — |
