@@ -1,5 +1,25 @@
 use super::*;
 
+/// A fixture created below a symbolic parent reports the canonical root, the
+/// same repository identity that discovery and the editor registry compare.
+#[test]
+fn fixture_path_is_canonical_below_a_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let parent = TempDir::new().expect("tempdir");
+    let alias = parent.path().join("alias");
+    symlink(parent.path(), &alias).expect("symlink parent");
+    let (fixture, repo) = RepoFixture::new_in(&alias)
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let name = fixture.path().file_name().expect("fixture directory name");
+    let expected = std::fs::canonicalize(parent.path())
+        .expect("canonical parent")
+        .join(name);
+    assert_eq!(fixture.path(), expected.as_path());
+    assert_eq!(repo.root(), expected.as_path());
+}
+
 #[test]
 fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
     use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
