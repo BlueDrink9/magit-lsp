@@ -214,7 +214,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.todo-submit` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
 | `rebase.todo-up` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
 | `remote.add` | menu-action | Implemented | — | — | Available | Available | Available | — |
-| `remote.configure` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
+| `remote.configure` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `remote.prune` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `remote.prune-refspecs` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.remove` | menu-action | Implemented | — | — | Available | Available | Available | — |

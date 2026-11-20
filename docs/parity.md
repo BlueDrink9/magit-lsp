@@ -229,7 +229,7 @@
 | `magit-remote-add` | `M a` | `remote.add` | Implemented | remote |
 | `magit-remote-rename` | `M r` | `remote.rename` | Implemented | remote |
 | `magit-remote-remove` | `M k` | `remote.remove` | Implemented | remote |
-| `magit-remote-configure` | `M C` | `remote.configure` | Planned R-6.3 | remote |
+| `magit-remote-configure` | `M C` | `remote.configure` | Implemented | remote |
 | `magit-remote-prune` | `M p` | `remote.prune` | Implemented | remote |
 | `magit-remote-prune-refspecs` | `M P` | `remote.prune-refspecs` | Planned R-6.3 | remote |
 | `magit-remote-unshallow` | `M z` | `remote.unshallow` | Planned R-6.3 | remote |
