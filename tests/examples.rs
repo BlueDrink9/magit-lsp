@@ -952,6 +952,178 @@ fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Val
     serde_json::from_str(&text).expect("parse expanded client frame")
 }
 
+/// One recorded client document as the recording's frames assert it.
+struct RecordedDocument {
+    /// The document version the recording last assigned to the client copy.
+    version: u64,
+    /// The complete client text the recording last assigned.
+    text: String,
+}
+
+/// A server edit that a following client `didChange` may echo.
+///
+/// The recorded edit proves that the client frame is an echo; the observed
+/// edit is what the current server actually asked the client to apply, so the
+/// refreshed echo is derived from the edit this replay really captured.
+#[derive(Clone)]
+struct ServerEdit {
+    /// The document version the recorded edit applies to.
+    version: u64,
+    recorded_range: Value,
+    recorded_text: String,
+    observed_range: Value,
+    observed_text: String,
+}
+
+/// One full-document client update asserted by a `didOpen` or `didChange`.
+struct DocumentUpdate {
+    uri: String,
+    version: u64,
+    text: String,
+}
+
+/// The full-document update a client frame asserts, if it is one.
+///
+/// Only a single full-text `contentChanges` entry counts: an incremental
+/// change is client-authored input, not an echo of a server edit.
+fn recorded_document_update(message: &Map<String, Value>) -> Option<DocumentUpdate> {
+    let method = message.get("method").and_then(Value::as_str)?;
+    let params = message.get("params")?;
+    let document = params.get("textDocument")?;
+    let uri = document.get("uri")?.as_str()?.to_owned();
+    let version = document.get("version")?.as_u64()?;
+    let text = match method {
+        "textDocument/didOpen" => document.get("text")?.as_str()?.to_owned(),
+        "textDocument/didChange" => {
+            let [change] = params.get("contentChanges")?.as_array()?.as_slice() else {
+                return None;
+            };
+            if change.get("range").is_some() {
+                return None;
+            }
+            change.get("text")?.as_str()?.to_owned()
+        }
+        _ => return None,
+    };
+    Some(DocumentUpdate { uri, version, text })
+}
+
+/// The target URIs of a recorded `workspace/applyEdit` frame.
+fn edited_document_uris(message: &Map<String, Value>) -> Vec<String> {
+    message
+        .get("params")
+        .and_then(|params| params.get("edit"))
+        .and_then(|edit| edit.get("documentChanges"))
+        .and_then(Value::as_array)
+        .map(|changes| {
+            changes
+                .iter()
+                .filter_map(|change| {
+                    change
+                        .get("textDocument")
+                        .and_then(|document| document.get("uri"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The version, range and new text of the sole edit in an `workspace/applyEdit`
+/// frame, when it has exactly one document change with exactly one edit.
+fn sole_text_edit(message: &Value) -> Option<(u64, Value, String)> {
+    let [change] = message.get("params")?.get("edit")?.get("documentChanges")?.as_array()?.as_slice() else {
+        return None;
+    };
+    let [edit] = change.get("edits")?.as_array()?.as_slice() else {
+        return None;
+    };
+    let version = change.get("textDocument")?.get("version")?.as_u64()?;
+    Some((version, edit.get("range")?.clone(), edit.get("newText")?.as_str()?.to_owned()))
+}
+
+/// The UTF-16 position of an LSP `range` endpoint as a byte offset.
+fn position_offset(text: &str, position: &Value) -> Result<usize, String> {
+    let line = position.get("line").and_then(Value::as_u64).ok_or("edit position has no line")? as usize;
+    let character = position
+        .get("character")
+        .and_then(Value::as_u64)
+        .ok_or("edit position has no character")? as usize;
+    let line_start = if line == 0 {
+        0
+    } else {
+        let mut start = None;
+        for (seen, (index, _)) in text.match_indices('\n').enumerate() {
+            if seen + 1 == line {
+                start = Some(index + 1);
+                break;
+            }
+        }
+        start.ok_or_else(|| format!("edit line {line} is past the document end"))?
+    };
+    let line_text = text[line_start..].split('\n').next().unwrap_or("");
+    let mut units = 0;
+    for (index, character_text) in line_text.char_indices() {
+        if units == character {
+            return Ok(line_start + index);
+        }
+        units += character_text.len_utf16();
+        if units > character {
+            return Err(format!("edit character {character} splits a code point"));
+        }
+    }
+    if units == character {
+        Ok(line_start + line_text.len())
+    } else {
+        Err(format!("edit character {character} is past the line end"))
+    }
+}
+
+/// Apply one LSP text edit to a complete document text.
+fn apply_text_edit(text: &str, range: &Value, new_text: &str) -> Result<String, String> {
+    let start = position_offset(text, range.get("start").ok_or("edit range has no start")?)?;
+    let end = position_offset(text, range.get("end").ok_or("edit range has no end")?)?;
+    if start > end {
+        return Err("edit range ends before it starts".to_owned());
+    }
+    Ok(format!("{}{}{}", &text[..start], new_text, &text[end..]))
+}
+
+/// The refreshed text of a client `didChange` that is provably an echo.
+///
+/// Binding is mechanical: the recorded edit targets the same document version
+/// as the recording's previous client text, the `didChange` is exactly one
+/// version later, and replaying the recorded edit on that previous text yields
+/// exactly the recorded echo. Otherwise the frame is authored input and is
+/// left untouched. A proven echo is replaced by the observed server edit
+/// applied to the current client text.
+fn refreshed_echo(
+    recorded_uri: &str,
+    recorded_version: u64,
+    recorded_text: &str,
+    current_text: Option<&str>,
+    documents: &HashMap<String, RecordedDocument>,
+    edits: &HashMap<String, Option<ServerEdit>>,
+) -> Result<Option<String>, String> {
+    let Some(Some(edit)) = edits.get(recorded_uri) else {
+        return Ok(None);
+    };
+    let Some(previous) = documents.get(recorded_uri) else {
+        return Ok(None);
+    };
+    if edit.version != previous.version || recorded_version != edit.version + 1 {
+        return Ok(None);
+    }
+    match apply_text_edit(&previous.text, &edit.recorded_range, &edit.recorded_text) {
+        Ok(applied) if applied == recorded_text => {}
+        _ => return Ok(None),
+    }
+    let current_text =
+        current_text.ok_or_else(|| format!("no client text is recorded for {recorded_uri}"))?;
+    apply_text_edit(current_text, &edit.observed_range, &edit.observed_text).map(Some)
+}
+
 /// Visit every string leaf in a JSON value.
 fn for_each_string(value: &mut Value, apply: &mut dyn FnMut(&mut String)) {
     match value {
@@ -1178,6 +1350,13 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
 /// roots, binary paths, run ids, outbound ids and hashes; only a divergent `s2c`
 /// payload is captured through [`captured_line`], which keeps the recorded
 /// envelope and refuses a changed exchange identity.
+///
+/// Regeneration also refreshes the client's `didChange` echo of a server edit:
+/// when the recording mechanically proves the frame is that reply (same
+/// document and version, and the recorded edit applied to the recorded client
+/// text yields exactly the recorded echo), the echo is re-derived from the edit
+/// the current server actually sent. Authored or divergent client changes are
+/// left untouched, and a proven echo that cannot be re-derived is an error.
 fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<Vec<String>, String> {
     let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
@@ -1202,6 +1381,13 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
         line.dir == Dir::ServerToClient
             && line.message.get("method").and_then(Value::as_str) == Some("view/keymap")
     });
+    // Regeneration only: the client document each recorded frame asserts, the
+    // client document this replay currently maintains, and the last server
+    // edit each document received. A `None` edit means the recorded edit was
+    // not a single unambiguous text edit, so no echo may bind to it.
+    let mut recorded_documents: HashMap<String, RecordedDocument> = HashMap::new();
+    let mut current_documents: HashMap<String, String> = HashMap::new();
+    let mut pending_edits: HashMap<String, Option<ServerEdit>> = HashMap::new();
 
     for (index, line) in lines.iter().enumerate() {
         regenerated.push(line.raw.clone());
@@ -1222,6 +1408,47 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                             })?;
                             message["id"] = actual.clone();
                         }
+                    }
+                }
+                if regenerate {
+                    if let Some(update) = recorded_document_update(&line.message) {
+                        let opened =
+                            line.message.get("method").and_then(Value::as_str) == Some("textDocument/didOpen");
+                        let probe = expand_client_frame(&message, &root, run_id.as_deref());
+                        let current_uri = probe["params"]["textDocument"]["uri"]
+                            .as_str()
+                            .ok_or_else(|| format!("{where_}: client document update has no uri"))?
+                            .to_owned();
+                        if opened {
+                            current_documents.insert(current_uri, update.text.clone());
+                            pending_edits.remove(&update.uri);
+                        } else {
+                            let current_text = current_documents.get(&current_uri).map(String::as_str);
+                            let refreshed = refreshed_echo(
+                                &update.uri,
+                                update.version,
+                                &update.text,
+                                current_text,
+                                &recorded_documents,
+                                &pending_edits,
+                            )
+                            .map_err(|error| format!("{where_}: {error}"))?;
+                            if let Some(refreshed) = &refreshed {
+                                message["params"]["contentChanges"][0]["text"] = Value::String(refreshed.clone());
+                                regenerated[index] = captured_line(line, &message)
+                                    .map_err(|error| format!("{where_}: {error}"))?;
+                            }
+                            let sent_text = refreshed.unwrap_or_else(|| update.text.clone());
+                            current_documents.insert(current_uri, sent_text);
+                            pending_edits.remove(&update.uri);
+                        }
+                        recorded_documents.insert(
+                            update.uri,
+                            RecordedDocument {
+                                version: update.version,
+                                text: update.text,
+                            },
+                        );
                     }
                 }
                 server.send(expand_client_frame(&message, &root, run_id.as_deref()));
@@ -1269,6 +1496,25 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                     // replay failure, not a capture.
                     regenerated[index] =
                         captured_line(line, &observed).map_err(|error| format!("{where_}: {error}"))?;
+                }
+                if regenerate && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit") {
+                    let recorded = Value::Object(line.message.clone());
+                    let pending = match (sole_text_edit(&recorded), sole_text_edit(&actual)) {
+                        (
+                            Some((version, recorded_range, recorded_text)),
+                            Some((_, observed_range, observed_text)),
+                        ) => Some(ServerEdit {
+                            version,
+                            recorded_range,
+                            recorded_text,
+                            observed_range,
+                            observed_text,
+                        }),
+                        _ => None,
+                    };
+                    for uri in edited_document_uris(&line.message) {
+                        pending_edits.insert(uri, pending.clone());
+                    }
                 }
             }
         }
@@ -1527,6 +1773,189 @@ fn regeneration_refuses_a_changed_exchange_identity() {
     observed["method"] = method;
     observed["id"] = Value::String("magit-lsp/outbound/99".to_owned());
     let error = captured_line(request, &observed).expect_err("a changed id is refused");
+    assert!(error.contains("identity changed"), "{error}");
+}
+
+/// Regeneration refreshes a client echo only when the recording mechanically
+/// proves it is the result of the preceding server edit, and derives the new
+/// text from the edit the current server actually sent.
+#[test]
+fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
+    let name = "plain-code-action.jsonl";
+    let current = example_lines(name);
+    let render = current
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
+        })
+        .expect("the recorded status render");
+    let open = current
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didOpen")
+        })
+        .expect("the recorded document open");
+    let echo = current
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+        })
+        .expect("the recorded client echo");
+    // Build a coherent stale recording: every server render and every client
+    // echo names the old head, so each echo is still provably the recorded
+    // edit applied to the recorded client text, but none matches the current
+    // server. Edits start at line 2 or later, so the line 0 change is safe.
+    let mut stale: Vec<Line> = current
+        .iter()
+        .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
+        .collect();
+    let mut replaced = 0;
+    for line in stale.iter_mut() {
+        match line.message.get("method").and_then(Value::as_str) {
+            Some("workspace/applyEdit") => {
+                if let Some(changes) = line.message["params"]["edit"]["documentChanges"].as_array_mut() {
+                    for change in changes {
+                        if let Some(edits) = change["edits"].as_array_mut() {
+                            for edit in edits {
+                                if let Some(text) = edit["newText"].as_str() {
+                                    if text.contains("Head: main") {
+                                        edit["newText"] = Value::String(text.replace("Head: main", "Head: stale"));
+                                        replaced += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Some("textDocument/didChange") => {
+                let is_status = line.message["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .is_some_and(|uri| uri.ends_with("/.magit"));
+                if is_status {
+                    if let Some(text) = line.message["params"]["contentChanges"][0]["text"].as_str() {
+                        line.message["params"]["contentChanges"][0]["text"] =
+                            Value::String(text.replace("Head: main", "Head: stale"));
+                        replaced += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(replaced >= 3, "the stale recording keeps its renders and echoes coherent");
+    let opened = stale[open].message["params"]["textDocument"]["text"]
+        .as_str()
+        .expect("the recorded opened text")
+        .to_owned();
+    let stale_text = stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"]
+        .as_str()
+        .expect("the recorded render text")
+        .to_owned();
+    let stale_range = stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["range"].clone();
+    let stale_echo = stale[echo].message["params"]["contentChanges"][0]["text"]
+        .as_str()
+        .expect("the recorded echo text")
+        .to_owned();
+    assert_eq!(
+        apply_text_edit(&opened, &stale_range, &stale_text).expect("the stale edit applies"),
+        stale_echo,
+        "the synthetic recording stays a mechanically coherent echo"
+    );
+
+    let error = replay_example_mode(name, &stale, false)
+        .expect_err("strict replay must reject the coherent stale echo");
+    assert!(error.contains("recorded s2c frame mismatch") && error.contains("Head: stale"), "{error}");
+
+    let captured = replay_example_mode(name, &stale, true)
+        .expect("regeneration refreshes the bound echo and captures the rest");
+    let reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    replay_example_mode(name, &reparsed, false)
+        .expect("the refreshed echo and the captured frames replay strictly");
+
+    let observed_text = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"]
+        .as_str()
+        .expect("the captured render text");
+    let observed_range = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["range"].clone();
+    let expected_echo = apply_text_edit(&opened, &observed_range, observed_text).expect("the observed edit applies");
+    let observed_echo = reparsed[echo].message["params"]["contentChanges"][0]["text"]
+        .as_str()
+        .expect("the refreshed echo text");
+    assert_ne!(observed_echo, stale_echo, "regeneration replaced the stale echo");
+    assert_eq!(observed_echo, expected_echo, "the echo is the observed server edit applied to the opened text");
+    assert!(observed_echo.contains("Keys: off (built-in)"), "the echo carries the current render");
+}
+
+/// Regeneration never rewrites authored client edits: a commit message the
+/// client typed itself stays exactly as recorded.
+#[test]
+fn regeneration_echo_leaves_authored_client_edits_unchanged() {
+    let name = "commit-edit-confirm.jsonl";
+    let captured = replay_example_mode(name, &example_lines(name), true)
+        .expect("regeneration captures the commit example");
+    let reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    replay_example_mode(name, &reparsed, false).expect("the captured commit example replays strictly");
+    let authored = reparsed
+        .iter()
+        .find_map(|line| {
+            let is_authored = line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+                && line.message["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .is_some_and(|uri| uri.ends_with(".git/COMMIT_EDITMSG"));
+            is_authored.then(|| line.message["params"]["contentChanges"][0]["text"].as_str().unwrap().to_owned())
+        })
+        .expect("the authored commit-message change");
+    assert_eq!(authored, "Recorded commit body\n", "an authored change is never rewritten");
+}
+
+/// Regeneration refuses to rewrite a divergent echo, and refuses a captured
+/// frame whose exchange identity changed instead of accepting it.
+#[test]
+fn regeneration_echo_refuses_divergent_edits_and_identity_changes() {
+    let name = "plain-code-action.jsonl";
+    let current = example_lines(name);
+    let echo = current
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+        })
+        .expect("the recorded client echo");
+    // A didChange that does not equal the recorded edit applied to the recorded
+    // client text is authored input, so regeneration must not rewrite it.
+    let mut divergent: Vec<Line> = current
+        .iter()
+        .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
+        .collect();
+    let divergent_text = divergent[echo].message["params"]["contentChanges"][0]["text"]
+        .as_str()
+        .expect("the recorded echo text")
+        .replace("Head: main", "Head: authored");
+    divergent[echo].message["params"]["contentChanges"][0]["text"] = Value::String(divergent_text);
+    let error = replay_example_mode(name, &divergent, true)
+        .expect_err("a divergent echo must not be rewritten or accepted");
+    assert!(error.contains("identity changed"), "the server's correction is refused: {error}");
+
+    // Regeneration must still refuse a recorded server exchange whose observed
+    // identity differs, even when the payload could be captured.
+    let render = current
+        .iter()
+        .position(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
+        })
+        .expect("the recorded status render");
+    let mut mismatched: Vec<Line> = current
+        .iter()
+        .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
+        .collect();
+    mismatched[render].message.remove("method");
+    let error = replay_example_mode(name, &mismatched, true)
+        .expect_err("a changed exchange identity must be refused");
     assert!(error.contains("identity changed"), "{error}");
 }
 
