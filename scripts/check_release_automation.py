@@ -4,12 +4,17 @@
 The default mode is a static, line-oriented check (PyYAML is not available) of
 ``.github/workflows/release.yml`` and ``.github/workflows/publish.yml`` plus
 `cargo package --list`, so an accidental auto-publish, a publication step in the
-build workflow or an incomplete crate cannot land unnoticed. The helper modes
-are invoked by the workflows themselves: ``--validate-release-ref`` validates
-the version pair and tag ref for a build run, ``--validate-artifacts`` verifies
-the downloaded release archive/sidecar and version triple, and
+build workflow, incomplete crate metadata or release provenance that is not
+bound to one source commit cannot land unnoticed. The helper modes are invoked
+by the workflows themselves: ``--validate-run-metadata`` verifies that the
+selected build run is this repository's successful release build of the
+dispatch commit, ``--check-release-target`` resolves the version tag's commit
+and prints ``RELEASE_TARGET=<sha>``, ``--validate-release-ref`` validates the
+version pair and tag ref for a build run, ``--validate-artifacts`` verifies the
+downloaded release archive/sidecar set and version triple, and
 ``--print-version`` emits the ``RELEASE_VERSION`` environment line for later
-jobs.
+jobs. The default mode also runs fixture-driven self-tests of those decision
+points, so the rejections are exercised rather than only described.
 """
 
 import argparse
@@ -19,6 +24,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 WORKFLOW = Path('.github/workflows/publish.yml')
@@ -27,7 +35,15 @@ CARGO_MANIFEST = Path('Cargo.toml')
 EXTENSION_MANIFEST = Path('clients/vscode/package.json')
 ARTIFACT_NAME = 'linux-x86_64-gnu-release-candidate'
 ASSET = 'x86_64-unknown-linux-gnu'
+BUILD_WORKFLOW_PATH = '.github/workflows/release.yml'
+BUILD_WORKFLOW_NAME = 'Release artifact build (no publication)'
+API_ROOT = 'https://api.github.com'
+# The publish workflow's provenance gate: the selected run is verified before
+# any of its bytes are downloaded, and the emitted target feeds the tag.
+RUN_PROVENANCE = 'python3 scripts/check_release_automation.py --validate-run-metadata'
+TAG_TARGET_CHECK = 'python3 scripts/check_release_automation.py --check-release-target'
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+
 # Paths owned by the local operator, never by the workflows they build here.
 UNTRACKED_PATHS = (
     'scripts/package-release.sh',
@@ -100,8 +116,8 @@ def cargo_versions():
     return package
 
 
-def check_workflow():
-    lines = read_lines(WORKFLOW)
+def check_workflow(path=WORKFLOW):
+    lines = read_lines(path)
     text = '\n'.join(lines)
     code = code_lines(lines)
 
@@ -195,16 +211,77 @@ def check_workflow():
         fail('workflow: validate job must download from `inputs.build_run_id`')
     if 'actions/download-artifact@' not in validate_text:
         fail('workflow: validate job must use actions/download-artifact')
+
+    # Provenance: the selected run is verified before any of its bytes are used,
+    # so a same-version run from another workflow, repository or commit cannot
+    # supply the assets. The checkout is pinned to the dispatch source commit.
+    if 'ref: ${{ github.sha }}' not in validate_text:
+        fail('workflow: validate job must check out the dispatch source commit')
+    if RUN_PROVENANCE not in validate_text:
+        fail('workflow: validate job must verify the selected build run provenance')
+    if 'BUILD_RUN_ID: ${{ inputs.build_run_id }}' not in validate_text:
+        fail('workflow: provenance check must receive `inputs.build_run_id`')
+    provenance_at = next(i for i, line in enumerate(validate) if RUN_PROVENANCE in line)
+    for later in ('actions/download-artifact@', '--validate-artifacts',
+                  'make vscode-package', 'name: validated-release-assets'):
+        later_at = next(i for i, line in enumerate(validate) if later in line)
+        if provenance_at > later_at:
+            fail(f'workflow: provenance verification must precede {later!r} '
+                 'in the validate job')
+
     if 'python3 scripts/check_release_automation.py --validate-artifacts' not in validate_text:
         fail('workflow: validate job must verify the archive and version triple')
     if 'make vscode-package' not in validate_text:
         fail('workflow: validate job must build the offline VSIX')
     if 'name: validated-release-assets' not in validate_text:
         fail('workflow: validate job must hand off validated assets to publish')
+    # Exactly the validated names are handed off; a glob or an unlisted path
+    # would let an unexpected file ride into the published release.
+    if '--print-version >> "$GITHUB_ENV"' not in validate_text:
+        fail('workflow: validate job must resolve RELEASE_VERSION for the handoff')
+    for glob in ('dist/*', 'build/vscode/*'):
+        if glob in validate_text:
+            fail(f'workflow: validated handoff must not upload {glob!r}')
+    for asset in (f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz',
+                  f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz.sha256',
+                  'build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix'):
+        if asset not in validate_text:
+            fail(f'workflow: validated handoff must list {asset!r}')
+    version_at = next(i for i, line in enumerate(validate)
+                      if '--print-version >> "$GITHUB_ENV"' in line)
+    handoff_at = next(i for i, line in enumerate(validate)
+                      if 'name: validated-release-assets' in line)
+    if version_at > handoff_at:
+        fail('workflow: RELEASE_VERSION must be resolved before the asset handoff')
 
     # Publish lanes: mode gate plus credential presence, one readable skip per lane.
     publish_text = '\n'.join(publish)
+    if 'ref: ${{ github.sha }}' not in publish_text:
+        fail('workflow: publish job must check out the dispatch source commit')
+    if '--validate-artifacts release-assets/dist' not in publish_text:
+        fail('workflow: publish job must re-verify the handed-off artifact set')
+    if 'release-assets/dist/*' in publish_text:
+        fail('workflow: release creation must upload exactly the validated assets')
+    if TAG_TARGET_CHECK not in publish_text:
+        fail('workflow: publish job must resolve the version tag target')
+    if '--target "$RELEASE_TARGET"' not in publish_text:
+        fail('workflow: release creation must target the verified source commit')
+    if f'stem="release-assets/dist/magit-lsp-v${{RELEASE_VERSION}}-{ASSET}.tar.gz"' \
+            not in publish_text:
+        fail('workflow: release creation must name the validated archive path')
+    if '"$stem" "$stem.sha256"' not in publish_text:
+        fail('workflow: release creation must upload the archive and its sidecar')
+    revalidate_at = next(i for i, line in enumerate(publish)
+                         if '--validate-artifacts release-assets/dist' in line)
+    tag_target_at = next(i for i, line in enumerate(publish) if TAG_TARGET_CHECK in line)
+    release_at = next(i for i, line in enumerate(publish)
+                      if 'gh release create' in line and not line.lstrip().startswith('#'))
+    if revalidate_at > release_at:
+        fail('workflow: artifact re-verification must precede release creation')
+    if tag_target_at > release_at:
+        fail('workflow: tag target resolution must precede release creation')
     for secret in SECRETS:
+
         if f'{secret}: ${{{{ secrets.{secret} }}}}' not in publish_text:
             fail(f'workflow: publish job must read secrets.{secret} into env')
         if f"env.{secret} != ''" not in publish_text:
@@ -463,8 +540,15 @@ def validate_release_ref():
     print(f'ok: RELEASE_VERSION={cargo} (ref {ref})')
 
 
-def validate_artifacts(directory):
-    version = release_versions()
+def validate_artifacts(directory, version=None):
+    """Verify the downloaded archive/sidecar set and version triple.
+
+    ``version`` defaults to the manifests' version; the self-tests pass a fixed
+    one so they do not depend on the checkout's current version. The directory
+    must contain exactly the expected archive and sidecar: an unexpected file is
+    refused rather than uploaded later, and the checksum is still compared.
+    """
+    version = version or release_versions()
     root = Path(directory)
     stem = f'magit-lsp-v{version}-{ASSET}'
     archive = root / f'{stem}.tar.gz'
@@ -473,6 +557,13 @@ def validate_artifacts(directory):
         fail(f'artifacts: missing {archive}')
     if not sidecar.is_file():
         fail(f'artifacts: missing {sidecar}')
+    if root.is_dir():
+        expected = {archive.name, sidecar.name}
+        unexpected = sorted(entry.name for entry in root.iterdir()
+                            if entry.name not in expected)
+        if unexpected:
+            fail(f'artifacts: unexpected files in {root}: ' + ', '.join(unexpected))
+
     sidecar_text = sidecar.read_text(encoding='utf-8')
     match = re.fullmatch(r'([0-9a-f]{64})  (\S+)\n', sidecar_text)
     if not match:
@@ -487,10 +578,315 @@ def validate_artifacts(directory):
     print(f'ok: validated {archive.name} ({version}, sha256 {digest})')
 
 
+def parse_json(document, label):
+    """Return the parsed JSON of ``document`` (bytes or text) or fail readably."""
+    try:
+        return json.loads(document)
+    except (TypeError, ValueError) as error:
+        fail(f'{label}: invalid JSON ({error})')
+
+
+def full_name(value):
+    """Return ``full_name`` from an API repository object, or ``None``."""
+    return value.get('full_name') if isinstance(value, dict) else None
+
+
+def fetch_api(repository, path, token):
+    """Return ``(status, body)`` for one GitHub API GET, failing closed.
+
+    Transport and credential problems are check failures, never an implicit
+    "resource missing": only the API's own status decides absence.
+    """
+    if not token:
+        fail('GH_TOKEN is required for GitHub API validation')
+    request = urllib.request.Request(
+        f'{API_ROOT}/repos/{repository}{path}',
+        headers={'Accept': 'application/vnd.github+json',
+                 'Authorization': f'Bearer {token}'})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+    except OSError as error:
+        fail(f'GitHub API request for {path} failed: {error}')
+
+
+def validate_run_metadata(document, repository, sha):
+    """Fail unless the run is this repository's successful release build of ``sha``.
+
+    ``document`` is a decoded "Get a workflow run" response. Repository, workflow
+    identity (path and name), completion, conclusion and head SHA must all match,
+    so a same-version artifact from another workflow, repository, fork or commit
+    can never be published as this commit's release.
+    """
+    if not isinstance(document, dict):
+        fail('build run metadata: expected a JSON object')
+    if document.get('path') != BUILD_WORKFLOW_PATH:
+        fail(f'build run workflow is {document.get("path")!r}, '
+             f'expected {BUILD_WORKFLOW_PATH!r}')
+    if document.get('name') != BUILD_WORKFLOW_NAME:
+        fail(f'build run workflow name is {document.get("name")!r}, '
+             f'expected {BUILD_WORKFLOW_NAME!r}')
+    run_repository = full_name(document.get('repository'))
+    if run_repository != repository:
+        fail(f'build run repository is {run_repository!r}, expected {repository!r}')
+    head_repository = full_name(document.get('head_repository'))
+    if head_repository != repository:
+        fail(f'build run head repository is {head_repository!r}, '
+             f'expected {repository!r}')
+    if document.get('status') != 'completed':
+        fail(f'build run status is {document.get("status")!r}, expected completed')
+    if document.get('conclusion') != 'success':
+        fail(f'build run conclusion is {document.get("conclusion")!r}, '
+             'expected success')
+    head_sha = document.get('head_sha')
+    if head_sha != sha:
+        fail(f'build run head sha is {head_sha!r}, '
+             f'expected the dispatch checkout {sha!r}')
+
+
+def release_target(status, body, sha):
+    """Return the commit the version tag must point at, refusing a conflict.
+
+    ``status``/``body`` are the ``commits/tags/v<version>`` lookup. HTTP 404 means
+    the tag does not exist yet, so the new tag must be created at the verified
+    source commit ``sha``; HTTP 200 is the tag's commit object, whose ``sha`` must
+    already be that same commit. Any other status fails closed.
+    """
+    if status == 404:
+        return sha
+    if status != 200:
+        fail(f'release tag lookup returned HTTP {status}')
+    document = parse_json(body, 'release tag lookup')
+    tag_sha = document.get('sha') if isinstance(document, dict) else None
+    if not isinstance(tag_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', tag_sha):
+        fail('release tag lookup: missing commit sha')
+    if tag_sha != sha:
+        fail(f'release tag points at {tag_sha}, not the verified source {sha}')
+    return sha
+
+
+def repository_and_sha():
+    """Return ``(repository, sha)`` from the workflow environment, validated."""
+    repository = os.environ.get('GITHUB_REPOSITORY', '')
+    sha = os.environ.get('GITHUB_SHA', '')
+    if not re.fullmatch(r'[\w.\-]+/[\w.\-]+', repository):
+        fail(f'GITHUB_REPOSITORY is not a repository slug: {repository!r}')
+    if not re.fullmatch(r'[0-9a-f]{40}', sha):
+        fail(f'GITHUB_SHA is not a full 40-character commit sha: {sha!r}')
+    return repository, sha
+
+
+def validate_build_run():
+    """Verify the selected build run's provenance as the validate job's gate."""
+    repository, sha = repository_and_sha()
+    run_id = os.environ.get('BUILD_RUN_ID', '')
+    if not re.fullmatch(r'[0-9]+', run_id):
+        fail(f'BUILD_RUN_ID is not a run id: {run_id!r}')
+    status, body = fetch_api(repository, f'/actions/runs/{run_id}',
+                             os.environ.get('GH_TOKEN', ''))
+    if status != 200:
+        fail(f'build run {run_id}: API returned HTTP {status}')
+    validate_run_metadata(parse_json(body, 'build run metadata'), repository, sha)
+    print(f'ok: build run {run_id} is this repository\'s successful build of {sha}')
+
+
+def check_release_target():
+    """Return the verified release target, refusing a conflicting version tag."""
+    repository, sha = repository_and_sha()
+    version = release_versions()
+    # `tags/` keeps a branch of the same name from being resolved instead.
+    status, body = fetch_api(repository, f'/commits/tags/v{version}',
+                             os.environ.get('GH_TOKEN', ''))
+    target = release_target(status, body, sha)
+    print(f'ok: release tag v{version} targets {target}', file=sys.stderr)
+    return target
+
+
+SELF_TEST_REPOSITORY = 'example/magit-lsp'
+SELF_TEST_SHA = 'a' * 40
+SELF_TEST_OTHER_SHA = 'b' * 40
+
+
+def expect_check(label, function, *args, expected=None):
+    """Fail the self-test unless ``function(*args)`` raises the intended check."""
+    try:
+        function(*args)
+    except CheckError as error:
+        if expected is not None and expected not in str(error):
+            fail(f'self-test: {label} failed for another reason: {error}')
+        return
+    fail(f'self-test: {label} was accepted')
+
+
+def run_metadata_fixture(**overrides):
+    """Return a successful build-run document for the self-tests."""
+    document = {
+        'name': BUILD_WORKFLOW_NAME,
+        'path': BUILD_WORKFLOW_PATH,
+        'status': 'completed',
+        'conclusion': 'success',
+        'head_sha': SELF_TEST_SHA,
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_repository': {'full_name': SELF_TEST_REPOSITORY},
+    }
+    document.update(overrides)
+    return document
+
+
+def tag_document(sha):
+    """Return the tag lookup body for an existing tag pointing at ``sha``."""
+    return json.dumps({'sha': sha})
+
+
+def write_artifacts(directory, version='1.2.3', payload=b'archive bytes'):
+    """Create the expected archive/sidecar pair and return the archive name."""
+    root = Path(directory)
+    root.mkdir(parents=True, exist_ok=True)
+    archive = root / f'magit-lsp-v{version}-{ASSET}.tar.gz'
+    archive.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    (root / f'{archive.name}.sha256').write_text(
+        f'{digest}  {archive.name}\n', encoding='utf-8')
+    return archive.name
+
+
+def mutated_workflow(directory, label, mutations):
+    """Write a mutated copy of the publish workflow and return its path.
+
+    Each mutation is ``(old, new, count)``; an ``old`` fragment that is absent
+    fails the self-test, so a probe can never quietly stop exercising the guard.
+    """
+    text = WORKFLOW.read_text(encoding='utf-8')
+    for old, new, count in mutations:
+        if old not in text:
+            fail(f'self-test: {label} cannot apply mutation {old!r}')
+        text = text.replace(old, new) if count is None else text.replace(old, new, count)
+    path = Path(directory) / f'publish-{re.sub(r"[^a-z0-9]+", "-", label.lower())}.yml'
+    path.write_text(text, encoding='utf-8')
+    return path
+
+
+def run_self_tests():
+    """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
+    validate_run_metadata(run_metadata_fixture(), SELF_TEST_REPOSITORY, SELF_TEST_SHA)
+    for label, document, expected in (
+        ('wrong repository', run_metadata_fixture(repository={'full_name': 'other/repo'}),
+         'build run repository is'),
+        ('fork head repository',
+         run_metadata_fixture(head_repository={'full_name': 'someone/magit-lsp'}),
+         'head repository'),
+        ('missing repository', run_metadata_fixture(repository=None),
+         'build run repository is'),
+        ('wrong workflow path',
+         run_metadata_fixture(path='.github/workflows/other-build.yml'),
+         'build run workflow is'),
+        ('wrong workflow name', run_metadata_fixture(name='Some other build'),
+         'workflow name is'),
+        ('unfinished run', run_metadata_fixture(status='in_progress', conclusion=None),
+         'build run status is'),
+        ('unsuccessful run', run_metadata_fixture(conclusion='failure'),
+         'build run conclusion is'),
+        ('other source commit', run_metadata_fixture(head_sha=SELF_TEST_OTHER_SHA),
+         'head sha is'),
+    ):
+        expect_check(label, validate_run_metadata, document,
+                     SELF_TEST_REPOSITORY, SELF_TEST_SHA, expected=expected)
+    expect_check('non-object run metadata', validate_run_metadata, [],
+                 SELF_TEST_REPOSITORY, SELF_TEST_SHA, expected='expected a JSON object')
+
+    if release_target(404, b'{"message":"Not Found"}', SELF_TEST_SHA) != SELF_TEST_SHA:
+        fail('self-test: an absent version tag must target the verified source commit')
+    if release_target(200, tag_document(SELF_TEST_SHA), SELF_TEST_SHA) != SELF_TEST_SHA:
+        fail('self-test: a version tag at the verified commit must be accepted')
+    for label, status, body, expected in (
+        ('same version, other commit', 200, tag_document(SELF_TEST_OTHER_SHA),
+         'not the verified source'),
+        ('tag lookup failure', 500, b'{}', 'returned HTTP 500'),
+        ('tag lookup without a sha', 200, b'{}', 'missing commit sha'),
+        ('tag lookup with invalid JSON', 200, b'not json', 'invalid JSON'),
+    ):
+        expect_check(label, release_target, status, body, SELF_TEST_SHA,
+                     expected=expected)
+
+    with tempfile.TemporaryDirectory(prefix='magit-lsp-release-self-test-') as temporary:
+        directory = Path(temporary)
+        artifacts = directory / 'dist'
+        write_artifacts(artifacts)
+        validate_artifacts(artifacts, '1.2.3')
+        (artifacts / 'unexpected.txt').write_text('stray', encoding='utf-8')
+        expect_check('extra artifact file', validate_artifacts, artifacts, '1.2.3',
+                     expected='unexpected files')
+        (artifacts / 'unexpected.txt').unlink()
+        sidecar = next(artifacts.glob('*.sha256'))
+        sidecar.write_text('0' * 64 + '  ' + next(artifacts.glob('*.tar.gz')).name + '\n',
+                           encoding='utf-8')
+        expect_check('tampered artifact checksum', validate_artifacts, artifacts, '1.2.3',
+                     expected='sha256 mismatch')
+        sidecar.unlink()
+        expect_check('missing artifact sidecar', validate_artifacts, artifacts, '1.2.3',
+                     expected='missing')
+
+        check_workflow()
+        for label, mutations, expected in (
+            ('publish workflow without a pinned validate checkout',
+             (('          ref: ${{ github.sha }}\n', '', 1),),
+             'validate job must check out the dispatch source commit'),
+            ('publish workflow without a pinned publish checkout',
+             (('          ref: ${{ github.sha }}\n\n'
+               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
+               ' # v7.0.0\n        with:\n'
+               '          name: validated-release-assets\n',
+               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
+               ' # v7.0.0\n        with:\n'
+               '          name: validated-release-assets\n', None),),
+             'publish job must check out the dispatch source commit'),
+            ('publish workflow without run provenance',
+             ((RUN_PROVENANCE, 'python3 scripts/other.py', None),),
+             'verify the selected build run provenance'),
+            ('publish workflow using the VSIX before provenance',
+             (('      # Fail closed before any of the selected run',
+               '      - run: make vscode-package\n'
+               '      # Fail closed before any of the selected run', None),),
+             'provenance verification must precede'),
+            ('publish workflow handing off a dist glob',
+             (('            dist/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu'
+               '.tar.gz\n', '            dist/*\n', None),),
+             'must not upload'),
+            ('publish workflow uploading arbitrary release assets',
+             (('"$stem" "$stem.sha256"', 'release-assets/dist/*', None),),
+             'upload exactly the validated assets'),
+            ('publish workflow releasing without a target',
+             ((' --target "$RELEASE_TARGET"', '', None),),
+             'must target the verified source commit'),
+            ('publish workflow without a tag target check',
+             ((TAG_TARGET_CHECK, 'python3 scripts/other.py', None),),
+             'resolve the version tag target'),
+            ('publish workflow without artifact re-verification',
+             (('--validate-artifacts release-assets/dist', '--print-version', None),),
+             're-verify the handed-off artifact set'),
+            ('publish workflow without frozen CLI dependencies',
+             (('      - name: Install frozen VS Code CLI dependencies\n'
+               '        run: make vscode-deps\n', '', None),),
+             'frozen VSCode CLI dependencies'),
+        ):
+            expect_check(label, check_workflow,
+                         mutated_workflow(directory, label, mutations),
+                         expected=expected)
+    print('ok: release provenance, tag, artifact and workflow wiring self-tests')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--validate-artifacts', metavar='DIR',
                         help='verify the downloaded release archive and sidecar')
+    parser.add_argument('--validate-run-metadata', action='store_true',
+                        help='verify the selected build run is this repository\'s '
+                             'successful build of $GITHUB_SHA')
+    parser.add_argument('--check-release-target', action='store_true',
+                        help='reject a version tag at another commit and print '
+                             'RELEASE_TARGET=<verified sha>')
     parser.add_argument('--validate-release-ref', action='store_true',
                         help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
@@ -500,12 +896,19 @@ def main():
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)
             return 0
+        if args.validate_run_metadata:
+            validate_build_run()
+            return 0
+        if args.check_release_target:
+            print(f'RELEASE_TARGET={check_release_target()}')
+            return 0
         if args.validate_release_ref:
             validate_release_ref()
             return 0
         if args.print_version:
             print(f'RELEASE_VERSION={release_versions()}')
             return 0
+        run_self_tests()
         check_workflow()
         check_build_workflow()
         check_artifact_consistency()
