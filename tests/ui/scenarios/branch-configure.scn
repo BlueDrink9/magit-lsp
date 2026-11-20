@@ -1,0 +1,30 @@
+# T043 Part 3: configure and explicitly clear a non-current branch setting.
+fixture: modified-two-files
+---
+sh: git branch feature && git config branch.feature.rebase false
+keys: b
+wait
+expect screen contains "configure..."
+keys: C
+wait prompt
+keys: rebase Enter
+wait prompt
+keys: C-u feature Enter
+wait prompt
+expect screen contains "rebase for feature (current: false)"
+keys: C-u true Enter
+wait
+sh: test "$(git config branch.feature.rebase)" = true && test "$(git symbolic-ref --short HEAD)" = main && test -z "$(git config --local --get branch.main.rebase 2>/dev/null || true)"
+keys: b
+wait
+keys: C
+wait prompt
+keys: rebase Enter
+wait prompt
+keys: C-u feature Enter
+wait prompt
+expect screen contains "rebase for feature (current: true)"
+keys: C-u unset Enter
+wait
+expect screen contains "rebase"
+sh: test -z "$(git config --local --get branch.feature.rebase 2>/dev/null || true)" && test "$(git symbolic-ref --short HEAD)" = main && test -z "$(git config --local --get branch.main.rebase 2>/dev/null || true)"
