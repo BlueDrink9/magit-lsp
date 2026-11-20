@@ -55,7 +55,9 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
     assert!(
         matches!(resolve(None, &[a.clone(), nested.clone()], None), Resolution::Choose(xs) if xs.len() == 2)
     );
+    #[cfg(unix)]
     let alias = temp.path().join("alias");
+    #[cfg(unix)]
     std::os::unix::fs::symlink(&a, &alias).unwrap();
     let linked = temp.path().join("linked");
     git(
@@ -74,6 +76,7 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
     assert_ne!(discovered.root(), original.root());
     assert_ne!(discovered.git_dir(), original.git_dir());
     assert_eq!(discovered.common_dir(), original.common_dir());
+    #[cfg(unix)]
     assert!(matches!(
         resolve(None, &[a.clone(), alias], None),
         Resolution::Resolved(_)
