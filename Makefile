@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -37,6 +37,17 @@ build:
 
 release:
 	$(call run,release,cargo build --release -q)
+
+# The release workflow's pinned, locked build and actual-artifact check, for
+# local reproduction without publication. Both targets run the same
+# scripts/check_release_pipeline.py the workflow runs, so a change here cannot
+# drift into a second CI-only build path. A machine without exactly the pinned
+# Rust toolchain fails readably; the target never downloads or installs one.
+release-locked:
+	$(call run,release-locked,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py build)
+
+release-artifact-check: release-locked
+	$(call run,release-artifact-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py artifacts)
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py

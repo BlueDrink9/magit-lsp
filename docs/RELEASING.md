@@ -83,18 +83,35 @@ run is local Linux evidence only.
 
 ## Contracts
 
-Run from the repository root:
+Run from the repository root in an environment that provides Rust 1.94.1:
 
 ```sh
-cargo build --release --locked
-sh scripts/package-release.sh 0.2.0 target/release/magit-lsp dist
-PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_TEST_BINARY=target/release/magit-lsp python3 -m unittest discover -s tests/release -p 'test_*.py' -v
-shellcheck scripts/install.sh scripts/package-release.sh
-git diff --check
+make release-locked
+make release-artifact-check
 ```
 
-Use the matching Cargo/extension version (0.2.0).
-The packager checks both versions and the supplied binary's `--version`.
+`release-locked` runs the workflow's exact locked build
+(`cargo build --release --locked --target x86_64-unknown-linux-gnu`).
+`release-artifact-check` depends on it, then packages
+`target/x86_64-unknown-linux-gnu/release/magit-lsp` with
+`scripts/package-release.sh`, validates the archive/sidecar set offline
+(`--validate-artifacts`) and runs the release suite with
+`MAGIT_LSP_TEST_BINARY` set, so the actual-binary package/install/launch case
+runs instead of skipping. `dist/` must contain only the current version's
+archive and sidecar.
+
+Both targets run `scripts/check_release_pipeline.py`, the script
+`.github/workflows/release.yml` invokes, so there is no CI-only build or
+packaging path. The build requires exactly Rust 1.94.1: another toolchain fails
+with the found version and a request to provide the pin. No target downloads or
+installs Rust, and the flake dev shell's newer Rust is not silently substituted.
+Use the matching Cargo/extension version (0.2.0); the packager checks both and
+the supplied binary's `--version`. `RELEASE_VERSION` reaches packaging from the
+workflow's `--validate-release-ref` step, which writes it to `$GITHUB_ENV`;
+locally the pipeline derives the same value from `Cargo.toml` and
+`clients/vscode/package.json` and fails on a mismatch. `nix develop -c make
+release-contract-check` covers shellcheck plus the offline suite; run
+`git diff --check` before committing.
 The build workflow also checks any tag equals `v<Cargo version>`; manual runs use
 the checked-out version. Inputs enter shell through quoted environment variables,
 never expression interpolation. The build workflow grants only `contents: read`;
@@ -123,9 +140,11 @@ with a notice when that secret is absent.
 
 Three local targets guard this automation: `make workflows-check` (actionlint
 syntax, expression and `run:` shell lint over every workflow),
-`make release-automation-check` (workflow structure, lane gating and Cargo
-packaging) and `make release-contract-check` (shellcheck plus the offline
-release suite).
+`make release-automation-check` (workflow structure, lane gating, the shared
+pinned build/artifact handoff and Cargo packaging) and
+`make release-contract-check` (shellcheck plus the offline release suite). Two
+more reproduce the build side locally without publishing: `release-locked` and
+`release-artifact-check` above.
 
 For version X.Y.Z the two exact release assets are:
 

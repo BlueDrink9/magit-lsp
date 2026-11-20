@@ -13,7 +13,9 @@ and prints ``RELEASE_TARGET=<sha>``, ``--validate-release-ref`` validates the
 version pair and tag ref for a build run, ``--validate-artifacts`` verifies the
 downloaded release archive/sidecar set and version triple, and
 ``--print-version`` emits the ``RELEASE_VERSION`` environment line for later
-jobs. The default mode also runs fixture-driven self-tests of those decision
+jobs. The default mode also verifies that the build workflow and the local
+`make release-locked`/`release-artifact-check` targets share one pinned
+release pipeline script, and runs fixture-driven self-tests of those decision
 points, so the rejections are exercised rather than only described.
 """
 
@@ -35,6 +37,14 @@ CARGO_MANIFEST = Path('Cargo.toml')
 EXTENSION_MANIFEST = Path('clients/vscode/package.json')
 ARTIFACT_NAME = 'linux-x86_64-gnu-release-candidate'
 ASSET = 'x86_64-unknown-linux-gnu'
+MAKEFILE = Path('Makefile')
+PIPELINE = Path('scripts/check_release_pipeline.py')
+# The workflow's fixed toolchain is the shared pin: the local pipeline script
+# refuses any other version, and both invocations below are the only build and
+# artifact paths the workflow may use.
+RELEASE_TOOLCHAIN = '1.94.1'
+PIPELINE_BUILD = 'python3 scripts/check_release_pipeline.py build'
+PIPELINE_ARTIFACTS = 'python3 scripts/check_release_pipeline.py artifacts'
 BUILD_WORKFLOW_PATH = '.github/workflows/release.yml'
 BUILD_WORKFLOW_NAME = 'Release artifact build (no publication)'
 API_ROOT = 'https://api.github.com'
@@ -388,9 +398,9 @@ def step_artifact_name(lines, action, context):
     fail(f'{context}: missing {action}')
 
 
-def check_build_workflow():
-    """Structure-check the tracked build workflow: dispatch/tag triggers, no publishing."""
-    lines = read_lines(BUILD_WORKFLOW)
+def check_build_workflow(path=BUILD_WORKFLOW):
+    """Structure-check the build workflow: dispatch/tag triggers, no publishing."""
+    lines = read_lines(path)
     text = '\n'.join(lines)
 
     find_line(lines, 'name: Release artifact build (no publication)', 'build workflow')
@@ -429,6 +439,32 @@ def check_build_workflow():
     check_inline_scripts(lines, 'build workflow')
     check_python_interpreter(lines)
 
+    # Release handoff: the fixed toolchain, the tag/version validator that
+    # produces RELEASE_VERSION in $GITHUB_ENV, and the shared pipeline script
+    # the local Make targets also run. An inline cargo/package command here
+    # would be a second correctness path that the local target could not share.
+    code = code_lines(lines)
+    pipeline_text = '\n'.join(code)
+    if f'rustup toolchain install {RELEASE_TOOLCHAIN} --profile minimal' not in pipeline_text:
+        fail(f'build workflow: must install the pinned Rust {RELEASE_TOOLCHAIN} toolchain')
+    if '--validate-release-ref' not in pipeline_text:
+        fail('build workflow: must validate the version/tag ref before building '
+             '(it produces RELEASE_VERSION for $GITHUB_ENV)')
+    if PIPELINE_BUILD not in pipeline_text:
+        fail(f'build workflow: must run the shared pinned build {PIPELINE_BUILD!r}')
+    if PIPELINE_ARTIFACTS not in pipeline_text:
+        fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
+    for alternate in ('cargo build', 'package-release.sh', 'MAGIT_LSP_TEST_BINARY'):
+        if alternate in pipeline_text:
+            fail(f'build workflow: {alternate!r} belongs to the shared pipeline script, '
+                 'not a separate workflow path')
+    ref_at = next(i for i, line in enumerate(code) if '--validate-release-ref' in line)
+    build_at = next(i for i, line in enumerate(code) if PIPELINE_BUILD in line)
+    artifacts_at = next(i for i, line in enumerate(code) if PIPELINE_ARTIFACTS in line)
+    if not ref_at < build_at < artifacts_at:
+        fail('build workflow: version validation must precede the pinned build, '
+             'and the build must precede artifact packaging')
+
     # Build-only: no publication step and no publishing credential.
     for command in PUBLISH_COMMANDS + ('gh release create',):
         if command in text:
@@ -438,6 +474,81 @@ def check_build_workflow():
     for forbidden in RELEASE_FORBIDDEN_PATHS:
         if forbidden in text:
             fail(f'build workflow: references operator-owned path {forbidden!r}')
+
+
+def load_pipeline(path=PIPELINE):
+    """Import the release pipeline module (a mutation copy under self-test)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('release_pipeline_under_test', path)
+    if spec is None or spec.loader is None:
+        fail(f'release pipeline: cannot load {path}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def pipeline_violations(module):
+    """Return the contract violations of a release pipeline module."""
+    problems = []
+    if getattr(module, 'TOOLCHAIN', None) != RELEASE_TOOLCHAIN:
+        problems.append(f'toolchain pin {getattr(module, "TOOLCHAIN", None)!r} '
+                        f'is not {RELEASE_TOOLCHAIN!r}')
+    if getattr(module, 'TARGET', None) != ASSET:
+        problems.append(f'target {getattr(module, "TARGET", None)!r} is not {ASSET!r}')
+    expected_build = ['cargo', 'build', '--release', '--locked', '--target', ASSET]
+    if module.build_command(['cargo']) != expected_build:
+        problems.append(f'build command is {module.build_command(["cargo"])!r}, '
+                        f'expected {expected_build!r}')
+    steps, environment = module.artifact_commands('1.2.3', 'binary', 'dist')
+    if steps[:1] != [['sh', 'scripts/package-release.sh', '1.2.3', 'binary', 'dist']]:
+        problems.append('artifact steps must package the explicit binary with '
+                        'scripts/package-release.sh')
+    if len(steps) < 3 or steps[1][-2:] != ['--validate-artifacts', 'dist']:
+        problems.append('artifact steps must validate the archive set offline')
+    if len(steps) < 3 or steps[-1][1:4] != ['-m', 'unittest', 'discover']:
+        problems.append('artifact steps must run the release suite')
+    if environment.get('MAGIT_LSP_TEST_BINARY') != 'binary':
+        problems.append('artifact environment must hand the binary to '
+                        'MAGIT_LSP_TEST_BINARY')
+    return problems
+
+
+def check_release_pipeline():
+    """The local pipeline script must keep the workflow's pinned build/artifact contract."""
+    problems = pipeline_violations(load_pipeline())
+    if problems:
+        fail('release pipeline: ' + '; '.join(problems))
+
+
+def make_recipe(lines, number):
+    """Return the tab-indented recipe lines below the 1-based Makefile line ``number``.
+
+    Make recipes are identified by a leading tab, not by indentation depth, so
+    the YAML ``block_after`` helper cannot read them.
+    """
+    recipe = []
+    for line in lines[number:]:
+        if not line.startswith('\t'):
+            break
+        recipe.append(line)
+    return recipe
+
+
+def check_local_pipeline(path=MAKEFILE):
+    """The Make targets must run the same pipeline script as the workflow."""
+    lines = read_lines(path)
+    for target, command in (
+        ('release-locked', PIPELINE_BUILD),
+        ('release-artifact-check', PIPELINE_ARTIFACTS),
+    ):
+        number = next((index for index, line in enumerate(lines, 1)
+                       if line.startswith(target + ':')), None)
+        if number is None:
+            fail(f'Makefile: missing {target}')
+        recipe = make_recipe(lines, number)
+        if not any(command in line for line in recipe):
+            fail(f'Makefile: {target} must run {command!r}')
+    find_line(lines, 'release-artifact-check: release-locked', 'Makefile')
 
 
 def check_artifact_consistency():
@@ -720,6 +831,17 @@ def expect_check(label, function, *args, expected=None):
     fail(f'self-test: {label} was accepted')
 
 
+def expect_pipeline_error(module, label, function, *args, expected=None):
+    """Fail the self-test unless the pipeline module rejects ``function(*args)``."""
+    try:
+        function(*args)
+    except module.PipelineError as error:
+        if expected is not None and expected not in str(error):
+            fail(f'self-test: {label} failed for another reason: {error}')
+        return
+    fail(f'self-test: {label} was accepted')
+
+
 def run_metadata_fixture(**overrides):
     """Return a successful build-run document for the self-tests."""
     document = {
@@ -752,20 +874,26 @@ def write_artifacts(directory, version='1.2.3', payload=b'archive bytes'):
     return archive.name
 
 
-def mutated_workflow(directory, label, mutations):
-    """Write a mutated copy of the publish workflow and return its path.
+def mutated_file(source, directory, label, mutations):
+    """Write a mutated copy of ``source`` for the self-tests and return its path.
 
     Each mutation is ``(old, new, count)``; an ``old`` fragment that is absent
     fails the self-test, so a probe can never quietly stop exercising the guard.
     """
-    text = WORKFLOW.read_text(encoding='utf-8')
+    text = source.read_text(encoding='utf-8')
     for old, new, count in mutations:
         if old not in text:
             fail(f'self-test: {label} cannot apply mutation {old!r}')
         text = text.replace(old, new) if count is None else text.replace(old, new, count)
-    path = Path(directory) / f'publish-{re.sub(r"[^a-z0-9]+", "-", label.lower())}.yml'
+    prefix = re.sub(r'[^a-z0-9]+', '-', label.lower())
+    path = Path(directory) / f'{prefix}{source.suffix}'
     path.write_text(text, encoding='utf-8')
     return path
+
+
+def mutated_workflow(directory, label, mutations):
+    """Write a mutated copy of the publish workflow and return its path."""
+    return mutated_file(WORKFLOW, directory, 'publish-' + label, mutations)
 
 
 def run_self_tests():
@@ -874,6 +1002,62 @@ def run_self_tests():
             expect_check(label, check_workflow,
                          mutated_workflow(directory, label, mutations),
                          expected=expected)
+
+        # The build workflow keeps one pinned pipeline handoff: fixed
+        # toolchain, version producer, shared build and shared artifact check.
+        for label, mutations, expected in (
+            ('build workflow with an unpinned build',
+             ((PIPELINE_BUILD, 'cargo build --release', None),),
+             'shared pinned build'),
+            ('build workflow without the artifact pipeline',
+             ((PIPELINE_ARTIFACTS, 'true', None),),
+             'shared artifact check'),
+            ('build workflow without the pinned toolchain',
+             ((f'rustup toolchain install {RELEASE_TOOLCHAIN}',
+               'rustup toolchain install stable', None),),
+             'pinned Rust'),
+            ('build workflow without the version producer',
+             (('--validate-release-ref', '--print-version', None),),
+             'validate the version/tag ref'),
+        ):
+            expect_check(label, check_build_workflow,
+                         mutated_file(BUILD_WORKFLOW, directory, label, mutations),
+                         expected=expected)
+
+        # The local Make targets must run that same script, not a parallel path.
+        for label, mutations in (
+            ('Makefile without the pinned build target',
+             ((PIPELINE_BUILD, 'cargo build --release', None),)),
+            ('Makefile without the artifact target',
+             ((PIPELINE_ARTIFACTS, 'true', None),)),
+        ):
+            expect_check(label, check_local_pipeline,
+                         mutated_file(MAKEFILE, directory, label, mutations),
+                         expected='Makefile:')
+
+        # The shared script keeps the locked flags and the binary handoff.
+        for label, mutations, expected in (
+            ('pipeline without --locked',
+             (("'--locked', ", '', None),), 'build command is'),
+            ('pipeline without the binary handoff',
+             (("'MAGIT_LSP_TEST_BINARY': str(binary),", '', None),),
+             'MAGIT_LSP_TEST_BINARY'),
+        ):
+            problems = pipeline_violations(
+                load_pipeline(mutated_file(PIPELINE, directory, label, mutations)))
+            if not any(expected in problem for problem in problems):
+                fail(f'self-test: {label} was accepted')
+
+        # A missing or mismatched RELEASE_VERSION handoff must fail closed.
+        pipeline = load_pipeline()
+        if pipeline.resolve_version({}) != release_versions():
+            fail('self-test: the local pipeline must fall back to the manifest version')
+        expect_pipeline_error(pipeline, 'mismatched release version handoff',
+                              pipeline.resolve_version, {'RELEASE_VERSION': '99.0.0'},
+                              expected='does not match')
+        expect_pipeline_error(pipeline, 'missing CI release version handoff',
+                              pipeline.resolve_version, {'GITHUB_ACTIONS': 'true'},
+                              expected='RELEASE_VERSION is missing')
     print('ok: release provenance, tag, artifact and workflow wiring self-tests')
 
 
@@ -911,6 +1095,8 @@ def main():
         run_self_tests()
         check_workflow()
         check_build_workflow()
+        check_release_pipeline()
+        check_local_pipeline()
         check_artifact_consistency()
         check_metadata()
     except CheckError as error:

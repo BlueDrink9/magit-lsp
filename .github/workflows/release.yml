@@ -32,13 +32,15 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: python3 scripts/check_release_automation.py --validate-release-ref
 
+      # The shared pipeline script is also what `make release-locked` and
+      # `make release-artifact-check` run locally, so this workflow has no
+      # separate build/packaging path to drift. `--validate-release-ref` above
+      # writes RELEASE_VERSION to $GITHUB_ENV, which the artifact step consumes.
       - name: Locked Linux GNU build
-        run: cargo +1.94.1 build --release --locked --target x86_64-unknown-linux-gnu
+        run: python3 scripts/check_release_pipeline.py build
 
       - name: Package and smoke test actual binary
-        run: |
-          sh scripts/package-release.sh "$RELEASE_VERSION" target/x86_64-unknown-linux-gnu/release/magit-lsp dist
-          PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_TEST_BINARY=target/x86_64-unknown-linux-gnu/release/magit-lsp python3 -m unittest discover -s tests/release -p 'test_*.py' -v
+        run: python3 scripts/check_release_pipeline.py artifacts
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
