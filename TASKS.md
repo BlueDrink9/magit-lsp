@@ -832,6 +832,18 @@ Every ticket states **Target Files**, **Reference Files**, **Architectural Const
 
 ## Ad hoc
 
+- [x] **Gate — Retire prompt tests for removed branch options.**
+  - VERIFIED at `0dd2794`: `tests/prompts.rs:1046-1052,1083-1092,1132-1143` request `open.branch` options `=u`/`=p`, absent from `src/menus/branch.rs`; no production menu declares Ref/Remote option readers. Supported branch configuration is the command-owned `branch.configure` workflow, covered separately.
+  - check: remove only the three tests of these retired options and helpers made unused solely by that removal; preserve all live prompt/cancellation/validation tests and existing branch-configuration coverage. Do not restore obsolete options, fabricate production consumers or delete generic implementation as adjacent cleanup.
+  - check: `make test-rust FILTER="--test prompts"` passes; record evidence, tick and commit.
+  - Verified: `make test-rust FILTER="--test prompts"` → ok: rust (31 passed; 0 failed). Removed exactly the three retired `open.branch` `=u`/`=p` ref/remote option tests plus the two helpers (`stage_option_pick`, `stage_ref_prompt`) used only by them; no production consumer declares those readers. Behavior is retired, not replaced: no surrogate tests added, and all other prompt/cancellation/validation tests and the separate `branch.configure` coverage remain.
+
+- [ ] **Robustness — Deep dive on stale operations, freezes and hangs.**
+  - User priority (2026-11-20): after the current regression ticket, before resuming feature extensions. Review this queue and historical evidence, then trace reachable request/response completion, retained origins/staleness, render/ack ordering, prompts, cancellation/disconnects, repository-operation lifetimes and lock/await boundaries across server and clients.
+  - check: distinguish demonstrated deadlocks or missing completions from explicit refusals, obsolete test fixtures and tests awaiting outcomes that were never produced; cite file:line and historical evidence, label hypotheses, and do not infer absent events from truncated logs.
+  - check: produce a documented risk/coverage assessment and prioritized, independently verifiable remediation tickets with permanent regression oracles where warranted. Preserve stale-target safety; do not substitute retries, sleeps or longer timeouts for completion/cancellation correctness.
+  - check: implement confirmed fixes through separately scoped worker tickets and run relevant Make targets; no speculative production paths or unsupported routes. Inspect user-visible feedback/recovery, not just test timeouts.
+
 - [x] **Gate — Complete Plain commit-menu actions after queued status renders.**
   - Verified regression gate blocker: `make test` at `69384b1` fails `commit_menu_is_offered_after_a_queued_status_render_is_released`; isolated `make test-rust FILTER="--test plain_draft commit_menu_is_offered_after_a_queued_status_render_is_released"` repeats timeout after `menu.run-action` (`build/test-logs/rust.Qinni0`, fixture receive `tests/plain_draft.rs:107`). No root cause yet established; do not weaken test sequencing or invent a diagnosis.
   - test: supported Plain commit-menu action completes after the held status edit is released, preserving nearest document, queued-render ordering and real commit/draft effect; no timeout or swallowed errors.
