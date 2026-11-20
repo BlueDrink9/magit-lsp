@@ -15,3 +15,8 @@ LAST_RUN = BUILD_UI / "last_run"
 def run_dir(run_id: str) -> Path:
     """Return the state directory for `run_id`."""
     return RUNS / run_id
+
+
+def run_socket_path(run_id: str) -> Path:
+    """Return a unique RPC socket path outside the potentially deep run directory."""
+    return BUILD_UI / f"n-{run_id[-14:]}.sock"

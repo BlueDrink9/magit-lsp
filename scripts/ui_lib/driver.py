@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import fixtures, keys, startup
-from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, NATIVE_SHUTDOWN, PLAIN_INIT, RUNS, run_dir
+from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, NATIVE_SHUTDOWN, PLAIN_INIT, RUNS, run_dir, run_socket_path
 
 SESSION = "magit"
 DEFAULT_SIZE = (100, 30)
@@ -129,7 +129,7 @@ def parse_size(value: str) -> tuple[int, int]:
 def new_run_id() -> str:
     """Return a timestamped run id that is unique across parallel starts."""
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    return f"{stamp}-{secrets.token_hex(3)}"
+    return f"{stamp}-{secrets.token_hex(8)}"
 
 
 def _update_last_run(run_id: str) -> None:
@@ -861,7 +861,7 @@ def start(
         directory=str(directory),
         repo=str(directory / "repo"),
         home=str(directory / "home"),
-        socket=str(directory / "nvim.sock"),
+        socket=str(run_socket_path(run_id)),
         trace=str(directory / "trace.jsonl"),
         tmux=f"magit-ui-{run_id}",
         client=client,

@@ -967,25 +967,33 @@ class StartPathTest(unittest.TestCase):
                     driver.start("clean", extra_env=extra_env)
         self.assertEqual(Path(captured["MAGIT_LSP_BIN"]), expected)
 
-    def test_overlong_socket_path_is_rejected_before_launch(self) -> None:
+    def test_long_run_directory_uses_short_unique_socket_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            run_dir = Path(directory) / "run"
-            state = startup.SocketState(
-                path=str(run_dir / "nvim.sock"),
-                length=startup.SOCKET_PATH_LIMIT + 1,
-            )
+            run_dir = Path(directory) / ("workspace-" + "x" * 100) / "run"
+            paths = [driver.run_socket_path(run_id) for run_id in ("first", "second")]
+            self.assertGreater(len(str(run_dir / "nvim.sock").encode()), startup.SOCKET_PATH_LIMIT)
+            self.assertTrue(all(len(str(path).encode()) <= startup.SOCKET_PATH_LIMIT for path in paths))
+            self.assertNotEqual(paths[0], paths[1])
+            state = startup.SocketState(path=str(paths[0]), length=len(str(paths[0]).encode()))
+            captured = {}
+
+            def capture(run, _env):
+                captured["run"] = run
+                raise RuntimeError("stop after launcher setup")
+
             with (
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build"),
                 patch.object(driver.startup, "inspect_socket", return_value=state),
-                patch.object(driver, "_tmux") as tmux,
+                patch.object(driver, "_launcher_script", side_effect=capture),
                 patch.object(driver, "_cleanup"),
             ):
-                with self.assertRaises(driver.StartupError) as caught:
+                with self.assertRaisesRegex(RuntimeError, "launcher setup"):
                     driver.start("clean")
-        self.assertIn("too long", str(caught.exception))
-        tmux.assert_not_called()
+            run = captured["run"]
+            self.assertEqual(run.socket_path, driver.run_socket_path(run.id))
+            self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
 
 
 class NativeSessionTest(unittest.TestCase):
