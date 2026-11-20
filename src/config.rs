@@ -405,7 +405,6 @@ pub struct LoadOptions {
 pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
     let mut config = Config::default();
     let mut files = Vec::new();
-    let mut user_file_pair_timeout_ms = None;
 
     let resolved = resolve_config_path(options.config_path.as_deref());
     if let Some(path) = resolved {
@@ -415,7 +414,6 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
             let mut visiting = Vec::new();
             load_file(&path, &mut layered, &mut visiting)?;
             apply_layered(&mut config, layered);
-            user_file_pair_timeout_ms = Some(config.plain.keys_pair_timeout_ms);
             files.push(path);
         } else if explicit {
             return Err(ConfigError::new("config file not found").at_file(path));
@@ -424,11 +422,6 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
 
     if let Some(init) = &options.initialization {
         apply_initialization(&mut config, init)?;
-        if init.get("plain").and_then(|plain| plain.get("keys")).and_then(|keys| keys.get("pair_timeout_ms")).is_some() {
-            if let Some(timeout) = user_file_pair_timeout_ms {
-                config.plain.keys_pair_timeout_ms = timeout;
-            }
-        }
     }
 
     if config.trust_repo_config {
