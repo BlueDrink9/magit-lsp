@@ -223,6 +223,33 @@ mod editor_history_tests {
         assert_eq!(draft.abort(context).unwrap(), Reply::Abort);
     }
 
+    #[test]
+    fn helper_target_accepts_a_symlinked_alias_of_the_expected_file() {
+        let dir = repository();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let expected = repo.commit_message_path().unwrap();
+        let supplied = alias.join(".git/COMMIT_EDITMSG");
+        assert_ne!(supplied, expected);
+        assert_eq!(std::fs::canonicalize(&supplied).unwrap(), expected);
+
+        let mut draft = draft::Draft::for_kind(&repo, "owner", DraftKind::CommitMessage).unwrap();
+        let repository = draft.repository().to_path_buf();
+        let run = draft.run_id().to_string();
+        let uri = draft.uri().to_string();
+        let context = draft::DraftContext {
+            owner: "owner",
+            run_id: &run,
+            uri: &uri,
+            repository: &repository,
+        };
+        let token = draft.helper_token().to_string();
+        draft
+            .accept_helper(context, &token, COMMIT_MESSAGE_KIND, &supplied)
+            .unwrap();
+    }
+
     fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
         let run = registry
             .create(repo.to_str().unwrap(), "owner", DraftKind::CommitMessage)
