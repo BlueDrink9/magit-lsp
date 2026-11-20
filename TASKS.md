@@ -121,6 +121,20 @@ Priority work before further feature execution. Earlier checked Review items are
 
 Last review: `b1cf181..4666caf` (2026-11-20), RV-07-only follow-up; direct source/test review found the prior P1 fixed and no new defects. Reported verification: `git_backend` 46, `commands` 94; not rerun. Earlier: `bb4af51..b1cf181`, scoped source review of T043 branch configuration, Git config boundary and UI harness socket handling; one P1 was queued, no tests rerun and no manual check required.
 
+- [x] **[P1] Reject symlink traversal for user excludes destinations** (`src/git.rs:98-110,1220-1238`, `user_excludes_path`, `GitRepo::add_ignore_rule`)
+  - **Problem:** Symlink-component rejection is only applied when the destination path starts under the repository root. `IgnoreScope::User` writes to the configured/default excludes path without checking it or its parent components, so a symlinked excludes file (or symlinked parent directory) redirects this append outside the selected file and can modify an unintended target.
+  - **Why it matters:** Correctness and path safety — ignore writes must not follow attacker- or unexpectedly-controlled filesystem links merely because the destination is outside the worktree.
+  - **Change:** Before creating parents or opening any ignore destination, apply a path-safety check to user-scope paths as well as repository paths. Resolve/check the destination's existing parent components and reject symlink components and a symlink destination; preserve normal creation of missing directories and append-only behavior. Add a Unix regression using a configured user excludes file symlink and a symlinked parent, asserting the operation errors and the link targets retain exact bytes.
+  - **Done when:** **test:** `make test-rust FILTER="--test git_backend ignore"` proves both user-scope symlink cases are rejected without changing target bytes, while normal configured/default user excludes writes and existing repository scope tests still pass.
+  - **Constraints:** Do not canonicalize a missing destination by following links, replace existing excludes content, or weaken repository-relative traversal validation.
+
+- [ ] **[P2] Propagate user-excludes configuration lookup failures** (`src/git.rs:98-110`, `user_excludes_path`)
+  - **Problem:** Every unsuccessful `git config --path --get core.excludesFile` currently falls through to the default path, although only the expected absent-key result should do so. A malformed/unreadable configuration or another Git failure can therefore cause a write to the wrong excludes file instead of reporting the lookup failure.
+  - **Why it matters:** Correctness and error propagation — configured destination semantics must not silently degrade to a different user file when Git could not resolve configuration.
+  - **Change:** Distinguish Git's expected missing-key status from other command failures and propagate the latter using the project's normal Git error representation; retain default-path resolution only for the absent-key case. Add focused coverage for missing key versus an actual configuration-read failure, asserting the latter creates or appends to no fallback file.
+  - **Done when:** **test:** `make test-rust FILTER="--test git_backend ignore"` passes with an absent-key default-path case and a propagated configuration error case that leaves all exclude files unchanged.
+  - **Constraints:** Do not change which effective `core.excludesFile` value Git selects or introduce a second config-resolution implementation.
+
 - [x] **[P1] RV-07 — Propagate Git configuration read and clear failures** (`src/git.rs:908-996`, `branch_string_config`, `repo_string_config`, `set_branch_value`, `set_repo_value`)
   - **Problem:** Both config readers convert every Git command error into `None`, so permission, malformed-config and repository I/O failures are displayed as “unset.” Both unset writers also discard every `git config --unset-all` failure and return success, causing the command to report a successful clear when the repository config was not changed.
   - **Why it matters:** Correctness — configuration state must not be misreported or claim a write succeeded after Git rejected it; this also violates the existing user-facing Git error propagation contract.
@@ -672,6 +686,7 @@ Post-release; scopes for phases 10–13 remain mandatory in [specifications](./T
   - Verified (Part 3/4, A1/A2/A3, 2026-11-20): `make ui-file FILE=tests/ui/scenarios/branch-configure.scn` → exit 0 (`ok: build`, `ok: ui-file`). Scenario text shows the `feature` rebase prompt's current `false`, then reopened current `true`; Git shell assertions prove set/explicit-unset persistence, `main` stays checked out, and `branch.main.rebase` remains absent. Text evidence is the scenario and successful target output; no failure artifact is written on success. `ps -ef | grep '[m]agit-lsp'` showed no surviving process. Native scenario commit: `e0aaee2`.
   - Verified (Part 4/4, A1/A2, 2026-11-20): generated `docs/parity.md` and `docs/plain-support.md` reflect `b C` as implemented and removal of inert Configure option rows; `make registry-docs-check` → exit 0. Generated-only commit: `74815b3`, generated with `make registry-docs-generate`.
 - [ ] **T044 — notes-ignore.**
+  - Done (Part 5/10): `d0630a5`, hook follow-up `eb14f22`; backend verification recorded below.
   - Done (Part 3/10): `91701b1`.
   - Done (Part 2b/10): snapshots `caef87a`, source/audit `4fc9938`, evidence `ee4a951`.
   - Done (Part 2a/10): `868e116`, evidence `9e0415d`; profile/menu golden verification remains before native notes evidence.

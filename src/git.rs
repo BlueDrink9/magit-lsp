@@ -99,6 +99,24 @@ fn reject_symlink_components(root: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn reject_symlink_destination(root: &Path, path: &Path) -> Result<()> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+            if metadata.file_type().is_symlink() {
+                return Err(Error::new("Ignore destination must not traverse symlinks"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn user_excludes_path(root: &Path) -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["config", "--path", "--get", "core.excludesFile"])
@@ -1229,6 +1247,8 @@ impl GitRepo {
         };
         if path.starts_with(&self.root) {
             reject_symlink_components(&self.root, &path)?;
+        } else if scope == IgnoreScope::User {
+            reject_symlink_destination(&self.root, &path)?;
         }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
