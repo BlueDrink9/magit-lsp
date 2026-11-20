@@ -258,6 +258,7 @@ fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
 /// `view/resync` answers from the session's published snapshot, so it returns
 /// the latest pre-mutation text without waiting for the session lock that the
 /// blocked command holds.
+#[cfg(unix)]
 #[test]
 fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     let (tmp, _repo) = init_repo();
@@ -340,6 +341,7 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+#[cfg(unix)]
 #[test]
 fn blocked_repository_does_not_serialize_unrelated_repository_operations() {
     let (repo_a_tmp, _) = init_repo();
@@ -448,6 +450,7 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+#[cfg(unix)]
 #[test]
 fn absent_or_false_progress_capability_emits_no_create_or_progress() {
     for capabilities in [json!({}), json!({"window":{"workDoneProgress":false}})] {
@@ -479,6 +482,7 @@ fn absent_or_false_progress_capability_emits_no_create_or_progress() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsive() {
     for reply in ["success", "error", "never", "after-completion"] {
@@ -567,6 +571,7 @@ fn progress_event(message: &Value) -> Option<(String, String)> {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn mutations_for_one_repository_apply_in_request_order() {
     let (tmp, _repo) = init_repo();
@@ -2043,6 +2048,7 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_cancel_notification_aborts_a_slow_mutation() {
     let (tmp, _repo) = RepoFixture::new()

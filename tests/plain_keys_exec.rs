@@ -2,6 +2,7 @@
 mod editor_model;
 #[path = "common/fake_editor.rs"]
 mod fake_editor;
+#[cfg(unix)]
 #[path = "common/fake_git.rs"]
 mod fake_git;
 #[path = "common/mod.rs"]
@@ -280,6 +281,7 @@ fn wait_for_action(
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn gated_plain_key_keeps_reader_live_and_drops_busy_input() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -329,6 +331,7 @@ fn gated_plain_key_keeps_reader_live_and_drops_busy_input() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn plain_key_waits_for_an_earlier_same_repository_mutation() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -458,6 +461,7 @@ fn refusing_a_plain_key_repair_does_not_leave_the_document_busy() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn closing_and_reopening_during_plain_key_does_not_repair_the_new_incarnation() {
     let (repo, _) = fixtures::RepoFixture::new()

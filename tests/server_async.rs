@@ -9,6 +9,7 @@ mod rich;
 use repository::keymap_keys;
 use rich::{invoke_rich, limited_rich};
 
+#[cfg(unix)]
 use common::fake_git::GatedGit;
 use common::stdio::*;
 use common::*;
