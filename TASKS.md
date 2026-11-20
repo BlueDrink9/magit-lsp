@@ -840,6 +840,7 @@ Every ticket states **Target Files**, **Reference Files**, **Architectural Const
   - check: `make test-rust FILTER="--test keys_protocol --test commands"` passes, evidence and scoped commit.
   - Done: e834d95
   - Verified: `make test-rust FILTER="--test keys_protocol --test commands"` → exit 0, `ok: rust` (warnings detected; `build/test-logs/rust.DjA3uz`)
+  - Disposition: unsupported ancestor-menu `common.confirm` route withdrawn; reused focused pass `build/test-logs/rust.h5TuIr` (before and after the withdrawn draft).
 
 - [x] **Gate — Refresh post-release protocol example recordings.**
   - Verified at `47fcd65`: full `make test` reaches two `tests/examples.rs` failures because registry frames gained `branch.configure` and `open.notes` (`build/test-logs/rust.Wf3QMm`). Existing `make update-examples` (Makefile:113–115) regenerates maintained `docs/examples/*.jsonl` via strict real-binary capture, not authored expectations.
