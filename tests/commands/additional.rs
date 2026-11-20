@@ -199,7 +199,6 @@ fn typed_target_rejects_forged_hash_and_cross_render_retargeting() {
 }
 
 pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bool) {
-    use std::os::unix::fs::{symlink, PermissionsExt};
     let path = root.join("f.txt");
     match kind {
         "binary" => std::fs::write(
@@ -211,7 +210,9 @@ pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bo
             },
         )
         .unwrap(),
+        #[cfg(unix)]
         "mode" | "text-mode" | "added-mode" => {
+            use std::os::unix::fs::PermissionsExt;
             if kind != "mode" {
                 std::fs::write(&path, "shown text\n").unwrap();
             }
@@ -222,7 +223,9 @@ pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bo
             )
             .unwrap();
         }
+        #[cfg(unix)]
         "type" => {
+            use std::os::unix::fs::symlink;
             std::fs::remove_file(&path).unwrap();
             symlink(
                 if later {
@@ -234,7 +237,9 @@ pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bo
             )
             .unwrap();
         }
+        #[cfg(unix)]
         "untracked-link" => {
+            use std::os::unix::fs::symlink;
             if later {
                 std::fs::remove_file(&path).unwrap();
             }
@@ -256,6 +261,10 @@ pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bo
             )
             .unwrap();
         }
+        #[cfg(not(unix))]
+        "mode" | "text-mode" | "added-mode" | "type" | "untracked-link" => {
+            unreachable!("{kind} fixture needs Unix filesystem semantics")
+        }
         _ => std::fs::write(
             path,
             if later {
@@ -271,17 +280,27 @@ pub(super) fn change_identity_file(root: &std::path::Path, kind: &str, later: bo
 pub(super) fn file_identity_matrix(action: &str, stale: bool, selection: bool) {
     use magit_lsp::protocol::{PromptValue, Selection, ViewInvokeParams};
     use magit_lsp::session::Execution;
-    for kind in [
-        "binary",
-        "mode",
-        "text-mode",
-        "added-mode",
-        "type",
-        "collapsed",
-        "untracked",
-        "untracked-link",
-        "directory",
-    ] {
+    let kinds: &[&str] = {
+        #[cfg(unix)]
+        {
+            &[
+                "binary",
+                "mode",
+                "text-mode",
+                "added-mode",
+                "type",
+                "collapsed",
+                "untracked",
+                "untracked-link",
+                "directory",
+            ]
+        }
+        #[cfg(not(unix))]
+        {
+            &["binary", "collapsed", "untracked", "directory"]
+        }
+    };
+    for &kind in kinds {
         let untracked = matches!(kind, "untracked" | "untracked-link" | "directory");
         if untracked && action == "unstage" {
             continue;
@@ -503,10 +522,13 @@ pub(super) fn file_identity_matrix(action: &str, stale: bool, selection: bool) {
                     if untracked {
                         assert!(std::fs::symlink_metadata(tmp.path().join("f.txt")).is_err());
                     } else {
-                        use std::os::unix::fs::PermissionsExt;
                         let metadata = std::fs::symlink_metadata(tmp.path().join("f.txt")).unwrap();
                         assert!(metadata.is_file());
-                        assert_eq!(metadata.permissions().mode() & 0o777, 0o644);
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            assert_eq!(metadata.permissions().mode() & 0o777, 0o644);
+                        }
                         assert_eq!(
                             std::fs::read(tmp.path().join("f.txt")).unwrap(),
                             initial.as_bytes()

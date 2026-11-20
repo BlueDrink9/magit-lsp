@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(unix)]
 #[test]
 fn hunk_mode_metadata_is_render_bound_for_typed_cursor_and_visual_actions() {
     use magit_lsp::protocol::Selection;
