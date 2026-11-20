@@ -8,6 +8,43 @@ use proptest::prelude::*;
 use std::path::Path;
 
 #[test]
+fn configuration_read_failures_are_not_reported_as_unset() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    git(tmp.path(), &["branch", "feature"]);
+    write(&repo.git_dir().join("config"), "[broken\n");
+    assert!(repo.branch_rebase("feature").is_err());
+    assert!(repo.pull_rebase().is_err());
+}
+
+#[test]
+fn failed_configuration_clears_preserve_values_and_absent_clears_succeed() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    git(tmp.path(), &["branch", "feature"]);
+    repo.set_branch_rebase("feature", Some(true))
+        .expect("set branch value");
+    repo.set_pull_rebase(Some(true)).expect("set repo value");
+    repo.set_branch_push_remote("main", None)
+        .expect("clear absent branch value");
+    repo.set_push_default(None)
+        .expect("clear absent repo value");
+    let lock = repo.git_dir().join("config.lock");
+    write(&lock, "locked\n");
+    assert!(repo.set_branch_rebase("feature", None).is_err());
+    assert!(repo.set_pull_rebase(None).is_err());
+    std::fs::remove_file(lock).expect("remove config lock");
+    assert_eq!(
+        repo.branch_rebase("feature")
+            .expect("branch value retained"),
+        Some(true)
+    );
+    assert_eq!(repo.pull_rebase().expect("repo value retained"), Some(true));
+}
+
+#[test]
 fn branch_and_repository_configuration_round_trips_locally() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

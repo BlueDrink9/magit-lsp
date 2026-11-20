@@ -900,15 +900,16 @@ impl GitRepo {
     }
     fn branch_string_config(&self, branch: &str, key: &str) -> Result<Option<String>> {
         let branch = self.existing_local_branch(branch)?;
-        Ok(self
-            .run(&[
-                "config",
-                "--local",
-                "--get",
-                &format!("branch.{branch}.{key}"),
-            ])
-            .ok()
-            .map(|v| v.trim().to_owned()))
+        match self.run(&[
+            "config",
+            "--local",
+            "--get",
+            &format!("branch.{branch}.{key}"),
+        ]) {
+            Ok(value) => Ok(Some(value.trim().to_owned())),
+            Err(error) if is_missing_config_key(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
     fn set_branch_value(&self, branch: &str, key: &str, value: Option<&str>) -> Result<()> {
         let branch = self.existing_local_branch(branch)?;
@@ -918,7 +919,11 @@ impl GitRepo {
                 self.run(&["config", "--local", "--", &key, value])?;
             }
             None => {
-                let _ = self.run(&["config", "--local", "--unset-all", &key]);
+                if let Err(error) = self.run(&["config", "--local", "--unset-all", &key]) {
+                    if !is_missing_config_clear(&error) {
+                        return Err(error);
+                    }
+                }
             }
         }
         Ok(())
@@ -946,10 +951,11 @@ impl GitRepo {
         self.set_repo_value("push.default", value.map(PushDefault::as_str))
     }
     fn repo_string_config(&self, key: &str) -> Result<Option<String>> {
-        Ok(self
-            .run(&["config", "--local", "--get", key])
-            .ok()
-            .map(|v| v.trim().to_owned()))
+        match self.run(&["config", "--local", "--get", key]) {
+            Ok(value) => Ok(Some(value.trim().to_owned())),
+            Err(error) if is_missing_config_key(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
     fn repo_bool_config(&self, key: &str) -> Result<Option<bool>> {
         let Some(value) = self.repo_string_config(key)? else {
@@ -967,7 +973,11 @@ impl GitRepo {
                 self.run(&["config", "--local", key, value])?;
             }
             None => {
-                let _ = self.run(&["config", "--local", "--unset-all", key]);
+                if let Err(error) = self.run(&["config", "--local", "--unset-all", key]) {
+                    if !is_missing_config_clear(&error) {
+                        return Err(error);
+                    }
+                }
             }
         }
         Ok(())
@@ -2539,6 +2549,20 @@ impl GitRepo {
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
+}
+
+fn is_missing_config_key(error: &crate::Error) -> bool {
+    error
+        .git
+        .as_ref()
+        .is_some_and(|failure| failure.exit_code == 1)
+}
+
+fn is_missing_config_clear(error: &crate::Error) -> bool {
+    error
+        .git
+        .as_ref()
+        .is_some_and(|failure| failure.exit_code == 5)
 }
 
 // Diagnostics have their own cancellation deadline, never consume mutation
