@@ -435,7 +435,8 @@ fn eligible_key_stages_exactly_and_repairs_authoritative_text() {
         .build();
     let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", true);
     let line = line_of(&editor, &uri, "f.txt");
-    replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
+    // A single-character replacement over the row's leading space is still key input.
+    replace(&mut server, &mut editor, &uri, line, 0, 1, "s");
     apply(&mut server, &mut editor);
     assert_eq!(
         fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
@@ -472,6 +473,7 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
     let line = line_of(&editor, &uri, "f.txt");
     let before = fixtures::git(repo.path(), &["status", "--porcelain"]);
     let authoritative = editor.text(&uri).to_owned();
+    let head = fixtures::git(repo.path(), &["rev-parse", "HEAD"]);
     let messages = {
         replace(&mut server, &mut editor, &uri, line, 0, 0, "x");
         apply(&mut server, &mut editor)
@@ -486,6 +488,30 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
     apply(&mut server, &mut editor);
     assert_eq!(fixtures::git(repo.path(), &["status", "--porcelain"]), before);
     assert_eq!(editor.text(&uri), authoritative);
+    // The unchanged space shared by the whole document must not shrink this
+    // two-character replacement to the stage key.
+    replace(&mut server, &mut editor, &uri, line, 0, 1, "s ");
+    apply(&mut server, &mut editor);
+    assert_eq!(
+        fixtures::git(repo.path(), &["rev-parse", "HEAD"]),
+        head,
+        "overlapping paste never commits"
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "",
+        "overlapping paste never touches the index"
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["status", "--porcelain"]),
+        before,
+        "overlapping paste leaves index and worktree unchanged"
+    );
+    assert_eq!(
+        editor.text(&uri),
+        authoritative,
+        "overlapping paste is repaired to the authoritative text"
+    );
     replace(&mut server, &mut editor, &uri, line, 0, 0, "R");
     let messages = apply(&mut server, &mut editor);
     assert!(messages.iter().any(|message| message.contains("planned")), "planned key refused: {messages:?}");

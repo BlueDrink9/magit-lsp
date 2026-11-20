@@ -29,6 +29,15 @@ fn classifies_supported_patterns_and_requires_related_pair(){
     let del=derive_edit("abc",5,6,&[change((0,1),(0,2),"")],Encoding::Utf16);
     assert_eq!(classify(&mut state,del,10,250),Outcome::Wait);
     assert!(matches!(classify(&mut state,derive_edit("ac",6,7,&[change((0,1),(0,1),"z")],Encoding::Utf16),261,250),Outcome::Reject{repair:true}));
+    // A ranged replacement is judged by its submitted payload, never by a
+    // whole-document delta whose common prefix/suffix trims overlapping text.
+    let overlap=derive_edit(" a",1,2,&[change((0,0),(0,1),"s ")],Encoding::Utf8);
+    assert_eq!(overlap.inserted,"s ");
+    let mut replaced=State::Ready;
+    assert_eq!(classify(&mut replaced,overlap,0,250),Outcome::Reject{repair:true});
+    let single=derive_edit(" a",2,3,&[change((0,0),(0,1),"s")],Encoding::Utf8);
+    assert_eq!(single.inserted,"s");
+    assert_eq!(classify(&mut replaced,single,0,250),Outcome::Accept("s".into()));
 }
 
 #[test]

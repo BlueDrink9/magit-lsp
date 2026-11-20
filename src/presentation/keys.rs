@@ -125,7 +125,10 @@ pub fn derive_edit(pre:&str, before:i32, after:i32, changes:&[Change], encoding:
         (Some(a),Some(b))=>{ if simple.is_none() && changes.len()==1 {simple=Some((a,b));} let x=offset(&result,a,encoding); let y=offset(&result,b,encoding); if let (Some(x),Some(y))=(x,y){if x<=y {result.replace_range(x..y,&c.text)} else {complex=true}} else {complex=true} }
         (None,None)=>{result.clone_from(&c.text); complex=true}, _=>complex=true,
     }}
-    let (range,inserted)=if complex || simple.is_none(){(None,delta(pre,&result))} else {(simple,delta(pre,&result))};
+    // A supported single ranged change is keyed by its submitted payload: a
+    // whole-document delta can trim overlapping prefix/suffix text and turn a
+    // multi-character replacement into an unintended single key.
+    let (range,inserted)=if complex || simple.is_none(){(None,delta(pre,&result))} else {(simple,changes[0].text.clone())};
     NetEdit{pre_hash:text_hash(pre),resulting_hash:text_hash(&result),version_before:before,version_after:after,pre_range:range,inserted,header:false}
 }
 
