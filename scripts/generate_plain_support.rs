@@ -34,6 +34,7 @@ pub fn render() -> String {
 
     let mut out = String::from(
         "# Plain presentation command support\n\n\
+For the authored Plain-key policy, safety limits and per-document toggle, see [Plain-key guidance](./PLAIN_KEYS.md).\n\n\
 This table is generated from command registry metadata (`Command::effects`, `Command::scope` and `Command::status`) and `PlainCapabilities::plain_availability`; it records declarations, not the result of executing each command. The `minimal`, `edits` and `full` columns evaluate three representative capability sets. Effect declarations are enforced when effects are delivered, so an available command still needs the listed capability before an optional effect reaches the client. Do not hand-edit this file; regenerate it with `make registry-docs-generate`.\n\n\
 | Command | Scope | Status | Effects | Needs capability | minimal | edits | full | Reason |\n\
 |---|---|---|---|---|---|---|---|---|\n",

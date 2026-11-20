@@ -185,8 +185,10 @@ and commit-menu switches such as `-a` continue against server state. This is a
 subset, not Phase 9 completion: hunk, visual, unstage and navigation cases and
 the wider property/native matrix (T034–T039) are still unverified. The policy,
 per-document `Keys: on/off` toggle and command limits are in
-[Plain command support](docs/plain-support.md); the tested behavior is in
-`tests/plain_keys_exec.rs` and `tests/ui/scenarios/plain-keys-recovered.scn`.
+[Plain-key guidance](docs/PLAIN_KEYS.md); per-command availability is in the
+generated [Plain command support](docs/plain-support.md). The tested behavior
+is in `tests/plain_keys_exec.rs` and
+`tests/ui/scenarios/plain-keys-recovered.scn`.
 
 ### Planned
 

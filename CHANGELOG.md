@@ -64,6 +64,7 @@ is added only when the version is tagged. Nothing here is a publication claim.
   unstage and navigation key cases and the wider property/native matrix
   (T034–T039) remain unverified, and no broad plain-client support is claimed.
   The policy, per-document toggle and limits are in
+  [Plain-key guidance](docs/PLAIN_KEYS.md); per-command availability is in
   [Plain command support](docs/plain-support.md).
 
 ### Known limits and platform matrix
