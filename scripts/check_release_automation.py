@@ -42,6 +42,11 @@ PUBLISH_COMMANDS = ('vsce publish', 'ovsx publish', 'cargo publish --locked')
 # dependencies, so the frozen install must precede every publishing step.
 DEPENDENCY_INSTALL = 'make vscode-deps'
 PUBLISHING_STEPS = ('gh release create',) + PUBLISH_COMMANDS
+# The release checker imports tomllib, so the build workflow must select a
+# supported interpreter instead of trusting the Ubuntu 22.04 default python3.
+SETUP_PYTHON = 'actions/setup-python@'
+MIN_PYTHON = (3, 11)
+PYTHON_CONSUMER = re.compile(r'\bpython3(?:\s|$)')
 
 
 class CheckError(Exception):
@@ -262,6 +267,35 @@ def check_inline_scripts(lines, context):
             fail(f'{context}:{index + 1}: inline script has {len(script)} lines (max 10)')
 
 
+def check_python_interpreter(lines):
+    """Require a pinned setup-python >= 3.11 step before the first python3 use."""
+    consumers = [index for index, line in enumerate(lines)
+                 if PYTHON_CONSUMER.search(line) and not line.lstrip().startswith('#')]
+    if not consumers:
+        fail('build workflow: no python3 consumer found to order against')
+    setup_at = next((index for index, line in enumerate(lines)
+                     if f'uses: {SETUP_PYTHON}' in line), None)
+    if setup_at is None:
+        fail('build workflow: missing pinned actions/setup-python step')
+    if setup_at > consumers[0]:
+        fail('build workflow: actions/setup-python must precede the first python3 '
+             f'step (line {consumers[0] + 1})')
+    version = None
+    for entry in block_after(lines, setup_at, indent_of(lines[setup_at])):
+        match = re.match(r"^\s*python-version:\s*['\"]?(\d+(?:\.\d+)*)", entry)
+        if match:
+            version = tuple(int(part) for part in match.group(1).split('.'))
+            break
+    if not version:
+        fail('build workflow: actions/setup-python must select an explicit '
+             'python-version')
+    if version < MIN_PYTHON:
+        selected = '.'.join(str(part) for part in version)
+        required = '.'.join(str(part) for part in MIN_PYTHON)
+        fail(f'build workflow: selected Python {selected} is below the required '
+             f'{required}')
+
+
 def step_artifact_name(lines, action, context):
     """Return the `name:` of the first step that uses ``action``."""
     for index, line in enumerate(lines):
@@ -316,6 +350,7 @@ def check_build_workflow():
 
     check_pinned_actions(lines, 'build workflow')
     check_inline_scripts(lines, 'build workflow')
+    check_python_interpreter(lines)
 
     # Build-only: no publication step and no publishing credential.
     for command in PUBLISH_COMMANDS + ('gh release create',):

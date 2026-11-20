@@ -18,6 +18,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # The release checker needs tomllib, so select a supported interpreter
+      # instead of relying on the Ubuntu 22.04 runner's default `python3`.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
       - name: Install fixed Rust toolchain
         run: rustup toolchain install 1.94.1 --profile minimal
 
