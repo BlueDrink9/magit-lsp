@@ -213,10 +213,38 @@ pub(super) fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 }
 
 /// Readable refusal while the prior operation still owns repository cleanup.
+const CANCELLING_MESSAGE: &str = "Cancelling… wait for the current Git operation to finish";
+
+/// Readable refusal while a detached worker owns repository mutation authority.
+const DEFERRED_MESSAGE: &str = "Wait for the current Git operation to finish";
+
+/// Readable refusal for a key that must not start now, if admission is closed.
+///
+/// Mirrors `view_key`: cancellation cleanup refuses every key, and a detached
+/// worker's mutation authority refuses keys whose resolved command can mutate
+/// the repository or index. `resolve_command` is only called when a detached
+/// operation is pending, matching `view/key` admission.
+pub(super) fn key_admission_refusal(
+    shared: &Shared,
+    repo: &str,
+    resolve_command: impl FnOnce() -> Result<Option<String>>,
+) -> Result<Option<&'static str>> {
+    if shared.cancellation_pending(repo) {
+        return Ok(Some(CANCELLING_MESSAGE));
+    }
+    if shared.deferred_pending(repo)
+        && resolve_command()?.is_some_and(|command| repository_mutation_command(&command))
+    {
+        return Ok(Some(DEFERRED_MESSAGE));
+    }
+    Ok(None)
+}
+
+/// Readable refusal while the prior operation still owns repository cleanup.
 pub(super) fn cancelling_response() -> Result<Dispatched> {
     Ok(Dispatched::value(
         serde_json::json!({ "effects": [Effect::message(
-        MessageLevel::Info, "Cancelling… wait for the current Git operation to finish".to_string(),
+        MessageLevel::Info, CANCELLING_MESSAGE.to_string(),
     )] }),
     ))
 }
@@ -225,7 +253,7 @@ pub(super) fn cancelling_response() -> Result<Dispatched> {
 pub(super) fn deferred_operation_response() -> Result<Dispatched> {
     Ok(Dispatched::value(
         serde_json::json!({ "effects": [Effect::message(
-        MessageLevel::Info, "Wait for the current Git operation to finish".to_string(),
+        MessageLevel::Info, DEFERRED_MESSAGE.to_string(),
     )] }),
     ))
 }

@@ -690,6 +690,23 @@ pub(super) fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> 
             repo,
             params,
         } => {
+            // Admission must match `key_view`: cancellation cleanup and a
+            // detached worker's mutation authority both refuse before any
+            // command starts, leaving the typed text to the authoritative repair.
+            if let Some(message) = super::view_execution::key_admission_refusal(shared, &repo, || {
+                let Some(handle) = shared.session(&repo) else {
+                    return Ok(None);
+                };
+                let resolved = handle
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .resolved_key_command(&params);
+                resolved
+            })? {
+                let _ = shared.sender.send(show_message(2, message.into()));
+                repair_plain_authoritative(shared, &uri);
+                return Ok(());
+            }
             if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&uri) {
                 entry.key_state.classifier = crate::presentation::keys::State::Executing;
                 entry.key_state.repair_due = false;

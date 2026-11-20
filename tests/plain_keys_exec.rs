@@ -9,6 +9,7 @@ mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
+use std::time::{Duration, Instant};
 
 fn open(
     repo: &fixtures::RepoFixture,
@@ -19,6 +20,7 @@ fn open(
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
+        "window":{"showDocument":{"support":true}},
         "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
         "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
     });
@@ -172,6 +174,81 @@ fn plain_args(actions: &[Value], command: &str) -> Value {
         .find(|action| action["command"]["arguments"][0]["command"] == command)
         .unwrap_or_else(|| panic!("missing Plain action {command}"))["command"]["arguments"][0]
         .clone()
+}
+
+/// Pump one frame: answer server requests and let the editor apply their edits.
+fn pump(server: &mut stdio::TestServer, editor: &mut FakeEditor, seen: &mut Vec<Value>) -> Value {
+    let message = server.recv();
+    seen.push(message.clone());
+    if message["method"].is_string() && !message["id"].is_null() {
+        for frame in editor.dispatch(&message) {
+            server.send(frame);
+        }
+    }
+    message
+}
+
+/// Execute one Plain action, pumping frames until its own reply.
+fn execute_action(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    seen: &mut Vec<Value>,
+    args: Value,
+    id: i64,
+) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    loop {
+        let message = pump(server, editor, seen);
+        if message["id"] == json!(id) && message["method"].is_null() {
+            return message;
+        }
+    }
+}
+
+/// Query the actions offered for one line, pumping until the reply.
+fn offered_actions(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    seen: &mut Vec<Value>,
+    uri: &str,
+    line: u32,
+    id: i64,
+) -> Vec<Value> {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":line,"character":0},"end":{"line":line,"character":0}},"context":{"diagnostics":[]}}}));
+    loop {
+        let message = pump(server, editor, seen);
+        if message["id"] == json!(id) && message["method"].is_null() {
+            return message["result"].as_array().unwrap().clone();
+        }
+    }
+}
+
+/// Poll for the Plain action `command` offered on `needle`'s row.
+fn wait_for_action(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    seen: &mut Vec<Value>,
+    uri: &str,
+    needle: &str,
+    command: &str,
+    mut id: i64,
+) -> (Value, i64) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        assert!(Instant::now() < deadline, "action {command} was not offered for {needle}");
+        if editor.text(uri).contains(needle) {
+            let line = line_of(editor, uri, needle);
+            let offered = offered_actions(server, editor, seen, uri, line, id);
+            id += 1;
+            if let Some(found) =
+                offered.iter().find(|action| action["command"]["arguments"][0]["command"] == command)
+            {
+                return (found["command"]["arguments"][0].clone(), id);
+            }
+        } else {
+            pump(server, editor, seen);
+        }
+    }
 }
 
 #[test]
@@ -360,4 +437,140 @@ fn chord_and_menu_steps_keep_server_state() {
         before,
         "menu keys never mutated Git"
     );
+}
+
+#[test]
+fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n"), ("g.txt", "unchanged\n")])
+        .modify("f.txt", "two\n")
+        .modify("g.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", true);
+    let mut seen = Vec::new();
+
+    // Stage f.txt so commit creation has something to commit.
+    let (stage, id) = wait_for_action(
+        &mut server, &mut editor, &mut seen, &uri, "f.txt", "status.stage", 20,
+    );
+    let staged = execute_action(&mut server, &mut editor, &mut seen, stage, id);
+    assert!(staged["error"].is_null(), "{staged}");
+    let mut id = id + 1;
+    let _ = settle(&mut server, &mut editor);
+
+    // Open the commit menu and start a commit draft that owns the repository.
+    let (open_commit, next) = wait_for_action(
+        &mut server, &mut editor, &mut seen, &uri, "f.txt", "open.commit", id,
+    );
+    id = next;
+    let opened = execute_action(&mut server, &mut editor, &mut seen, open_commit, id);
+    assert!(opened["error"].is_null(), "{opened}");
+    id += 1;
+    let _ = settle(&mut server, &mut editor);
+    replace(&mut server, &mut editor, &uri, 0, 0, 0, "c");
+    let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", repo.path().display());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
+    }) {
+        assert!(Instant::now() < deadline, "commit draft was not opened: {seen:#?}");
+        pump(&mut server, &mut editor, &mut seen);
+    }
+    let template =
+        std::fs::read_to_string(repo.path().join(".git/COMMIT_EDITMSG")).expect("commit template");
+    server.send(editor.open(&draft_uri, &template));
+
+    // The draft holds mutation authority while the status document stays usable.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !(editor.text(&uri).contains("g.txt") && editor.text(&uri).contains(&draft_uri)) {
+        assert!(
+            Instant::now() < deadline,
+            "status document did not return: {:#?}",
+            editor.text(&uri)
+        );
+        pump(&mut server, &mut editor, &mut seen);
+    }
+    let _ = settle(&mut server, &mut editor);
+
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let index = repo.git(&["write-tree"]);
+    let worktree = repo.git(&["status", "--porcelain=v1"]);
+    let diff = repo.git(&["diff", "--binary"]);
+    let before = editor.text(&uri).to_owned();
+    let line = line_of(&editor, &uri, "g.txt");
+    replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut refusal = None;
+    while refusal.is_none() {
+        assert!(Instant::now() < deadline, "deferred key was not refused: {seen:#?}");
+        let message = pump(&mut server, &mut editor, &mut seen);
+        if message["method"] == "window/showMessage" {
+            let text = message["params"]["message"].as_str().unwrap_or_default();
+            if text == "Wait for the current Git operation to finish" {
+                refusal = Some(text.to_owned());
+            }
+        }
+    }
+    let _ = settle(&mut server, &mut editor);
+    assert_eq!(
+        editor.text(&uri),
+        before,
+        "the refused key was repaired to the authoritative status text"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "the refused key never committed");
+    assert_eq!(repo.git(&["write-tree"]), index, "the refused key never touched the index");
+    assert_eq!(
+        repo.git(&["status", "--porcelain=v1"]),
+        worktree,
+        "the refused key never touched the worktree"
+    );
+    assert_eq!(repo.git(&["diff", "--binary"]), diff, "the refused key left the diff unchanged");
+
+    // Abort the draft, releasing repository mutation authority.
+    for _ in 0..2 {
+        let offered = offered_actions(&mut server, &mut editor, &mut seen, &draft_uri, 0, id);
+        id += 1;
+        let Some(cancel) = offered
+            .iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == "common.cancel")
+        else {
+            break;
+        };
+        let cancelled =
+            execute_action(&mut server, &mut editor, &mut seen, cancel["command"]["arguments"][0].clone(), id);
+        id += 1;
+        assert!(cancelled["error"].is_null(), "{cancelled}");
+    }
+    server.send(editor.close(&draft_uri));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while editor.text(&uri).contains(&draft_uri) || !editor.text(&uri).contains("g.txt") {
+        assert!(
+            Instant::now() < deadline,
+            "status document did not return after abort: {:#?}",
+            editor.text(&uri)
+        );
+        pump(&mut server, &mut editor, &mut seen);
+    }
+    let _ = settle(&mut server, &mut editor);
+
+    // The same armed key stages once the deferred operation has released ownership.
+    let line = line_of(&editor, &uri, "g.txt");
+    replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
+    apply(&mut server, &mut editor);
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "f.txt\ng.txt\n",
+        "the same key stages after the draft is aborted: {}",
+        server.stderr_text()
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--name-only"]),
+        "",
+        "the worktree is clean after the released key staged"
+    );
+    assert!(
+        !editor.text(&uri).lines().any(|line| line.starts_with('s')),
+        "the typed key was removed by the authoritative repair"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "staging after release never commits");
 }
