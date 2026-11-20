@@ -5,7 +5,7 @@
 --- one and records it, all in one synchronous call: no key can be pressed
 --- between the delete and the set.
 
-local keys = require('magit-lsp.keys')
+local keys = require("magit-lsp.keys")
 
 local M = {}
 
@@ -15,30 +15,30 @@ M.applied = {}
 
 --- Native fold keys and the server command each mirrors (§3.9).
 local FOLDS = {
-  za = { command = 'common.toggle-section' },
-  zA = { command = 'common.toggle-section', args = { recursive = true } },
-  zo = { command = 'common.show-section' },
-  zO = { command = 'common.show-section', args = { recursive = true } },
-  zc = { command = 'common.hide-section' },
-  zC = { command = 'common.hide-section', args = { recursive = true } },
-  zR = { command = 'common.show-all' },
-  zM = { command = 'common.hide-all' },
-  zr = { command = 'common.more-detail' },
-  zm = { command = 'common.less-detail' },
-  zj = { command = 'common.next-section' },
-  zk = { command = 'common.prev-section' },
+  za = { command = "common.toggle-section" },
+  zA = { command = "common.toggle-section", args = { recursive = true } },
+  zo = { command = "common.show-section" },
+  zO = { command = "common.show-section", args = { recursive = true } },
+  zc = { command = "common.hide-section" },
+  zC = { command = "common.hide-section", args = { recursive = true } },
+  zR = { command = "common.show-all" },
+  zM = { command = "common.hide-all" },
+  zr = { command = "common.more-detail" },
+  zm = { command = "common.less-detail" },
+  zj = { command = "common.next-section" },
+  zk = { command = "common.prev-section" },
 }
 
-local FOLD_ORDER = { 'za', 'zA', 'zo', 'zO', 'zc', 'zC', 'zR', 'zM', 'zr', 'zm', 'zj', 'zk' }
+local FOLD_ORDER = { "za", "zA", "zo", "zO", "zc", "zC", "zR", "zM", "zr", "zm", "zj", "zk" }
 
 --- The fold target a user mapping's `rhs` mirrors, if any.
 local function fold_target(rhs)
-  if type(rhs) ~= 'string' or rhs == '' then
+  if type(rhs) ~= "string" or rhs == "" then
     return nil
   end
-  local fold = rhs:match('^%s*:?%s*normal!?%s+([zZ][a-zA-Z])%s*$')
-    or rhs:match('^%s*<Cmd>%s*normal!?%s+([zZ][a-zA-Z])%s*<CR>%s*$')
-    or rhs:match('^([zZ][a-zA-Z])$')
+  local fold = rhs:match("^%s*:?%s*normal!?%s+([zZ][a-zA-Z])%s*$")
+    or rhs:match("^%s*<Cmd>%s*normal!?%s+([zZ][a-zA-Z])%s*<CR>%s*$")
+    or rhs:match("^([zZ][a-zA-Z])$")
   return fold and FOLDS[fold] or nil
 end
 
@@ -48,8 +48,8 @@ end
 local function user_folds(bufnr)
   local found = {}
   local maps = {}
-  vim.list_extend(maps, vim.api.nvim_get_keymap('n'))
-  vim.list_extend(maps, vim.api.nvim_buf_get_keymap(bufnr, 'n'))
+  vim.list_extend(maps, vim.api.nvim_get_keymap("n"))
+  vim.list_extend(maps, vim.api.nvim_buf_get_keymap(bufnr, "n"))
   for _, map in ipairs(maps) do
     local target = fold_target(map.rhs)
     if target and not found[map.lhs] then
@@ -89,7 +89,7 @@ function M.apply(bufnr, notice, handlers, opts)
   local seen = {}
 
   local function add(mode, lhs, fn, desc)
-    local key = mode .. '\0' .. lhs
+    local key = mode .. "\0" .. lhs
     if seen[key] then
       return
     end
@@ -104,7 +104,7 @@ function M.apply(bufnr, notice, handlers, opts)
   end
 
   -- Text mode is plain editing: only the server's toggle stays bound.
-  local text_mode = notice.mode == 'text'
+  local text_mode = notice.mode == "text"
 
   -- Every binding the server sent, in each mode it applies to.
   for _, binding in ipairs(notice.bindings or {}) do
@@ -113,8 +113,8 @@ function M.apply(bufnr, notice, handlers, opts)
       for _, chord in ipairs(binding.keys or {}) do
         local lhs, steps = keys.to_lhs(chord)
         if lhs and steps then
-          for _, mode in ipairs(binding.modes or { 'normal', 'visual' }) do
-            local nvim_mode = mode == 'visual' and 'x' or 'n'
+          for _, mode in ipairs(binding.modes or { "normal", "visual" }) do
+            local nvim_mode = mode == "visual" and "x" or "n"
             local captured = steps
             add(nvim_mode, lhs, local_fn or function()
               handlers.press(captured)
@@ -128,13 +128,13 @@ function M.apply(bufnr, notice, handlers, opts)
   -- Mirror the native fold keys; a server binding for the same lhs wins.
   if not text_mode and opts.folds ~= false then
     for _, native in ipairs(FOLD_ORDER) do
-      add('n', native, command_fn(FOLDS[native]), 'Fold')
+      add("n", native, command_fn(FOLDS[native]), "Fold")
     end
     for lhs, target in pairs(user_folds(bufnr)) do
-      add('n', lhs, command_fn(target), 'Fold')
+      add("n", lhs, command_fn(target), "Fold")
     end
     for lhs, command in pairs(opts.fold_keys or {}) do
-      add('n', lhs, command_fn({ command = command }), 'Fold')
+      add("n", lhs, command_fn({ command = command }), "Fold")
     end
   end
 
@@ -143,18 +143,18 @@ function M.apply(bufnr, notice, handlers, opts)
     for code = 32, 126 do
       local char = string.char(code)
       local canonical = char
-      if char == ' ' then
-        canonical = 'Space'
-      elseif char == '+' then
-        canonical = 'Plus'
+      if char == " " then
+        canonical = "Space"
+      elseif char == "+" then
+        canonical = "Plus"
       end
       local lhs = keys.to_lhs(canonical)
       if lhs then
         local captured = { canonical }
-        for _, nvim_mode in ipairs({ 'n', 'x' }) do
+        for _, nvim_mode in ipairs({ "n", "x" }) do
           add(nvim_mode, lhs, function()
             handlers.press(captured)
-          end, 'Capture key')
+          end, "Capture key")
         end
       end
     end

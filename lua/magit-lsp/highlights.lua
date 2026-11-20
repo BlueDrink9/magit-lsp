@@ -18,11 +18,11 @@ M.OVERRIDES = {}
 M.MODIFIER_LINKS = {
   -- keep-for: TASKS §3.15 recorded modifier styling; selected is used by log
   -- selection, remaining links support planned/ref presentation (R-5.3).
-  staged = 'Bold',
-  selected = 'Visual',
-  planned = 'Comment',
-  disabled = 'Comment',
-  bold = 'Bold',
+  staged = "Bold",
+  selected = "Visual",
+  planned = "Comment",
+  disabled = "Comment",
+  bold = "Bold",
 }
 
 --- The legend of the most recently initialized client, kept for `:colorscheme`.
@@ -43,8 +43,8 @@ function M.define()
   end
   -- A link cannot add attributes, so the off flag's dim is carried by an
   -- intermediate group; its colour still comes from the colourscheme.
-  local comment = vim.api.nvim_get_hl(0, { name = 'Comment' })
-  vim.api.nvim_set_hl(0, 'MagitMenuFlagOff', {
+  local comment = vim.api.nvim_get_hl(0, { name = "Comment" })
+  vim.api.nvim_set_hl(0, "MagitMenuFlagOff", {
     fg = comment.fg,
     bg = comment.bg,
     dim = true,
@@ -52,13 +52,13 @@ function M.define()
   -- A menu item that cannot complete the pending prefix, and the prefix of one
   -- that can. Both need an intermediate group because a link cannot add the
   -- dim/bold attributes.
-  vim.api.nvim_set_hl(0, 'MagitMenuDisabled', {
+  vim.api.nvim_set_hl(0, "MagitMenuDisabled", {
     fg = comment.fg,
     bg = comment.bg,
     dim = true,
   })
-  local keyword = vim.api.nvim_get_hl(0, { name = 'Keyword' })
-  vim.api.nvim_set_hl(0, 'MagitMenuPending', {
+  local keyword = vim.api.nvim_get_hl(0, { name = "Keyword" })
+  vim.api.nvim_set_hl(0, "MagitMenuPending", {
     fg = keyword.fg,
     bg = keyword.bg,
     bold = true,
@@ -69,12 +69,12 @@ function M.define()
   for _, token_type in ipairs(legend.tokenTypes or {}) do
     local group = M.OVERRIDES[token_type] or suggested[token_type]
     if group then
-      local name = string.format('@lsp.type.%s.%s', token_type, ft)
+      local name = string.format("@lsp.type.%s.%s", token_type, ft)
       vim.api.nvim_set_hl(0, name, { link = group, default = true })
     end
   end
   for modifier, link in pairs(M.MODIFIER_LINKS) do
-    local group = string.format('@lsp.mod.%s.%s', modifier, ft)
+    local group = string.format("@lsp.mod.%s.%s", modifier, ft)
     vim.api.nvim_set_hl(0, group, { link = link, default = true })
   end
 end
@@ -93,8 +93,8 @@ end
 function M.setup(ft)
   filetype = ft
   M.define()
-  vim.api.nvim_create_autocmd('ColorScheme', {
-    group = vim.api.nvim_create_augroup('magit_lsp_highlights', { clear = true }),
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = vim.api.nvim_create_augroup("magit_lsp_highlights", { clear = true }),
     callback = M.define,
   })
 end

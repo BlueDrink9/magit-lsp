@@ -6,7 +6,7 @@
 --- `vim.ui`/`vim.fn` helpers and forwards the answer. It holds no Git or
 --- layout logic.
 
-local hooks = require('magit-lsp.hooks')
+local hooks = require("magit-lsp.hooks")
 
 local M = {}
 
@@ -28,7 +28,7 @@ function M.respond(client_id, prompt_id, cancelled, value)
     hooks.prompt_finished()
     return
   end
-  c:request('view/promptRespond', {
+  c:request("view/promptRespond", {
     promptId = prompt_id,
     cancelled = cancelled,
     value = value,
@@ -41,8 +41,8 @@ local function finish(client_id, params, cancelled, value)
 end
 
 local function format_item(item)
-  if item.description and item.description ~= '' then
-    return string.format('%s — %s', item.label, item.description)
+  if item.description and item.description ~= "" then
+    return string.format("%s — %s", item.label, item.description)
   end
   return item.label
 end
@@ -52,14 +52,14 @@ local function ask_text(client_id, params, on_value)
   if params.secret then
     -- `vim.ui.input` cannot mask, so secret answers use the built-in helper.
     local value = vim.fn.inputsecret(params.title)
-    if value == nil or value == '' then
+    if value == nil or value == "" then
       finish(client_id, params, true)
     else
       on_value(value)
     end
     return
   end
-  local default = type(params.default) == 'string' and params.default or nil
+  local default = type(params.default) == "string" and params.default or nil
   vim.ui.input({ prompt = params.title, default = default }, function(input)
     if input == nil then
       finish(client_id, params, true)
@@ -70,11 +70,10 @@ local function ask_text(client_id, params, on_value)
 end
 
 local function ask_confirm(client_id, params)
-  local yes = params.yesLabel or 'Yes'
+  local yes = params.yesLabel or "Yes"
   -- A destructive question focuses "No" first.
-  local no = params.noLabel or 'No'
-  local labels = (params.destructive or params.default == false) and { no, yes }
-    or { yes, no }
+  local no = params.noLabel or "No"
+  local labels = (params.destructive or params.default == false) and { no, yes } or { yes, no }
   vim.ui.select(labels, { prompt = params.title }, function(choice)
     if choice == nil then
       finish(client_id, params, true)
@@ -90,7 +89,7 @@ local function ask_choice(client_id, params)
     items[#items + 1] = item
   end
   if params.allowCustom then
-    items[#items + 1] = { id = '__custom__', label = 'Enter custom value…' }
+    items[#items + 1] = { id = "__custom__", label = "Enter custom value…" }
   end
   vim.ui.select(items, {
     prompt = params.title,
@@ -98,7 +97,7 @@ local function ask_choice(client_id, params)
   }, function(item)
     if item == nil then
       finish(client_id, params, true)
-    elseif item.id == '__custom__' then
+    elseif item.id == "__custom__" then
       -- The chosen item's `default` is an item id, not custom text; never
       -- prefill the custom field with it. `promptId` must remain for the reply.
       local custom = vim.deepcopy(params)
@@ -127,12 +126,12 @@ local function ask_multi(client_id, params)
     for _, item in ipairs(params.items or {}) do
       items[#items + 1] = {
         id = item.id,
-        label = (selected[item.id] and '[x] ' or '[ ] ') .. item.label,
+        label = (selected[item.id] and "[x] " or "[ ] ") .. item.label,
         description = item.description,
         detail = item.detail,
       }
     end
-    items[#items + 1] = { id = '__done__', label = 'Done' }
+    items[#items + 1] = { id = "__done__", label = "Done" }
 
     vim.ui.select(items, {
       prompt = params.title,
@@ -140,7 +139,7 @@ local function ask_multi(client_id, params)
     }, function(item)
       if item == nil then
         finish(client_id, params, true)
-      elseif item.id == '__done__' then
+      elseif item.id == "__done__" then
         finish(client_id, params, false, { ids = order })
       else
         if selected[item.id] then
@@ -167,20 +166,20 @@ end
 ---@param params table `view/prompt` params
 ---@param client_id integer|nil originating LSP client
 function M.handle(params, client_id)
-  if type(params) ~= 'table' or not params.promptId then
+  if type(params) ~= "table" or not params.promptId then
     return
   end
   hooks.prompt_started()
   local kind = params.kind
-  if kind == 'confirm' then
+  if kind == "confirm" then
     ask_confirm(client_id, params)
-  elseif kind == 'text' then
+  elseif kind == "text" then
     ask_text(client_id, params, function(text)
       finish(client_id, params, false, text)
     end)
-  elseif kind == 'choice' then
+  elseif kind == "choice" then
     ask_choice(client_id, params)
-  elseif kind == 'multiChoice' then
+  elseif kind == "multiChoice" then
     ask_multi(client_id, params)
   else
     -- An unknown kind cannot be repaired client-side; cancel it.

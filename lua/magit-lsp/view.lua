@@ -6,10 +6,10 @@
 --- buffering are kind-independent. Managed drafts register their own placement
 --- and explicitly own document synchronization and close intent.
 
-local buffer = require('magit-lsp.buffer')
-local keymap = require('magit-lsp.keymap')
-local hooks = require('magit-lsp.hooks')
-local requests = require('magit-lsp.requests')
+local buffer = require("magit-lsp.buffer")
+local keymap = require("magit-lsp.keymap")
+local hooks = require("magit-lsp.hooks")
+local requests = require("magit-lsp.requests")
 
 local M = {}
 
@@ -64,7 +64,7 @@ local function client(client_id)
 end
 
 local function error_message(err)
-  if type(err) == 'table' then
+  if type(err) == "table" then
     return tostring(err.message or err)
   end
   return tostring(err)
@@ -76,7 +76,7 @@ end
 ---@param view_id string
 ---@return string
 local function view_key(client_id, view_id)
-  return tostring(client_id or 0) .. '\0' .. tostring(view_id)
+  return tostring(client_id or 0) .. "\0" .. tostring(view_id)
 end
 
 local flush_deferred
@@ -134,7 +134,7 @@ end
 function M.status(root)
   for _, id in ipairs(M.order) do
     local view = M.views[id]
-    if view and view.kind == 'status' and (root == nil or view.root == root) then
+    if view and view.kind == "status" and (root == nil or view.root == root) then
       return view
     end
   end
@@ -209,7 +209,7 @@ function M.uri(view)
   if view and view.uri then
     return view.uri
   end
-  return view and vim.uri_from_bufnr(view.buf) or ''
+  return view and vim.uri_from_bufnr(view.buf) or ""
 end
 
 --- Queue one asynchronous LSP request for `buf` and call `on_result`.
@@ -253,7 +253,7 @@ local function ack(view)
   end
   local c = client(view.client_id)
   if c then
-    c:notify('view/rendered', { viewId = view.id, version = view.version })
+    c:notify("view/rendered", { viewId = view.id, version = view.version })
     hooks.render_acked(view.key, view.version)
   end
 end
@@ -274,7 +274,7 @@ function M.flush_acks(client_id)
     local view = M.views[key]
     local c = client(pending.client_id)
     if view and c then
-      c:notify('view/rendered', { viewId = pending.view_id, version = pending.version })
+      c:notify("view/rendered", { viewId = pending.view_id, version = pending.version })
       hooks.render_acked(key, pending.version)
     end
   end
@@ -302,11 +302,10 @@ local function set_cursor(view, cursor)
     return
   end
   local line = math.min(cursor.line, vim.api.nvim_buf_line_count(view.buf) - 1)
-  local text = vim.api.nvim_buf_get_lines(view.buf, line, line + 1, false)[1] or ''
+  local text = vim.api.nvim_buf_get_lines(view.buf, line, line + 1, false)[1] or ""
   local column = math.min(cursor.column, #text)
   vim.api.nvim_win_set_cursor(win, { line + 1, column })
 end
-
 
 --- Hold renders of a view while its full resync is outstanding.
 ---@param view table
@@ -317,10 +316,10 @@ local function request_resync(view)
   end
   view.resyncing = true
   hooks.request_started()
-  c:request('view/resync', { viewId = view.id }, function(err, result)
+  c:request("view/resync", { viewId = view.id }, function(err, result)
     hooks.request_finished()
     view.resyncing = false
-    if err or type(result) ~= 'table' then
+    if err or type(result) ~= "table" then
       flush_deferred(view.key)
       return
     end
@@ -372,15 +371,15 @@ function M.apply_render(params, client_id)
 
   -- Leaving text mode: drop undo history before replacing the text, so the
   -- server's version cannot be undone back into the user's edits.
-  if params.mode == 'text' and view.mode ~= 'text' then
-    view.mode = 'text'
+  if params.mode == "text" and view.mode ~= "text" then
+    view.mode = "text"
     buffer.enter_text_mode(view.buf)
-  elseif params.mode == 'interactive' and view.mode == 'text' then
-    view.mode = 'interactive'
+  elseif params.mode == "interactive" and view.mode == "text" then
+    view.mode = "interactive"
     buffer.exit_text_mode(view.buf)
   end
 
-  local text_mode = view.mode == 'text'
+  local text_mode = view.mode == "text"
   if params.text then
     buffer.set_lines(view.buf, 0, -1, params.text, text_mode)
   elseif params.edits then
@@ -439,7 +438,7 @@ end
 ---@param notice table `view/keymap` params
 ---@param client_id integer the client that sent the notification
 function M.apply_keymap(notice, client_id)
-  if type(notice) ~= 'table' or not notice.viewId or not client_id then
+  if type(notice) ~= "table" or not notice.viewId or not client_id then
     return
   end
   local key = view_key(client_id, notice.viewId)
@@ -452,13 +451,13 @@ function M.apply_keymap(notice, client_id)
   end
   view.keymap = notice
 
-  if notice.mode == 'text' then
-    if view.mode ~= 'text' then
-      view.mode = 'text'
+  if notice.mode == "text" then
+    if view.mode ~= "text" then
+      view.mode = "text"
       buffer.enter_text_mode(view.buf)
     end
-  elseif view.mode == 'text' then
-    view.mode = 'interactive'
+  elseif view.mode == "text" then
+    view.mode = "interactive"
     buffer.exit_text_mode(view.buf)
   end
 
@@ -486,12 +485,12 @@ function M.apply_keymap(notice, client_id)
   -- capture keymap does not carry it.
   if view.capture and not view.bs_mapped then
     view.bs_mapped = true
-    vim.keymap.set({ 'n', 'x' }, '<BS>', function()
-      M.press({ 'Backspace' }, view.key)
-    end, { buffer = view.buf, nowait = true, silent = true, desc = 'Pop a pending step' })
+    vim.keymap.set({ "n", "x" }, "<BS>", function()
+      M.press({ "Backspace" }, view.key)
+    end, { buffer = view.buf, nowait = true, silent = true, desc = "Pop a pending step" })
   elseif not view.capture and view.bs_mapped then
     view.bs_mapped = false
-    pcall(vim.keymap.del, { 'n', 'x' }, '<BS>', { buffer = view.buf })
+    pcall(vim.keymap.del, { "n", "x" }, "<BS>", { buffer = view.buf })
   end
   view.keymap_ready = true
 end
@@ -509,7 +508,7 @@ end
 
 local function place_side(view)
   local width = math.max(20, math.min(80, math.floor(vim.o.columns / 2)))
-  pcall(vim.cmd, 'botright ' .. width .. 'vsplit')
+  pcall(vim.cmd, "botright " .. width .. "vsplit")
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, view.buf)
   buffer.enable_folding(win)
@@ -523,13 +522,13 @@ local function float_config(view)
   local row = math.max(0, math.floor((vim.o.lines - height) / 2))
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
   return {
-    relative = 'editor',
+    relative = "editor",
     row = row,
     col = col,
     width = width,
     height = height,
-    style = 'minimal',
-    border = 'single',
+    style = "minimal",
+    border = "single",
   }
 end
 
@@ -561,11 +560,21 @@ end
 
 local function restore_document(view)
   local win, buf = view.win, view.previous_buf
-  if not win or not vim.api.nvim_win_is_valid(win)
-    or not buf or not vim.api.nvim_buf_is_valid(buf) then return false end
-  if not pcall(vim.api.nvim_win_set_buf, win, buf) then return false end
+  if
+    not win
+    or not vim.api.nvim_win_is_valid(win)
+    or not buf
+    or not vim.api.nvim_buf_is_valid(buf)
+  then
+    return false
+  end
+  if not pcall(vim.api.nvim_win_set_buf, win, buf) then
+    return false
+  end
   local previous = view_for_buf(buf)
-  if previous then previous.win = win end
+  if previous then
+    previous.win = win
+  end
   return true
 end
 
@@ -577,10 +586,15 @@ local function on_wiped(key)
   if view.document then
     -- Retain the run and its last full snapshot until terminal progress. A
     -- rejected saved-file close must still have a recovery owner.
-    if view.on_closed then view.on_closed(view) end
+    if view.on_closed then
+      view.on_closed(view)
+    end
     hooks.schedule(function()
-      if view.win and vim.api.nvim_win_is_valid(view.win)
-        and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
+      if
+        view.win
+        and vim.api.nvim_win_is_valid(view.win)
+        and not view_for_buf(vim.api.nvim_win_get_buf(view.win))
+      then
         restore_document(view)
       end
     end)
@@ -598,9 +612,9 @@ local function on_wiped(key)
   local c = client(view.client_id)
   if c then
     -- Use the tracked request queue: the server does not handle close notifications.
-    M.request(view.buf, view.client_id, 'view/close', { viewId = view.id }, function(_, err)
+    M.request(view.buf, view.client_id, "view/close", { viewId = view.id }, function(_, err)
       if err then
-        vim.notify('magit-lsp view close failed: ' .. error_message(err), vim.log.levels.WARN)
+        vim.notify("magit-lsp view close failed: " .. error_message(err), vim.log.levels.WARN)
       end
     end)
   end
@@ -608,10 +622,14 @@ local function on_wiped(key)
   -- hidden main-view parent afterwards, just as a server-driven pop does.
   hooks.schedule(function()
     local previous = view.previous and M.views[view.previous]
-    if view.placement == 'main' and previous
+    if
+      view.placement == "main"
+      and previous
       and vim.api.nvim_buf_is_valid(previous.buf)
-      and view.win and vim.api.nvim_win_is_valid(view.win)
-      and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
+      and view.win
+      and vim.api.nvim_win_is_valid(view.win)
+      and not view_for_buf(vim.api.nvim_win_get_buf(view.win))
+    then
       vim.api.nvim_win_set_buf(view.win, previous.buf)
       previous.win = view.win
       M.focus(previous.key)
@@ -648,8 +666,8 @@ function M.open(descriptor, opts)
     kind = descriptor.kind,
     uri = descriptor.uri,
     title = descriptor.title,
-    placement = descriptor.placement or 'main',
-    mode = descriptor.mode or 'interactive',
+    placement = descriptor.placement or "main",
+    mode = descriptor.mode or "interactive",
     scope = descriptor.scope,
     capture = descriptor.capture == true,
     descriptor = descriptor,
@@ -672,7 +690,7 @@ function M.open(descriptor, opts)
     view.buf = buffer.fresh(descriptor.uri)
   end
 
-  if view.mode == 'text' then
+  if view.mode == "text" then
     buffer.enter_text_mode(view.buf)
   end
 
@@ -686,7 +704,7 @@ function M.open(descriptor, opts)
   attach(view)
   hooks.view_open(key, view.kind, view.buf, view.title)
 
-  vim.api.nvim_create_autocmd('BufWipeout', {
+  vim.api.nvim_create_autocmd("BufWipeout", {
     buffer = view.buf,
     callback = function()
       on_wiped(key)
@@ -695,7 +713,7 @@ function M.open(descriptor, opts)
 
   -- A user can add fold mappings while the server is running; re-scan them
   -- whenever the view regains focus.
-  vim.api.nvim_create_autocmd('BufEnter', {
+  vim.api.nvim_create_autocmd("BufEnter", {
     buffer = view.buf,
     callback = function()
       if view.keymap and M.views[key] then
@@ -732,7 +750,7 @@ end
 ---  table, on_closed: fun(record)|nil }
 ---@return table|nil record
 function M.open_document(effect, spec)
-  if type(effect) ~= 'table' or not effect.runId then
+  if type(effect) ~= "table" or not effect.runId then
     return nil
   end
   spec = spec or {}
@@ -752,7 +770,7 @@ function M.open_document(effect, spec)
     text = effect.text,
     title = effect.title,
     placement = spec.placement,
-    mode = 'interactive',
+    mode = "interactive",
     document = true,
     client_id = client_id,
     root = spec.root,
@@ -771,7 +789,7 @@ function M.open_document(effect, spec)
   if spec.filetype and record.buf then
     vim.bo[record.buf].filetype = spec.filetype
   end
-  vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
     buffer = record.buf,
     callback = function()
       on_wiped(key)
@@ -812,10 +830,12 @@ function M.close(id, focus_previous_window, client_id)
   if view.document then
     -- Only explicit/terminal teardown reaches here. Native dirty refusal must
     -- remain untouched, but accepted confirm/abort may discard this buffer.
-    if vim.api.nvim_buf_is_valid(view.buf) then vim.bo[view.buf].modified = false end
+    if vim.api.nvim_buf_is_valid(view.buf) then
+      vim.bo[view.buf].modified = false
+    end
     restored = restore_document(view)
   end
-  if view.placement == 'main' and view.previous then
+  if view.placement == "main" and view.previous then
     local previous = M.views[view.previous]
     if previous and previous.buf and vim.api.nvim_buf_is_valid(previous.buf) then
       if win and vim.api.nvim_win_is_valid(win) then
@@ -826,7 +846,7 @@ function M.close(id, focus_previous_window, client_id)
     end
   end
   if not restored and win and vim.api.nvim_win_is_valid(win) then
-    if view.placement == 'main' then
+    if view.placement == "main" then
       if #vim.api.nvim_list_wins() > 1 then
         pcall(vim.api.nvim_win_close, win, true)
       end
@@ -884,16 +904,16 @@ end
 ---@param view table
 ---@return table cursor, table|nil selection, string mode
 local function position(view)
-  local mode = 'normal'
+  local mode = "normal"
   if vim.api.nvim_get_current_buf() == view.buf then
     local raw = vim.fn.mode()
-    if raw == 'v' or raw == 'V' or raw == '\22' then
-      mode = 'visual'
+    if raw == "v" or raw == "V" or raw == "\22" then
+      mode = "visual"
     end
   end
   local selection
-  if mode == 'visual' then
-    local first, last = vim.fn.line('v'), vim.fn.line('.')
+  if mode == "visual" then
+    local first, last = vim.fn.line("v"), vim.fn.line(".")
     if first ~= 0 and last ~= 0 then
       selection = { startLine = math.min(first, last) - 1, endLine = math.max(first, last) - 1 }
     end
@@ -928,7 +948,7 @@ function M.press(steps, id)
   for _, step in ipairs(steps) do
     local key = view.key
     requests.enqueue(view.client_id, {
-      method = 'view/key',
+      method = "view/key",
       buf = view.buf,
       params = {
         viewId = view.id,
@@ -947,7 +967,10 @@ function M.press(steps, id)
           return
         end
         if not resp then
-          vim.notify('magit-lsp key ' .. step .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
+          vim.notify(
+            "magit-lsp key " .. step .. " failed: " .. error_message(err),
+            vim.log.levels.WARN
+          )
           flush_deferred(key)
           return
         end
@@ -970,7 +993,7 @@ function M.invoke(command, opts, id)
   opts = opts or {}
   local view = id and find(id) or M.current()
   if not view then
-    return nil, 'no view is open'
+    return nil, "no view is open"
   end
   local cursor, visual_selection = position(view)
   if opts.cursor then
@@ -984,7 +1007,7 @@ function M.invoke(command, opts, id)
   end
 
   requests.enqueue(view.client_id, {
-    method = 'view/invoke',
+    method = "view/invoke",
     buf = view.buf,
     params = {
       viewId = view.id,
@@ -998,10 +1021,10 @@ function M.invoke(command, opts, id)
     on_result = function(resp, err)
       if not resp then
         if M.host.set_error_detail then
-          M.host.set_error_detail(type(err) == 'table' and err.data and err.data.detail or nil)
+          M.host.set_error_detail(type(err) == "table" and err.data and err.data.detail or nil)
         end
         vim.notify(
-          'magit-lsp ' .. command .. ' failed: ' .. error_message(err),
+          "magit-lsp " .. command .. " failed: " .. error_message(err),
           vim.log.levels.WARN
         )
         flush_deferred(view.key)
@@ -1021,34 +1044,34 @@ function M.apply_effects(effects, source)
   local client_id = source and source.client_id
   for _, effect in ipairs(effects or {}) do
     local kind = effect.type
-    if kind == 'message' then
+    if kind == "message" then
       if M.host.notify then
         M.host.notify(effect)
       end
-    elseif kind == 'clipboard' then
+    elseif kind == "clipboard" then
       if M.host.clipboard then
-        M.host.clipboard(effect.text or '')
+        M.host.clipboard(effect.text or "")
       end
-    elseif kind == 'passThrough' then
+    elseif kind == "passThrough" then
       if M.host.replay then
         M.host.replay(effect.key)
       end
-    elseif kind == 'pushView' then
+    elseif kind == "pushView" then
       M.open(effect.descriptor, {
         client_id = client_id,
         root = source and source.root,
       })
-    elseif kind == 'popView' then
+    elseif kind == "popView" then
       M.close(effect.viewId, true, client_id)
-    elseif kind == 'focusView' then
+    elseif kind == "focusView" then
       M.focus(effect.viewId, client_id)
-    elseif kind == 'quit' then
+    elseif kind == "quit" then
       M.quit(source)
-    elseif kind == 'visitFile' then
+    elseif kind == "visitFile" then
       if M.host.visit_file then
         M.host.visit_file(effect)
       end
-    elseif kind == 'editDocument' then
+    elseif kind == "editDocument" then
       if M.host.edit_document then
         M.host.edit_document(effect, source)
       end
@@ -1087,24 +1110,26 @@ function M.resize(id)
   view.rows = rows
   local c = client(view.client_id)
   if c then
-    c:notify('view/resize', { viewId = view.id, cols = cols, rows = rows })
+    c:notify("view/resize", { viewId = view.id, cols = cols, rows = rows })
   end
 end
 
 --- Install window resize and owned-client shutdown hooks once at client setup.
 ---@param sessions table<string, table>
 function M.setup_lifecycle(sessions)
-  vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
-    group = vim.api.nvim_create_augroup('magit_lsp_resize', { clear = true }),
+  vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+    group = vim.api.nvim_create_augroup("magit_lsp_resize", { clear = true }),
     callback = M.resize_all,
   })
-  vim.api.nvim_create_autocmd('VimLeavePre', {
-    group = vim.api.nvim_create_augroup('magit_lsp_leave', { clear = true }),
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = vim.api.nvim_create_augroup("magit_lsp_leave", { clear = true }),
     callback = function()
       M.close_all()
       for _, session in pairs(sessions) do
         local c = client(session.client_id)
-        if c then c:stop(true) end
+        if c then
+          c:stop(true)
+        end
       end
     end,
   })

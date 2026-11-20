@@ -50,8 +50,8 @@ end
 --- The id of the key press the following events belong to.
 local trace_press = 0
 
-if trace_path and trace_path ~= '' then
-  trace_file = io.open(vim.fn.expand(trace_path), 'a')
+if trace_path and trace_path ~= "" then
+  trace_file = io.open(vim.fn.expand(trace_path), "a")
 end
 
 --- Append one trace event when `MAGIT_LSP_TRACE` names a file.
@@ -63,8 +63,8 @@ function M.trace(event, detail)
   end
   local elapsed_ms = (uv.hrtime() - trace_started) / 1e6
   local ok, line = pcall(vim.json.encode, {
-    t_ms = tonumber(string.format('%.3f', elapsed_ms)),
-    t_unix_ms = tonumber(string.format('%.3f', trace_epoch + elapsed_ms)),
+    t_ms = tonumber(string.format("%.3f", elapsed_ms)),
+    t_unix_ms = tonumber(string.format("%.3f", trace_epoch + elapsed_ms)),
     id = trace_press,
     event = event,
     detail = detail or vim.NIL,
@@ -72,7 +72,7 @@ function M.trace(event, detail)
   if not ok then
     return
   end
-  trace_file:write(line .. '\n')
+  trace_file:write(line .. "\n")
   trace_file:flush()
 end
 
@@ -94,18 +94,18 @@ function M.configure(_opts)
   M.notify_wrapped = true
   -- A server progress token keeps `idle` false until its `end` arrives, so a
   -- detached commit cannot be observed half-finished.
-  vim.api.nvim_create_autocmd('LspProgress', {
+  vim.api.nvim_create_autocmd("LspProgress", {
     callback = function(args)
       local params = args.data and args.data.params
       local value = params and params.value
-      if type(value) ~= 'table' then
+      if type(value) ~= "table" then
         return
       end
-      if value.kind == 'begin' then
+      if value.kind == "begin" then
         M.progress_started(params.token, value)
-      elseif value.kind == 'report' then
+      elseif value.kind == "report" then
         M.progress_reported(params.token, value)
-      elseif value.kind == 'end' then
+      elseif value.kind == "end" then
         M.progress_finished(params.token)
       end
     end,
@@ -132,10 +132,10 @@ function M.view_open(id, kind, buf, title)
     M.views[id] = view
     M.order[#M.order + 1] = id
   end
-  view.kind = kind or view.kind or ''
+  view.kind = kind or view.kind or ""
   view.title = title or view.title
   view.buf = buf or view.buf
-  M.trace('window_opened', { view = id, kind = view.kind, buffer = buf })
+  M.trace("window_opened", { view = id, kind = view.kind, buffer = buf })
 end
 
 --- Record that a view is gone.
@@ -157,7 +157,7 @@ end
 ---@param id string
 ---@param version integer
 function M.render_received(id, version)
-  M.trace('render_received', { view = id, version = version })
+  M.trace("render_received", { view = id, version = version })
 end
 
 --- Record a render the client actually applied to a buffer.
@@ -168,7 +168,7 @@ function M.render_applied(id, version)
   if view then
     view.version = version
   end
-  M.trace('render_applied', { view = id, version = version })
+  M.trace("render_applied", { view = id, version = version })
 end
 
 --- Record the version the client told the server it holds.
@@ -192,7 +192,7 @@ function M.keymap_received(id, notice)
   local keys = {}
   local seen = {}
   local live = notice.liveKeys
-  if type(live) == 'table' and #live > 0 then
+  if type(live) == "table" and #live > 0 then
     for _, chord in ipairs(live) do
       if not seen[chord] then
         seen[chord] = true
@@ -209,10 +209,10 @@ function M.keymap_received(id, notice)
       end
     end
   end
-  view.scope = notice.scope or ''
+  view.scope = notice.scope or ""
   view.capture = notice.capture == true
   view.keys = keys
-  view.pending = notice.pending or ''
+  view.pending = notice.pending or ""
 end
 
 --- Record the server's pending menu steps for a view.
@@ -221,7 +221,7 @@ end
 function M.set_pending(id, pending)
   local view = M.views[id]
   if view then
-    view.pending = pending or ''
+    view.pending = pending or ""
   end
 end
 
@@ -229,7 +229,7 @@ end
 ---@param steps string[]
 function M.key_pressed(steps)
   trace_press = trace_press + 1
-  M.trace('key_pressed', { steps = steps })
+  M.trace("key_pressed", { steps = steps })
 end
 
 --- The id of the key press being traced, sent with `view/key` (§A.4).
@@ -243,19 +243,19 @@ end
 ---@param value table|nil
 function M.progress_started(token, value)
   M.state.progress[tostring(token)] = vim.deepcopy(value or {})
-  M.record_progress(token, value or { kind = 'begin' })
+  M.record_progress(token, value or { kind = "begin" })
 end
 
 --- Retain bounded progress evidence without changing server-owned state.
 ---@param token string|integer
 ---@param value table
 function M.record_progress(token, value)
-  local event = vim.tbl_extend('force', vim.deepcopy(value), { token = tostring(token) })
+  local event = vim.tbl_extend("force", vim.deepcopy(value), { token = tostring(token) })
   M.progress_events[#M.progress_events + 1] = event
   if #M.progress_events > 20 then
     table.remove(M.progress_events, 1)
   end
-  M.trace('progress', event)
+  M.trace("progress", event)
 end
 
 --- Record feedback only for an operation that has not already ended.
@@ -264,7 +264,7 @@ end
 function M.progress_reported(token, value)
   local current = M.state.progress[tostring(token)]
   if current then
-    M.state.progress[tostring(token)] = vim.tbl_extend('force', current, value)
+    M.state.progress[tostring(token)] = vim.tbl_extend("force", current, value)
     M.record_progress(token, value)
   end
 end
@@ -273,14 +273,14 @@ end
 ---@param token string|integer
 function M.progress_finished(token)
   M.state.progress[tostring(token)] = nil
-  M.record_progress(token, { kind = 'end' })
+  M.record_progress(token, { kind = "end" })
 end
 
 --- Record one canonical key step being sent to the server.
 ---@param step string
 ---@param id string|nil
 function M.key_sent(step, id)
-  M.trace('key_sent', { key = step, view = id })
+  M.trace("key_sent", { key = step, view = id })
 end
 
 --- Count one asynchronous request until `M.request_finished` runs.
@@ -349,7 +349,7 @@ function M.idle()
   end
   if not was_idle then
     was_idle = true
-    M.trace('idle', { views = #M.order })
+    M.trace("idle", { views = #M.order })
   end
   return true
 end
@@ -372,7 +372,7 @@ end
 local function window_state(win)
   local buf = vim.api.nvim_win_get_buf(win)
   local config = vim.api.nvim_win_get_config(win)
-  local float = config.relative ~= nil and config.relative ~= ''
+  local float = config.relative ~= nil and config.relative ~= ""
   local row, col
   if float then
     row = config.row or 0
@@ -399,12 +399,12 @@ end
 
 --- The last 20 lines of `:messages`.
 local function recent_messages()
-  local ok, output = pcall(vim.fn.execute, 'messages')
-  if not ok or type(output) ~= 'string' then
+  local ok, output = pcall(vim.fn.execute, "messages")
+  if not ok or type(output) ~= "string" then
     return {}
   end
   local lines = {}
-  for line in output:gmatch('[^\n]+') do
+  for line in output:gmatch("[^\n]+") do
     lines[#lines + 1] = line
   end
   local recent = {}
@@ -428,17 +428,24 @@ function M.snapshot()
     stack[#stack + 1] = { id = id, kind = M.views[id].kind, title = M.views[id].title }
   end
   local drafts = {}
-  for _, record in pairs(require('magit-lsp.view').views) do
+  for _, record in pairs(require("magit-lsp.view").views) do
     if record.document and vim.api.nvim_buf_is_valid(record.buf) then
       drafts[#drafts + 1] = {
-        runId = record.id, uri = record.uri, buffer = record.buf,
-        version = record.version, savedVersion = record.saved_version,
-        modified = vim.bo[record.buf].modified, busy = record.busy == true,
-        disconnected = record.disconnected == true, error = record.sync_error,
+        runId = record.id,
+        uri = record.uri,
+        buffer = record.buf,
+        version = record.version,
+        savedVersion = record.saved_version,
+        modified = vim.bo[record.buf].modified,
+        busy = record.busy == true,
+        disconnected = record.disconnected == true,
+        error = record.sync_error,
       }
     end
   end
-  table.sort(drafts, function(a, b) return a.uri < b.uri end)
+  table.sort(drafts, function(a, b)
+    return a.uri < b.uri
+  end)
   return {
     mode = vim.fn.mode(),
     cursor = { row = cursor[1] - 1, col = cursor[2] },
@@ -446,13 +453,13 @@ function M.snapshot()
     windows = windows,
     view_stack = stack,
     drafts = drafts,
-    pending = (view and view.pending) or '',
+    pending = (view and view.pending) or "",
     render = {
       version = (view and view.version) or 0,
       acked = (view and view.acked) or 0,
     },
     keymap = {
-      scope = (view and view.scope) or '',
+      scope = (view and view.scope) or "",
       capture = (view and view.capture) or false,
       keys = (view and view.keys) or {},
     },
@@ -464,7 +471,7 @@ end
 -- Fill the product-side hook table with the real recorder. Product modules only
 -- require `magit-lsp.hooks`, so a normal start never loads this module; the test
 -- harness and `MAGIT_LSP_TRACE` do, and this is where recording turns on.
-local hooks = require('magit-lsp.hooks')
+local hooks = require("magit-lsp.hooks")
 hooks.configure = M.configure
 hooks.prompt_started = M.prompt_started
 hooks.prompt_finished = M.prompt_finished

@@ -7,7 +7,7 @@
 --- a response callback runs on Neovim's event loop, so the editor stays
 --- responsive while a slow Git command, prompt or editor bridge is outstanding.
 
-local hooks = require('magit-lsp.hooks')
+local hooks = require("magit-lsp.hooks")
 
 local uv = vim.uv or vim.loop
 
@@ -26,7 +26,7 @@ M.queues = {}
 ---@param err any
 ---@return string
 function M.error_message(err)
-  if type(err) == 'table' then
+  if type(err) == "table" then
     return tostring(err.message or err)
   end
   return tostring(err)
@@ -66,7 +66,12 @@ function M.pump(client_id)
 
   local c = vim.lsp.get_client_by_id(client_id)
   if not c then
-    M.finish(client_id, table.remove(state.items, 1), nil, { message = 'the LSP client is not running' })
+    M.finish(
+      client_id,
+      table.remove(state.items, 1),
+      nil,
+      { message = "the LSP client is not running" }
+    )
     return
   end
 
@@ -76,7 +81,12 @@ function M.pump(client_id)
     if uv.hrtime() >= deadline then
       state.waiting = nil
       state.deadline = nil
-      M.finish(client_id, table.remove(state.items, 1), nil, { message = 'the LSP client did not initialize' })
+      M.finish(
+        client_id,
+        table.remove(state.items, 1),
+        nil,
+        { message = "the LSP client did not initialize" }
+      )
       return
     end
     if state.waiting then
@@ -145,7 +155,7 @@ function M.pump(client_id)
   if not ok then
     handler(nil, { message = tostring(sent) })
   elseif sent == false then
-    handler(nil, { message = 'the client did not accept ' .. item.method })
+    handler(nil, { message = "the client did not accept " .. item.method })
   end
 end
 

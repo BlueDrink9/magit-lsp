@@ -9,7 +9,7 @@ local M = {}
 
 --- The filetype every view buffer uses; LSP groups are
 --- `@lsp.type.<type>.<filetype>`.
-M.filetype = 'magit-lsp'
+M.filetype = "magit-lsp"
 
 --- The user's undo setting captured when each block buffer was created.
 ---@type table<integer, integer>
@@ -31,7 +31,7 @@ local WRITE_COMMANDS = { w = true, wr = true, wri = true, writ = true, write = t
 ---@param cmdline string
 ---@return boolean
 local function is_write_command(cmdline)
-  local cmd = cmdline:match('^%s*(%a+)!?%s*$')
+  local cmd = cmdline:match("^%s*(%a+)!?%s*$")
   return cmd ~= nil and WRITE_COMMANDS[cmd] == true
 end
 
@@ -42,7 +42,7 @@ local function notify_read_only()
   end
   M.read_only_hint_shown = true
   vim.notify(
-    'Read-only view. Press the text-mode key (ctrl+t) to edit or copy as plain text.',
+    "Read-only view. Press the text-mode key (ctrl+t) to edit or copy as plain text.",
     vim.log.levels.INFO
   )
 end
@@ -52,20 +52,20 @@ end
 --- swallow a bare write at the command line.
 ---@param buf integer
 local function configure_read_only(buf)
-  vim.api.nvim_create_autocmd('BufWriteCmd', {
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = buf,
     callback = function()
       vim.bo[buf].modified = false
       notify_read_only()
     end,
   })
-  vim.api.nvim_create_autocmd('CmdlineLeave', {
+  vim.api.nvim_create_autocmd("CmdlineLeave", {
     buffer = buf,
     callback = function()
-      if vim.fn.getcmdtype() ~= ':' or not is_write_command(vim.fn.getcmdline()) then
+      if vim.fn.getcmdtype() ~= ":" or not is_write_command(vim.fn.getcmdline()) then
         return
       end
-      pcall(vim.fn.setcmdline, '')
+      pcall(vim.fn.setcmdline, "")
       vim.bo[buf].modified = false
       notify_read_only()
     end,
@@ -77,8 +77,8 @@ end
 ---@return integer buf
 function M.fresh(name)
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
   -- `readonly` is deliberately unset: Vim warns W10 on programmatic writes.
@@ -147,7 +147,7 @@ end
 --- Keep native folding out of the server-owned section visibility.
 ---@param win integer
 function M.enable_folding(win)
-  vim.wo[win].foldmethod = 'manual'
+  vim.wo[win].foldmethod = "manual"
   vim.wo[win].foldenable = false
 end
 
