@@ -24,7 +24,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `branch.checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.checkout-local` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.checkout-remote` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.configure` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.configure` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.configure-description` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.create` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.create-and-checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |

@@ -30,11 +30,6 @@
 | `-` | `-m` | `-` | Implemented | branch |
 | `-` | `-r` | `-` | Implemented | branch |
 | `magit-branch.<branch>.description` | `b d` | `branch.configure-description` | Implemented | branch |
-| `-` | `=u` | `-` | Implemented | branch |
-| `-` | `=r` | `-` | Implemented | branch |
-| `-` | `=p` | `-` | Implemented | branch |
-| `-` | `=R` | `-` | Implemented | branch |
-| `-` | `=P` | `-` | Implemented | branch |
 | `magit-update-default-branch` | `b B` | `branch.update-default` | Planned R-6.1 | branch |
 | `magit-checkout` | `b b` | `branch.checkout` | Planned R-6.1 | branch |
 | `magit-branch-checkout` | `b l` | `branch.checkout-local` | Planned R-6.1 | branch |
@@ -46,7 +41,7 @@
 | `magit-branch-create` | `b n` | `branch.create` | Implemented | branch |
 | `magit-branch-spinout` | `b S` | `branch.spinout` | Implemented | branch |
 | `magit-worktree-branch` | `b W` | `branch.worktree-create` | Planned R-6.1 | branch |
-| `magit-branch-configure` | `b C` | `branch.configure` | Planned R-6.1 | branch |
+| `magit-branch-configure` | `b C` | `branch.configure` | Implemented | branch |
 | `magit-branch-rename` | `b m` | `branch.rename` | Implemented | branch |
 | `magit-branch-reset` | `b x` | `branch.reset` | Implemented | branch |
 | `magit-branch-delete` | `b k` | `branch.delete` | Implemented | branch |
