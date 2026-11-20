@@ -6,10 +6,11 @@ and untracked nonignored sources; ignored files are excluded. Legacy formatting
 is checked only when a maintained source file changes, so these commands do not
 normalize the whole repository.
 
-Install the formatter tools. StyLua comes from the development environment and is
-resolved from `PATH` (the flake dev shell installs it); CI installs the same
-pinned version (`2.6.0`) explicitly instead of assuming a dev shell. The
-repository hook is optional:
+Install the formatter tools. Rustfmt and StyLua come from the locked development
+environment and are resolved from `PATH`; CI runs the format job inside that same
+flake shell (`nix develop --no-update-lock-file -c ...`), so the formatter
+versions come from `flake.lock` rather than an ad hoc install. The repository
+hook is optional:
 
 ```sh
 nix develop

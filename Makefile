@@ -209,9 +209,9 @@ release-automation-check:
 	$(call run,release-automation-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py)
 
 # Shellcheck plus the offline release contract suite for the download/packaging
-# scripts the release workflow and installer path depend on. shellcheck is not
-# in the flake dev shell yet, so a missing tool fails with a readable message
-# instead of silently skipping the lint half.
+# scripts the release workflow and installer path depend on. The flake dev shell
+# provides shellcheck; a missing tool fails with a readable message instead of
+# silently skipping the lint half.
 release-contract-check:
 	$(call run,release-contract-check,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-check: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/release -p 'test_*.py')
 

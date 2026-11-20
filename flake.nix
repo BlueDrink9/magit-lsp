@@ -53,6 +53,7 @@
               rust-analyzer
               rustc
               rustfmt
+              shellcheck
               stylua
               typescript-language-server
               ps  # used for tests to check child processes

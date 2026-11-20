@@ -182,12 +182,19 @@ opens the commit-message buffer in the same instance; bottom menu placement.
 
 ### 8.7 CI
 
-`make test-rust` on Linux/macOS/Windows; Neovim tests on stable and nightly;
-manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
-on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
-`make ui-test` and uploads `build/ui/` on failure (R-UI-6); a Linux `coverage`
-job that runs `make coverage-rust`, keeps `build/coverage/` as an artifact and
-uploads the Rust-only LCOV to Codecov when `CODECOV_TOKEN` is configured.
+The Linux jobs in `.github/workflows/ci.yml` run their command bodies inside the
+repository's locked Nix development shell (`nix develop --no-update-lock-file -c
+...`), installed from `flake.lock`. Rustc, rustfmt, StyLua, cargo-llvm-cov,
+Node.js, pnpm, Neovim, tmux and shellcheck therefore come from one pinned
+nixpkgs revision instead of separate toolchain/action installs. The jobs cover
+formatting, the release contract, Rust/Lua/VSCode tests, Rust coverage,
+documentation and UI scenarios; `make vscode-test` still installs the locked
+VSCode dependencies from `pnpm-lock.yaml`. The Windows/macOS `native-test` lanes
+deliberately keep each runner's native toolchain: Nix has no native Windows
+support and those lanes exist to cover native OS behavior, so they make no Nix
+coverage claim. `release.yml` also stays outside the shell, because it builds
+on Ubuntu 22.04 with its fixed Rust 1.94.1 toolchain to preserve the glibc
+baseline; `publish.yml` only validates artifacts that workflow already built.
 
 ### Rust line coverage
 
@@ -220,9 +227,10 @@ mismatch. `make test-rust` remains the ordinary test gate, and ordinary
 `make test` stays uninstrumented.
 
 CI publishes this Rust-only measurement from a dedicated Linux `coverage` job
-in `.github/workflows/ci.yml`. The job installs the `llvm-tools-preview`
-component through `dtolnay/rust-toolchain` and `cargo install cargo-llvm-cov
---locked`, then runs the same `make coverage-rust` target as local use; it never
+in `.github/workflows/ci.yml`. The job runs inside the same locked Nix dev shell
+as local use, whose `cargo-llvm-cov` and exported `LLVM_COV`/`LLVM_PROFDATA`
+pair come from the nixpkgs revision in `flake.lock`, so they always match the
+shell's rustc; the job then runs the same `make coverage-rust` target. It never
 calls `cargo llvm-cov` with different arguments or adds `--ignore-run-fail`.
 `build/coverage/lcov.info`, `build/coverage/cargo-llvm-cov.log` and
 `build/coverage/summary.txt` are uploaded as the `rust-coverage` artifact even

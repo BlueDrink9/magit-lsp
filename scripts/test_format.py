@@ -4,11 +4,14 @@
 Each test builds a throwaway Git repository with tracked, excluded and untracked
 maintained sources, puts fake `rustfmt`, `stylua` and `prettier` executables on
 PATH that log their arguments, and runs the production `scripts/format.py`.
+`CIWorkflowEnvironmentTest` also checks that every Linux CI job runs its tools
+inside the locked flake dev shell, using source-level negative fixtures.
 Run via `make format-test`.
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +22,81 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 FORMAT_PY = REPO / "scripts/format.py"
 HOOK = REPO / ".githooks/pre-commit"
+CI_WORKFLOW = REPO / ".github/workflows/ci.yml"
+NIX_DEVELOP = "nix develop --no-update-lock-file -c"
+
+# Every Linux job must run its tool commands inside the flake's locked dev
+# shell, and it must not provision any of these tools itself.
+LINUX_JOB_COMMANDS = {
+    "format-check": (
+        f"{NIX_DEVELOP} make vscode-deps",
+        f'{NIX_DEVELOP} python3 scripts/format.py --base "$base"',
+    ),
+    "release-contract": (f"{NIX_DEVELOP} make release-contract-check",),
+    "test": (
+        f"{NIX_DEVELOP} make vscode-test",
+        f"{NIX_DEVELOP} make test-rust test-lua",
+    ),
+    "coverage": (f"{NIX_DEVELOP} make coverage-rust",),
+    "documentation": (f"{NIX_DEVELOP} make docs-artifacts-check docs-check",),
+    "ui-test": (
+        f"{NIX_DEVELOP} make build",
+        f"{NIX_DEVELOP} env CI=1 make ui-unit ui-test",
+    ),
+}
+
+FORBIDDEN_PROVISIONING = (
+    "cargo install",
+    "apt-get install",
+    "dtolnay/rust-toolchain",
+    "actions/setup-node",
+    "actions/setup-python",
+    "pnpm/action-setup",
+    "rhysd/action-setup-vim",
+)
+
+
+def workflow_jobs(workflow: str) -> dict[str, str]:
+    """Return each job body from a workflow's top-level `jobs:` mapping."""
+    lines = workflow.splitlines()
+    try:
+        start = lines.index("jobs:")
+    except ValueError:
+        return {}
+    jobs: dict[str, list[str]] = {}
+    current = None
+    for line in lines[start + 1:]:
+        match = re.match(r"^  ([A-Za-z0-9_-]+):$", line)
+        if match:
+            current = match.group(1)
+            jobs[current] = []
+        elif current is not None:
+            jobs[current].append(line)
+    return {name: "\n".join(body) for name, body in jobs.items()}
+
+
+def workflow_environment_violations(workflow: str) -> list[str]:
+    """Report Linux CI jobs that leave the locked flake dev shell."""
+    jobs = workflow_jobs(workflow)
+    violations = []
+    for name, commands in LINUX_JOB_COMMANDS.items():
+        body = jobs.get(name)
+        if body is None:
+            violations.append(f"{name}: job is missing")
+            continue
+        for command in commands:
+            if command not in body:
+                violations.append(f"{name}: missing locked command: {command}")
+        for forbidden in FORBIDDEN_PROVISIONING:
+            if forbidden in body:
+                violations.append(
+                    f"{name}: provisions tools outside the dev shell with '{forbidden}'"
+                )
+    native = jobs.get("native-test", "")
+    if "nix develop" in native:
+        violations.append("native-test: native lanes must not claim Nix coverage")
+    return violations
+
 
 FAKE_FORMATTER = '''#!/usr/bin/env python3
 """Log invocations and pretend to format or check source files."""
@@ -279,6 +357,41 @@ class FormatSweepTest(unittest.TestCase):
         self.write(path, "ok\n")
         result = self.run_format("--all-tracked", "--source", "working-tree", "--formatter", "stylua")
         self.assertEqual(0, result.returncode, result.stderr)
+
+
+class CIWorkflowEnvironmentTest(unittest.TestCase):
+    """Guard the Linux CI jobs' locked flake-shell contract."""
+
+    def workflow(self) -> str:
+        """Return the tracked CI workflow source."""
+        return CI_WORKFLOW.read_text()
+
+    def test_linux_jobs_use_locked_flake_shell(self) -> None:
+        """Every Linux job runs its tools inside the pinned dev shell."""
+        violations = workflow_environment_violations(self.workflow())
+        self.assertEqual([], violations)
+        lock = (REPO / "flake.lock").read_text()
+        self.assertIn('"locked"', lock)
+        self.assertIn('"narHash"', lock)
+
+    def test_missing_nix_coverage_is_rejected(self) -> None:
+        """A coverage command outside the shell is reported."""
+        workflow = self.workflow().replace(
+            f"{NIX_DEVELOP} make coverage-rust", "make coverage-rust"
+        )
+        violations = workflow_environment_violations(workflow)
+        self.assertTrue(any("coverage:" in v for v in violations), violations)
+
+    def test_missing_nix_format_execution_is_rejected(self) -> None:
+        """A formatter run outside the shell and an ad hoc install are reported."""
+        workflow = self.workflow().replace(
+            f'{NIX_DEVELOP} python3 scripts/format.py --base "$base"',
+            "cargo install stylua --version 2.6.0 --locked\n"
+            '          python3 scripts/format.py --base "$base"',
+        )
+        violations = workflow_environment_violations(workflow)
+        self.assertTrue(any("format-check:" in v for v in violations), violations)
+        self.assertTrue(any("cargo install" in v for v in violations), violations)
 
 
 if __name__ == "__main__":
