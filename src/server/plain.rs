@@ -3,7 +3,7 @@
 use super::*;
 
 /// Start an asynchronous bootstrap after the didOpen notification is accepted.
-pub(super) fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(String, InvokeResult)> {
+pub(super) fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(String, String)> {
     let format = {
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(document) = documents.get(&uri) else {
@@ -81,6 +81,28 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
         crate::presentation::resolve::Resolution::None => return,
     };
     let repo = repository.root.to_string_lossy().into_owned();
+    let lock = repository_lock(&shared.repo_locks, &repo).await;
+    let guard = lock.lock_owned().await;
+    let shared = shared.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        bootstrap_plain_view(&shared, uri, incarnation, format, caps, encoding, repo);
+    }).await;
+}
+
+/// Open and publish a Plain view while holding the repository execution lock.
+fn bootstrap_plain_view(
+    shared: &Shared,
+    uri: String,
+    incarnation: u64,
+    format: DocumentFormat,
+    caps: PlainCapabilities,
+    encoding: Encoding,
+    repo: String,
+) {
+    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) {
+        return;
+    }
     let handle = repository_session(shared, &repo);
     let config = shared.config.for_repository(Path::new(&repo));
     let view_id = shared.next_view_id();
@@ -169,6 +191,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
                     controller,
                     keys_override: None,
                     key_state: Default::default(),
+                    key_executing: false,
                 },
             );
         shared
@@ -448,15 +471,30 @@ enum PlainKeyStep {
 }
 
 /// One Plain key action to execute once the Plain lifecycle guard is released.
+#[derive(Clone)]
 pub(super) enum PlainKeyDispatch {
     /// Run one key step through the existing shared session key handler.
     Key {
         uri: String,
         repo: String,
+        incarnation: u64,
         params: crate::protocol::ViewKeyParams,
     },
     /// Discard a stale edit and render the session's current state.
-    Refresh { uri: String, repo: String },
+    Refresh { uri: String, repo: String, incarnation: u64 },
+}
+
+impl PlainKeyDispatch {
+    /// Repository whose execution lock and mutation turn own this dispatch.
+    pub(super) fn repo(&self) -> &str {
+        match self { Self::Key { repo, .. } | Self::Refresh { repo, .. } => repo }
+    }
+
+    fn identity(&self) -> (&str, u64) {
+        match self {
+            Self::Key { uri, incarnation, .. } | Self::Refresh { uri, incarnation, .. } => (uri, *incarnation),
+        }
+    }
 }
 
 /// Classify one accepted Plain edit as a key against its matched retained snapshot.
@@ -466,13 +504,13 @@ fn plain_key_step(
     change: &super::drafts::AcceptedChange,
     snapshot: &crate::docstore::Document,
 ) -> PlainKeyStep {
-    use crate::presentation::keys::{self, KeyPreflight, State};
+    use crate::presentation::keys::{self, State};
     let encoding = shared
         .client
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .encoding;
-    let (repo, view_id, generation, prior, mut state) = {
+    let (repo, incarnation, view_id, generation, prior, mut state) = {
         let mut documents = shared
             .plain_documents
             .lock()
@@ -484,7 +522,7 @@ fn plain_key_step(
         // repair, before treating its mutated pre-text as fresh key input.
         if entry.key_state.repair_echo.is_some_and(|(_, version, hash)| version == change.post_version && hash == crate::presentation::plain::hash_text(&change.post_text)) {
             entry.key_state.repair_echo = None;
-            entry.key_state.classifier = State::Ready;
+            if !entry.key_executing { entry.key_state.classifier = State::Ready; }
             return PlainKeyStep::Continue;
         }
         if !plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled {
@@ -501,6 +539,7 @@ fn plain_key_step(
         let state = entry.key_state.clone();
         (
             entry.repo.clone(),
+            entry.incarnation,
             view_id.to_owned(),
             generation,
             state.classifier.clone(),
@@ -594,8 +633,10 @@ fn plain_key_step(
             .get_mut(uri)
         {
             entry.key_state = Default::default();
+            entry.key_executing = true;
+            entry.key_state.classifier = State::Executing;
         }
-        return PlainKeyStep::Dispatch(PlainKeyDispatch::Refresh { uri: uri.to_owned(), repo });
+        return PlainKeyStep::Dispatch(PlainKeyDispatch::Refresh { uri: uri.to_owned(), repo, incarnation });
     }
     let edit = keys::derive_edit(
         &change.pre.text,
@@ -618,56 +659,59 @@ fn plain_key_step(
         },
         selection,
     };
-    let Some(handle) = shared.session(&repo) else {
-        return PlainKeyStep::Continue;
-    };
-    let keymaps = shared
-        .config
-        .for_repository(Path::new(&repo))
-        .keymaps();
-    let preflight = {
-        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-        session.set_keymaps(keymaps);
-        session.preflight_key(&params)
-    };
-    match preflight {
-        Ok(KeyPreflight::Pending) => PlainKeyStep::Dispatch(PlainKeyDispatch::Key {
-            uri: uri.to_owned(),
-            repo,
-            params,
-        }),
-        Ok(KeyPreflight::Allowed { .. }) => PlainKeyStep::Dispatch(PlainKeyDispatch::Key {
-            uri: uri.to_owned(),
-            repo,
-            params,
-        }),
-        Ok(KeyPreflight::Unbound) => {
-            let _ = shared
-                .sender
-                .send(show_message(2, "key is not bound in the active profile".into()));
-            PlainKeyStep::Continue
-        }
-        Ok(KeyPreflight::Refused { message, .. }) => {
-            let _ = shared.sender.send(show_message(2, message));
-            PlainKeyStep::Continue
-        }
-        Err(error) => {
-            tracing::warn!(%error, "failed to preflight a Plain key");
-            PlainKeyStep::Continue
-        }
+    if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri) {
+        entry.key_executing = true;
+        entry.key_state.classifier = State::Executing;
+        entry.key_state.repair_due = false;
     }
+    PlainKeyStep::Dispatch(PlainKeyDispatch::Key { uri: uri.to_owned(), repo, incarnation, params })
 }
 
-/// Execute one accepted Plain key with no lifecycle guard held.
-pub(super) fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> {
+/// Run a tracked Plain handler in repository order, off the transport reader.
+pub(super) async fn handle_plain_key(shared: Shared, dispatch: PlainKeyDispatch, turn: MutationTurn) {
+    turn.wait().await;
+    let lock = repository_lock(&shared.repo_locks, dispatch.repo()).await;
+    let _guard = lock.lock().await;
+    let (token, cancel) = shared.begin_progress(&shared.sender, "view/key", None, Some(dispatch.repo()));
+    let worker_shared = shared.clone();
+    let worker_dispatch = dispatch.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        runner::with_cancel(Some(cancel), || execute_plain_key(&worker_shared, worker_dispatch))
+    }).await;
+    let error = match result {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(error) => Some(format!("Plain key worker failed: {error}")),
+    };
+    if let Some(error) = error {
+        let _ = shared.sender.send(show_message(1, format!("Cannot execute Plain key: {error}")));
+    }
+    let (uri, incarnation) = dispatch.identity();
+    repair_plain_authoritative(&shared, uri, incarnation);
+    {
+        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri).filter(|entry| entry.incarnation == incarnation) {
+            entry.key_executing = false;
+            entry.key_state.repair_due = false;
+            if entry.key_state.repair_echo.is_none() { entry.key_state.classifier = crate::presentation::keys::State::Ready; }
+        }
+    }
+    shared.end_progress(&shared.sender, &token);
+    drop(turn);
+}
+
+/// Execute one admitted Plain key with no lifecycle guard held during Git/render delivery.
+fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> {
+    let (uri, incarnation) = dispatch.identity();
+    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, uri, incarnation) { return Ok(()); }
     match dispatch {
-        PlainKeyDispatch::Refresh { uri, repo } => {
+        PlainKeyDispatch::Refresh { uri, repo, incarnation } => {
             let view_id = shared
                 .plain_documents
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .values()
-                .find(|entry| entry.repo == repo)
+                .get(&uri)
+                .filter(|entry| entry.incarnation == incarnation && entry.repo == repo)
                 .map(|entry| entry.view_id.clone());
             let snapshot = view_id.as_ref().and_then(|view_id| {
                 shared
@@ -681,61 +725,67 @@ pub(super) fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> 
                 (Some(view_id), Some(snapshot)) => {
                     route_plain_render(shared, &view_id, Some(snapshot));
                 }
-                _ => repair_plain_authoritative(shared, &uri),
+                _ => repair_plain_authoritative(shared, &uri, incarnation),
             }
             return Ok(());
         }
         PlainKeyDispatch::Key {
             uri,
             repo,
+            incarnation,
             params,
         } => {
+            let handle = shared.session(&repo).ok_or_else(|| Error::new("Plain key session closed"))?;
+            // Session ownership serializes admission with execution; lifecycle
+            // ownership is needed only to validate the live URI, never for Git.
+            let step = {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                let lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+                let eligible = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).is_some_and(|entry| {
+                    entry.incarnation == incarnation && entry.repo == repo && entry.view_id == params.view_id
+                        && plain_keys_effective(shared, &repo, entry.keys_override).enabled
+                        && entry.controller.latest_action_meta().is_some_and(|(_, view_id, _, scope, _)| view_id == params.view_id && !matches!(scope, "prompt" | "log.select" | "commit-message"))
+                });
+                if !eligible || !plain_incarnation_is_current(shared, &uri, incarnation) || shared.closing.load(Ordering::SeqCst) { return Ok(()); }
+                let current = shared.published.lock().unwrap_or_else(|p| p.into_inner()).values().find_map(|views| views.current_snapshot(&params.view_id).map(|(_, version, _, _)| version));
+                if current != Some(params.version) {
+                    let _ = shared.sender.send(show_message(2, PLAIN_KEY_STALE.into()));
+                    return Ok(());
+                }
+                session.set_keymaps(shared.config.for_repository(Path::new(&repo)).keymaps());
+                use crate::presentation::keys::KeyPreflight;
+                match session.preflight_key(&params)? {
+                    KeyPreflight::Pending | KeyPreflight::Allowed { .. } => {}
+                    KeyPreflight::Unbound => { let _ = shared.sender.send(show_message(2, "key is not bound in the active profile".into())); return Ok(()); }
+                    KeyPreflight::Refused { message, .. } => { let _ = shared.sender.send(show_message(2, message)); return Ok(()); }
+                }
             // Admission must match `key_view`: cancellation cleanup and a
             // detached worker's mutation authority both refuse before any
             // command starts, leaving the typed text to the authoritative repair.
             if let Some(message) = super::view_execution::key_admission_refusal(shared, &repo, || {
-                let Some(handle) = shared.session(&repo) else {
-                    return Ok(None);
-                };
-                let resolved = handle
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .resolved_key_command(&params);
-                resolved
+                session.resolved_key_command(&params)
             })? {
                 let _ = shared.sender.send(show_message(2, message.into()));
-                repair_plain_authoritative(shared, &uri);
                 return Ok(());
             }
-            if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&uri) {
-                entry.key_state.classifier = crate::presentation::keys::State::Executing;
-                entry.key_state.repair_due = false;
-            }
-            let handle = shared
-                .session(&repo)
-                .ok_or_else(|| Error::new("Plain key session closed"))?;
-            let keymaps = shared
-                .config
-                .for_repository(Path::new(&repo))
-                .keymaps();
-            let step = {
-                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                session.set_keymaps(keymaps);
+                drop(lifecycle);
                 session.start_key(&params)?
             };
             let outcome = super::view_execution::drive_execution(shared, &repo, step)?;
+            if !plain_incarnation_is_current(shared, &uri, incarnation) { return Ok(()); }
             let dispatched = super::view_execution::dispatched_outcome(shared, &repo, outcome)?;
             for notification in dispatched.notifications {
                 let _ = shared.sender.send(notification);
             }
-            repair_plain_authoritative(shared, &uri);
             Ok(())
         }
     }
 }
 
 /// Repair one Plain document to its newest retained authoritative render.
-fn repair_plain_authoritative(shared: &Shared, uri: &str) {
+fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
+    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    if !plain_incarnation_is_current(shared, uri, incarnation) { return; }
     let (text, version) = {
         let documents = shared
             .documents
@@ -746,15 +796,11 @@ fn repair_plain_authoritative(shared: &Shared, uri: &str) {
         };
         (document.text.clone(), document.version)
     };
-    let _lifecycle = shared
-        .plain_lifecycle
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let mut documents = shared
         .plain_documents
         .lock()
         .unwrap_or_else(|p| p.into_inner());
-    let Some(entry) = documents.get_mut(uri) else {
+    let Some(entry) = documents.get_mut(uri).filter(|entry| entry.incarnation == incarnation) else {
         return;
     };
     if entry.key_state.repair_echo.is_some() {
@@ -833,7 +879,7 @@ pub(super) fn reconcile_rich_prompt(shared: &Shared, uri: &str, sender: &mpsc::U
     }
 }
 
-pub(super) fn close_plain(shared: &Shared, uri: &str) -> Option<(String, InvokeResult)> {
+pub(super) fn close_plain(shared: &Shared, uri: &str) -> Option<(String, String)> {
     shared
         .plain_incarnations
         .lock()
@@ -848,45 +894,43 @@ pub(super) fn close_plain(shared: &Shared, uri: &str) -> Option<(String, InvokeR
         return None;
     };
     entry.controller.close();
-    let outcome = shared.session(&entry.repo).and_then(|session| {
-        session
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .close(&entry.view_id)
-            .ok()
-            .map(|outcome| (entry.repo.clone(), outcome))
-    });
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .remove(&entry.view_id);
-    let repo = entry.repo;
-    let shared = shared.clone();
-    let runtime = shared
-        .runtime
-        .clone()
-        .expect("Plain transport owns a Tokio runtime");
-    runtime.spawn_blocking(move || shared.stop_watcher_if_idle(&repo));
-    outcome
+    Some((entry.repo, entry.view_id))
 }
 
 /// Deliver the renders and effects a closed Plain view resumed.
 ///
 /// Callers must drop `plain_lifecycle` first: routing these notifications
 /// reacquires it.
-pub(super) fn deliver_plain_close_outcome(shared: &Shared, close: Option<(String, InvokeResult)>) {
-    let Some((repo, outcome)) = close else {
+pub(super) fn deliver_plain_close_outcome(shared: &Shared, close: Option<(String, String)>) {
+    let Some((repo, view_id)) = close else {
         return;
     };
-    match dispatched_outcome(shared, &repo, outcome) {
-        Ok(dispatched) => {
-            for notification in dispatched.notifications {
-                let _ = shared.sender.send(notification);
+    let shared = shared.clone();
+    tokio::spawn(async move {
+        let lock = repository_lock(&shared.repo_locks, &repo).await;
+        let guard = lock.lock_owned().await;
+        let _ = tokio::task::spawn_blocking(move || {
+            let _guard = guard;
+            let outcome = shared.session(&repo).and_then(|session| session.lock().unwrap_or_else(|p| p.into_inner()).close(&view_id).ok());
+            if let Some(outcome) = outcome {
+                // A replacement document owns its own focus/render lifecycle.
+                // Closing the old logical view must not redirect that document.
+                let replacement = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).values().any(|entry| entry.repo == repo);
+                if !replacement {
+                    match dispatched_outcome(&shared, &repo, outcome) {
+                        Ok(dispatched) => for notification in dispatched.notifications { let _ = shared.sender.send(notification); },
+                        Err(error) => tracing::warn!(%error, "failed to deliver a Plain view close outcome"),
+                    }
+                }
             }
-        }
-        Err(error) => tracing::warn!(%error, "failed to deliver a Plain view close outcome"),
-    }
+            shared.stop_watcher_if_idle(&repo);
+        }).await;
+    });
 }
 
 /// Default time a Plain client has to open a commit draft before it is canceled.
@@ -1252,6 +1296,7 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
             documents.get_mut(&uri).filter(|entry| entry.incarnation == incarnation).map(|entry| {
                 if !applied && entry.key_state.repair_echo.is_some_and(|(id, _, _)| id == edit.id) {
                     entry.key_state.repair_echo = None;
+                    if !entry.key_executing { entry.key_state.classifier = crate::presentation::keys::State::Ready; }
                 }
                 let next = entry.controller.response(edit.id, applied);
                 let warning = entry.controller.take_format_warning();
@@ -1273,7 +1318,14 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
                     if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(&shared, &uri, incarnation) { return; }
                     let next = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner())
                         .get_mut(&uri).filter(|entry| entry.incarnation == incarnation)
-                        .and_then(|entry| entry.controller.expire(edit_id));
+                        .and_then(|entry| {
+                            let next = entry.controller.expire(edit_id);
+                            if entry.key_state.repair_echo.is_some_and(|(id, _, _)| id == edit_id) {
+                                entry.key_state.repair_echo = None;
+                                if !entry.key_executing { entry.key_state.classifier = crate::presentation::keys::State::Ready; }
+                            }
+                            next
+                        });
                     if let Some(next) = next { send_plain_edit(&shared, uri, incarnation, next); }
                 });
             }

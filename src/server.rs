@@ -51,7 +51,7 @@ use view_execution::CommitEdit;
 
 use plain::{deliver_plain_effects, deliver_render, route_plain_render, schedule_plain_open};
 use plain::{
-    close_plain, deliver_plain_close_outcome, execute_plain_key, plain_change,
+    close_plain, deliver_plain_close_outcome, handle_plain_key, plain_change,
     reconcile_rich_prompt, refresh_pending_views, report_pending_refresh_error,
 };
 use ui::{custom_ui, dynamic_delivery, refresh_view_keymaps, PickBridge, PromptBridge, ServerUi};
@@ -220,6 +220,8 @@ struct PlainEntry {
     keys_override: Option<bool>,
     /// Per-document key classifier and repair latch.
     key_state: crate::presentation::keys::DocumentState,
+    /// A worker still owns execution, independently of a repair awaiting echo.
+    key_executing: bool,
 }
 
 #[derive(Clone)]
@@ -1248,9 +1250,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 // held across the key execution or this call.
                                 drop(_plain);
                                 if let Some(dispatch) = dispatched {
-                                    if let Err(error) = execute_plain_key(&shared, dispatch) {
-                                        tracing::warn!(%error, "failed to execute a Plain key");
-                                    }
+                                    let turn = shared.reserve_mutation(dispatch.repo().to_owned());
+                                    handlers.spawn(handle_plain_key(shared.clone(), dispatch, turn));
                                 }
                                 reconcile_rich_prompt(&shared, uri, &sender);
                             }
