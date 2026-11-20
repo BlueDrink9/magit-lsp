@@ -11,8 +11,8 @@ pub fn definition() -> MenuDef {
         groups: vec![group(
             "Notes",
             vec![
-                action("r", "notes.read", "read", "magit-notes-show", ""),
-                action("a", "notes.add", "add", "magit-notes-add", ""),
+                action("r", "notes.read", "read", "-", ""),
+                action("a", "notes.add", "add", "-", ""),
                 action("e", "notes.edit", "edit", "magit-notes-edit", ""),
                 action("k", "notes.remove", "remove", "magit-notes-remove", ""),
             ],

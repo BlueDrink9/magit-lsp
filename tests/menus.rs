@@ -338,6 +338,21 @@ fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
         magit_command: "magit-log-select".to_string(),
         local_command: "log.select-and-copy".to_string(),
     });
+    // Notes keys are project-local choices; edit/remove origins exist upstream,
+    // but their upstream keys are T and r rather than these local bindings.
+    for (key, command, magit_command) in [
+        ("r", "notes.read", "-"),
+        ("a", "notes.add", "-"),
+        ("e", "notes.edit", "magit-notes-edit"),
+        ("k", "notes.remove", "magit-notes-remove"),
+    ] {
+        reference.push(AuditAction {
+            menu: "notes".to_string(),
+            key: key.to_string(),
+            magit_command: magit_command.to_string(),
+            local_command: command.to_string(),
+        });
+    }
     let expected = definition_actions();
     validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
     let aliases = [
