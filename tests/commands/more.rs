@@ -5423,3 +5423,327 @@ fn ignore_root_stale_origin_is_refused_without_redirecting() {
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["write-tree"]), index);
 }
+
+/// Read one file's index flag from `git ls-files -v -z` output (`S`/`h`/`H`).
+fn skip_worktree_flag<'a>(listing: &'a str, target: &str) -> Option<char> {
+    listing.split('\0').find_map(|entry| {
+        let tag = entry.chars().next()?;
+        let path = entry[tag.len_utf8()..].strip_prefix(' ')?;
+        (path == target).then_some(tag)
+    })
+}
+
+#[test]
+fn skip_worktree_commands_set_and_clear_explicit_path() {
+    use magit_lsp::protocol::PromptKind;
+
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                (path, "original\n"),
+                ("dir/other.txt", "other\n"),
+                ("base.txt", "base\n"),
+            ],
+        )
+        .modify(path, "changed\n")
+        .build();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage"]);
+    let target_before = std::fs::read(tmp.path().join(path)).unwrap();
+    let other_before = std::fs::read(tmp.path().join("dir/other.txt")).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    assert_eq!(
+        skip_worktree_flag(&flags(), path),
+        Some('H'),
+        "precondition"
+    );
+    assert_eq!(
+        skip_worktree_flag(&flags(), "dir/other.txt"),
+        Some('H'),
+        "precondition"
+    );
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", path);
+    assert_eq!(test.cursor().line, line);
+
+    // Real `i`/`w` ingress with the selected wildcard-and-space path; the
+    // answer is typed literally and must never be split or expanded.
+    test.ui().reply_text(Some(path.to_string()));
+    test.press_ui("i");
+    let set = test.press_ui("w");
+    let asked = test.ui().last_request().expect("one text prompt");
+    assert_eq!(asked.kind, PromptKind::Text);
+    assert_eq!(asked.default.as_ref().and_then(|v| v.as_str()), Some(path));
+    assert!(
+        message_texts(&set.effects)
+            .iter()
+            .any(|text| text.contains("Set skip-worktree") && text.contains(path)),
+        "{:?}",
+        set.effects
+    );
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('S'), "{}", flags());
+    assert_eq!(skip_worktree_flag(&flags(), "dir/other.txt"), Some('H'));
+
+    // An independent assume-unchanged bit on the same target must survive the
+    // clear below; setting it also hides the file from status, as in Magit.
+    tmp.git(&["update-index", "--assume-unchanged", "--", path]);
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('s'), "{}", flags());
+
+    // Clear from the status header: no file row under the cursor, so the
+    // default is blank and the now-hidden path is entered by hand.
+    test.goto(0);
+    assert_ne!(
+        test.tree().line_nodes.first().map(|node| node.kind),
+        Some(magit_lsp::tree::NodeKind::File)
+    );
+    test.ui().reply_text(Some(path.to_string()));
+    test.press_ui("i");
+    let clear = test.press_ui("W");
+    let asked = test.ui().last_request().expect("second text prompt");
+    assert_eq!(asked.kind, PromptKind::Text);
+    assert!(
+        asked.default.is_none(),
+        "blank default without a selected file: {:?}",
+        asked.default
+    );
+    assert!(
+        message_texts(&clear.effects)
+            .iter()
+            .any(|text| text.contains("Cleared skip-worktree") && text.contains(path)),
+        "{:?}",
+        clear.effects
+    );
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('h'), "{}", flags());
+    assert_eq!(skip_worktree_flag(&flags(), "dir/other.txt"), Some('H'));
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage"]), staged);
+    assert_eq!(std::fs::read(tmp.path().join(path)).unwrap(), target_before);
+    assert_eq!(
+        std::fs::read(tmp.path().join("dir/other.txt")).unwrap(),
+        other_before
+    );
+    assert_eq!(
+        std::fs::read(tmp.path().join("base.txt")).unwrap(),
+        base_before
+    );
+}
+
+#[test]
+fn skip_worktree_commands_cancel_never_writes() {
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
+        .modify(path, "changed\n")
+        .build();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let index_before = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    let flags_before = flags();
+    let staged = tmp.git(&["ls-files", "--stage"]);
+    let target_before = std::fs::read(tmp.path().join(path)).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    let assert_preserved = |stage: &str| {
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/index")).unwrap(),
+            index_before,
+            "{stage}: index bytes"
+        );
+        assert_eq!(flags(), flags_before, "{stage}: index flags");
+        assert_eq!(
+            tmp.git(&["ls-files", "--stage"]),
+            staged,
+            "{stage}: staged entries and modes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(path)).unwrap(),
+            target_before,
+            "{stage}: target bytes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("base.txt")).unwrap(),
+            base_before,
+            "{stage}: base bytes"
+        );
+    };
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    test.goto_file("unstaged", path);
+
+    // Cancel the set prompt with an explicit `None` text answer.
+    test.ui().reply_text(None);
+    test.press_ui("i");
+    let cancelled = test.press_ui("w");
+    assert!(
+        !message_texts(&cancelled.effects)
+            .iter()
+            .any(|text| text.contains("Set skip-worktree")),
+        "{:?}",
+        cancelled.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+    assert_preserved("cancel set");
+
+    // Cancel the clear prompt through the generic cancel answer.
+    test.goto(0);
+    test.ui().reply_cancel();
+    test.press_ui("i");
+    let cancelled = test.press_ui("W");
+    assert!(
+        !message_texts(&cancelled.effects)
+            .iter()
+            .any(|text| text.contains("Cleared skip-worktree")),
+        "{:?}",
+        cancelled.effects
+    );
+    assert!(!test.session.has_pending_prompt());
+    assert_preserved("cancel clear");
+}
+
+#[test]
+fn skip_worktree_commands_invalid_and_untracked_paths_do_not_write() {
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
+        .modify(path, "changed\n")
+        .build();
+    std::fs::write(tmp.path().join("untracked.txt"), "not in index\n").unwrap();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let index_before = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    let flags_before = flags();
+    let staged = tmp.git(&["ls-files", "--stage"]);
+    let target_before = std::fs::read(tmp.path().join(path)).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    let untracked_before = std::fs::read(tmp.path().join("untracked.txt")).unwrap();
+    let assert_preserved = |stage: &str| {
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/index")).unwrap(),
+            index_before,
+            "{stage}: index bytes"
+        );
+        assert_eq!(flags(), flags_before, "{stage}: index flags");
+        assert_eq!(
+            tmp.git(&["ls-files", "--stage"]),
+            staged,
+            "{stage}: staged entries and modes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(path)).unwrap(),
+            target_before,
+            "{stage}: target bytes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("base.txt")).unwrap(),
+            base_before,
+            "{stage}: base bytes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("untracked.txt")).unwrap(),
+            untracked_before,
+            "{stage}: untracked bytes"
+        );
+    };
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", path);
+    for (case, input) in ["", "   ", "untracked.txt", "../escape.txt", "dir/nope.txt"]
+        .into_iter()
+        .enumerate()
+    {
+        test.goto(line);
+        test.ui().reply_text(Some(input.to_string()));
+        test.press_ui("i");
+        let result = test.press_ui("w");
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts.iter().any(|text| {
+                !text.trim().is_empty() && !text.contains('{') && !text.contains('}')
+            }),
+            "case {case} ({input:?}) must give a readable refusal: {texts:?}"
+        );
+        assert!(
+            !texts
+                .iter()
+                .any(|text| text.contains("Set skip-worktree")
+                    || text.contains("Cleared skip-worktree")),
+            "case {case} ({input:?}) claimed success: {texts:?}"
+        );
+        assert_preserved(&format!("invalid {input:?}"));
+    }
+}
+
+#[test]
+fn skip_worktree_commands_index_lock_failure_is_readable() {
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
+        .modify(path, "changed\n")
+        .build();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let index_before = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    let flags_before = flags();
+    let staged = tmp.git(&["ls-files", "--stage"]);
+    let target_before = std::fs::read(tmp.path().join(path)).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    test.goto_file("unstaged", path);
+    let lock = tmp.path().join(".git/index.lock");
+    std::fs::write(&lock, "locked").unwrap();
+
+    test.ui().reply_text(Some(path.to_string()));
+    test.press_ui("i");
+    let result = test.press_ui("w");
+    let texts = message_texts(&result.effects);
+    assert!(
+        result.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Message {
+                level: MessageLevel::Error,
+                ..
+            }
+        )),
+        "a Git failure must be an error effect: {:?}",
+        result.effects
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| !text.trim().is_empty() && !text.contains('{')),
+        "readable failure, not raw data: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.contains("Set skip-worktree")),
+        "a failed write must not claim success: {texts:?}"
+    );
+    std::fs::remove_file(&lock).unwrap();
+
+    assert_eq!(
+        std::fs::read(tmp.path().join(".git/index")).unwrap(),
+        index_before,
+        "index bytes"
+    );
+    assert_eq!(flags(), flags_before, "index flags");
+    assert_eq!(
+        tmp.git(&["ls-files", "--stage"]),
+        staged,
+        "staged entries and modes"
+    );
+    assert_eq!(
+        std::fs::read(tmp.path().join(path)).unwrap(),
+        target_before,
+        "target bytes"
+    );
+    assert_eq!(
+        std::fs::read(tmp.path().join("base.txt")).unwrap(),
+        base_before,
+        "base bytes"
+    );
+}

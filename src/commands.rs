@@ -456,6 +456,11 @@ pub enum PromptAction {
         rule: String,
         pattern: bool,
     },
+    /// Apply the answered repository-relative path to one skip-worktree index bit.
+    IndexFlagPath {
+        /// `true` sets the skip-worktree bit, `false` clears it.
+        enabled: bool,
+    },
     /// Add a remote with the answered name.
     RemoteAdd,
     /// Second half of a remote add: point this validated name at the answered URL.
@@ -1070,6 +1075,30 @@ pub fn resume_prompt(
                 return Ok(CommandOutcome::default());
             }
             apply_ignore_rule(ctx, crate::git::IgnoreScope::User, &rule, pattern)
+        }
+        PromptAction::IndexFlagPath { enabled } => {
+            let PromptValue::Text(value) = answer else {
+                return Err(crate::Error::new(
+                    "Expected one repository-relative tracked path",
+                ));
+            };
+            if value.trim().is_empty() || value.contains('\n') || value.contains('\r') {
+                ctx.info("Enter one exact repository-relative tracked path");
+                return Ok(CommandOutcome::default());
+            }
+            let result = GitRepo::open(ctx.repo_path)
+                .and_then(|repo| repo.set_skip_worktree(&[value.as_str()], enabled));
+            match result {
+                Ok(()) => ctx.info(format!(
+                    "{} skip-worktree for {value}",
+                    if enabled { "Set" } else { "Cleared" }
+                )),
+                Err(error) => report_git_error(ctx, &error),
+            }
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
         }
         PromptAction::NotesTarget { operation } => {
             let PromptValue::Text(target) = answer else {
@@ -1995,6 +2024,8 @@ fn build() -> Registry {
         command! { id: "ignore.subdir", scope: Scope::MenuAction, doc: "Ignore the selected file in its parent .gitignore", status: CommandStatus::Implemented, run: ignore_subdir, effects: &[] },
         command! { id: "ignore.gitdir", scope: Scope::MenuAction, doc: "Ignore the selected file in repository info/exclude", status: CommandStatus::Implemented, run: ignore_gitdir, effects: &[] },
         command! { id: "ignore.system", scope: Scope::MenuAction, doc: "Ignore the selected file in the user excludes file", status: CommandStatus::Implemented, run: ignore_system, effects: &[] },
+        command! { id: "ignore.skip-worktree", scope: Scope::MenuAction, doc: "Set skip-worktree on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_skip_worktree, effects: &[] },
+        command! { id: "ignore.no-skip-worktree", scope: Scope::MenuAction, doc: "Clear skip-worktree on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_no_skip_worktree, effects: &[] },
         menu(
             "open.patch-apply",
             "Open the apply-patches menu",
@@ -2888,6 +2919,50 @@ fn ignore_gitdir(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 fn ignore_system(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     ignore_action(ctx, crate::git::IgnoreScope::User)
+}
+
+/// Open the single explicit-path prompt for a skip-worktree index-flag action.
+///
+/// The structured source file supplies the default when a file row is selected;
+/// an empty default lets the user clear a bit on a file hidden from status.
+fn index_flag_action(ctx: &mut CommandCtx<'_>, enabled: bool) -> Result<CommandOutcome> {
+    let tree = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
+    let path = ctx
+        .cursor
+        .and_then(|cursor| tree.navigation_node(cursor.line))
+        .filter(|node| node.kind == NodeKind::File)
+        .and_then(|node| node.path.clone());
+    let mut prompt = branch_name_prompt(
+        if enabled {
+            "Skip worktree"
+        } else {
+            "Do not skip worktree"
+        },
+        path.as_deref().unwrap_or(""),
+        "Exact repository-relative tracked path",
+    );
+    prompt.prompt_id = "index-flag-path".into();
+    prompt.detail = Some(
+        "Enter the exact repository-relative path of one tracked file. Whitespace and wildcards are literal, not a list or pattern. Skip-worktree is not an ignore rule: the file stays tracked and indexed."
+            .to_string(),
+    );
+    Ok(CommandOutcome {
+        prompt: Some((prompt, PromptAction::IndexFlagPath { enabled })),
+        ..Default::default()
+    })
+}
+
+/// Set the skip-worktree bit on one explicitly entered tracked path.
+fn ignore_skip_worktree(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    index_flag_action(ctx, true)
+}
+
+/// Clear the skip-worktree bit on one explicitly entered tracked path.
+fn ignore_no_skip_worktree(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    index_flag_action(ctx, false)
 }
 
 fn notes_read(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

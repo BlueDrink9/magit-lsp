@@ -260,9 +260,12 @@ source path before writing `core.excludesFile`; declining or cancelling writes
 nothing.
 
 An ignore rule only changes Git's untracked/ignored classification: it does
-**not** hide a file that Git already tracks. The skip-worktree and
-assume-unchanged index-flag actions displayed in the menu are not implemented
-yet.
+**not** hide or untrack a file that Git already tracks. The skip-worktree
+actions are implemented: `w` sets the bit and `W` clears it. Each prompts for
+one repository-relative tracked path (prefilled from the selected status file,
+or blank when no file is selected); enter the path literally, including spaces
+or wildcard characters. No list or wildcard expansion is performed. The
+assume-unchanged actions (`u`/`U`) remain planned and are not implemented.
 
 ### 5.5 Commit-message scope
 
