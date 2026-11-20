@@ -456,9 +456,11 @@ pub enum PromptAction {
         rule: String,
         pattern: bool,
     },
-    /// Apply the answered repository-relative path to one skip-worktree index bit.
+    /// Apply the answered repository-relative path to one index flag.
     IndexFlagPath {
-        /// `true` sets the skip-worktree bit, `false` clears it.
+        /// Whether this toggles assume-unchanged rather than skip-worktree.
+        assume_unchanged: bool,
+        /// `true` sets the selected bit, `false` clears it.
         enabled: bool,
     },
     /// Add a remote with the answered name.
@@ -1076,7 +1078,10 @@ pub fn resume_prompt(
             }
             apply_ignore_rule(ctx, crate::git::IgnoreScope::User, &rule, pattern)
         }
-        PromptAction::IndexFlagPath { enabled } => {
+        PromptAction::IndexFlagPath {
+            assume_unchanged,
+            enabled,
+        } => {
             let PromptValue::Text(value) = answer else {
                 return Err(crate::Error::new(
                     "Expected one repository-relative tracked path",
@@ -1086,11 +1091,21 @@ pub fn resume_prompt(
                 ctx.info("Enter one exact repository-relative tracked path");
                 return Ok(CommandOutcome::default());
             }
-            let result = GitRepo::open(ctx.repo_path)
-                .and_then(|repo| repo.set_skip_worktree(&[value.as_str()], enabled));
+            let result = GitRepo::open(ctx.repo_path).and_then(|repo| {
+                if assume_unchanged {
+                    repo.set_assume_unchanged(&[value.as_str()], enabled)
+                } else {
+                    repo.set_skip_worktree(&[value.as_str()], enabled)
+                }
+            });
+            let flag = if assume_unchanged {
+                "assume-unchanged"
+            } else {
+                "skip-worktree"
+            };
             match result {
                 Ok(()) => ctx.info(format!(
-                    "{} skip-worktree for {value}",
+                    "{} {flag} for {value}",
                     if enabled { "Set" } else { "Cleared" }
                 )),
                 Err(error) => report_git_error(ctx, &error),
@@ -2026,6 +2041,8 @@ fn build() -> Registry {
         command! { id: "ignore.system", scope: Scope::MenuAction, doc: "Ignore the selected file in the user excludes file", status: CommandStatus::Implemented, run: ignore_system, effects: &[] },
         command! { id: "ignore.skip-worktree", scope: Scope::MenuAction, doc: "Set skip-worktree on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_skip_worktree, effects: &[] },
         command! { id: "ignore.no-skip-worktree", scope: Scope::MenuAction, doc: "Clear skip-worktree on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_no_skip_worktree, effects: &[] },
+        command! { id: "ignore.assume-unchanged", scope: Scope::MenuAction, doc: "Set assume-unchanged on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_assume_unchanged, effects: &[] },
+        command! { id: "ignore.no-assume-unchanged", scope: Scope::MenuAction, doc: "Clear assume-unchanged on one explicit tracked path", status: CommandStatus::Implemented, run: ignore_no_assume_unchanged, effects: &[] },
         menu(
             "open.patch-apply",
             "Open the apply-patches menu",
@@ -2925,7 +2942,11 @@ fn ignore_system(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 ///
 /// The structured source file supplies the default when a file row is selected;
 /// an empty default lets the user clear a bit on a file hidden from status.
-fn index_flag_action(ctx: &mut CommandCtx<'_>, enabled: bool) -> Result<CommandOutcome> {
+fn index_flag_action(
+    ctx: &mut CommandCtx<'_>,
+    assume_unchanged: bool,
+    enabled: bool,
+) -> Result<CommandOutcome> {
     let tree = ctx
         .view
         .command_source_tree()
@@ -2936,7 +2957,11 @@ fn index_flag_action(ctx: &mut CommandCtx<'_>, enabled: bool) -> Result<CommandO
         .filter(|node| node.kind == NodeKind::File)
         .and_then(|node| node.path.clone());
     let mut prompt = branch_name_prompt(
-        if enabled {
+        if assume_unchanged && enabled {
+            "Assume unchanged"
+        } else if assume_unchanged {
+            "Do not assume unchanged"
+        } else if enabled {
             "Skip worktree"
         } else {
             "Do not skip worktree"
@@ -2946,23 +2971,40 @@ fn index_flag_action(ctx: &mut CommandCtx<'_>, enabled: bool) -> Result<CommandO
     );
     prompt.prompt_id = "index-flag-path".into();
     prompt.detail = Some(
-        "Enter the exact repository-relative path of one tracked file. Whitespace and wildcards are literal, not a list or pattern. Skip-worktree is not an ignore rule: the file stays tracked and indexed."
+        if assume_unchanged {
+            "Enter the exact repository-relative path of one tracked file. Whitespace and wildcards are literal, not a list or pattern. Assume-unchanged is a performance promise, not an ignore rule or untrack operation."
+        } else {
+            "Enter the exact repository-relative path of one tracked file. Whitespace and wildcards are literal, not a list or pattern. Skip-worktree is not an ignore rule: the file stays tracked and indexed."
+        }
             .to_string(),
     );
     Ok(CommandOutcome {
-        prompt: Some((prompt, PromptAction::IndexFlagPath { enabled })),
+        prompt: Some((
+            prompt,
+            PromptAction::IndexFlagPath {
+                assume_unchanged,
+                enabled,
+            },
+        )),
         ..Default::default()
     })
 }
 
 /// Set the skip-worktree bit on one explicitly entered tracked path.
 fn ignore_skip_worktree(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    index_flag_action(ctx, true)
+    index_flag_action(ctx, false, true)
 }
 
 /// Clear the skip-worktree bit on one explicitly entered tracked path.
 fn ignore_no_skip_worktree(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    index_flag_action(ctx, false)
+    index_flag_action(ctx, false, false)
+}
+
+fn ignore_assume_unchanged(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    index_flag_action(ctx, true, true)
+}
+fn ignore_no_assume_unchanged(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    index_flag_action(ctx, true, false)
 }
 
 fn notes_read(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

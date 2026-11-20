@@ -265,7 +265,9 @@ actions are implemented: `w` sets the bit and `W` clears it. Each prompts for
 one repository-relative tracked path (prefilled from the selected status file,
 or blank when no file is selected); enter the path literally, including spaces
 or wildcard characters. No list or wildcard expansion is performed. The
-assume-unchanged actions (`u`/`U`) remain planned and are not implemented.
+assume-unchanged actions are implemented: `u` sets the bit and `U` clears it,
+using the same exact single-path prompt. Assume-unchanged is a performance
+promise to Git, not an ignore rule or an untrack operation.
 
 ### 5.5 Commit-message scope
 

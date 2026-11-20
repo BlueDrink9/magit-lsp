@@ -5535,6 +5535,107 @@ fn skip_worktree_commands_set_and_clear_explicit_path() {
 }
 
 #[test]
+fn assume_unchanged_commands_set_and_clear_explicit_path() {
+    use magit_lsp::protocol::PromptKind;
+
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [(path, "original\n"), ("dir/other.txt", "other\n")])
+        .modify(path, "changed\n")
+        .build();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage"]);
+    let target_before = std::fs::read(tmp.path().join(path)).unwrap();
+    let other_before = std::fs::read(tmp.path().join("dir/other.txt")).unwrap();
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('H'));
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    test.goto_file("unstaged", path);
+    tmp.git(&["update-index", "--skip-worktree", "--", path]);
+    test.ui().reply_text(Some(path.to_string()));
+    test.press_ui("i");
+    let set = test.press_ui("u");
+    let asked = test.ui().last_request().expect("path prompt");
+    assert_eq!(asked.kind, PromptKind::Text);
+    assert_eq!(asked.default.as_ref().and_then(|v| v.as_str()), Some(path));
+    assert!(message_texts(&set.effects)
+        .iter()
+        .any(|m| m.contains("Set assume-unchanged") && m.contains(path)));
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('s'));
+    assert_eq!(skip_worktree_flag(&flags(), "dir/other.txt"), Some('H'));
+    test.goto(0);
+    test.ui().reply_text(Some(path.to_string()));
+    test.press_ui("i");
+    let clear = test.press_ui("U");
+    assert!(test.ui().last_request().unwrap().default.is_none());
+    assert!(message_texts(&clear.effects)
+        .iter()
+        .any(|m| m.contains("Cleared assume-unchanged") && m.contains(path)));
+    assert_eq!(skip_worktree_flag(&flags(), path), Some('S'));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage"]), staged);
+    assert_eq!(std::fs::read(tmp.path().join(path)).unwrap(), target_before);
+    assert_eq!(
+        std::fs::read(tmp.path().join("dir/other.txt")).unwrap(),
+        other_before
+    );
+}
+
+#[test]
+fn assume_unchanged_commands_refuse_cancel_invalid_and_locked_writes() {
+    let path = "dir/a b*.txt";
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [(path, "original\n")])
+        .modify(path, "changed\n")
+        .build();
+    std::fs::write(tmp.path().join("untracked.txt"), "untracked\n").unwrap();
+    let flags = || tmp.git(&["ls-files", "-v", "-z"]);
+    let before = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    let initial_flags = flags();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", path);
+    test.ui().reply_cancel();
+    test.press_ui("i");
+    let cancelled = test.press_ui("u");
+    assert!(!message_texts(&cancelled.effects)
+        .iter()
+        .any(|m| m.contains("Set assume-unchanged")));
+    for input in ["untracked.txt", "../escape"] {
+        test.goto(line);
+        test.ui().reply_text(Some(input.into()));
+        test.press_ui("i");
+        let result = test.press_ui("u");
+        let texts = message_texts(&result.effects);
+        assert!(texts
+            .iter()
+            .any(|m| !m.trim().is_empty() && !m.contains('{')));
+        assert!(!texts.iter().any(|m| m.contains("Set assume-unchanged")));
+    }
+    std::fs::write(tmp.path().join(".git/index.lock"), "locked").unwrap();
+    test.goto(line);
+    test.ui().reply_text(Some(path.into()));
+    test.press_ui("i");
+    let locked = test.press_ui("u");
+    assert!(locked.effects.iter().any(|e| matches!(
+        e,
+        Effect::Message {
+            level: MessageLevel::Error,
+            ..
+        }
+    )));
+    assert!(!message_texts(&locked.effects)
+        .iter()
+        .any(|m| m.contains("Set assume-unchanged")));
+    assert_eq!(
+        std::fs::read(tmp.path().join(".git/index")).unwrap(),
+        before
+    );
+    assert_eq!(flags(), initial_flags);
+}
+
+#[test]
 fn skip_worktree_commands_cancel_never_writes() {
     let path = "dir/a b*.txt";
     let (tmp, _) = RepoFixture::new()
