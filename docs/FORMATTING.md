@@ -47,15 +47,27 @@ The sweep selects every tracked regular file the dispatcher owns and skips
 `vendor/`, `generated/`, `fixtures/`, `node_modules/` and `target/` trees, text
 fixtures and untracked files.
 
+Four generated client references are also excluded by exact path, in every
+source-formatting mode and in the hook: `lua/magit-lsp/types.lua`,
+`lua/magit-lsp/shared.lua`, `clients/vscode/types/protocol.d.ts` and
+`clients/vscode/types/shared-lists.js`. `scripts/generate_schema.rs` owns their
+bytes and `make schema-check` compares fresh generator output with them exactly,
+so formatting them would only make the generator look stale. Handwritten Lua,
+TypeScript and JavaScript files in the same directories stay eligible, and the
+generated references remain covered by schema freshness, linting and type
+checking. Correct staleness by regenerating through the schema target; never
+hand-edit these files or suppress the freshness check.
+
 ```sh
 make format-all-list                         # exact tracked files and counts
 make format-all-check FORMATTER=rustfmt      # fail-capable full check
 make format-all FORMATTER=rustfmt            # rewrite clean working copies
 ```
 
-`FORMATTER` is `rustfmt`, `stylua` or `prettier`. At this commit the sweep
-covers 171 Rust, 32 Lua and 49 JavaScript/TypeScript files; run
-`make format-all-list` for the exact current list. `format-all` refuses to run
+`FORMATTER` is `rustfmt`, `stylua` or `prettier`. At this commit, after the
+generator-owned exclusions, the sweep covers 171 Rust, 30 Lua and 47
+JavaScript/TypeScript files; run `make format-all-list` for the exact current
+list. `format-all` refuses to run
 when any selected file differs from the index, so it never overwrites unrelated
 work; revert only its own output with `git checkout -- <paths>` if needed, then
 stage the exact selected paths with `git add -- <paths>`.

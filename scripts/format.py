@@ -20,6 +20,18 @@ RUST = {".rs"}
 FORMATTERS = ("rustfmt", "stylua", "prettier")
 STYLUA_CONFIGS = (".stylua.toml", "stylua.toml")
 SKIP_PARTS = {"node_modules", "target", "vendor", "fixtures", "generated"}
+# Generated client references are written byte-for-byte by the schema generator
+# (`scripts/generate_schema.rs`), and freshness checks compare fresh generator
+# output against these committed bytes. Formatting them would only make the
+# generator look stale, so exclude these exact paths from every source mode.
+GENERATOR_OWNED = frozenset(
+    {
+        "lua/magit-lsp/types.lua",
+        "lua/magit-lsp/shared.lua",
+        "clients/vscode/types/protocol.d.ts",
+        "clients/vscode/types/shared-lists.js",
+    }
+)
 
 
 def run_git(*args: str, check: bool = True) -> bytes:
@@ -85,6 +97,8 @@ def base_tree() -> str:
 
 def eligible(path: str) -> bool:
     """Return whether path is an owned formatter input rather than generated or fixture data."""
+    if path in GENERATOR_OWNED:
+        return False
     parts = Path(path).parts
     if any(part.lower() in SKIP_PARTS for part in parts):
         return False
