@@ -1973,6 +1973,62 @@ impl GitRepo {
         self.status_listing_excluding(&policy)
     }
 
+    /// Set or clear Git's skip-worktree bit for explicitly selected tracked paths.
+    pub fn set_skip_worktree(&self, paths: &[&str], enabled: bool) -> Result<()> {
+        self.set_index_flag(paths, enabled, "--skip-worktree", "--no-skip-worktree")
+    }
+
+    /// Set or clear Git's assume-unchanged bit for explicitly selected tracked paths.
+    pub fn set_assume_unchanged(&self, paths: &[&str], enabled: bool) -> Result<()> {
+        self.set_index_flag(
+            paths,
+            enabled,
+            "--assume-unchanged",
+            "--no-assume-unchanged",
+        )
+    }
+
+    fn set_index_flag(&self, paths: &[&str], enabled: bool, set: &str, clear: &str) -> Result<()> {
+        if paths.is_empty() {
+            return Err(Error::new("at least one tracked path is required"));
+        }
+        let mut literals = Vec::with_capacity(paths.len());
+        for path in paths {
+            let p = Path::new(path);
+            if path.is_empty()
+                || p.is_absolute()
+                || p.components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return Err(Error::new(format!("invalid tracked path: {path}")));
+            }
+            if self
+                .run(&[
+                    "--literal-pathspecs",
+                    "ls-files",
+                    "--error-unmatch",
+                    "-z",
+                    "--",
+                    path,
+                ])
+                .is_err()
+            {
+                return Err(Error::new(format!("path is not tracked: {path}")));
+            }
+            literals.push(path.to_string());
+        }
+        let mut owned = vec![
+            "--literal-pathspecs".to_string(),
+            "update-index".to_string(),
+            if enabled { set } else { clear }.to_string(),
+            "--".to_string(),
+        ];
+        owned.extend(literals);
+        let args = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        self.run(&args)?;
+        Ok(())
+    }
+
     /// Read status while excluding configured presentation-document basenames.
     pub fn status_listing_excluding(&self, presentation_files: &[String]) -> Result<Status> {
         let repo_path = self.root.to_string_lossy().into_owned();

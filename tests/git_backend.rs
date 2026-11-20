@@ -9,6 +9,53 @@ use proptest::prelude::*;
 use std::path::Path;
 
 #[test]
+fn index_flags_are_independent_literal_and_atomic() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit(
+            "initial",
+            [("-odd [x]*.txt", "literal"), ("other.txt", "other")],
+        )
+        .build();
+    let flags = || git(tmp.path(), &["ls-files", "-v"]);
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let index = git(tmp.path(), &["ls-files", "--stage"]);
+    repo.set_skip_worktree(&["-odd [x]*.txt"], true).unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('S') && line.ends_with("-odd [x]*.txt")));
+    repo.set_assume_unchanged(&["-odd [x]*.txt"], true).unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('s') && line.ends_with("-odd [x]*.txt")));
+    repo.set_skip_worktree(&["-odd [x]*.txt"], false).unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('h') && line.ends_with("-odd [x]*.txt")));
+    repo.set_assume_unchanged(&["-odd [x]*.txt"], false)
+        .unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('H') && line.ends_with("-odd [x]*.txt")));
+    let before = flags();
+    assert!(repo
+        .set_skip_worktree(&["other.txt", "missing"], true)
+        .is_err());
+    assert_eq!(flags(), before);
+    assert!(repo.set_assume_unchanged(&["../other.txt"], true).is_err());
+    assert_eq!(flags(), before);
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(tmp.path(), &["ls-files", "--stage"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("-odd [x]*.txt")).unwrap(),
+        "literal"
+    );
+    std::fs::write(repo.git_dir().join("index.lock"), "locked").unwrap();
+    assert!(repo.set_skip_worktree(&["other.txt"], true).is_err());
+    std::fs::remove_file(repo.git_dir().join("index.lock")).unwrap();
+    assert_eq!(flags(), before);
+}
+
+#[test]
 fn ignore_scopes_preserve_content_and_literal_paths_are_exact() {
     let (tmp, repo) = RepoFixture::new()
         .commit("initial", [("tracked.txt", TEN_LINES)])
