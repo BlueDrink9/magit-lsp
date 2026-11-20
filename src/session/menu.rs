@@ -509,7 +509,13 @@ impl Session {
                     .get(view_id)
                     .and_then(|view| view.menu_origin.clone());
                 let origin = origin.filter(|origin| origin.view_id == target);
-                if origin.is_none() && Session::command_is_positional(&registered.id) {
+                // The required-tree positional predicate omits commands that
+                // may consume an optional cursor, so default conservatively to
+                // source-bound. Only these verified coordinate-free commands
+                // bypass retained-origin checks and forwarding.
+                let uses_origin_context =
+                    registered.id != "commit.create" && registered.id != "common.toggle-text-mode";
+                if origin.is_none() && uses_origin_context {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
                             MessageLevel::Info,
@@ -518,11 +524,16 @@ impl Session {
                         ..InvokeResult::empty()
                     });
                 }
-                if origin.as_ref().is_some_and(|origin| {
-                    !self.views.get(&target).is_some_and(|view| {
-                        view.version == origin.version || view.acked_version == Some(origin.version)
+                // Explicit coordinate-free commands are not bound to an
+                // obsolete version; all others keep stale-origin protection.
+                if uses_origin_context
+                    && origin.as_ref().is_some_and(|origin| {
+                        !self.views.get(&target).is_some_and(|view| {
+                            view.version == origin.version
+                                || view.acked_version == Some(origin.version)
+                        })
                     })
-                }) {
+                {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
                             MessageLevel::Info,
@@ -548,15 +559,26 @@ impl Session {
                         keymap = popped.keymap;
                     }
                 }
+                // The explicitly context-free commit.create command carries
+                // no retained coordinates or version.
+                let (version, cursor, selection) = if !uses_origin_context {
+                    (None, None, None)
+                } else {
+                    (
+                        origin.as_ref().map(|origin| origin.version),
+                        origin.as_ref().and_then(|origin| origin.cursor),
+                        origin.as_ref().and_then(|origin| origin.selection),
+                    )
+                };
                 let mut run = self.dispatch(
                     crate::dispatch::DispatchRequest {
                         action_target: None,
                         command: registered.id.to_string(),
                         target: crate::dispatch::DispatchTarget {
                             view_id: target,
-                            version: origin.as_ref().map(|origin| origin.version),
-                            cursor: origin.as_ref().and_then(|origin| origin.cursor),
-                            selection: origin.as_ref().and_then(|origin| origin.selection),
+                            version,
+                            cursor,
+                            selection,
                             key: Some(key.to_string()),
                         },
                         args: serialized_args,
