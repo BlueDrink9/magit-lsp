@@ -1,0 +1,77 @@
+# T044 Part 8: native ignore actions write only the chosen destination.
+fixture: modified-two-files
+---
+sh: mkdir -p dir/nested; printf 'tracked\n' > 'dir/nested/a b*.txt'; printf 'decoy\n' > dir/nested/axxb.txt; printf 'tracked\n' > dir/top.txt; git add dir && git commit -m 'ignore fixture' >/dev/null; git add g.txt; printf 'changed\n' >> 'dir/nested/a b*.txt'; printf 'changed\n' >> dir/top.txt; git config core.excludesFile "$PWD/.git/private-user-excludes"; printf '# retained\n' > .git/private-user-excludes; cp .git/info/exclude .git/ignore-exclude-orig; git hash-object .git/info/exclude > .git/ignore-exclude-hash; git rev-parse HEAD > .git/ignore-head; git ls-files -s > .git/ignore-index; git diff --cached --binary > .git/ignore-staged; git hash-object g.txt > .git/ignore-g
+wait screen contains "dir/nested/a b*.txt"
+goto "M dir/nested/a b*.txt"
+keys: i
+wait
+expect screen contains "Ignore"
+keys: t
+wait prompt
+expect screen contains "Literal selected path"
+keys: 1 Enter
+wait
+sh: test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt'
+sh: git check-ignore --no-index -q 'dir/nested/a b*.txt' && ! git check-ignore --no-index -q dir/nested/axxb.txt
+sh: test "$(cat .git/private-user-excludes)" = '# retained' && test "$(git hash-object .git/info/exclude)" = "$(cat .git/ignore-exclude-hash)" && test ! -e dir/.gitignore
+# A tracked file stays selectable after a rule matches its path.
+goto "M dir/nested/a b*.txt"
+goto "M dir/top.txt"
+keys: i
+wait
+keys: s
+wait prompt
+expect screen contains "Literal selected path"
+keys: 1 Enter
+wait
+sh: test "$(cat dir/.gitignore)" = '/top.txt' && test ! -e dir/nested/.gitignore
+sh: test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt' && git check-ignore -v --no-index dir/top.txt | grep -F 'dir/.gitignore:1:/top.txt'
+sh: test "$(cat .git/private-user-excludes)" = '# retained' && test "$(git hash-object .git/info/exclude)" = "$(cat .git/ignore-exclude-hash)"
+goto "M dir/top.txt"
+keys: i
+wait
+keys: p
+wait prompt
+keys: 2 Enter
+wait prompt
+expect screen contains "Custom ignore pattern"
+keys: C-u 'dir/*.log' Enter
+wait
+sh: test "$(tail -n 1 .git/info/exclude)" = 'dir/*.log' && head -c "$(stat -c %s .git/ignore-exclude-orig)" .git/info/exclude | cmp - .git/ignore-exclude-orig
+sh: git check-ignore -v --no-index dir/top.log | grep -F '.git/info/exclude:' && ! git check-ignore -v --no-index dir/top.log | grep -F 'dir/.gitignore:'
+sh: test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt' && test "$(cat dir/.gitignore)" = '/top.txt' && test "$(cat .git/private-user-excludes)" = '# retained'
+goto "M f.txt"
+keys: i
+wait
+keys: g
+wait prompt
+expect screen contains "Ignore in the user-wide excludes file"
+expect screen matches /Literal selected path.*f\.txt/
+keys: 1 Enter
+wait prompt
+expect screen contains "Write user-wide ignore rule?"
+expect screen contains "Write user excludes"
+keys: 2 Enter
+wait
+sh: test "$(cat .git/private-user-excludes)" = '# retained' && ! git check-ignore --no-index -q f.txt
+sh: test "$(tail -n 1 .git/info/exclude)" = 'dir/*.log' && test "$(cat dir/.gitignore)" = '/top.txt' && test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt'
+goto "M f.txt"
+keys: i
+wait
+keys: g
+wait prompt
+expect screen contains "Ignore in the user-wide excludes file"
+expect screen matches /Literal selected path.*f\.txt/
+keys: 1 Enter
+wait prompt
+expect screen contains "Write user-wide ignore rule?"
+expect screen contains "Write user excludes"
+keys: 1 Enter
+wait
+sh: printf '# retained\n/f.txt\n' > .git/ignore-user-expected && cmp .git/ignore-user-expected .git/private-user-excludes
+sh: git check-ignore --no-index -q f.txt && test ! -e dir/nested/.gitignore
+sh: test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt' && test "$(cat dir/.gitignore)" = '/top.txt' && test "$(tail -n 1 .git/info/exclude)" = 'dir/*.log' && ! grep -Fx '/f.txt' .gitignore dir/.gitignore .git/info/exclude
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/ignore-head)" && git ls-files -s | cmp - .git/ignore-index && git diff --cached --binary | cmp - .git/ignore-staged && test "$(git hash-object g.txt)" = "$(cat .git/ignore-g)"
+sh: test "$(git show HEAD:'dir/nested/a b*.txt')" = 'tracked' && test "$(tail -n 1 'dir/nested/a b*.txt')" = changed && test "$(tail -n 1 dir/top.txt)" = changed && ! git check-ignore --no-index -q dir/nested/axxb.txt
+expect no_message /E5108|failed/
