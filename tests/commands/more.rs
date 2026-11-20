@@ -4727,6 +4727,204 @@ fn ignore_root_custom_pattern_is_deliberate() {
 }
 
 #[test]
+fn ignore_rule_cancellation_never_writes() {
+    use magit_lsp::protocol::{
+        Cursor, PromptChoiceAnswer, PromptKind, PromptValue, ViewInvokeParams,
+    };
+    use magit_lsp::session::Execution;
+
+    // A fixture-only private file stands in for the user-wide excludes file;
+    // neither the real HOME/XDG config nor any global file is ever touched.
+    let private = tempfile::TempDir::new().expect("tempdir for private user excludes");
+    let user_ignore = private.path().join("user-ignore");
+    std::fs::write(&user_ignore, "# retained\n").unwrap();
+
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("dir/axxb.txt", "decoy\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .build();
+    let excludes_arg = user_ignore.to_string_lossy().into_owned();
+    tmp.git(&["config", "core.excludesFile", &excludes_arg]);
+
+    // Seed all four possible ignore destinations with exact retained bytes.
+    std::fs::write(tmp.path().join(".gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join("dir/.gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join(".git/info/exclude"), "# retained\n").unwrap();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let status = tmp.git(&["status", "--porcelain=v2", "-z"]);
+    let root_before = std::fs::read(tmp.path().join(".gitignore")).unwrap();
+    let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
+    let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
+    let user_before = std::fs::read(&user_ignore).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
+
+    let assert_unchanged = |stage: &str| {
+        assert_eq!(
+            std::fs::read(tmp.path().join(".gitignore")).unwrap(),
+            root_before,
+            "{stage}: root .gitignore"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/.gitignore")).unwrap(),
+            subdir_before,
+            "{stage}: subdir .gitignore"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/info/exclude")).unwrap(),
+            repo_before,
+            "{stage}: repo exclude"
+        );
+        assert_eq!(
+            std::fs::read(&user_ignore).unwrap(),
+            user_before,
+            "{stage}: user excludes"
+        );
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{stage}: HEAD");
+        assert_eq!(tmp.git(&["write-tree"]), index, "{stage}: index");
+        assert_eq!(
+            tmp.git(&["status", "--porcelain=v2", "-z"]),
+            status,
+            "{stage}: status"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            selected_before,
+            "{stage}: selected file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("base.txt")).unwrap(),
+            base_before,
+            "{stage}: base file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            decoy_before,
+            "{stage}: decoy file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("other/other.txt")).unwrap(),
+            other_before,
+            "{stage}: other file"
+        );
+    };
+    let assert_no_success = |effects: &[Effect], stage: &str| {
+        let messages = message_texts(effects);
+        assert!(
+            !messages
+                .iter()
+                .any(|text| text.contains("Added ignore rule")),
+            "{stage}: unexpected success message {messages:?}"
+        );
+    };
+    let start = |test: &mut TestSession, command: &str, line: usize| {
+        test.session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: command.into(),
+                version: Some(test.version()),
+                cursor: Some(Cursor { line, column: 0 }),
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+    };
+    let open = || {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        (test, line)
+    };
+
+    // (1) Cancel at the initial kind choice for ignore.topdir (None answer).
+    {
+        let (mut test, line) = open();
+        let started = start(&mut test, "ignore.topdir", line);
+        let Execution::Prompt(kind) = started else {
+            panic!("expected ignore-rule-kind prompt, got {started:?}");
+        };
+        assert_eq!(kind.kind, PromptKind::Choice);
+        let done = test.session.resume_prompt(&kind.prompt_id, None).unwrap();
+        let Execution::Done(result) = done else {
+            panic!("cancelling the kind prompt must finish, got {done:?}");
+        };
+        assert_no_success(&result.effects, "kind-choice cancel");
+    }
+    assert_unchanged("after kind-choice cancellation");
+
+    // (2) Select "pattern", then cancel at the text-pattern prompt for ignore.topdir.
+    {
+        let (mut test, line) = open();
+        let started = start(&mut test, "ignore.topdir", line);
+        let Execution::Prompt(kind) = started else {
+            panic!("expected ignore-rule-kind prompt, got {started:?}");
+        };
+        let Execution::Prompt(value) = test
+            .session
+            .resume_prompt(
+                &kind.prompt_id,
+                Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                    id: "pattern".into(),
+                })),
+            )
+            .unwrap()
+        else {
+            panic!("expected custom-pattern prompt");
+        };
+        let done = test.session.resume_prompt(&value.prompt_id, None).unwrap();
+        let Execution::Done(result) = done else {
+            panic!("cancelling the pattern prompt must finish, got {done:?}");
+        };
+        assert_no_success(&result.effects, "pattern-prompt cancel");
+    }
+    assert_unchanged("after pattern-prompt cancellation");
+
+    // (3) Choose "literal", then cancel at the user-wide confirmation for ignore.system.
+    {
+        let (mut test, line) = open();
+        let started = start(&mut test, "ignore.system", line);
+        let Execution::Prompt(kind) = started else {
+            panic!("expected ignore-rule-kind prompt, got {started:?}");
+        };
+        let Execution::Prompt(confirm) = test
+            .session
+            .resume_prompt(
+                &kind.prompt_id,
+                Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                    id: "literal".into(),
+                })),
+            )
+            .unwrap()
+        else {
+            panic!("expected user-wide confirmation prompt");
+        };
+        assert_eq!(confirm.kind, PromptKind::Confirm);
+        assert_eq!(confirm.title, "Write user-wide ignore rule?");
+        let done = test
+            .session
+            .resume_prompt(&confirm.prompt_id, None)
+            .unwrap();
+        let Execution::Done(result) = done else {
+            panic!("cancelling the user-wide confirmation must finish, got {done:?}");
+        };
+        assert_no_success(&result.effects, "user-confirm cancel");
+    }
+    assert_unchanged("after user-confirm cancellation");
+}
+
+#[test]
 fn ignore_root_stale_origin_is_refused_without_redirecting() {
     use magit_lsp::errors::STALE_VIEW;
     let (tmp, _) = RepoFixture::new()
