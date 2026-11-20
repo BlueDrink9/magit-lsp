@@ -236,6 +236,34 @@ Git in option position. `X h` asking for confirmation on a dirty tree is a
 deliberate deviation from Magit, which hard-resets without asking. `X f/i/w`
 (path-scoped) remain planned.
 
+#### 5.4.6 Ignore menu: supported subset
+
+Open the ignore menu with `i` from status. These menu keys are identical in both
+profiles. Each action writes a rule based on the file selected in the status
+view; the menu cursor never redirects the source file.
+
+| Keys | Destination |
+| --- | --- |
+| `t` | Shared toplevel `.gitignore` (`ignore.topdir`) |
+| `s` | Shared, selected file's parent directory `.gitignore` (`ignore.subdir`) |
+| `p` | Private to this repository, `.git/info/exclude` (`ignore.gitdir`) |
+| `g` | Private to this user, `core.excludesFile` (`ignore.system`) |
+
+Every action first offers a choice. **Literal selected path** pins the selected
+source path and escapes Git metacharacters so only that exact path is ignored;
+**Enter custom pattern** prompts for a Git ignore pattern, kept pinned to the
+selected source path and entered deliberately (blank, comment-prefixed or
+multi-line patterns are refused). Existing destination content is preserved and
+appended to. The user-wide (`g`) action additionally shows a deliberate
+confirmation naming the proposed rule, the user-wide scope and the selected
+source path before writing `core.excludesFile`; declining or cancelling writes
+nothing.
+
+An ignore rule only changes Git's untracked/ignored classification: it does
+**not** hide a file that Git already tracks. The skip-worktree and
+assume-unchanged index-flag actions displayed in the menu are not implemented
+yet.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

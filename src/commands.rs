@@ -2833,8 +2833,7 @@ fn ignore_user_confirmation(path: String, rule: String, pattern: bool) -> Result
     prompt.yes_label = Some("Write user excludes".into());
     prompt.no_label = Some("Cancel".into());
     prompt.detail = Some(format!(
-        "This changes the user-wide excludes file for {}: {rule}",
-        ignore_scope_label(crate::git::IgnoreScope::User)
+        "Add rule {rule} to the user-wide excludes file (selected path: {path})."
     ));
     Ok(CommandOutcome {
         prompt: Some((

@@ -4521,6 +4521,67 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         other_before
     );
 
+    // Third real ingress: custom pattern choice, then DECLINE the user-wide
+    // confirmation. The prompt must name the pinned selected source path AND
+    // the differing proposed pattern, state user-wide scope exactly once, and
+    // declining must leave every byte untouched.
+    {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        assert_eq!(test.cursor().line, line);
+        let pattern = "dir/*.log";
+        assert_ne!(
+            pattern, "dir/a*b.txt",
+            "pattern must differ from the selected source path"
+        );
+        test.ui()
+            .reply_choice(Some(PromptChoiceAnswer::Id {
+                id: "pattern".into(),
+            }))
+            .reply_text(Some(pattern.into()))
+            .reply_confirm(false);
+        test.press_ui("i");
+        let result = test.press_ui("g");
+
+        let confirm = test
+            .ui()
+            .last_request()
+            .expect("a user-wide confirmation prompt was shown");
+        assert_eq!(confirm.kind, PromptKind::Confirm);
+        assert_eq!(confirm.title, "Write user-wide ignore rule?");
+        assert_eq!(confirm.yes_label.as_deref(), Some("Write user excludes"));
+        let detail = confirm.detail.as_deref().unwrap_or_default();
+        assert_eq!(
+            detail.matches("user-wide excludes file").count(),
+            1,
+            "user-wide scope must be named exactly once: {detail}"
+        );
+        assert!(
+            detail.contains("dir/a*b.txt"),
+            "selected source path must be visible: {detail}"
+        );
+        assert!(
+            detail.contains(pattern),
+            "proposed custom pattern must be visible: {detail}"
+        );
+        assert!(
+            !message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Added ignore rule")),
+            "{:?}",
+            result.effects
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&user_ignore).unwrap(),
+        user_ignore_before
+    );
+    assert!(
+        !ignored("dir/a*b.txt"),
+        "a declined custom-pattern confirmation must not write a rule"
+    );
+
     // Second real ingress: literal choice, then ACCEPT the deliberate
     // confirmation. Only the configured private user excludes file changes.
     {
