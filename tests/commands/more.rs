@@ -4012,3 +4012,277 @@ fn branch_spinoff_without_unpushed_commits_creates_the_branch_and_leaves_the_sou
     );
     assert!(!test.session.has_pending_prompt());
 }
+
+#[test]
+fn ignore_root_literal_uses_selected_path() {
+    use magit_lsp::protocol::PromptChoiceAnswer;
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("dir/axxb.txt", "decoy\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .modify("other/other.txt", "changed too\n")
+        .build();
+    std::fs::write(tmp.path().join(".gitignore"), "# retained\n").unwrap();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
+    let decoy_before = std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap();
+    let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    assert_eq!(test.cursor().line, line);
+    // A different modified file supplies a menu cursor whose line resolves to
+    // another file in the source view, so the action can only succeed if it
+    // reads the source identity rather than the menu's own cursor.
+    let other_line = test.goto_file("unstaged", "other/other.txt");
+    assert_ne!(other_line, line);
+    test.goto(line);
+
+    // Real key ingress: the `i` opener, then the `t` root action. Queue the
+    // choice answer before pressing `t` so the ScriptedUi can drive it through
+    // the pending prompt.
+    test.ui().reply_choice(Some(PromptChoiceAnswer::Id {
+        id: "literal".into(),
+    }));
+    test.press_ui("i");
+    // Move the menu cursor away from the retained source cursor.
+    test.goto(other_line);
+    assert_eq!(test.cursor().line, other_line);
+    let result = test.press_ui("t");
+
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("root .gitignore")),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
+        "# retained\n/dir/a\\*b.txt\n"
+    );
+
+    let ignored = |path: &str| -> bool {
+        std::process::Command::new("git")
+            .args(["check-ignore", "--no-index", path])
+            .current_dir(tmp.path())
+            .output()
+            .expect("run git check-ignore")
+            .status
+            .success()
+    };
+    assert!(ignored("dir/a*b.txt"), "the literal file must be ignored");
+    assert!(
+        !ignored("dir/axxb.txt"),
+        "the wildcard must be escaped, not expanded"
+    );
+    assert!(
+        !ignored("base.txt"),
+        "an unrelated file must not be ignored"
+    );
+    assert!(
+        !ignored("other/other.txt"),
+        "the menu cursor's file must not be ignored"
+    );
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        base_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        decoy_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap(),
+        other_before
+    );
+}
+
+#[test]
+fn ignore_root_custom_pattern_is_deliberate() {
+    use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("cache.tmp", "cache\n"),
+                ("dir/nested.tmp", "nested\n"),
+                ("keep.txt", "keep\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .build();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let target_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", "dir/a*b.txt");
+
+    let started = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "ignore.topdir".into(),
+            version: Some(test.version()),
+            cursor: Some(Cursor { line, column: 0 }),
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let Execution::Prompt(kind) = started else {
+        panic!("expected ignore-rule-kind prompt, got {started:?}");
+    };
+    assert_eq!(kind.kind, magit_lsp::protocol::PromptKind::Choice);
+    let items = kind.items.as_ref().expect("choice items");
+    assert!(items.iter().any(|item| item.id == "literal"));
+    assert!(items.iter().any(|item| item.id == "pattern"));
+    assert!(
+        kind.detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("dir/a*b.txt")),
+        "{:?}",
+        kind.detail
+    );
+
+    let Execution::Prompt(value) = test
+        .session
+        .resume_prompt(
+            &kind.prompt_id,
+            Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                id: "pattern".into(),
+            })),
+        )
+        .unwrap()
+    else {
+        panic!("expected custom-pattern prompt");
+    };
+    assert!(
+        value
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("dir/a*b.txt")),
+        "the selected path stays pinned across prompts: {:?}",
+        value.detail
+    );
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&value.prompt_id, Some(PromptValue::Text("*.tmp".into())))
+        .unwrap()
+    else {
+        panic!("custom pattern must finish without another prompt");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("root .gitignore")),
+        "{:?}",
+        result.effects
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
+        "*.tmp\n"
+    );
+    let ignored = |path: &str| -> bool {
+        std::process::Command::new("git")
+            .args(["check-ignore", "--no-index", path])
+            .current_dir(tmp.path())
+            .output()
+            .expect("run git check-ignore")
+            .status
+            .success()
+    };
+    assert!(ignored("cache.tmp"), "the custom pattern matches at root");
+    assert!(
+        ignored("dir/nested.tmp"),
+        "the custom pattern matches in a subdirectory"
+    );
+    assert!(!ignored("keep.txt"), "the custom pattern is selective");
+    assert!(
+        !ignored("dir/a*b.txt"),
+        "a pattern is distinct from A1's literal selected path"
+    );
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        target_before
+    );
+}
+
+#[test]
+fn ignore_root_stale_origin_is_refused_without_redirecting() {
+    use magit_lsp::errors::STALE_VIEW;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    std::fs::write(tmp.path().join("first.txt"), "first\n").unwrap();
+    std::fs::write(tmp.path().join("second.txt"), "second\n").unwrap();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let status_id = test.view_id().to_string();
+    let first_line = test.goto_file("untracked", "first.txt");
+    let second_line = test.goto_file("untracked", "second.txt");
+    assert!(second_line > first_line);
+    test.goto(first_line);
+
+    test.press_ui("i");
+
+    // The client applies a refreshed status view: the origin file is gone and
+    // the retained line now names a different file in the acknowledged tree.
+    std::fs::remove_file(tmp.path().join("first.txt")).unwrap();
+    test.session.refresh(&status_id).expect("refresh status");
+    let refreshed_version = test
+        .session
+        .views()
+        .get(&status_id)
+        .expect("status view")
+        .version();
+    test.session
+        .ack(&status_id, refreshed_version)
+        .expect("ack refreshed status");
+    let acked = test
+        .session
+        .views()
+        .get(&status_id)
+        .expect("status view")
+        .acked_tree()
+        .expect("acked status tree")
+        .clone();
+    let redirected = &acked.line_nodes[first_line];
+    assert_eq!(redirected.kind, magit_lsp::tree::NodeKind::File);
+    assert_eq!(redirected.path.as_deref(), Some("second.txt"));
+
+    let result = test.press_ui("t");
+    assert_eq!(message_texts(&result.effects), vec![STALE_VIEW]);
+    assert!(
+        !tmp.path().join(".gitignore").exists(),
+        "a stale origin must not write any ignore rule"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+}

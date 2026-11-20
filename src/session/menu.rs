@@ -56,6 +56,9 @@ impl Session {
                     None,
                     None,
                     Some(params.key.clone()),
+                    self.views
+                        .get(&params.view_id)
+                        .and_then(|v| v.menu_origin.clone()),
                     ui,
                 )?;
                 if result.keymap.is_none() {
@@ -71,6 +74,9 @@ impl Session {
                     None,
                     None,
                     Some(params.key.clone()),
+                    self.views
+                        .get(&params.view_id)
+                        .and_then(|v| v.menu_origin.clone()),
                     ui,
                 )?;
                 if result.keymap.is_none() {
@@ -498,6 +504,31 @@ impl Session {
                         });
                     }
                 };
+                let origin = self
+                    .views
+                    .get(view_id)
+                    .and_then(|view| view.menu_origin.clone());
+                let Some(origin) = origin.filter(|origin| origin.view_id == target) else {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            "Originating view context is unavailable",
+                        )],
+                        ..InvokeResult::empty()
+                    });
+                };
+                let origin_valid = self.views.get(&target).is_some_and(|view| {
+                    view.version == origin.version || view.acked_version == Some(origin.version)
+                });
+                if !origin_valid {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            crate::errors::STALE_VIEW,
+                        )],
+                        ..InvokeResult::empty()
+                    });
+                }
 
                 let mut effects = Vec::new();
                 let mut keymap = None;
@@ -521,9 +552,9 @@ impl Session {
                         command: registered.id.to_string(),
                         target: crate::dispatch::DispatchTarget {
                             view_id: target,
-                            version: None,
-                            cursor: None,
-                            selection: None,
+                            version: Some(origin.version),
+                            cursor: origin.cursor,
+                            selection: origin.selection,
                             key: Some(key.to_string()),
                         },
                         args: serialized_args,

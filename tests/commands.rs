@@ -566,7 +566,11 @@ fn the_registry_lists_every_named_command_once() {
                     .unwrap_or_else(|| panic!("{command} is registered"));
                 if matches!(
                     *command,
-                    "commit.fixup"
+                    "ignore.topdir"
+                        | "ignore.subdir"
+                        | "ignore.gitdir"
+                        | "ignore.system"
+                        | "commit.fixup"
                         | "commit.instant-fixup"
                         | "commit.instant-squash"
                         | "rebase.continue"

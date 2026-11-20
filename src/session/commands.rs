@@ -167,7 +167,22 @@ impl Session {
                 });
             }
         }
-        let result = self.run_command(view_id, command_id, cursor, selection, args, key, ui);
+        let result = self.run_command(
+            view_id,
+            command_id,
+            cursor,
+            selection,
+            args,
+            key,
+            Some(super::MenuOrigin {
+                view_id: view_id.to_string(),
+                version: version
+                    .unwrap_or_else(|| self.views.get(view_id).map_or(0, |v| v.version())),
+                cursor,
+                selection,
+            }),
+            ui,
+        );
         if let Some(view) = self.views.get_mut(view_id) {
             view.request_tree = None;
         }
@@ -188,6 +203,7 @@ impl Session {
         selection: Option<Selection>,
         args: Option<&serde_json::Value>,
         key: Option<String>,
+        origin: Option<super::MenuOrigin>,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
         if let Some(required) = self
@@ -263,7 +279,7 @@ impl Session {
             let effects = ctx.into_effects();
             (effects, outcome)
         };
-        self.finish_command(view_id, command.id, cursor, effects, outcome)
+        self.finish_command(view_id, command.id, cursor, effects, outcome, origin)
     }
 
     /// Apply a command outcome to the session's views and pending interactions.
@@ -274,6 +290,7 @@ impl Session {
         cursor: Option<Cursor>,
         mut effects: Vec<Effect>,
         mut outcome: commands::CommandOutcome,
+        origin: Option<super::MenuOrigin>,
     ) -> Result<InvokeResult> {
         commands::enforce_effects(command_id, &mut effects);
         if let Some((request, action)) = outcome.prompt.take() {
@@ -705,7 +722,11 @@ impl Session {
                     parent_id = previous.descriptor().id.clone();
                 }
             }
-            let (descriptor, render) = self.push_menu(&parent_id, menu)?;
+            let inherited = self
+                .views
+                .get(&parent_id)
+                .and_then(|v| v.menu_origin.clone());
+            let (descriptor, render) = self.push_menu(&parent_id, menu, inherited.or(origin))?;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
             return Ok(InvokeResult {

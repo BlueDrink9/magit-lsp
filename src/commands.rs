@@ -13,7 +13,8 @@ use crate::log_view::CommitSelection;
 use crate::menu::Menu;
 use crate::patch::{FileLayout, SelectionOp};
 use crate::protocol::{
-    Cursor, Effect, MessageLevel, PromptKind, PromptValue, Selection, ViewPromptParams,
+    Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptItem, PromptKind, PromptValue,
+    Selection, ViewPromptParams,
 };
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
@@ -438,6 +439,23 @@ pub enum PromptAction {
     NotesContent { commit: String, replace: bool },
     /// Confirm removal of a note from the already resolved commit.
     NotesRemove { commit: String },
+    /// Choose whether the pinned path is entered literally or as a pattern.
+    IgnoreRuleKind {
+        scope: crate::git::IgnoreScope,
+        path: String,
+    },
+    /// Apply the answered ignore rule to the pinned scope and path.
+    IgnoreRuleValue {
+        scope: crate::git::IgnoreScope,
+        path: String,
+        pattern: bool,
+    },
+    /// Require explicit confirmation before writing the user-wide excludes file.
+    IgnoreUserConfirm {
+        path: String,
+        rule: String,
+        pattern: bool,
+    },
     /// Add a remote with the answered name.
     RemoteAdd,
     /// Second half of a remote add: point this validated name at the answered URL.
@@ -986,6 +1004,72 @@ pub fn resume_prompt(
                 refresh: true,
                 ..Default::default()
             })
+        }
+        PromptAction::IgnoreRuleKind { scope, path } => {
+            let PromptValue::Choice(answer) = answer else {
+                return Err(crate::Error::new("Choose a literal path or custom pattern"));
+            };
+            let pattern = match answer {
+                PromptChoiceAnswer::Id { id } if id == "literal" => false,
+                PromptChoiceAnswer::Id { id } if id == "pattern" => true,
+                _ => {
+                    ctx.info("Choose literal path or custom pattern");
+                    return Ok(CommandOutcome::default());
+                }
+            };
+            if pattern {
+                let mut prompt =
+                    branch_name_prompt("Custom ignore pattern", "", "Git ignore pattern");
+                prompt.detail = Some(format!("Destination: {}. Enter a pattern deliberately; the selected path {path} remains pinned and is not reinterpreted.", ignore_scope_label(scope)));
+                Ok(CommandOutcome {
+                    prompt: Some((
+                        prompt,
+                        PromptAction::IgnoreRuleValue {
+                            scope,
+                            path,
+                            pattern: true,
+                        },
+                    )),
+                    ..Default::default()
+                })
+            } else if scope == crate::git::IgnoreScope::User {
+                ignore_user_confirmation(path.clone(), path, false)
+            } else {
+                apply_ignore_rule(ctx, scope, &path, false)
+            }
+        }
+        PromptAction::IgnoreRuleValue {
+            scope,
+            path,
+            pattern,
+        } => {
+            let PromptValue::Text(value) = answer else {
+                return Err(crate::Error::new("Expected an ignore pattern"));
+            };
+            let value = value.trim();
+            if value.is_empty()
+                || value.starts_with('#')
+                || value.contains('\n')
+                || value.contains('\r')
+            {
+                ctx.info("Enter one non-empty ignore pattern");
+                return Ok(CommandOutcome::default());
+            }
+            if scope == crate::git::IgnoreScope::User {
+                ignore_user_confirmation(path, value.to_owned(), pattern)
+            } else {
+                apply_ignore_rule(ctx, scope, value, pattern)
+            }
+        }
+        PromptAction::IgnoreUserConfirm {
+            path: _,
+            rule,
+            pattern,
+        } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
+            apply_ignore_rule(ctx, crate::git::IgnoreScope::User, &rule, pattern)
         }
         PromptAction::NotesTarget { operation } => {
             let PromptValue::Text(target) = answer else {
@@ -1907,6 +1991,10 @@ fn build() -> Registry {
         command! { id: "notes.add", scope: Scope::MenuAction, doc: "Add a note to an explicit commit", status: CommandStatus::Implemented, run: notes_add, effects: &[] },
         command! { id: "notes.edit", scope: Scope::MenuAction, doc: "Edit a note on an explicit commit", status: CommandStatus::Implemented, run: notes_edit, effects: &[] },
         command! { id: "notes.remove", scope: Scope::MenuAction, doc: "Remove a note from an explicit commit", status: CommandStatus::Implemented, run: notes_remove, effects: &[] },
+        command! { id: "ignore.topdir", scope: Scope::MenuAction, doc: "Ignore the selected file in the root .gitignore", status: CommandStatus::Implemented, run: ignore_topdir, effects: &[] },
+        command! { id: "ignore.subdir", scope: Scope::MenuAction, doc: "Ignore the selected file in its parent .gitignore", status: CommandStatus::Implemented, run: ignore_subdir, effects: &[] },
+        command! { id: "ignore.gitdir", scope: Scope::MenuAction, doc: "Ignore the selected file in repository info/exclude", status: CommandStatus::Implemented, run: ignore_gitdir, effects: &[] },
+        command! { id: "ignore.system", scope: Scope::MenuAction, doc: "Ignore the selected file in the user excludes file", status: CommandStatus::Implemented, run: ignore_system, effects: &[] },
         menu(
             "open.patch-apply",
             "Open the apply-patches menu",
@@ -2693,6 +2781,114 @@ fn notes_action(ctx: &mut CommandCtx<'_>, operation: NotesOperation) -> Result<C
         )),
         ..Default::default()
     })
+}
+
+fn ignore_action(
+    ctx: &mut CommandCtx<'_>,
+    scope: crate::git::IgnoreScope,
+) -> Result<CommandOutcome> {
+    let tree = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
+    let path = ctx
+        .cursor
+        .and_then(|cursor| tree.navigation_node(cursor.line))
+        .filter(|node| node.kind == NodeKind::File)
+        .and_then(|node| node.path.clone());
+    let Some(path) = path else {
+        ctx.info("Select a file in the status view before adding an ignore rule");
+        return Ok(CommandOutcome::default());
+    };
+    let mut prompt = ViewPromptParams {
+        prompt_id: String::new(), kind: PromptKind::Choice,
+        title: format!("Ignore in {}", ignore_scope_label(scope)),
+        detail: Some(format!("Selected file: {path}. Choose literal path to ignore only this file, or custom pattern to enter a Git pattern.")),
+        yes_label: None, no_label: None, destructive: None, default: Some(Value::String("literal".into())),
+        placeholder: None, secret: None,
+        items: Some(vec![
+            PromptItem { id: "literal".into(), label: "Literal selected path".into(), description: Some(path.clone()), detail: None },
+            PromptItem { id: "pattern".into(), label: "Enter custom pattern…".into(), description: Some("Treat the next input as an ignore pattern".into()), detail: None },
+        ]), allow_custom: Some(false), preselected: None, min: None, max: None,
+    };
+    prompt.prompt_id = "ignore-rule-kind".into();
+    Ok(CommandOutcome {
+        prompt: Some((prompt, PromptAction::IgnoreRuleKind { scope, path })),
+        ..Default::default()
+    })
+}
+
+fn ignore_scope_label(scope: crate::git::IgnoreScope) -> &'static str {
+    match scope {
+        crate::git::IgnoreScope::Root => "the repository root .gitignore",
+        crate::git::IgnoreScope::Directory => "the selected file's parent .gitignore",
+        crate::git::IgnoreScope::Repository => "repository info/exclude",
+        crate::git::IgnoreScope::User => "the user-wide excludes file",
+    }
+}
+
+fn ignore_user_confirmation(path: String, rule: String, pattern: bool) -> Result<CommandOutcome> {
+    let mut prompt = branch_name_prompt("Write user-wide ignore rule?", "", "Confirm");
+    prompt.kind = PromptKind::Confirm;
+    prompt.yes_label = Some("Write user excludes".into());
+    prompt.no_label = Some("Cancel".into());
+    prompt.detail = Some(format!(
+        "This changes the user-wide excludes file for {}: {rule}",
+        ignore_scope_label(crate::git::IgnoreScope::User)
+    ));
+    Ok(CommandOutcome {
+        prompt: Some((
+            prompt,
+            PromptAction::IgnoreUserConfirm {
+                path,
+                rule,
+                pattern,
+            },
+        )),
+        ..Default::default()
+    })
+}
+
+fn apply_ignore_rule(
+    ctx: &mut CommandCtx<'_>,
+    scope: crate::git::IgnoreScope,
+    rule: &str,
+    pattern: bool,
+) -> Result<CommandOutcome> {
+    let result = GitRepo::open(ctx.repo_path).and_then(|repo| {
+        if pattern {
+            repo.add_ignore_rule(scope, crate::git::IgnoreRule::Pattern(rule))
+        } else {
+            repo.add_ignore_rule(
+                scope,
+                crate::git::IgnoreRule::LiteralPath(std::path::Path::new(rule)),
+            )
+        }
+    });
+    match result {
+        Ok(()) => ctx.info(format!(
+            "Added ignore rule to {}",
+            ignore_scope_label(scope)
+        )),
+        Err(error) => report_git_error(ctx, &error),
+    }
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
+}
+
+fn ignore_topdir(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ignore_action(ctx, crate::git::IgnoreScope::Root)
+}
+fn ignore_subdir(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ignore_action(ctx, crate::git::IgnoreScope::Directory)
+}
+fn ignore_gitdir(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ignore_action(ctx, crate::git::IgnoreScope::Repository)
+}
+fn ignore_system(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ignore_action(ctx, crate::git::IgnoreScope::User)
 }
 
 fn notes_read(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

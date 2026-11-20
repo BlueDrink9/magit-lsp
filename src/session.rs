@@ -246,6 +246,8 @@ pub struct OpenView {
     acked: Option<Tree>,
     /// A bounded dispatch-only clone; never changes the acknowledgement snapshot.
     request_tree: Option<Tree>,
+    /// Original positional input retained by a transient menu opened here.
+    pub(crate) menu_origin: Option<MenuOrigin>,
     acked_version: Option<u64>,
     /// Chord steps collected for this view since the last complete match.
     pending: PendingChord,
@@ -263,6 +265,14 @@ pub struct OpenView {
     published: PublishedViews,
     repo_path: String,
     draft_owner: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MenuOrigin {
+    pub(crate) view_id: String,
+    pub(crate) version: u64,
+    pub(crate) cursor: Option<Cursor>,
+    pub(crate) selection: Option<crate::protocol::Selection>,
 }
 
 impl OpenView {
@@ -556,6 +566,7 @@ fn initialize_open_view(
         version,
         acked: None,
         request_tree: None,
+        menu_origin: None,
         acked_version: None,
         pending: PendingChord::default(),
         menu_pending: Vec::new(),
@@ -2153,6 +2164,7 @@ impl Session {
                     pending.cursor,
                     effects,
                     outcome,
+                    None,
                 )?
             }
         };
@@ -2231,14 +2243,23 @@ impl Session {
     }
 
     /// Push a menu above `parent_id` and return its descriptor and first render.
-    fn push_menu(&mut self, parent_id: &str, menu: Menu) -> Result<(ViewDescriptor, ViewRender)> {
+    fn push_menu(
+        &mut self,
+        parent_id: &str,
+        menu: Menu,
+        origin: Option<MenuOrigin>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         let kind = ViewKind::Menu(format!("menu.{}", menu.id));
-        self.push_view(
+        let (descriptor, render) = self.push_view(
             parent_id,
             kind,
             Placement::Bottom,
             Box::new(MenuView::new(menu)),
-        )
+        )?;
+        if let Some(view) = self.views.get_mut(&descriptor.id) {
+            view.menu_origin = origin;
+        }
+        Ok((descriptor, render))
     }
 
     /// Create a non-menu view and push it above `parent_id`.
@@ -2449,6 +2470,7 @@ impl Session {
         self.run_command(
             &params.view_id,
             TOGGLE_TEXT_MODE,
+            None,
             None,
             None,
             None,
