@@ -444,6 +444,58 @@ fn execute_offered(
     }
 }
 
+/// Send a `view/invoke`, driving Plain choice-document renders into the editor.
+///
+/// Plain delivers prompt/choice renders as `workspace/applyEdit` notifications
+/// rather than response effects, so they must be acknowledged before the render
+/// is visible to the client.
+fn invoke_plain(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    id: i64,
+    params: Value,
+) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke","params":params}));
+    loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            continue;
+        }
+        if message["id"] == json!(id) {
+            return message;
+        }
+    }
+}
+
+/// The real status view ID and displayed generation from an offered action.
+fn offered_status_view(
+    server: &mut stdio::TestServer,
+    editor: &FakeEditor,
+    uri: &str,
+    row: u32,
+    id: i64,
+) -> (String, u64) {
+    let args = offered_for_range(
+        server,
+        uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.commit",
+        id,
+    );
+    assert!(!args.is_null(), "open.commit not offered on the file row");
+    let view_id = args["target"]["viewId"]
+        .as_str()
+        .expect("status view ID")
+        .to_owned();
+    let generation = args["viewGeneration"]
+        .as_u64()
+        .expect("status view generation");
+    (view_id, generation)
+}
+
 /// Exact `(HEAD, index f.txt, worktree f.txt)` repository state.
 fn repo_state(repo: &fixtures::RepoFixture) -> (String, String, String) {
     (
@@ -1712,54 +1764,50 @@ fn plain_text_prompt_submit_row_answers_with_the_typed_value() {
 }
 
 #[test]
-fn plain_upstream_pick_uses_a_choice_document_and_submits_the_value() {
+fn plain_ignore_topdir_uses_a_choice_document_and_submits_literal_id() {
     let (repo, _) = fixtures::RepoFixture::new()
-        .commit("initial", [("f.txt", "one\n")])
-        .modify("f.txt", "changed\n")
+        .commit(
+            "initial",
+            [("dir/a*b.txt", "one\n"), ("other.txt", "other\n")],
+        )
+        .modify("dir/a*b.txt", "changed\n")
         .build();
+    std::fs::write(repo.path().join(".gitignore"), "# retained\n").unwrap();
+    let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo);
     let row = editor
         .text(&uri)
         .lines()
-        .position(|line| line.contains("f.txt"))
+        .position(|line| line.contains("a*b.txt"))
         .expect("file row") as u32;
-    let open = offered_for_range(
+    let (view_id, version) = offered_status_view(&mut server, &editor, &uri, row, 139);
+    let invoked = invoke_plain(
         &mut server,
-        &uri,
-        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
-        "open.branch",
+        &mut editor,
         140,
+        json!({"viewId":view_id,"command":"ignore.topdir","version":version,"cursor":{"line":row,"column":0}}),
     );
-    assert!(!open.is_null(), "open.branch not offered");
-    let opened = execute_offered(&mut server, &mut editor, open, 141);
-
-    let menu_text = editor.text(&uri).to_owned();
-    let option_row = menu_text
-        .lines()
-        .position(|line| line.contains("Set the upstream branch"))
-        .unwrap_or_else(|| panic!("missing upstream row: {menu_text} / opened: {opened}"))
-        as u32;
-    let option = offered_for_range(
-        &mut server,
-        &uri,
-        json!({"start":{"line":option_row,"character":0},"end":{"line":option_row,"character":0}}),
-        "menu.run-option",
-        142,
+    assert!(
+        invoked["error"].is_null(),
+        "ignore.topdir invoke failed: {invoked}"
     );
-    execute_offered(&mut server, &mut editor, option, 143);
 
     let prompt_text = editor.text(&uri).to_owned();
     assert!(
-        prompt_text.contains("Set the upstream branch (--set-upstream-to=)"),
-        "pick prompt missing: {prompt_text}"
+        prompt_text.contains("Ignore in the repository root .gitignore"),
+        "choice prompt title missing: {prompt_text}"
     );
     assert!(
-        prompt_text.lines().any(|line| line.trim() == "main"),
-        "main item missing: {prompt_text}"
+        prompt_text.contains("Literal selected path"),
+        "literal choice item missing: {prompt_text}"
     );
     assert!(
-        prompt_text.contains("Submit"),
-        "submit row missing: {prompt_text}"
+        prompt_text.contains("Enter custom pattern"),
+        "pattern choice item missing: {prompt_text}"
+    );
+    assert!(
+        prompt_text.lines().any(|line| line.trim() == "Cancel"),
+        "choice document must render its cancel row: {prompt_text}"
     );
     assert!(
         !server
@@ -1769,33 +1817,41 @@ fn plain_upstream_pick_uses_a_choice_document_and_submits_the_value() {
         "a Plain pick must be a document, not view/pick"
     );
 
-    let submit = exact_row(&prompt_text, "Submit");
-    let mut lines: Vec<String> = prompt_text.lines().map(str::to_owned).collect();
-    let field = (submit - 1) as usize;
-    lines[field] = "main".into();
-    let edited = lines.join("\n");
-    server.send(editor.edit(&uri, &edited));
-
-    let answer = offered_prompt_answer(&mut server, &uri, submit, 144);
+    let literal = prompt_text
+        .lines()
+        .position(|line| line.contains("Literal selected path"))
+        .expect("literal item row") as u32;
+    let answer = offered_prompt_answer(&mut server, &uri, literal, 144);
     let submitted = execute_offered(&mut server, &mut editor, answer, 145);
     assert!(
         submitted["error"].is_null(),
-        "pick submit failed: {submitted}"
+        "literal pick submit failed: {submitted}"
     );
 
     let closed = editor.text(&uri).to_owned();
     assert!(
-        closed.contains("--set-upstream-to=main"),
-        "menu does not reflect the pick: {closed}"
+        !closed.contains("Literal selected path"),
+        "choice document did not close: {closed}"
     );
-    assert!(!closed.contains("Submit"), "pick stayed open: {closed}");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join(".gitignore")).unwrap(),
+        "# retained\n/dir/a\\*b.txt\n",
+        "literal root ignore rule must be appended verbatim"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "HEAD must not move");
+    assert_eq!(fixtures::read(&repo.path().join("other.txt")), "other\n");
+    assert_eq!(
+        repo.git(&["status", "--short"]),
+        " M dir/a*b.txt\n?? .gitignore\n",
+        "only the modified file and the newly written ignore file may change"
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
 }
 
 #[test]
-fn plain_choice_item_row_answers_the_pick() {
+fn plain_choice_item_row_answers_the_ignore_kind_pick() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
         .modify("f.txt", "changed\n")
@@ -1806,32 +1862,23 @@ fn plain_choice_item_row_answers_the_pick() {
         .lines()
         .position(|line| line.contains("f.txt"))
         .expect("file row") as u32;
-    let open = offered_for_range(
+    let (view_id, version) = offered_status_view(&mut server, &editor, &uri, row, 149);
+    let invoked = invoke_plain(
         &mut server,
-        &uri,
-        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
-        "open.branch",
+        &mut editor,
         150,
+        json!({"viewId":view_id,"command":"ignore.topdir","version":version,"cursor":{"line":row,"column":0}}),
     );
-    assert!(!open.is_null(), "open.branch not offered");
-    execute_offered(&mut server, &mut editor, open, 151);
-
-    let menu_text = editor.text(&uri).to_owned();
-    let option_row = menu_text
-        .lines()
-        .position(|line| line.contains("Set the upstream branch"))
-        .unwrap_or_else(|| panic!("missing upstream row: {menu_text}")) as u32;
-    let option = offered_for_range(
-        &mut server,
-        &uri,
-        json!({"start":{"line":option_row,"character":0},"end":{"line":option_row,"character":0}}),
-        "menu.run-option",
-        152,
+    assert!(
+        invoked["error"].is_null(),
+        "ignore.topdir invoke failed: {invoked}"
     );
-    execute_offered(&mut server, &mut editor, option, 153);
 
     let prompt_text = editor.text(&uri).to_owned();
-    let item = exact_row(&prompt_text, "main");
+    let item = prompt_text
+        .lines()
+        .position(|line| line.contains("Literal selected path"))
+        .expect("literal item row") as u32;
     server.send(json!({"jsonrpc":"2.0","id":154,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":item,"character":0},"end":{"line":item,"character":0}},"context":{"diagnostics":[]}}}));
     let actions = server.response_with_id(154)["result"].clone();
     let answers: Vec<&Value> = actions
@@ -1843,21 +1890,25 @@ fn plain_choice_item_row_answers_the_pick() {
     assert_eq!(
         answers.len(),
         1,
-        "expected one prompt.answer on the item row: {prompt_text}"
+        "expected one prompt.answer on the literal item row: {prompt_text}"
     );
     let answer = answers[0]["command"]["arguments"][0].clone();
     let answered = execute_offered(&mut server, &mut editor, answer, 155);
     assert!(
         answered["error"].is_null(),
-        "item answer failed: {answered}"
+        "literal item-row answer failed: {answered}"
     );
 
     let closed = editor.text(&uri).to_owned();
     assert!(
-        closed.contains("--set-upstream-to=main"),
-        "menu does not reflect the item pick: {closed}"
+        !closed.contains("Literal selected path"),
+        "choice document did not close: {closed}"
     );
-    assert!(!closed.contains("Submit"), "pick stayed open: {closed}");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join(".gitignore")).unwrap(),
+        "/f.txt\n",
+        "the literal item-row code action must write exactly the selected path"
+    );
     assert!(
         !server
             .sent
