@@ -4112,6 +4112,145 @@ fn ignore_root_literal_uses_selected_path() {
 }
 
 #[test]
+fn ignore_subdir_literal_is_relative_and_scoped() {
+    use magit_lsp::protocol::PromptChoiceAnswer;
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/nested/a*b.txt", "original\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/nested/a*b.txt", "changed\n")
+        .modify("other/other.txt", "changed too\n")
+        .build();
+    // Pre-seed the selected parent's ignore file and place untracked decoys:
+    // one with the same basename outside the parent, one with a non-literal
+    // name inside it. The rule must be relative to and scoped to this parent.
+    std::fs::write(tmp.path().join("dir/nested/.gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join("dir/nested/axxb.txt"), "decoy inside\n").unwrap();
+    std::fs::write(tmp.path().join("dir/a*b.txt"), "decoy outside\n").unwrap();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
+    let selected_before = std::fs::read_to_string(tmp.path().join("dir/nested/a*b.txt")).unwrap();
+    let inside_before = std::fs::read_to_string(tmp.path().join("dir/nested/axxb.txt")).unwrap();
+    let outside_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
+    let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
+    let root_ignore_before = std::fs::read_to_string(tmp.path().join(".gitignore")).ok();
+    let repo_exclude_before =
+        std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap_or_default();
+    let user_ignore_path =
+        std::path::PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap()).join("git/ignore");
+    let user_ignore_before = std::fs::read_to_string(&user_ignore_path).ok();
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", "dir/nested/a*b.txt");
+    assert_eq!(test.cursor().line, line);
+    // A different modified file supplies a menu cursor whose line resolves to
+    // another file in the source view, so the action can only succeed if it
+    // reads the retained source identity rather than the menu's own cursor.
+    let other_line = test.goto_file("unstaged", "other/other.txt");
+    assert_ne!(other_line, line);
+    test.goto(line);
+
+    // Real key ingress: the `i` opener, then the `s` subdir action. Queue the
+    // literal choice before pressing `s` so ScriptedUi drives the prompt.
+    test.ui().reply_choice(Some(PromptChoiceAnswer::Id {
+        id: "literal".into(),
+    }));
+    test.press_ui("i");
+    // Move the menu cursor away from the retained source cursor.
+    test.goto(other_line);
+    assert_eq!(test.cursor().line, other_line);
+    let result = test.press_ui("s");
+
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("parent .gitignore")),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/nested/.gitignore")).unwrap(),
+        "# retained\n/a\\*b.txt\n"
+    );
+
+    // No other scope was written: root ignore, repository exclude and the
+    // isolated user excludes file all remain byte-for-byte unchanged.
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".gitignore")).ok(),
+        root_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap_or_default(),
+        repo_exclude_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(&user_ignore_path).ok(),
+        user_ignore_before
+    );
+
+    let ignored = |path: &str| -> bool {
+        std::process::Command::new("git")
+            .args(["check-ignore", "--no-index", path])
+            .current_dir(tmp.path())
+            .output()
+            .expect("run git check-ignore")
+            .status
+            .success()
+    };
+    assert!(
+        ignored("dir/nested/a*b.txt"),
+        "the literal file in the selected parent must be ignored"
+    );
+    assert!(
+        !ignored("dir/nested/axxb.txt"),
+        "the wildcard must be escaped, not expanded"
+    );
+    assert!(
+        !ignored("dir/a*b.txt"),
+        "the same basename outside the selected parent must not be ignored"
+    );
+    assert!(
+        !ignored("base.txt"),
+        "an unrelated file must not be ignored"
+    );
+    assert!(
+        !ignored("other/other.txt"),
+        "the menu cursor's file must not be ignored"
+    );
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        base_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/nested/a*b.txt")).unwrap(),
+        selected_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/nested/axxb.txt")).unwrap(),
+        inside_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        outside_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap(),
+        other_before
+    );
+}
+
+#[test]
 fn ignore_root_custom_pattern_is_deliberate() {
     use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
