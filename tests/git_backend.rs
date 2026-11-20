@@ -7,6 +7,177 @@ use magit_lsp::ErrorKind;
 use proptest::prelude::*;
 use std::path::Path;
 
+#[test]
+fn branch_and_repository_configuration_round_trips_locally() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    git(tmp.path(), &["branch", "feature"]);
+    git(
+        tmp.path(),
+        &["remote", "add", "origin", "https://example.invalid/repo"],
+    );
+    git(
+        tmp.path(),
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    write(
+        &tmp.path().join("untracked.txt"),
+        "keep this worktree content\n",
+    );
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    repo.set_branch_upstream("feature", Some("origin/main"))
+        .expect("set upstream");
+    assert_eq!(
+        repo.branch_upstream("feature")
+            .expect("read upstream")
+            .as_deref(),
+        Some("origin/main")
+    );
+    repo.set_branch_rebase("feature", Some(true))
+        .expect("set rebase");
+    assert_eq!(
+        repo.branch_rebase("feature").expect("read rebase"),
+        Some(true)
+    );
+    repo.set_branch_push_remote("feature", Some("origin"))
+        .expect("set push remote");
+    assert_eq!(
+        repo.branch_push_remote("feature")
+            .expect("read push remote")
+            .as_deref(),
+        Some("origin")
+    );
+    repo.set_branch_upstream("feature", None)
+        .expect("clear upstream");
+    repo.set_branch_rebase("feature", None)
+        .expect("clear rebase");
+    repo.set_branch_push_remote("feature", None)
+        .expect("clear push remote");
+    assert_eq!(
+        repo.branch_upstream("feature")
+            .expect("read cleared upstream"),
+        None
+    );
+    assert_eq!(
+        repo.branch_rebase("feature").expect("read cleared rebase"),
+        None
+    );
+    assert_eq!(
+        repo.branch_push_remote("feature")
+            .expect("read cleared remote"),
+        None
+    );
+    repo.set_pull_rebase(Some(true)).expect("set pull.rebase");
+    assert_eq!(repo.pull_rebase().expect("read pull.rebase"), Some(true));
+    repo.set_push_default(Some(magit_lsp::git::PushDefault::Current))
+        .expect("set push.default");
+    assert_eq!(
+        repo.push_default().expect("read push.default"),
+        Some(magit_lsp::git::PushDefault::Current)
+    );
+    assert!(git(
+        tmp.path(),
+        &[
+            "config",
+            "--show-origin",
+            "--local",
+            "--get",
+            "push.default"
+        ]
+    )
+    .contains("file:"));
+    repo.set_pull_rebase(None).expect("clear pull.rebase");
+    repo.set_push_default(None).expect("clear push.default");
+    assert_eq!(repo.pull_rebase().expect("read cleared pull.rebase"), None);
+    assert_eq!(
+        repo.push_default().expect("read cleared push.default"),
+        None
+    );
+    assert_eq!(
+        git(tmp.path(), &["branch", "--show-current"]).trim(),
+        "main"
+    );
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        repo.branch_rebase("main").expect("other branch untouched"),
+        None
+    );
+    assert_eq!(
+        read(&tmp.path().join("untracked.txt")),
+        "keep this worktree content\n"
+    );
+}
+
+#[test]
+fn branch_configuration_rejects_invalid_targets_and_handles_head_states() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    git(tmp.path(), &["branch", "feature"]);
+    assert!(repo
+        .set_branch_rebase("missing", Some(true))
+        .unwrap_err()
+        .to_string()
+        .contains("missing"));
+    assert!(repo
+        .set_branch_upstream("feature", Some("origin/missing"))
+        .is_err());
+    assert!(repo
+        .set_branch_push_remote("feature", Some("missing-remote"))
+        .is_err());
+    assert_eq!(
+        repo.branch_rebase("feature")
+            .expect("failed input did not write"),
+        None
+    );
+    git(
+        tmp.path(),
+        &[
+            "config",
+            "--local",
+            "branch.feature.rebase",
+            "not-a-boolean",
+        ],
+    );
+    assert!(repo
+        .branch_rebase("feature")
+        .unwrap_err()
+        .to_string()
+        .contains("Invalid"));
+    git(
+        tmp.path(),
+        &["config", "--local", "push.default", "not-a-mode"],
+    );
+    assert!(repo
+        .push_default()
+        .unwrap_err()
+        .to_string()
+        .contains("Invalid push.default"));
+
+    let (_detached_tmp, detached) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .detached()
+        .build();
+    detached
+        .set_branch_rebase("main", Some(false))
+        .expect("explicit branch works with detached HEAD");
+    assert_eq!(detached.current_branch(), None);
+    assert_eq!(
+        detached
+            .branch_rebase("main")
+            .expect("read detached branch config"),
+        Some(false)
+    );
+
+    let (_unborn_tmp, unborn) = RepoFixture::new()
+        .unborn()
+        .staged_file("f.txt", TEN_LINES)
+        .build();
+    assert!(unborn.set_branch_rebase("main", Some(true)).is_err());
+    assert_eq!(unborn.current_branch(), Some("main".to_owned()));
+}
+
 /// `git diff [-U3]` for [`standard_changes`]: the whole fixture staged.
 const STANDARD_DIFF: &str = concat!(
     "diff --git a/f.txt b/f.txt\n",

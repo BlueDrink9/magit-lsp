@@ -8,6 +8,38 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
+/// Git's supported `push.default` modes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PushDefault {
+    Nothing,
+    Current,
+    Upstream,
+    Simple,
+    Matching,
+}
+
+impl PushDefault {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Nothing => "nothing",
+            Self::Current => "current",
+            Self::Upstream => "upstream",
+            Self::Simple => "simple",
+            Self::Matching => "matching",
+        }
+    }
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "nothing" => Ok(Self::Nothing),
+            "current" => Ok(Self::Current),
+            "upstream" => Ok(Self::Upstream),
+            "simple" => Ok(Self::Simple),
+            "matching" => Ok(Self::Matching),
+            _ => Err(Error::new(format!("Invalid push.default value: {value}"))),
+        }
+    }
+}
+
 const RECOMMENDED_GIT_VERSION: &str = include_str!("../RECOMMENDED_GIT_VERSION");
 
 // Hash only this path's subtree. Never follow symlinks (including directory
@@ -773,6 +805,172 @@ impl GitRepo {
         let key = format!("branch.{name}.description");
         self.run(&["config", "--", key.as_str(), description])
             .map(|_| ())
+    }
+
+    fn existing_local_branch(&self, name: &str) -> Result<String> {
+        let name = self.validate_branch_name(name)?;
+        self.run(&[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ])?;
+        Ok(name)
+    }
+
+    /// Read a branch's Git-resolved upstream, or `None` when unset.
+    pub fn branch_upstream(&self, branch: &str) -> Result<Option<String>> {
+        let branch = self.existing_local_branch(branch)?;
+        let value = self.run(&[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            &format!("refs/heads/{branch}"),
+        ])?;
+        Ok((!value.trim().is_empty()).then(|| value.trim().to_owned()))
+    }
+
+    /// Set or clear the upstream of an existing local branch using Git's upstream semantics.
+    pub fn set_branch_upstream(&self, branch: &str, upstream: Option<&str>) -> Result<()> {
+        let branch = self.existing_local_branch(branch)?;
+        match upstream {
+            Some(upstream) => {
+                if self
+                    .run(&[
+                        "rev-parse",
+                        "--verify",
+                        "--quiet",
+                        &format!("{upstream}^{{commit}}"),
+                    ])
+                    .is_err()
+                {
+                    return Err(Error::new(format!(
+                        "Upstream ref does not exist: {upstream}"
+                    )));
+                }
+                self.run(&[
+                    "branch",
+                    &format!("--set-upstream-to={upstream}"),
+                    "--",
+                    &branch,
+                ])?;
+            }
+            None => {
+                self.run(&["branch", "--unset-upstream", "--", &branch])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Read branch-specific rebase policy, distinguishing unset from false.
+    pub fn branch_rebase(&self, branch: &str) -> Result<Option<bool>> {
+        self.branch_bool_config(branch, "rebase")
+    }
+    /// Set or clear branch-specific rebase policy on an existing local branch.
+    pub fn set_branch_rebase(&self, branch: &str, value: Option<bool>) -> Result<()> {
+        self.set_branch_value(
+            branch,
+            "rebase",
+            value.map(|v| if v { "true" } else { "false" }),
+        )
+    }
+    /// Read branch-specific push remote, or `None` when unset.
+    pub fn branch_push_remote(&self, branch: &str) -> Result<Option<String>> {
+        self.branch_string_config(branch, "pushRemote")
+    }
+    /// Set or clear branch-specific push remote after validating it exists.
+    pub fn set_branch_push_remote(&self, branch: &str, remote: Option<&str>) -> Result<()> {
+        if let Some(remote) = remote {
+            Self::reject_option_like("remote name", remote)?;
+            self.run(&["remote", "get-url", remote])?;
+        }
+        self.set_branch_value(branch, "pushRemote", remote)
+    }
+
+    fn branch_bool_config(&self, branch: &str, key: &str) -> Result<Option<bool>> {
+        let Some(value) = self.branch_string_config(branch, key)? else {
+            return Ok(None);
+        };
+        match value.as_str() {
+            "true" | "yes" | "on" | "1" => Ok(Some(true)),
+            "false" | "no" | "off" | "0" => Ok(Some(false)),
+            _ => Err(Error::new(format!(
+                "Invalid branch.{branch}.{key} value: {value}"
+            ))),
+        }
+    }
+    fn branch_string_config(&self, branch: &str, key: &str) -> Result<Option<String>> {
+        let branch = self.existing_local_branch(branch)?;
+        Ok(self
+            .run(&[
+                "config",
+                "--local",
+                "--get",
+                &format!("branch.{branch}.{key}"),
+            ])
+            .ok()
+            .map(|v| v.trim().to_owned()))
+    }
+    fn set_branch_value(&self, branch: &str, key: &str, value: Option<&str>) -> Result<()> {
+        let branch = self.existing_local_branch(branch)?;
+        let key = format!("branch.{branch}.{key}");
+        match value {
+            Some(value) => {
+                self.run(&["config", "--local", "--", &key, value])?;
+            }
+            None => {
+                let _ = self.run(&["config", "--local", "--unset-all", &key]);
+            }
+        }
+        Ok(())
+    }
+
+    /// Read repository-local pull.rebase, or `None` when unset.
+    pub fn pull_rebase(&self) -> Result<Option<bool>> {
+        self.repo_bool_config("pull.rebase")
+    }
+    /// Set or clear repository-local pull.rebase.
+    pub fn set_pull_rebase(&self, value: Option<bool>) -> Result<()> {
+        self.set_repo_value(
+            "pull.rebase",
+            value.map(|v| if v { "true" } else { "false" }),
+        )
+    }
+    /// Read repository-local push.default, or `None` when unset.
+    pub fn push_default(&self) -> Result<Option<PushDefault>> {
+        self.repo_string_config("push.default")?
+            .map(|v| PushDefault::parse(&v))
+            .transpose()
+    }
+    /// Set or clear repository-local push.default.
+    pub fn set_push_default(&self, value: Option<PushDefault>) -> Result<()> {
+        self.set_repo_value("push.default", value.map(PushDefault::as_str))
+    }
+    fn repo_string_config(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .run(&["config", "--local", "--get", key])
+            .ok()
+            .map(|v| v.trim().to_owned()))
+    }
+    fn repo_bool_config(&self, key: &str) -> Result<Option<bool>> {
+        let Some(value) = self.repo_string_config(key)? else {
+            return Ok(None);
+        };
+        match value.as_str() {
+            "true" | "yes" | "on" | "1" => Ok(Some(true)),
+            "false" | "no" | "off" | "0" => Ok(Some(false)),
+            _ => Err(Error::new(format!("Invalid {key} value: {value}"))),
+        }
+    }
+    fn set_repo_value(&self, key: &str, value: Option<&str>) -> Result<()> {
+        match value {
+            Some(value) => {
+                self.run(&["config", "--local", key, value])?;
+            }
+            None => {
+                let _ = self.run(&["config", "--local", "--unset-all", key]);
+            }
+        }
+        Ok(())
     }
 
     /// Check an external author-date expression without changing repository state.
