@@ -4925,6 +4925,229 @@ fn ignore_rule_cancellation_never_writes() {
 }
 
 #[test]
+fn ignore_rule_invalid_inputs_never_write() {
+    use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    use magit_lsp::tree::NodeKind;
+
+    // Fixture-only private user excludes; never the real HOME/XDG/global files.
+    let private = tempfile::TempDir::new().expect("tempdir for private user excludes");
+    let user_ignore = private.path().join("user-ignore");
+    std::fs::write(&user_ignore, "# retained\n").unwrap();
+
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("dir/axxb.txt", "decoy\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .build();
+    let excludes_arg = user_ignore.to_string_lossy().into_owned();
+    tmp.git(&["config", "core.excludesFile", &excludes_arg]);
+
+    std::fs::write(tmp.path().join(".gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join("dir/.gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join(".git/info/exclude"), "# retained\n").unwrap();
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let status = tmp.git(&["status", "--porcelain=v2", "-z"]);
+    let root_before = std::fs::read(tmp.path().join(".gitignore")).unwrap();
+    let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
+    let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
+    let user_before = std::fs::read(&user_ignore).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
+
+    let assert_unchanged = |stage: &str| {
+        assert_eq!(
+            std::fs::read(tmp.path().join(".gitignore")).unwrap(),
+            root_before,
+            "{stage}: root .gitignore"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/.gitignore")).unwrap(),
+            subdir_before,
+            "{stage}: subdir .gitignore"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/info/exclude")).unwrap(),
+            repo_before,
+            "{stage}: repo exclude"
+        );
+        assert_eq!(
+            std::fs::read(&user_ignore).unwrap(),
+            user_before,
+            "{stage}: user excludes"
+        );
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{stage}: HEAD");
+        assert_eq!(tmp.git(&["write-tree"]), index, "{stage}: index");
+        assert_eq!(
+            tmp.git(&["status", "--porcelain=v2", "-z"]),
+            status,
+            "{stage}: status"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            selected_before,
+            "{stage}: selected file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("base.txt")).unwrap(),
+            base_before,
+            "{stage}: base file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            decoy_before,
+            "{stage}: decoy file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("other/other.txt")).unwrap(),
+            other_before,
+            "{stage}: other file"
+        );
+    };
+    let assert_no_success = |effects: &[Effect], stage: &str| {
+        let messages = message_texts(effects);
+        assert!(
+            !messages
+                .iter()
+                .any(|text| text.contains("Added ignore rule")),
+            "{stage}: unexpected success message {messages:?}"
+        );
+    };
+    let start = |test: &mut TestSession, command: &str, line: usize| {
+        test.session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: command.into(),
+                version: Some(test.version()),
+                cursor: Some(Cursor { line, column: 0 }),
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+    };
+    let open_pattern = || {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let started = start(&mut test, "ignore.topdir", line);
+        let Execution::Prompt(kind) = started else {
+            panic!("expected ignore-rule-kind prompt, got {started:?}");
+        };
+        let Execution::Prompt(value) = test
+            .session
+            .resume_prompt(
+                &kind.prompt_id,
+                Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                    id: "pattern".into(),
+                })),
+            )
+            .unwrap()
+        else {
+            panic!("expected custom-pattern prompt");
+        };
+        (test, value.prompt_id)
+    };
+
+    // (a) No File node under the status cursor: readable refusal, no prompt.
+    {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let header = test.tree().navigation_node(0);
+        assert!(
+            header.map_or(true, |node| node.kind != NodeKind::File),
+            "line 0 must not be a File node for the missing-selection case"
+        );
+        let started = start(&mut test, "ignore.topdir", 0);
+        let Execution::Done(result) = started else {
+            panic!("missing selection must finish without a prompt, got {started:?}");
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Select a file")),
+            "expected readable selection message, got {:?}",
+            message_texts(&result.effects)
+        );
+        assert_no_success(&result.effects, "missing selection");
+    }
+    assert_unchanged("after missing selection");
+
+    // (b) Empty custom pattern: deliberate no-op with a readable message.
+    {
+        let (mut test, pattern_id) = open_pattern();
+        let done = test
+            .session
+            .resume_prompt(&pattern_id, Some(PromptValue::Text("".into())))
+            .unwrap();
+        let Execution::Done(result) = done else {
+            panic!("empty pattern must finish, got {done:?}");
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Enter one non-empty ignore pattern")),
+            "expected invalid-pattern message, got {:?}",
+            message_texts(&result.effects)
+        );
+        assert_no_success(&result.effects, "empty pattern");
+    }
+    assert_unchanged("after empty pattern");
+
+    // (b) Whitespace-only custom pattern is likewise refused.
+    {
+        let (mut test, pattern_id) = open_pattern();
+        let done = test
+            .session
+            .resume_prompt(&pattern_id, Some(PromptValue::Text("   \t ".into())))
+            .unwrap();
+        let Execution::Done(result) = done else {
+            panic!("whitespace pattern must finish, got {done:?}");
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Enter one non-empty ignore pattern")),
+            "expected invalid-pattern message, got {:?}",
+            message_texts(&result.effects)
+        );
+        assert_no_success(&result.effects, "whitespace pattern");
+    }
+    assert_unchanged("after whitespace pattern");
+
+    // (c) Custom pattern containing a newline is refused.
+    {
+        let (mut test, pattern_id) = open_pattern();
+        let done = test
+            .session
+            .resume_prompt(&pattern_id, Some(PromptValue::Text("foo\nbar".into())))
+            .unwrap();
+        let Execution::Done(result) = done else {
+            panic!("newline pattern must finish, got {done:?}");
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Enter one non-empty ignore pattern")),
+            "expected invalid-pattern message, got {:?}",
+            message_texts(&result.effects)
+        );
+        assert_no_success(&result.effects, "newline pattern");
+    }
+    assert_unchanged("after newline pattern");
+}
+
+#[test]
 fn ignore_root_stale_origin_is_refused_without_redirecting() {
     use magit_lsp::errors::STALE_VIEW;
     let (tmp, _) = RepoFixture::new()
