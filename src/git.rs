@@ -127,6 +127,13 @@ fn user_excludes_path(root: &Path) -> Result<PathBuf> {
             String::from_utf8_lossy(&output.stdout).trim(),
         ));
     }
+    if output.status.code() != Some(1) {
+        return Err(Error::git(GitFailure::from_output(
+            &["config", "--path", "--get", "core.excludesFile"],
+            output.status,
+            &output.stderr,
+        )));
+    }
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));

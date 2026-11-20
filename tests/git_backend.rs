@@ -168,6 +168,23 @@ fn configured_user_excludes_and_linked_worktree_repository_scope_resolve_correct
     );
 }
 
+#[test]
+fn user_excludes_config_lookup_failure_does_not_write_fallback() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("initial", [("tracked.txt", TEN_LINES)])
+        .build();
+    let fallback =
+        std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("git/ignore");
+    let before = std::fs::read(&fallback).ok();
+    std::fs::write(repo.git_dir().join("config"), "[broken\n").unwrap();
+
+    assert!(repo
+        .add_ignore_rule(IgnoreScope::User, IgnoreRule::Pattern("*.failure"))
+        .is_err());
+    assert_eq!(std::fs::read(&fallback).ok(), before);
+    assert!(!tmp.path().join("private/excludes").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn user_excludes_rejects_symlink_destinations_and_parents() {
