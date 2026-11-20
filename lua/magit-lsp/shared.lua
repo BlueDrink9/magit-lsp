@@ -8,11 +8,11 @@
 
 --- Optional effects a client may declare in `capabilities.experimental.magit`.
 ---@type string[]
-local optional_effects = { "visitFile", "clipboard", "editDocument" }
+local optional_effects = { 'visitFile', 'clipboard', 'editDocument' }
 
 --- Optional prompt kinds a client may declare in `capabilities.experimental.magit`.
 ---@type string[]
-local optional_prompt_kinds = { "confirm", "text", "choice", "multiChoice", "secret" }
+local optional_prompt_kinds = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' }
 
 ---@type MagitSharedLists
 return {
