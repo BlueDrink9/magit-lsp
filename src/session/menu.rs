@@ -508,7 +508,8 @@ impl Session {
                     .views
                     .get(view_id)
                     .and_then(|view| view.menu_origin.clone());
-                let Some(origin) = origin.filter(|origin| origin.view_id == target) else {
+                let origin = origin.filter(|origin| origin.view_id == target);
+                if origin.is_none() && Session::command_is_positional(&registered.id) {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
                             MessageLevel::Info,
@@ -516,11 +517,12 @@ impl Session {
                         )],
                         ..InvokeResult::empty()
                     });
-                };
-                let origin_valid = self.views.get(&target).is_some_and(|view| {
-                    view.version == origin.version || view.acked_version == Some(origin.version)
-                });
-                if !origin_valid {
+                }
+                if origin.as_ref().is_some_and(|origin| {
+                    !self.views.get(&target).is_some_and(|view| {
+                        view.version == origin.version || view.acked_version == Some(origin.version)
+                    })
+                }) {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
                             MessageLevel::Info,
@@ -552,9 +554,9 @@ impl Session {
                         command: registered.id.to_string(),
                         target: crate::dispatch::DispatchTarget {
                             view_id: target,
-                            version: Some(origin.version),
-                            cursor: origin.cursor,
-                            selection: origin.selection,
+                            version: origin.as_ref().map(|origin| origin.version),
+                            cursor: origin.as_ref().and_then(|origin| origin.cursor),
+                            selection: origin.as_ref().and_then(|origin| origin.selection),
                             key: Some(key.to_string()),
                         },
                         args: serialized_args,

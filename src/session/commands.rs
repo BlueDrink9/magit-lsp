@@ -15,6 +15,30 @@ use serde_json::Value;
 use std::sync::Arc;
 
 impl Session {
+    /// Whether a command may consume a document cursor or selection.
+    pub(super) fn command_is_positional(command_id: &str) -> bool {
+        matches!(
+            command_id,
+            "select.toggle-mark"
+                | "common.confirm"
+                | "status.stage"
+                | "status.unstage"
+                | "status.discard"
+                | "common.copy-value"
+                | "common.visit"
+                | "common.toggle-section"
+                | "common.show-section"
+                | "common.hide-section"
+                | "common.next-section"
+                | "common.prev-section"
+                | "common.jump"
+                | "common.next-sibling"
+                | "common.prev-sibling"
+                | "common.parent-section"
+                | "common.cycle-visibility"
+        )
+    }
+
     /// Bind positional input to its exact retained tree, never a newer ack.
     pub(super) fn run_versioned_command(
         &mut self,
@@ -39,25 +63,7 @@ impl Session {
         // edit confirmation and other non-positional actions need no tree.
         let requires_ack = command_id == "select.toggle-mark"
             || (command_id == "common.confirm" && view.commit_selection().is_some());
-        let positional = requires_ack
-            || matches!(
-                command_id,
-                "status.stage"
-                    | "status.unstage"
-                    | "status.discard"
-                    | "common.copy-value"
-                    | "common.visit"
-                    | "common.toggle-section"
-                    | "common.show-section"
-                    | "common.hide-section"
-                    | "common.next-section"
-                    | "common.prev-section"
-                    | "common.jump"
-                    | "common.next-sibling"
-                    | "common.prev-sibling"
-                    | "common.parent-section"
-                    | "common.cycle-visibility"
-            );
+        let positional = requires_ack || Self::command_is_positional(command_id);
         // Commit selection intentionally waits for an acknowledgement. Other
         // positional actions may address the exact current, initially unacked
         // render, but neither policy substitutes a different retained version.
