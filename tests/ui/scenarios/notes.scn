@@ -1,0 +1,60 @@
+# T044 Part 3: notes round-trip on an explicit non-HEAD commit and confirm removal.
+fixture: modified-two-files
+---
+sh: git config core.notesRef refs/notes/ui-test && git commit --allow-empty -m 'notes target' && git commit --allow-empty -m 'notes head' && git notes add -m 'head note' HEAD && git notes add -m 'other note' HEAD~2
+keys: ?
+wait
+keys: N
+wait
+expect screen contains "Notes"
+keys: a
+wait prompt
+snapshot: add-target-prompt
+keys: C-u HEAD~1 Enter
+wait prompt
+keys: "added note" Enter
+wait
+sh: git notes show HEAD~1 | grep -Fx 'added note'
+keys: ?
+wait
+keys: N
+wait
+keys: e
+wait prompt
+keys: C-u HEAD~1 Enter
+wait prompt
+expect screen contains "added note"
+keys: C-u "edited note" Enter
+wait
+sh: git notes show HEAD~1 | grep -Fx 'edited note'
+keys: ?
+wait
+keys: N
+wait
+keys: r
+wait prompt
+keys: C-u HEAD~1 Enter
+wait
+expect screen contains "edited note"
+keys: ?
+wait
+keys: N
+wait
+keys: k
+wait prompt
+keys: C-u HEAD~1 Enter
+wait prompt
+keys: 1 Enter
+wait
+sh: git notes show HEAD~1 | grep -Fx 'edited note'
+keys: ?
+wait
+keys: N
+wait
+keys: k
+wait prompt
+keys: C-u HEAD~1 Enter
+wait prompt
+keys: 2 Enter
+wait
+sh: ! git notes show HEAD~1 >/dev/null 2>&1 && git notes show HEAD | grep -Fx 'head note' && git notes show HEAD~2 | grep -Fx 'other note' && test "$(git symbolic-ref --short HEAD)" = main
