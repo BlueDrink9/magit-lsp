@@ -6,7 +6,14 @@ and untracked nonignored sources; ignored files are excluded. Legacy formatting
 is checked only when a maintained source file changes, so these commands do not
 normalize the whole repository.
 
-Install the locked Lua and JavaScript/TypeScript formatter tools:
+Install the formatter tools. StyLua comes from the development environment and is
+resolved from `PATH` (the flake dev shell installs it):
+
+```sh
+nix develop
+```
+
+Install the locked JavaScript/TypeScript formatter:
 
 ```sh
 npm ci --prefix clients/vscode

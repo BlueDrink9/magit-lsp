@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,15 +115,19 @@ def format_paths(paths: list[str], tree: Path, write: bool) -> bool:
     web = [path for path in paths if Path(path).suffix.lower() in WEB]
     rust = [path for path in paths if Path(path).suffix.lower() in RUST]
     okay = True
-    stylua = TOOL_ROOT / "clients/vscode/node_modules/.bin/stylua"
-    prettier = TOOL_ROOT / "clients/vscode/node_modules/.bin/prettier"
-    for name, tool, files in (("StyLua 2.6.0", stylua, lua), ("Prettier 3.9.10", prettier, web)):
+    stylua = shutil.which("stylua")
+    prettier_path = TOOL_ROOT / "clients/vscode/node_modules/.bin/prettier"
+    prettier = shutil.which(str(prettier_path))
+    for name, tool, files, missing in (
+        ("StyLua 2.6.0", stylua, lua, "install StyLua 2.6.0 on PATH, for example by entering the Nix dev shell with nix develop"),
+        ("Prettier 3.9.10", prettier, web, f"install locked VSCode dependencies with npm ci in clients/vscode (expected at {prettier_path})"),
+    ):
         if files:
-            if not tool.is_file():
-                print(f"{name} missing at {tool}; install locked VSCode dependencies with npm ci in clients/vscode", file=sys.stderr)
+            if tool is None:
+                print(f"{name} missing; {missing}", file=sys.stderr)
                 okay = False
             else:
-                command = [str(tool)]
+                command = [tool]
                 if name.startswith("Prettier") and write:
                     command.append("--write")
                 elif not write:
