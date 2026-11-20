@@ -185,7 +185,86 @@ opens the commit-message buffer in the same instance; bottom menu placement.
 `make test-rust` on Linux/macOS/Windows; Neovim tests on stable and nightly;
 manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
 on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
-`make ui-test` and uploads `build/ui/` on failure (R-UI-6).
+`make ui-test` and uploads `build/ui/` on failure (R-UI-6); a Linux `coverage`
+job that runs `make coverage-rust`, keeps `build/coverage/` as an artifact and
+uploads the Rust-only LCOV to Codecov when `CODECOV_TOKEN` is configured.
+
+### Rust line coverage
+
+`make coverage-rust` measures Rust-only line coverage through
+`cargo-llvm-cov`: it runs the ordinary Rust test suite with LLVM
+instrumentation, including the stdio tests that spawn the real server, and
+writes an LCOV report to `build/coverage/lcov.info` (ignored with `build/`).
+The invocation is `cargo llvm-cov --lcov --output-path build/coverage/lcov.info
+--ignore-filename-regex=/tests/`. Workspace dependencies are excluded by
+default and the Rust test harnesses are filtered out, so the report describes
+server source rather than tests or the editor clients. There is no threshold:
+a coverage number never gates a change.
+
+Prerequisites are `cargo-llvm-cov` plus `llvm-cov`/`llvm-profdata` from the same
+LLVM release as the active `rustc`; `rustc -vV` prints that release, and the
+Nix dev shell exports the matching pair as `LLVM_COV`/`LLVM_PROFDATA` and also
+provides `cargo-llvm-cov`. Outside the shell, set both variables to a matching
+pair (for example the rustup `llvm-tools-preview` component). No compiler
+version is hardcoded. Missing tools fail before tests run, naming the
+prerequisite; the target never installs anything.
+
+The full `cargo-llvm-cov` output is retained at
+`build/coverage/cargo-llvm-cov.log`. On success, when it contains a recognized
+warning diagnostic (the same structural `WARN_RE` heuristic the Make wrapper
+uses), the script forwards the matching lines (up to 20) so the wrapper keeps
+its log and reports `warnings detected`. A failing suite propagates: the script
+exits nonzero, prints the failure tail and the retained command log, and the
+target presents no coverage summary. It does not misreport a test failure as a missing tool or LLVM
+mismatch. `make test-rust` remains the ordinary test gate, and ordinary
+`make test` stays uninstrumented.
+
+CI publishes this Rust-only measurement from a dedicated Linux `coverage` job
+in `.github/workflows/ci.yml`. The job installs the `llvm-tools-preview`
+component through `dtolnay/rust-toolchain` and `cargo install cargo-llvm-cov
+--locked`, then runs the same `make coverage-rust` target as local use; it never
+calls `cargo llvm-cov` with different arguments or adds `--ignore-run-fail`.
+`build/coverage/lcov.info`, `build/coverage/cargo-llvm-cov.log` and
+`build/coverage/summary.txt` are uploaded as the `rust-coverage` artifact even
+when the job fails, so a failing suite still leaves the LCOV and command log for
+inspection while the job itself stays red.
+
+The upload to Codecov is scoped to Rust with `files:
+build/coverage/lcov.info`, `flags: rust` and `name: rust-linux`. It requires the
+`CODECOV_TOKEN` repository secret; Codecov upload is therefore inactive until a
+maintainer enables the repository there and stores that secret. Without the
+secret (and always for fork pull requests, where secrets are not exposed) the
+upload step is skipped and the artifact remains the published result. The job
+requests only `contents: read` and the action fails the job on a real upload
+error (`fail_ci_if_error: true`). There is no README badge; it stays deferred
+until the upload is verified green upstream.
+
+The Rust suite currently has known-baseline replay failures (see the queue's
+COV-RUST entries), so this job reports them honestly instead of suppressing
+them; `make test-rust` and this job share the same pass/fail gate.
+
+### Logged Make targets and retained warning logs
+
+Most Make targets wrap their command in the `run` macro (`Makefile`). By
+default its stdout/stderr is captured to `build/test-logs/<target>.XXXXXX`. A
+failing command prints the last `LOG_TAIL` lines plus the full-log path and
+keeps the log; `V=1` bypasses capture and streams the command directly. A
+successful command normally prints `ok: <target>` and deletes its log. If the
+captured output contains a recognized warning diagnostic, the command still
+exits 0 but the full log is **kept** and the macro prints
+`ok: <target> (warnings detected; check log: <path>)` so the warnings can be
+inspected; the printed path is the retained log.
+
+Detection is a deliberately structural heuristic (`WARN_RE` in the Makefile),
+not semantic analysis. It matches a line beginning with `warning:`/`Warning:`,
+a compiler-style `file:line[:column]: warning:` line, or a Python
+`CategoryWarning:` line with or without a `file:line:` prefix. Incidental prose
+that merely contains the word "warning" (for example `0 warnings` or
+`warning count zero`) does not match. Limits: a sentence that *looks* like a
+diagnostic (for example one starting `Warning:`) is a possible false positive,
+and a warning in an unrecognized format can be missed (false negative). The
+behavior and these boundaries are exercised by `make wrapper-check`, which
+drives the real `run` macro through temporary included Makefiles.
 
 ### Documentation maintenance
 

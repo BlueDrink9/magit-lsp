@@ -1,10 +1,17 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
 export CARGO_TERM_COLOR=never
 export CARGO_TERM_PROGRESS_WHEN=never
 LOG_TAIL ?= 60
+# Warning-log heuristic: on a successful logged command, keep the full log and
+# print its path when a line looks like a structural warning diagnostic (a
+# Rust/compiler/general `warning:` line, a compiler `file:line[:col]: warning:`
+# line, or a Python `CategoryWarning:` line with or without a location). This
+# deliberately does not match incidental prose that merely contains the word
+# "warning" (e.g. "0 warnings", "warning count zero"). See docs/TESTING.md.
+WARN_RE := ^[[:space:]]*[Ww]arning:|^[[:space:]]*[[:upper:]][[:alnum:]]*Warning:|^.+:[0-9]+(:[0-9]+)?:[[:space:]]*[Ww]arning:|^.+:[0-9]+:[[:space:]]*[[:upper:]][[:alnum:]]*Warning:
 # Always test the freshly built debug server, never a stale release binary.
 # (Confirm scripts/ui and clients/vscode read MAGIT_LSP_BIN.)
 export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
@@ -22,7 +29,7 @@ export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
 # Name any new mutating target to match, or add a deny rule there.
 
 define run
-@if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)\n'; rm -f "$$log"; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
+@if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)'; if grep -Eq '$(WARN_RE)' "$$log"; then printf ' (warnings detected; check log: %s)\n' "$$log"; else printf '\n'; rm -f "$$log"; fi; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
 endef
 
 build:
@@ -65,6 +72,18 @@ vscode-keybindings-generate:
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
+
+# Exercises the real `run` macro above through temporary included Makefiles.
+.PHONY: wrapper-check
+wrapper-check:
+	$(call run,wrapper-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_make_wrapper.py)
+
+# Rust-only line coverage via cargo-llvm-cov: LCOV lands under the gitignored
+# build/ tree. Prerequisites are checked before any build.
+coverage-rust:
+	$(call run,coverage-rust,scripts/coverage-rust.sh)
+	@cat build/coverage/summary.txt 2>/dev/null || true
+	@printf 'coverage-rust: LCOV at %s\n' "$(CURDIR)/build/coverage/lcov.info"
 
 # Regenerate only the two commit-edit exchanges from the real-server replay.
 update-examples:

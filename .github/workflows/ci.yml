@@ -86,6 +86,56 @@ jobs:
         run: make test-rust test-lua
 
 
+  coverage:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # cargo-llvm-cov drives llvm-cov/llvm-profdata from this component, so
+          # the instrumentation matches the active rustc.
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      # The same target as local use. It runs the ordinary Rust suite under
+      # instrumentation, so a failing test fails this job instead of yielding a
+      # coverage report; the report and command log are still uploaded below.
+      - name: make coverage-rust
+        run: make coverage-rust
+
+      - name: Upload Rust coverage report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-coverage
+          path: |
+            build/coverage/lcov.info
+            build/coverage/cargo-llvm-cov.log
+            build/coverage/summary.txt
+          if-no-files-found: warn
+
+      # Rust-only upload. Secret-less runs (fork pull requests) skip this step
+      # and keep the artifact above.
+      - name: Upload Rust coverage to Codecov
+        if: always() && env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
+        with:
+          files: build/coverage/lcov.info
+          flags: rust
+          name: rust-linux
+          token: ${{ env.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+
   documentation:
     runs-on: ubuntu-24.04
     steps:
