@@ -3,34 +3,9 @@ use magit_lsp::config::{Config, Profile};
 use magit_lsp::keymap::Keymap;
 use magit_lsp::presentation::keys::eligible;
 use magit_lsp::dispatch::{DispatchRequest, DispatchTarget};
-use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, ViewPromptParams};
-use magit_lsp::ui::PromptUi;
-use magit_lsp::Result;
-use std::cell::RefCell;
+use magit_lsp::protocol::Cursor;
 
 mod common;
-
-#[derive(Default)]
-struct RecordingCancelUi(RefCell<Vec<ViewPromptParams>>);
-
-impl PromptUi for RecordingCancelUi {
-    fn confirm(&self, request: &ViewPromptParams) -> Result<Option<bool>> {
-        self.0.borrow_mut().push(request.clone());
-        Ok(None)
-    }
-    fn text(&self, request: &ViewPromptParams) -> Result<Option<String>> {
-        self.0.borrow_mut().push(request.clone());
-        Ok(None)
-    }
-    fn choice(&self, request: &ViewPromptParams) -> Result<Option<PromptChoiceAnswer>> {
-        self.0.borrow_mut().push(request.clone());
-        Ok(None)
-    }
-    fn multi_choice(&self, request: &ViewPromptParams) -> Result<Option<Vec<String>>> {
-        self.0.borrow_mut().push(request.clone());
-        Ok(None)
-    }
-}
 
 #[test]
 fn registry_marks_destructive_commands_and_keeps_safe_representatives_unflagged() {
@@ -95,6 +70,7 @@ fn assert_repository_unchanged(
 #[test]
 fn session_dispatch_sweep_cancels_destructive_first_prompt_without_mutation() {
     use common::session::TestSession;
+    use common::recording_prompt_ui::RecordingPromptUi;
     use common::RepoFixture;
     use magit_lsp::dispatch::offer_target;
     use magit_lsp::tree::NodeKind;
@@ -110,7 +86,7 @@ fn session_dispatch_sweep_cancels_destructive_first_prompt_without_mutation() {
         fixture.git(&["branch", "topic"]);
         fixture.git(&["tag", "v1"]);
         let (mut test, render) = TestSession::open_status(&fixture, Profile::Vim);
-        let ui = RecordingCancelUi::default();
+        let ui = RecordingPromptUi::default();
         let before_head = common::git(fixture.path(), &["rev-parse", "HEAD"]);
         let before_index = std::fs::read(fixture.path().join(".git/index")).expect("index state");
         let before_worktree = std::fs::read(fixture.path().join("f.txt")).expect("worktree state");
@@ -133,7 +109,7 @@ fn session_dispatch_sweep_cancels_destructive_first_prompt_without_mutation() {
             action_target,
             args: None,
         };
-        let _ = test.session.dispatch(request, &ui);
+        let _ = test.dispatch(request, &ui);
         let prompt = test.session.pending_prompt_request();
         if command.destructive && matches!(command.status, CommandStatus::Implemented) {
             assert!(prompt.is_some(), "{} did not prompt before mutation", command.id);
@@ -145,12 +121,7 @@ fn session_dispatch_sweep_cancels_destructive_first_prompt_without_mutation() {
             if prompt.destructive == Some(true) {
                 assert!(command.destructive, "{} emitted destructive prompt metadata without a destructive flag", command.id);
             }
-            let answer = match prompt.kind {
-                magit_lsp::protocol::PromptKind::Confirm => ui.confirm(&prompt).map(|v| v.map(magit_lsp::protocol::PromptValue::Bool)),
-                magit_lsp::protocol::PromptKind::Text => ui.text(&prompt).map(|v| v.map(magit_lsp::protocol::PromptValue::Text)),
-                magit_lsp::protocol::PromptKind::Choice => ui.choice(&prompt).map(|v| v.map(magit_lsp::protocol::PromptValue::Choice)),
-                magit_lsp::protocol::PromptKind::MultiChoice => ui.multi_choice(&prompt).map(|v| v.map(|ids| magit_lsp::protocol::PromptValue::Multi { ids })),
-            }.expect("recording UI cancellation");
+            let answer = magit_lsp::ui::answer(&ui, &prompt).expect("recording UI answer");
             assert!(answer.is_none(), "recording UI must cancel");
             let _ = test.session.resume_prompt(&prompt.prompt_id, answer).expect("cancel prompt");
         }

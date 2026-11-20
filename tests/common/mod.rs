@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod recording_prompt_ui;
+
 use magit_lsp::git::GitRepo;
 use std::path::Path;
 use std::process::Command;

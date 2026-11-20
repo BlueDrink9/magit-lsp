@@ -10,6 +10,7 @@
 
 use super::RepoFixture;
 use magit_lsp::config::{Config, Profile};
+use magit_lsp::dispatch::DispatchRequest;
 use magit_lsp::keymap::{self, EditorMode, Keymap};
 use magit_lsp::protocol::{
     Cursor, Effect, Selection, ViewInvokeParams, ViewKeyParams, ViewRender, ViewSetModeParams,
@@ -17,6 +18,7 @@ use magit_lsp::protocol::{
 use magit_lsp::session::{InvokeResult, Session};
 use magit_lsp::tree::{Node, NodeKind, Tree};
 use magit_lsp::ui::ScriptedUi;
+use magit_lsp::ui::PromptUi;
 use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, ViewMode, Viewport};
 use magit_lsp::Error;
 use serde_json::Value;
@@ -74,6 +76,15 @@ pub struct TestSession {
 }
 
 impl TestSession {
+    /// Dispatch an arbitrary request through the production session path.
+    pub fn dispatch(
+        &mut self,
+        request: DispatchRequest,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult, Error> {
+        self.session.dispatch(request, ui)
+    }
+
     /// A session for `repo` with the profile's keymaps and no open view.
     pub fn new(repo: impl Into<String>, profile: Profile) -> Self {
         Self::with_config(
