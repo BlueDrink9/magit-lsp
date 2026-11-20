@@ -1490,6 +1490,101 @@ fn branch_configuration_workflow_targets_selected_branch_and_repository() {
 }
 
 #[test]
+fn branch_configuration_clear_lock_failure_is_reported_without_changes() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "feature"]);
+    tmp.git(&["config", "branch.feature.rebase", "true"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let start = || ViewInvokeParams {
+        view_id: String::new(),
+        command: "branch.configure".into(),
+        version: None,
+        cursor: None,
+        selection: None,
+        args: None,
+    };
+    let invoke = |test: &mut TestSession| {
+        let mut request = start();
+        request.view_id = test.view_id().to_string();
+        request.version = Some(test.version());
+        test.session.start_invoke(&request).unwrap()
+    };
+    let Execution::Prompt(setting) = invoke(&mut test) else {
+        panic!("expected setting prompt")
+    };
+    let Execution::Prompt(branch) = test
+        .session
+        .resume_prompt(&setting.prompt_id, Some(PromptValue::Text("rebase".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt")
+    };
+    let Execution::Prompt(value) = test
+        .session
+        .resume_prompt(&branch.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("expected value prompt")
+    };
+    assert!(value.title.contains("current: true"), "{}", value.title);
+    std::fs::write(tmp.path().join(".git/config.lock"), "locked").unwrap();
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&value.prompt_id, Some(PromptValue::Text("unset".into())))
+        .unwrap()
+    else {
+        panic!("clear must finish")
+    };
+    assert!(
+        format!("{:?}", result.effects)
+            .to_ascii_lowercase()
+            .contains("lock"),
+        "{:?}",
+        result.effects
+    );
+    assert!(
+        !message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("Configured")),
+        "{:?}",
+        result.effects
+    );
+    std::fs::remove_file(tmp.path().join(".git/config.lock")).unwrap();
+    assert_eq!(tmp.git(&["config", "branch.feature.rebase"]).trim(), "true");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+fn branch_configuration_read_failure_is_not_shown_as_unset() {
+    use magit_lsp::protocol::ViewInvokeParams;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let config = tmp.path().join(".git/config");
+    std::fs::write(&config, "[broken\n").unwrap();
+    let request = ViewInvokeParams {
+        view_id: test.view_id().to_string(),
+        command: "branch.configure".into(),
+        version: Some(test.version()),
+        cursor: None,
+        selection: None,
+        args: None,
+    };
+    let error = test.session.start_invoke(&request).unwrap_err();
+    assert!(error.to_string().contains("bad config line"), "{error}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "[broken\n");
+    assert!(!config.with_extension("lock").exists());
+}
+
+#[test]
 fn branch_configuration_handles_detached_and_unborn_contexts() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
