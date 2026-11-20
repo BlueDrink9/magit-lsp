@@ -81,6 +81,22 @@ function PlainUI.idle()
   return client ~= nil and client.initialized and next(client.requests) == nil
 end
 
+--- Return the fixture's staged paths, newline-joined, or nil when unreadable.
+---
+--- A test-only observation: scenarios gate asynchronous key completion on the
+--- repository index itself instead of on a pre-existing buffer equality.
+function PlainUI.staged_names()
+  local repo = vim.env.PLAIN_REPO
+  if not repo then
+    return nil
+  end
+  local names = vim.fn.systemlist({ "git", "-C", repo, "diff", "--cached", "--name-only" })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return table.concat(names, "\n")
+end
+
 --- Observe native buffer/client state without synthesizing server structure.
 function PlainUI.snapshot()
   local buf = vim.api.nvim_get_current_buf()
@@ -94,6 +110,11 @@ function PlainUI.snapshot()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
   local authoritative = _G.plain_authoritative_text
+  local staged_names = PlainUI.staged_names()
+  local staged_count = 0
+  for _ in (staged_names or ""):gmatch("[^\n]+") do
+    staged_count = staged_count + 1
+  end
   return {
     ready = applied > 0 and client ~= nil and client.initialized,
     idle = PlainUI.idle(),
@@ -101,6 +122,13 @@ function PlainUI.snapshot()
     text = text,
     -- The buffer equals the last applied server text, so no local edit remains.
     authoritative_match = authoritative ~= nil and authoritative == text,
+    -- The last applied server text declares the same staged count Git reports.
+    -- This is a text-level render completion check, not structure recovered by
+    -- parsing that text; scenarios still navigate through `goto`.
+    staged_section_rendered = staged_count > 0
+      and authoritative ~= nil
+      and authoritative:find("Staged changes (" .. staged_count .. ")", 1, true) ~= nil,
+    staged_names = staged_names,
     modified = vim.bo.modified,
     mode = vim.api.nvim_get_mode().mode,
     changedtick = vim.api.nvim_buf_get_changedtick(0),
