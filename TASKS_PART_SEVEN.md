@@ -152,12 +152,13 @@ Last review: `30de40d`; substantial fixture retirement, live synchronization cov
 | 6A | Rich v1 preview and prototypes | T105, T112 to T119 | T105, T112, T113, T114, T119 only; starts after T022 sign-off |
 | 7 | Test stabilization | T023 to T029, T120 | No (runs in parallel) |
 | 8 | Release | T030 to T033 | Starts after phases 1 to 6 and the Phase 6A release subset |
+| W | Deferred Windows | NREL-03, T097, T100, WINDOWS-NATIVE | No; informational, runs immediately before the optional phases |
 | 9 | Plain keys | T034 to T039 | No (starts after T022) |
 | 10 | Small features | T040 to T047 | No |
 | 11 | Read views | T048 to T057 | No |
 | 12 | Shared Git workflows | T058 to T073 | No |
-| 13 | Advanced workflows | T074 to T098 | No |
-| 14 | Deferred | T099 to T111, except T105 (moved to 6A) | No; owner-request-only |
+| 13 | Advanced workflows | T074 to T096, T098 | No |
+| 14 | Deferred | T099 to T111, except T097/T100 (moved to the deferred Windows phase) and T105 (moved to 6A) | No; owner-request-only |
 
 Order for phases 1 to 6: do T001 and T002 first, in parallel. Then do T004 and T005. Then do T006 and T007. Phase 3 follows. Phase 4 runs alongside phase 3. Phase 5 runs in parallel with all other phases. T022 closes the gate.
 
@@ -705,6 +706,17 @@ Do not schedule other feature work between the gates and the release. A ticket s
 - **Acceptance:** Write a short changelog. Add warnings about history rewrites. State the known limits and the platform matrix. Disclose the remaining limits of BUG-READ-1 for the same session. Record a full `make test`, the phase evidence, and a `make hygiene` run. Do the install and publication dry runs. Record an explicit human go or no-go before the tag. After approval, the tagged CI publishes all channels. It then checks the publication and the live badges. Windows and macOS acceptance, other menus and views, and build-only targets are not gates.
 - **Verify:** Run `make test`. Collect the native evidence and the clean-install smoke tests. A human reviews the changelog, the warnings and the limits.
 
+## Deferred Windows phase (after Phase 8)
+
+User decision (2026-11-20): all outstanding Windows work is deferred to this dedicated phase, executed only immediately before the optional extras/nicetohave work below. Windows results are informational and gate nothing; no Linux or macOS ticket depends on Windows success. These tickets keep their IDs and acceptance text, and none is marked complete. The retained research is in [RELEASING.md](RELEASING.md#portable-production-toolchain-decision-nrel-01) and is marked deferred there.
+
+| ID | Name | Depends on | Task |
+| --- | --- | --- | --- |
+| NREL-03 | windows-gnu-release | NREL-01 | Define the Windows GNU Nix production output: researched `pkgsCross.mingwW64` derivation with the locked compiler, `make release-nix-windows`, DLL/import evidence and `.exe` provenance under `build/release/`. Full acceptance is in [TASKS.md](TASKS.md#deferred-windows-phase-after-phase-8). |
+| T097 | windows-paths | none | Check Windows paths and CRLF. This is not a release gate. |
+| T100 | windows-editor-bridge | none | Study the Windows named pipe, ACL and Job-object design. Document the limits. Make no claim without evidence. |
+| WINDOWS-NATIVE | windows-native-acceptance | NREL-12 (Linux/macOS part) | Retain NREL-12's Windows acceptance on a native Windows runner: verified `.exe` identity, `--version`, initialize and Git status/mutation, bound to artifact identity. Also covers the deferred `.exe` test-binary selection from NREL-09 and the Windows consumer jobs from NREL-07/NREL-12. |
+
 ## Phase 9: Plain keys (optional; starts after T022)
 
 Plain keys is an optional input path for editors that cannot bind code actions to single keys. The user types one character. The server reads it as the matching Magit key and renders again. The render removes the character. Plain keys never runs a destructive command. Code actions are the only path for destructive commands.
@@ -836,7 +848,6 @@ These tickets do not gate 0.2. Each line is a ticket in short form. Expand a lin
 | T094 | full-line-tint | M | T093 | Let clients show a full-line background tint from server data. The owner wants this. |
 | T095 | profiling-budgets | M | none | Measure and document budgets and size limits. |
 | T096 | incremental-render | M | T095 | Add node-level incremental rendering only if profiling shows a need. |
-| T097 | windows-paths | M | none | Check Windows paths and CRLF. This is not a release gate. |
 | T098 | jj-fork | L | T046 | Make an optional jj fork. Do not weaken the Git boundary. |
 
 ## Phase 14: Deferred (not scheduled)
@@ -846,7 +857,6 @@ Do not start these tickets until the owner asks.
 | ID | Name | Depends on | Task |
 | --- | --- | --- | --- |
 | T099 | edit-history | T010 | Add history prev and next as a server code action. The code action sends a versioned `applyEdit`. It works the same for each client. |
-| T100 | windows-editor-bridge | none | Study the Windows named pipe, ACL and Job-object design. Document the limits. Make no claim without evidence. |
 | T101 | macos-editor-bridge | none | Run the process-group and reaping tests on a macOS CI runner. Until then, macOS is not verified. |
 | T102 | cross-hunk-selection-audit | none | Find out if a selection across hunks acts on lines or on whole hunks. Fix only a bug that you can show. |
 | T103 | same-session-read-redesign | none | Keep a published state for each view. Handle acks directly. Queue resize events. Ask the owner before you start if the work needs a rewrite of `View` or `CommandCtx`. |

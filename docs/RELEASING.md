@@ -142,10 +142,20 @@ release builds.
 
 This is a researched contract, not an executed build. No Nix production
 derivation, archive, Windows executable or macOS output exists yet, and nothing
-below is a runtime result. It binds NREL-02..NREL-12 to one builder/runtime/
-identity contract and names the bounded experiment where a mechanism is still
-unproven. The current rustup `release-locked` path remains the only executed
-release path until NREL-06 replaces it.
+below is a runtime result. It binds NREL-02 and NREL-04..NREL-12 to one
+builder/runtime/identity contract and names the bounded experiment where a
+mechanism is still unproven. The current rustup `release-locked` path remains
+the only executed release path until NREL-06 replaces it.
+
+> **Scope change (2026-11-20):** the user has deferred all Windows work — the
+> Windows GNU cross-build, the Windows editor-helper transport and Windows-native
+> runtime acceptance — to a dedicated deferred phase executed immediately before
+> the optional extras. The Windows rows, native-runner contract and risk items
+> below are retained research/evidence and are **informational only**: they are
+> not current release gates, and no release or publish decision depends on
+> Windows. Linux and both Darwin architectures remain the current targets. This
+> supersedes NREL-03's place in the active NREL sequence and the Windows portions
+> of NREL-07/NREL-09/NREL-12; the queue records the split and defers the work.
 
 ### Decision table
 
@@ -155,8 +165,8 @@ release path until NREL-06 replaces it.
 | Linux target and runtime | `x86_64-unknown-linux-gnu`; minimum Ubuntu 22.04, glibc 2.35. **Candidate** mechanism: add one sysroot-only flake input pinned to nixpkgs `nixos-22.11` head `ea4c80b39be4c09702b0cb3b42eab59e2ba4f24b` (its `glibc` is `2.35-224`), then build with the locked compiler via `makeRustPlatform { rustc = locked.rustc; cargo = locked.cargo; stdenv = sysroot.stdenv; }`; set the interpreter to `/lib64/ld-linux-x86-64.so.2`, remove Nix RPATH, and require `DT_NEEDED` to contain only system libraries with every `GLIBC_*` symbol version <= 2.35. | `makeRustPlatform` accepting an explicit `stdenv` is VERIFIED at the locked rev. The final link/ABI is **UNRESOLVED**: the locked compiler wrapper and prebuilt `libstd` may still inject or require newer glibc paths. NREL-02's bounded `make release-nix-linux` experiment decides success and must fail readably on any newer symbol, Nix store reference or unexpected `DT_NEEDED`. |
 | Old-sysroot cost | The extra input supplies only the C runtime/toolchain (`glibc`, GCC, binutils, stdenv) for the Linux link; it is **not** a whole-nixpkgs rollback and does not change the Rust compiler. It is accepted only if the experiment passes; otherwise the decision returns to a human. | Explicit cost: a second, EOL nixpkgs source of security/maintenance updates and a larger closure. It must not become a general downgrade of the project toolchain. |
 | Rejected Linux alternatives | musl/static was not chosen: it changes libc, allocator and NSS behavior and the user rejected an assumed migration. Static glibc has NSS/dlopen limits. rustup on `ubuntu-22.04` is the second compiler policy being retired. Shipping the Nix store closure is not portable off Nix because interpreter/RPATH point into `/nix/store`. | Decision, not a measured comparison. |
-| Windows target | `x86_64-pc-windows-gnu`, cross-built with the locked compiler through `pkgsCross.mingwW64`. The locked rev has mingw-w64 14.0.0 headers and GCC 15. Rust's target spec links executables with `-lgcc_eh`/`-l:libpthread.a` when all crates are statically linked, so no MinGW runtime DLL is expected; expected imports are OS DLLs only (`msvcrt`, `kernel32`, `advapi32`, `bcrypt`, `ntdll`, `userenv`, `ws2_32`, `user32`). | Upstream minima (see evidence): GNU Binutils 2.44, GCC 14.2, mingw-w64 12.0.0. The exact import table and any bundled DLL allowlist are **UNRESOLVED** until NREL-03 inspects the produced `.exe`; if a DLL is needed, bundle an explicit allowlist or declare a supported-system requirement, never ship a silently broken executable. |
-| Windows capability boundary | A Windows GNU server provides LSP, view rendering and Git status/actions only. Managed commit drafts, the editor bridge and askpass return "requires Unix"/"needs a Unix socket" on non-Unix builds, and the non-Unix owned-run fallback makes no cancellation guarantee. | VERIFIED source boundaries: `src/editor.rs:697-700,730-739,790-793,871,1260-1270,1276-1288`; `src/runner/owned.rs:45-53,67-94`. `tests/editor_bridge.rs:4` is `#![cfg(unix)]`, so that suite never counts as Windows coverage. A small explicit follow-up item is required; Windows helper support is not claimed. Git for Windows' MSYS2/BASH layer does not provide the existing bridge's Unix socket. |
+| Windows target | `x86_64-pc-windows-gnu`, cross-built with the locked compiler through `pkgsCross.mingwW64`. The locked rev has mingw-w64 14.0.0 headers and GCC 15. Rust's target spec links executables with `-lgcc_eh`/`-l:libpthread.a` when all crates are statically linked, so no MinGW runtime DLL is expected; expected imports are OS DLLs only (`msvcrt`, `kernel32`, `advapi32`, `bcrypt`, `ntdll`, `userenv`, `ws2_32`, `user32`). | Upstream minima (see evidence): GNU Binutils 2.44, GCC 14.2, mingw-w64 12.0.0. The exact import table and any bundled DLL allowlist are **UNRESOLVED** until NREL-03 inspects the produced `.exe`; if a DLL is needed, bundle an explicit allowlist or declare a supported-system requirement, never ship a silently broken executable. **Deferred 2026-11-20:** this row is retained research; informational only and not a release gate. |
+| Windows capability boundary | A Windows GNU server provides LSP, view rendering and Git status/actions only. Managed commit drafts, the editor bridge and askpass return "requires Unix"/"needs a Unix socket" on non-Unix builds, and the non-Unix owned-run fallback makes no cancellation guarantee. | VERIFIED source boundaries: `src/editor.rs:697-700,730-739,790-793,871,1260-1270,1276-1288`; `src/runner/owned.rs:45-53,67-94`. `tests/editor_bridge.rs:4` is `#![cfg(unix)]`, so that suite never counts as Windows coverage. A small explicit follow-up item is required; Windows helper support is not claimed. Git for Windows' MSYS2/BASH layer does not provide the existing bridge's Unix socket. **Deferred 2026-11-20:** informational only; Windows helper support is not a current gate. |
 | Darwin outputs | Native `x86_64-darwin` and `aarch64-darwin` builders in the same flake, using the locked compiler; distinct archive and executable identities per architecture. Contract: record `LC_BUILD_VERSION`/minos and `otool -L`; runtime dependencies must be system libraries only (no `/nix/store` install names or RPATH, rewritten with `install_name_tool` if needed). | Rust documents macOS 10.12+ for x86_64 and 11.0+ for arm64. NREL-04 must run on real matching builders; the Nix builder's own minimum macOS is not the artifact deployment baseline. Linux-to-Darwin cross output is not planned: nix.dev documents cross-Darwin only between the two Darwin hosts and barely tested. |
 | Artifact identity | One `.tar.gz` plus `.sha256` per target (existing asset shape), with a `provenance.json` in the CI artifact. Required fields: `source_sha` (`git rev-parse HEAD`, equal to the workflow SHA), `target`, `archive_sha256`, `executable_sha256` (extracted `magit-lsp`/`magit-lsp.exe` before packaging), `cargo_lock_sha256`, `rustc -Vv`, nixpkgs rev, Linux sysroot rev/glibc, Windows mingw-w64/GCC/binutils, Darwin SDK/minos. Consumers verify both SHAs and execute the bytes unchanged; they never rebuild the server. | GitHub `upload-artifact` artifacts are immutable from v4 and expose `artifact-id`/`artifact-digest`, but zipped uploads do not preserve file modes and the artifact bytes are not the released archive bytes; the durable identity is the sidecar SHA over the uploaded `.tar.gz`. VERIFIED against the pinned action README. |
 
@@ -169,7 +179,7 @@ compiled natively.
 * **Linux x86_64 GNU (clean Ubuntu 22.04):** `--version`, initialize, Git status
   plus one mutation, `editor_bridge` against the selected bytes, and the
   existing Neovim status/Git/editor-helper scenarios.
-* **Windows x86_64 GNU (native Windows runner):** `--version`, initialize, Git
+* **Windows x86_64 GNU (native Windows runner; deferred 2026-11-20, informational only and not a current gate):** `--version`, initialize, Git
   status plus one mutation. Editor helper, askpass, managed drafts and
   cancellation are not supported and are reported as skipped; skipped Unix
   suites never count as Windows coverage.
@@ -207,9 +217,9 @@ compiled natively.
 1. Linux mixed-sysroot link/ABI: the locked compiler wrapper or `libstd` may
    leak newer glibc requirements. NREL-02 must prove interpreter, dependency and
    symbol versions on the produced ELF and fail readably.
-2. Windows import table and DLL set: NREL-03 must record the actual imports and
+2. Windows import table and DLL set (deferred 2026-11-20 with the deferred Windows phase): NREL-03 must record the actual imports and
    decide bundling versus a supported-system requirement.
-3. Windows editor helper/askpass/managed drafts/cancellation: unsupported until
+3. Windows editor helper/askpass/managed drafts/cancellation (deferred 2026-11-20 with the deferred Windows phase): unsupported until
    a dedicated follow-up designs a Windows transport; do not describe the
    Windows artifact as fully feature-equivalent.
 4. Rust `windows-gnu` has no upstream target maintainers and may be demoted;
