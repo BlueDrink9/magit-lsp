@@ -4391,6 +4391,223 @@ fn ignore_repository_literal_is_private_and_scoped() {
 }
 
 #[test]
+fn ignore_user_literal_requires_deliberate_confirmation() {
+    use magit_lsp::protocol::{PromptChoiceAnswer, PromptKind};
+
+    // A fixture-only private directory stands in for the user-wide excludes
+    // file. The repository's LOCAL config points at it, so neither the real
+    // HOME/XDG config nor any global file is ever touched.
+    let private = tempfile::TempDir::new().expect("tempdir for private user excludes");
+    let user_ignore = private.path().join("user-ignore");
+    std::fs::write(&user_ignore, "# retained\n").unwrap();
+
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("dir/axxb.txt", "decoy\n"),
+                ("other/a*b.txt", "decoy outside\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .modify("other/other.txt", "changed too\n")
+        .build();
+    let excludes_arg = user_ignore.to_string_lossy().into_owned();
+    tmp.git(&["config", "core.excludesFile", &excludes_arg]);
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
+    let selected_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
+    let lookalike_before = std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap();
+    let outside_before = std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap();
+    let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
+    let root_ignore_before = std::fs::read_to_string(tmp.path().join(".gitignore")).ok();
+    let subdir_ignore_before = std::fs::read_to_string(tmp.path().join("dir/.gitignore")).ok();
+    let repo_exclude_before =
+        std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap_or_default();
+    let user_ignore_before = std::fs::read_to_string(&user_ignore).unwrap();
+
+    let ignored = |path: &str| -> bool {
+        std::process::Command::new("git")
+            .args(["check-ignore", "--no-index", path])
+            .current_dir(tmp.path())
+            .output()
+            .expect("run git check-ignore")
+            .status
+            .success()
+    };
+
+    // First real ingress: literal choice, then DECLINE the user-wide
+    // confirmation. The confirmation wording must be visible to the user and
+    // declining must leave every byte untouched.
+    {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        assert_eq!(test.cursor().line, line);
+        test.ui()
+            .reply_choice(Some(PromptChoiceAnswer::Id {
+                id: "literal".into(),
+            }))
+            .reply_confirm(false);
+        test.press_ui("i");
+        let result = test.press_ui("g");
+
+        let confirm = test
+            .ui()
+            .last_request()
+            .expect("a user-wide confirmation prompt was shown");
+        assert_eq!(confirm.kind, PromptKind::Confirm);
+        assert_eq!(confirm.title, "Write user-wide ignore rule?");
+        assert_eq!(confirm.yes_label.as_deref(), Some("Write user excludes"));
+        let detail = confirm.detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("user-wide excludes file"), "{detail}");
+        assert!(detail.contains("dir/a*b.txt"), "{detail}");
+        assert!(
+            !message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("Added ignore rule")),
+            "{:?}",
+            result.effects
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&user_ignore).unwrap(),
+        user_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".gitignore")).ok(),
+        root_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/.gitignore")).ok(),
+        subdir_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap_or_default(),
+        repo_exclude_before
+    );
+    assert!(
+        !ignored("dir/a*b.txt"),
+        "a declined confirmation must not write a rule"
+    );
+    assert!(!ignored("dir/axxb.txt"));
+    assert!(!ignored("other/a*b.txt"));
+    assert!(!ignored("base.txt"));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        base_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        selected_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        lookalike_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap(),
+        outside_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap(),
+        other_before
+    );
+
+    // Second real ingress: literal choice, then ACCEPT the deliberate
+    // confirmation. Only the configured private user excludes file changes.
+    {
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+        test.ack();
+        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        assert_eq!(test.cursor().line, line);
+        test.ui()
+            .reply_choice(Some(PromptChoiceAnswer::Id {
+                id: "literal".into(),
+            }))
+            .reply_confirm(true);
+        test.press_ui("i");
+        let result = test.press_ui("g");
+
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("the user-wide excludes file")),
+            "{:?}",
+            result.effects
+        );
+        let confirm = test
+            .ui()
+            .last_request()
+            .expect("a user-wide confirmation prompt was shown");
+        assert_eq!(confirm.kind, PromptKind::Confirm);
+        assert_eq!(confirm.title, "Write user-wide ignore rule?");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&user_ignore).unwrap(),
+        "# retained\n/dir/a\\*b.txt\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".gitignore")).ok(),
+        root_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/.gitignore")).ok(),
+        subdir_ignore_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap_or_default(),
+        repo_exclude_before
+    );
+    assert!(
+        ignored("dir/a*b.txt"),
+        "the accepted literal must be ignored via user excludes"
+    );
+    assert!(
+        !ignored("dir/axxb.txt"),
+        "the wildcard must be escaped, not expanded"
+    );
+    assert!(
+        !ignored("other/a*b.txt"),
+        "the same basename outside the selected path must not be ignored"
+    );
+    assert!(
+        !ignored("base.txt"),
+        "an unrelated file must not be ignored"
+    );
+    assert!(!ignored("other/other.txt"), "a decoy must not be ignored");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        base_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        selected_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        lookalike_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap(),
+        outside_before
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap(),
+        other_before
+    );
+}
+
+#[test]
 fn ignore_root_custom_pattern_is_deliberate() {
     use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
