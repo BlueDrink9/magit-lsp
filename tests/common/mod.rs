@@ -352,6 +352,10 @@ pub mod stdio;
 pub mod schema;
 
 /// Fake `git` executables (gated and stalling) shared by the real-server suites.
+///
+/// Unix only: the helper writes `#!/bin/sh` scripts and needs Unix file modes
+/// (`set_mode`), so non-Unix compilations leave it out entirely.
+#[cfg(unix)]
 pub mod fake_git;
 
 /// In-process session harness shared by the session suites.
