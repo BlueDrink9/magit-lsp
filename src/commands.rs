@@ -147,6 +147,28 @@ macro_rules! command {
             doc: $doc,
             status: $status,
             run: $run,
+            destructive: false,
+            effects: $effects,
+            target: $target,
+        }
+    };
+    (
+        id: $id:expr,
+        scope: $scope:expr,
+        doc: $doc:expr,
+        status: $status:expr,
+        run: $run:expr,
+        destructive: $destructive:expr,
+        effects: $effects:expr,
+        target: $target:expr $(,)?
+    ) => {
+        Command {
+            id: $id,
+            scope: $scope,
+            doc: $doc,
+            status: $status,
+            run: $run,
+            destructive: $destructive,
             effects: $effects,
             target: $target,
         }
@@ -165,6 +187,27 @@ macro_rules! command {
             doc: $doc,
             status: $status,
             run: $run,
+            destructive: false,
+            effects: $effects,
+            target: CommandTarget::Document,
+        }
+    };
+    (
+        id: $id:expr,
+        scope: $scope:expr,
+        doc: $doc:expr,
+        status: $status:expr,
+        run: $run:expr,
+        destructive: $destructive:expr,
+        effects: $effects:expr $(,)?
+    ) => {
+        Command {
+            id: $id,
+            scope: $scope,
+            doc: $doc,
+            status: $status,
+            run: $run,
+            destructive: $destructive,
             effects: $effects,
             target: CommandTarget::Document,
         }
@@ -178,6 +221,8 @@ pub struct Command {
     pub doc: &'static str,
     pub status: CommandStatus,
     pub run: RunFn,
+    /// Whether this command can discard data or perform an irreversible remote operation.
+    pub destructive: bool,
     /// Optional effects this command may emit, in declaration order.
     pub effects: &'static [EffectKind],
     /// Where the command acts when a menu item invokes it.
@@ -1357,6 +1402,7 @@ fn build() -> Registry {
             doc: "Discard the change at point",
             status: CommandStatus::Implemented,
             run: discard,
+            destructive: true,
             effects: &[],
         },
         planned(
@@ -1617,6 +1663,12 @@ fn build() -> Registry {
                     continue;
                 }
                 commands.push(planned(command, Scope::MenuAction, label, roadmap));
+                if let Some(registered) = commands.last_mut() {
+                    registered.destructive = matches!(
+                        *command,
+                        "reset.hard" | "branch.delete" | "tag.delete" | "worktree.delete"
+                    ) || command.starts_with("push.");
+                }
             }
         }
     }

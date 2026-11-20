@@ -1,5 +1,6 @@
 //! Pure classification of Plain-presentation edits as key input.
 use crate::docstore::{Change, Encoding};
+use crate::{commands::{Command, CommandStatus}, keymap::Keymap};
 use std::hash::{Hash, Hasher};
 
 /// Net change made by one document notification.
@@ -27,6 +28,13 @@ pub enum State { Ready, PendingDeletion { edit: NetEdit, since_ms: u64 }, Execut
 /// Classification decision for an edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome { Accept(String), Wait, Reject { repair: bool } }
+
+/// Whether `command` may accept character input under the active profile keymap.
+pub fn eligible(command: &Command, keymap: &Keymap) -> bool {
+    matches!(command.status, CommandStatus::Implemented)
+        && !command.destructive
+        && keymap.command(command.id).is_some()
+}
 
 /// Stable hash of canonical document text.
 pub fn text_hash(text: &str) -> u64 { let mut h=std::collections::hash_map::DefaultHasher::new(); text.hash(&mut h); h.finish() }
