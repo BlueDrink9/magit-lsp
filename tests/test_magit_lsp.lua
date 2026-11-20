@@ -507,6 +507,49 @@ local T = MiniTest.new_set({
   },
 })
 
+T["plugin loading registers :Magit without setup"] = function()
+  child.lua([[
+    vim.cmd('runtime plugin/magit-lsp.lua')
+    REGISTERED = vim.fn.exists(':Magit')
+    SESSIONS = vim.tbl_count(require('magit-lsp').sessions)
+    CLIENTS = #vim.lsp.get_clients({ name = 'magit-lsp' })
+  ]])
+  MiniTest.expect.equality(child.lua_get("REGISTERED"), 2)
+  MiniTest.expect.equality(child.lua_get("SESSIONS"), 0, "loading the plugin must not call setup()")
+  MiniTest.expect.equality(
+    child.lua_get("CLIENTS"),
+    0,
+    "loading the plugin must not start a server"
+  )
+end
+
+T["the :Magit command delegates to the public open path"] = function()
+  repo = make_repo(true, project .. "/build/test-repos/dir with space")
+  setup_child()
+  child.lua(string.format(
+    [[
+    vim.cmd('runtime plugin/magit-lsp.lua')
+    local calls = {}
+    local client = require('magit-lsp')
+    local real = client.open
+    client.open = function(root)
+      calls[#calls + 1] = root == nil and 'default' or root
+      return real(root)
+    end
+    vim.cmd('Magit ' .. vim.fn.fnameescape(%s))
+    FOCUSED_DIRECTORY = vim.api.nvim_get_current_buf() == STATUS.buf
+    vim.cmd('Magit')
+    FOCUSED_DEFAULT = vim.api.nvim_get_current_buf() == STATUS.buf
+    client.open = real
+    CALLS = calls
+  ]],
+    vim.inspect(repo)
+  ))
+  MiniTest.expect.equality(child.lua_get("FOCUSED_DIRECTORY"), true)
+  MiniTest.expect.equality(child.lua_get("FOCUSED_DEFAULT"), true)
+  MiniTest.expect.equality(child.lua_get("CALLS"), { repo, "default" })
+end
+
 T["creates a server-named virtual buffer and attaches LSP"] = function()
   setup_child()
   local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = STATUS.buf })")
