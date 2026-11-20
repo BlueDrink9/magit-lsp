@@ -44,6 +44,7 @@ PIPELINE = Path('scripts/check_release_pipeline.py')
 # artifact paths the workflow may use.
 RELEASE_TOOLCHAIN = '1.94.1'
 PIPELINE_BUILD = 'python3 scripts/check_release_pipeline.py build'
+PIPELINE_BUILD_LOCAL = 'python3 scripts/check_release_pipeline.py build --local'
 PIPELINE_ARTIFACTS = 'python3 scripts/check_release_pipeline.py artifacts'
 BUILD_WORKFLOW_PATH = '.github/workflows/release.yml'
 BUILD_WORKFLOW_NAME = 'Release artifact build (no publication)'
@@ -454,6 +455,9 @@ def check_build_workflow(path=BUILD_WORKFLOW):
         fail(f'build workflow: must run the shared pinned build {PIPELINE_BUILD!r}')
     if PIPELINE_ARTIFACTS not in pipeline_text:
         fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
+    if '--local' in pipeline_text:
+        fail('build workflow: must use the pinned toolchain, never the local '
+             'installed-compiler mode')
     for alternate in ('cargo build', 'package-release.sh', 'MAGIT_LSP_TEST_BINARY'):
         if alternate in pipeline_text:
             fail(f'build workflow: {alternate!r} belongs to the shared pipeline script, '
@@ -487,8 +491,13 @@ def load_pipeline(path=PIPELINE):
     return module
 
 
-def pipeline_violations(module):
-    """Return the contract violations of a release pipeline module."""
+def pipeline_violations(module, environment):
+    """Return the contract violations of a release pipeline module.
+
+    ``environment`` supplies the PATH the local mode reads, so the self-tests can
+    prove with a fixture toolchain that local mode uses the installed compiler
+    while the pinned mode still rejects a wrong version.
+    """
     problems = []
     if getattr(module, 'TOOLCHAIN', None) != RELEASE_TOOLCHAIN:
         problems.append(f'toolchain pin {getattr(module, "TOOLCHAIN", None)!r} '
@@ -499,7 +508,23 @@ def pipeline_violations(module):
     if module.build_command(['cargo']) != expected_build:
         problems.append(f'build command is {module.build_command(["cargo"])!r}, '
                         f'expected {expected_build!r}')
-    steps, environment = module.artifact_commands('1.2.3', 'binary', 'dist')
+    try:
+        local = module.compiler_for(True, environment)
+    except module.PipelineError:
+        problems.append('local mode must use the installed compiler without a pin')
+    else:
+        if local != ['cargo']:
+            problems.append(f'local compiler prefix is {local!r}, expected the '
+                            'installed cargo')
+    try:
+        pinned = module.compiler_for(False, environment)
+    except module.PipelineError:
+        pass
+    else:
+        if pinned != ['cargo', f'+{RELEASE_TOOLCHAIN}'] and pinned != ['cargo']:
+            problems.append(f'pinned compiler prefix is {pinned!r}, expected the '
+                            f'{RELEASE_TOOLCHAIN} pin')
+    steps, environment_vars = module.artifact_commands('1.2.3', 'binary', 'dist')
     if steps[:1] != [['sh', 'scripts/package-release.sh', '1.2.3', 'binary', 'dist']]:
         problems.append('artifact steps must package the explicit binary with '
                         'scripts/package-release.sh')
@@ -507,7 +532,7 @@ def pipeline_violations(module):
         problems.append('artifact steps must validate the archive set offline')
     if len(steps) < 3 or steps[-1][1:4] != ['-m', 'unittest', 'discover']:
         problems.append('artifact steps must run the release suite')
-    if environment.get('MAGIT_LSP_TEST_BINARY') != 'binary':
+    if environment_vars.get('MAGIT_LSP_TEST_BINARY') != 'binary':
         problems.append('artifact environment must hand the binary to '
                         'MAGIT_LSP_TEST_BINARY')
     return problems
@@ -515,7 +540,7 @@ def pipeline_violations(module):
 
 def check_release_pipeline():
     """The local pipeline script must keep the workflow's pinned build/artifact contract."""
-    problems = pipeline_violations(load_pipeline())
+    problems = pipeline_violations(load_pipeline(), dict(os.environ))
     if problems:
         fail('release pipeline: ' + '; '.join(problems))
 
@@ -540,6 +565,8 @@ def check_local_pipeline(path=MAKEFILE):
     for target, command in (
         ('release-locked', PIPELINE_BUILD),
         ('release-artifact-check', PIPELINE_ARTIFACTS),
+        ('release-local', PIPELINE_BUILD_LOCAL),
+        ('release-artifact-check-local', PIPELINE_ARTIFACTS),
     ):
         number = next((index for index, line in enumerate(lines, 1)
                        if line.startswith(target + ':')), None)
@@ -549,6 +576,7 @@ def check_local_pipeline(path=MAKEFILE):
         if not any(command in line for line in recipe):
             fail(f'Makefile: {target} must run {command!r}')
     find_line(lines, 'release-artifact-check: release-locked', 'Makefile')
+    find_line(lines, 'release-artifact-check-local: release-local', 'Makefile')
 
 
 def check_artifact_consistency():
@@ -874,6 +902,30 @@ def write_artifacts(directory, version='1.2.3', payload=b'archive bytes'):
     return archive.name
 
 
+def write_fake_toolchain(directory):
+    """Write installed-looking cargo/rustc stubs and return their environment.
+
+    The stubs report versions unlike the release pin and refuse the ``+1.94.1``
+    probe, so a fixture can prove local mode accepts the installed compiler while
+    the pinned CI mode still rejects it.
+    """
+    root = Path(directory) / 'toolchain-bin'
+    root.mkdir(parents=True, exist_ok=True)
+    for tool, version in (('rustc', 'rustc 1.99.1 (fixture)'),
+                          ('cargo', 'cargo 1.99.0 (fixture)')):
+        script = root / tool
+        script.write_text(
+            '#!/bin/sh\n'
+            'if [ "$1" = "+1.94.1" ]; then\n'
+            '  echo "error: toolchain +1.94.1 is not installed" >&2\n'
+            '  exit 1\n'
+            'fi\n'
+            f'echo "{version}"\n',
+            encoding='utf-8')
+        script.chmod(0o755)
+    return {'PATH': str(root)}
+
+
 def mutated_file(source, directory, label, mutations):
     """Write a mutated copy of ``source`` for the self-tests and return its path.
 
@@ -1019,6 +1071,9 @@ def run_self_tests():
             ('build workflow without the version producer',
              (('--validate-release-ref', '--print-version', None),),
              'validate the version/tag ref'),
+            ('build workflow running the local installed-compiler mode',
+             ((PIPELINE_BUILD, PIPELINE_BUILD_LOCAL, None),),
+             'never the local installed-compiler mode'),
         ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
@@ -1030,10 +1085,26 @@ def run_self_tests():
              ((PIPELINE_BUILD, 'cargo build --release', None),)),
             ('Makefile without the artifact target',
              ((PIPELINE_ARTIFACTS, 'true', None),)),
+            ('Makefile local target without --local',
+             ((PIPELINE_BUILD_LOCAL, PIPELINE_BUILD, None),)),
         ):
             expect_check(label, check_local_pipeline,
                          mutated_file(MAKEFILE, directory, label, mutations),
                          expected='Makefile:')
+
+        # The local targets must use the installed compiler, not the CI pin,
+        # while the pinned targets keep rejecting a wrong compiler. The fixture
+        # toolchain reports 1.99.x and refuses `+1.94.1`, like this environment.
+        toolchain = write_fake_toolchain(directory)
+        pipeline = load_pipeline()
+        if pipeline.compiler_for(True, toolchain) != ['cargo']:
+            fail('self-test: local release mode must use the installed compiler')
+        if pipeline.build_command(pipeline.compiler_for(True, toolchain)) != [
+                'cargo', 'build', '--release', '--locked', '--target', ASSET]:
+            fail('self-test: local release mode must keep the locked GNU target build')
+        expect_pipeline_error(pipeline, 'installed compiler satisfying the CI pin',
+                              pipeline.compiler, toolchain,
+                              expected='pinned release build needs')
 
         # The shared script keeps the locked flags and the binary handoff.
         for label, mutations, expected in (
@@ -1042,9 +1113,14 @@ def run_self_tests():
             ('pipeline without the binary handoff',
              (("'MAGIT_LSP_TEST_BINARY': str(binary),", '', None),),
              'MAGIT_LSP_TEST_BINARY'),
+            ('pipeline local mode forcing the pinned toolchain',
+             (('return installed_compiler(environment) if local else '
+               'compiler(environment)', 'return compiler(environment)', None),),
+             'local mode must use'),
         ):
             problems = pipeline_violations(
-                load_pipeline(mutated_file(PIPELINE, directory, label, mutations)))
+                load_pipeline(mutated_file(PIPELINE, directory, label, mutations)),
+                toolchain)
             if not any(expected in problem for problem in problems):
                 fail(f'self-test: {label} was accepted')
 

@@ -2,7 +2,10 @@
 """Run the release workflow's locked build and actual-artifact checks locally.
 
 ``build`` refuses any compiler that is not exactly the pinned Rust toolchain and
-then runs the workflow's ``--release --locked --target`` build. ``artifacts``
+then runs the workflow's ``--release --locked --target`` build; ``build
+--local`` instead uses the installed compiler without downloading one and
+records its real versions, while keeping the same locked command and artifact
+path. ``artifacts``
 packages that exact binary with ``scripts/package-release.sh``, validates the
 archive/sidecar set offline with the release checker and runs the release suite
 with ``MAGIT_LSP_TEST_BINARY`` set, so the real-binary case runs instead of
@@ -94,17 +97,25 @@ def resolve_version(environment):
     return version
 
 
-def compiler():
+def process_environment(environment):
+    """Return ``environment`` layered over this process's environment."""
+    return dict(os.environ, **(environment or {}))
+
+
+def compiler(environment):
     """Return the cargo prefix for exactly the pinned toolchain, or fail readably."""
     found = 'no cargo/rustc on PATH'
-    if shutil.which('cargo') and shutil.which('rustc'):
+    merged = process_environment(environment)
+    if shutil.which('cargo', path=merged.get('PATH')) and \
+            shutil.which('rustc', path=merged.get('PATH')):
         probe = subprocess.run(
-            ['cargo', f'+{TOOLCHAIN}', '--version'], cwd=ROOT,
+            ['cargo', f'+{TOOLCHAIN}', '--version'], cwd=ROOT, env=merged,
             capture_output=True, text=True)
         if probe.returncode == 0:
             return ['cargo', f'+{TOOLCHAIN}']
         version = subprocess.run(
-            ['rustc', '--version'], cwd=ROOT, capture_output=True, text=True)
+            ['rustc', '--version'], cwd=ROOT, env=merged,
+            capture_output=True, text=True)
         found = version.stdout.strip() or version.stderr.strip() or found
         if version.returncode == 0 and version.stdout.split()[1:2] == [TOOLCHAIN]:
             return ['cargo']
@@ -113,6 +124,43 @@ def compiler():
         f'Provide that exact toolchain and target {TARGET} (for example with '
         f'`rustup toolchain install {TOOLCHAIN}`); this target never downloads '
         'or installs a toolchain itself.')
+
+
+def installed_prefix(environment):
+    """Return the installed ``cargo`` prefix without downloading or pinning one."""
+    merged = process_environment(environment)
+    missing = [tool for tool in ('cargo', 'rustc')
+               if not shutil.which(tool, path=merged['PATH'])]
+    if missing:
+        raise PipelineError(
+            f'the local release build needs installed {" and ".join(missing)} on PATH; '
+            'this target never downloads or installs a toolchain')
+    return ['cargo']
+
+
+def installed_compiler(environment):
+    """Return the installed ``cargo`` prefix after recording the real toolchain."""
+    prefix = installed_prefix(environment)
+    versions = []
+    for tool in ('rustc', 'cargo'):
+        result = subprocess.run(
+            [tool, '--version'], cwd=ROOT, env=process_environment(environment),
+            capture_output=True, text=True)
+        line = result.stdout.strip() or result.stderr.strip()
+        if result.returncode != 0 or not line:
+            raise PipelineError(f'{tool} --version failed; the local release build '
+                                'needs a working installed toolchain')
+        versions.append(line)
+    print(f'local release toolchain: {versions[0]}; {versions[1]}', file=sys.stderr)
+    print('note: local mode proves the installed compiler; the hosted workflow '
+          f'keeps Rust {TOOLCHAIN} on Ubuntu 22.04 (glibc 2.35) for the exact '
+          'binary/glibc baseline', file=sys.stderr)
+    return prefix
+
+
+def compiler_for(local, environment):
+    """Return the cargo prefix: the installed compiler for ``local``, else the pin."""
+    return installed_compiler(environment) if local else compiler(environment)
 
 
 def run(argv, environment=None):
@@ -124,9 +172,14 @@ def run(argv, environment=None):
         raise PipelineError(f'{" ".join(argv)} exited {result.returncode}')
 
 
-def build():
-    """Run the workflow's pinned, locked, target-specific release build."""
-    run(build_command(compiler()))
+def build(local, environment):
+    """Run the workflow's locked, target-specific release build.
+
+    ``local`` selects the installed compiler (never downloading one) and records
+    its actual versions; both modes issue the same ``--release --locked
+    --target`` command and produce the binary ``artifacts`` later packages.
+    """
+    run(build_command(compiler_for(local, environment)), environment)
 
 
 def artifacts(environment):
@@ -143,10 +196,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('build', 'artifacts'),
                         help='build the pinned binary, or package and smoke-test it')
+    parser.add_argument('--local', action='store_true',
+                        help='build with the installed compiler instead of the '
+                             'pinned toolchain (never downloads one)')
     args = parser.parse_args()
     try:
         if args.mode == 'build':
-            build()
+            build(args.local, os.environ)
         else:
             artifacts(os.environ)
     except PipelineError as error:
