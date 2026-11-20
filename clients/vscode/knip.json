@@ -7,7 +7,8 @@
     "test/e2e/real-file-spike.mjs",
     "test/e2e/real-file-lifecycle.mjs",
     "test/e2e/real-file-spike.js",
-    "test/e2e/real-file-lifecycle.js"
+    "test/e2e/real-file-lifecycle.js",
+    "test/server-download-process.js"
   ],
   "project": [
     "**/*.js",
@@ -15,6 +16,8 @@
   ],
   "ignoreDependencies": [
     "@oxc-parser/binding-linux-x64-gnu",
+    "@vscode/vsce",
+    "ovsx",
     "prettier"
   ]
 }

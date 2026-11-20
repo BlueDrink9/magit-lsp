@@ -206,6 +206,4 @@ async function resolveServerSource(options) {
   return managed();
 }
 
-exports.SOURCES = SOURCES;
-exports.ServerSourceError = ServerSourceError;
 exports.resolveServerSource = resolveServerSource;

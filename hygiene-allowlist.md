@@ -52,6 +52,26 @@ and 69 unused exports. An isolated unreachable helper probe was previously
 reported and removed. Static graph check only; no native VSCode execution is
 claimed.
 
+### Knip disposition (2026-11-20)
+
+`make hygiene` at `9203210` reported four release-client findings; each is
+resolved by its real consumer, not by blanket suppression:
+
+- `test/server-download-process.js` is not dead: `test/server-download.test.js`
+  forks it as an independent resolver child process (`:18` fixture path, `:224`
+  `fork`), which static import analysis cannot see, so `clients/vscode/knip.json`
+  lists it as an entry.
+- `@vscode/vsce` and `ovsx` are distribution CLIs, not imports: the
+  `vscode-package` Make target runs `vsce package` and the publish workflow runs
+  `vsce publish` (`.github/workflows/publish.yml:120`) and `ovsx publish`
+  (`:128`), so `clients/vscode/knip.json` names them in `ignoreDependencies`.
+- The exports `SOURCES` and `ServerSourceError` had no importer and were
+  removed from `lib/server-source.js`; both remain module-internal for
+  `sourceSetting` validation and `fail` respectively.
+
+Only CLI-only dependencies with verified invocation sites are ignored; the
+unused-dependency probe above still governs ordinary imports.
+
 ## Luacheck
 
 All 34 warnings / 0 errors from the baseline are itemized. They are pre-existing
