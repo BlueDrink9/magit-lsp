@@ -168,6 +168,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
                     view_id: descriptor.id.clone(),
                     controller,
                     keys_override: None,
+                    key_state: Default::default(),
                 },
             );
         shared
@@ -264,7 +265,11 @@ pub(super) fn report_pending_refresh_error(shared: &Shared, error: Error) {
     }
 }
 
-pub(super) fn plain_change(shared: &Shared, uri: &str) {
+pub(super) fn plain_change(
+    shared: &Shared,
+    uri: &str,
+    accepted: Option<super::drafts::AcceptedChange>,
+) -> Option<PlainKeyDispatch> {
     let snapshot = shared
         .documents
         .lock()
@@ -272,7 +277,7 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
         .get(uri)
         .cloned();
     let Some(snapshot) = snapshot else {
-        return;
+        return None;
     };
 
     // The policy header is a structured node. If the client edits that row,
@@ -294,7 +299,7 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
     };
     if let Some((incarnation, edit)) = header_repair {
         send_plain_edit(shared, uri.to_owned(), incarnation, edit);
-        return;
+        return None;
     }
 
     // Route an edit of an open prompt or log-selection document through the
@@ -355,7 +360,7 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
                     if let Some(edit) = edit {
                         send_plain_edit(shared, uri.to_owned(), incarnation, edit);
                     }
-                    return;
+                    return None;
                 }
                 Ok(Some(PromptReconcile {
                     repaired: false,
@@ -375,7 +380,7 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
                             .controller
                             .retain_actions(tree, &view_id, generation, &scope, None);
                     }
-                    return;
+                    return None;
                 }
                 Ok(Some(PromptReconcile {
                     repaired: true,
@@ -391,6 +396,14 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
                     tracing::error!(%error, "failed to reconcile an edited prompt document");
                 }
             }
+        }
+    }
+
+    if let Some(change) = accepted.as_ref() {
+        match plain_key_step(shared, uri, change, &snapshot) {
+            PlainKeyStep::Continue => {}
+            PlainKeyStep::Wait => return None,
+            PlainKeyStep::Dispatch(dispatch) => return Some(dispatch),
         }
     }
 
@@ -417,6 +430,330 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
         if let Some(incarnation) = incarnation {
             send_plain_edit(shared, uri.to_owned(), incarnation, edit);
         }
+    }
+    None
+}
+
+/// Message shown when a key edit no longer matches the displayed session state.
+const PLAIN_KEY_STALE: &str = "changed since displayed; refreshed";
+
+/// Decision for one accepted Plain edit before the ordinary repair tail runs.
+enum PlainKeyStep {
+    /// Not a dispatchable key edit: fall through to the ordinary repair path.
+    Continue,
+    /// A deletion half waits for its related insertion; keep the document text.
+    Wait,
+    /// Run this key, or refresh the document, once the lifecycle guard drops.
+    Dispatch(PlainKeyDispatch),
+}
+
+/// One Plain key action to execute once the Plain lifecycle guard is released.
+pub(super) enum PlainKeyDispatch {
+    /// Run one key step through the existing shared session key handler.
+    Key {
+        uri: String,
+        repo: String,
+        params: crate::protocol::ViewKeyParams,
+    },
+    /// Discard a stale edit and render the session's current state.
+    Refresh { uri: String, repo: String },
+}
+
+/// Classify one accepted Plain edit as a key against its matched retained snapshot.
+fn plain_key_step(
+    shared: &Shared,
+    uri: &str,
+    change: &super::drafts::AcceptedChange,
+    snapshot: &crate::docstore::Document,
+) -> PlainKeyStep {
+    use crate::presentation::keys::{self, KeyPreflight, State};
+    let encoding = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .encoding;
+    let (repo, view_id, generation, prior, mut state) = {
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get_mut(uri) else {
+            return PlainKeyStep::Continue;
+        };
+        // Recognize only the exact version/hash produced by the outstanding
+        // repair, before treating its mutated pre-text as fresh key input.
+        if entry.key_state.repair_echo.is_some_and(|(_, version, hash)| version == change.post_version && hash == crate::presentation::plain::hash_text(&change.post_text)) {
+            entry.key_state.repair_echo = None;
+            entry.key_state.classifier = State::Ready;
+            return PlainKeyStep::Continue;
+        }
+        if !plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled {
+            return PlainKeyStep::Continue;
+        }
+        let Some((_, view_id, generation, scope, _)) =
+            entry.controller.action_snapshot(&change.pre.text)
+        else {
+            return PlainKeyStep::Continue;
+        };
+        if matches!(scope, "prompt" | "log.select" | "commit-message") {
+            return PlainKeyStep::Continue;
+        }
+        let state = entry.key_state.clone();
+        (
+            entry.repo.clone(),
+            view_id.to_owned(),
+            generation,
+            state.classifier.clone(),
+            state,
+        )
+    };
+    let timeout = shared
+        .config
+        .for_repository(Path::new(&repo))
+        .config()
+        .plain
+        .keys_pair_timeout_ms;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0);
+    let decision = keys::decide(
+        &mut state.classifier,
+        &change.pre.text,
+        &change.changes,
+        change.pre.version,
+        change.post_version,
+        &change.post_text,
+        encoding,
+        now,
+        timeout,
+    );
+    let selection = match &prior {
+        State::PendingDeletion { edit, .. } => edit.pre_range.map(|((start, _), (end, col))| {
+            crate::protocol::Selection {
+                start_line: start as usize,
+                end_line: keys::inclusive_lines(start, end, col).1 as usize,
+            }
+        }),
+        _ => None,
+    };
+    {
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = documents.get_mut(uri) {
+            entry.key_state = state.clone();
+            match &decision {
+                keys::Decision::Wait => {
+                    entry.controller.observe(snapshot.version, snapshot.text.clone());
+                }
+                keys::Decision::Dispatch(_) | keys::Decision::Repair | keys::Decision::DropBusy => {}
+            }
+        }
+    }
+    let key = match decision {
+        keys::Decision::Wait => return PlainKeyStep::Wait,
+        keys::Decision::Repair => return PlainKeyStep::Continue,
+        keys::Decision::DropBusy => {
+            if let Some(entry) = shared
+                .plain_documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get_mut(uri)
+            {
+                entry.key_state.repair_due = true;
+            }
+            return PlainKeyStep::Continue;
+        }
+        keys::Decision::Dispatch(key) => key,
+    };
+    // The key must resolve against the snapshot the client was actually shown.
+    let current = shared
+        .published
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .find_map(|views| {
+            views
+                .current_snapshot(&view_id)
+                .map(|(_, version, _, _)| version)
+        });
+    let focused = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(uri)
+        .is_some_and(|entry| entry.view_id == view_id);
+    if current != Some(generation) || !focused {
+        let _ = shared.sender.send(show_message(2, PLAIN_KEY_STALE.into()));
+        if let Some(entry) = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(uri)
+        {
+            entry.key_state = Default::default();
+        }
+        return PlainKeyStep::Dispatch(PlainKeyDispatch::Refresh { uri: uri.to_owned(), repo });
+    }
+    let edit = keys::derive_edit(
+        &change.pre.text,
+        change.pre.version,
+        change.post_version,
+        &change.changes,
+        encoding,
+    );
+    let Some(((line, column), _)) = edit.pre_range else {
+        return PlainKeyStep::Continue;
+    };
+    let params = crate::protocol::ViewKeyParams {
+        view_id,
+        version: generation,
+        key: key.clone(),
+        editor_mode: crate::keymap::EditorMode::Normal,
+        cursor: Cursor {
+            line: line as usize,
+            column: column as usize,
+        },
+        selection,
+    };
+    let Some(handle) = shared.session(&repo) else {
+        return PlainKeyStep::Continue;
+    };
+    let keymaps = shared
+        .config
+        .for_repository(Path::new(&repo))
+        .keymaps();
+    let preflight = {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.set_keymaps(keymaps);
+        session.preflight_key(&params)
+    };
+    match preflight {
+        Ok(KeyPreflight::Pending) => PlainKeyStep::Dispatch(PlainKeyDispatch::Key {
+            uri: uri.to_owned(),
+            repo,
+            params,
+        }),
+        Ok(KeyPreflight::Allowed { .. }) => PlainKeyStep::Dispatch(PlainKeyDispatch::Key {
+            uri: uri.to_owned(),
+            repo,
+            params,
+        }),
+        Ok(KeyPreflight::Unbound) => {
+            let _ = shared
+                .sender
+                .send(show_message(2, "key is not bound in the active profile".into()));
+            PlainKeyStep::Continue
+        }
+        Ok(KeyPreflight::Refused { message, .. }) => {
+            let _ = shared.sender.send(show_message(2, message));
+            PlainKeyStep::Continue
+        }
+        Err(error) => {
+            tracing::warn!(%error, "failed to preflight a Plain key");
+            PlainKeyStep::Continue
+        }
+    }
+}
+
+/// Execute one accepted Plain key with no lifecycle guard held.
+pub(super) fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> {
+    match dispatch {
+        PlainKeyDispatch::Refresh { uri, repo } => {
+            let view_id = shared
+                .plain_documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .values()
+                .find(|entry| entry.repo == repo)
+                .map(|entry| entry.view_id.clone());
+            let snapshot = view_id.as_ref().and_then(|view_id| {
+                shared
+                    .published
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .find_map(|views| views.current_snapshot(view_id))
+            });
+            match (view_id, snapshot) {
+                (Some(view_id), Some(snapshot)) => {
+                    route_plain_render(shared, &view_id, Some(snapshot));
+                }
+                _ => repair_plain_authoritative(shared, &uri),
+            }
+            return Ok(());
+        }
+        PlainKeyDispatch::Key {
+            uri,
+            repo,
+            params,
+        } => {
+            if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&uri) {
+                entry.key_state.classifier = crate::presentation::keys::State::Executing;
+                entry.key_state.repair_due = false;
+            }
+            let handle = shared
+                .session(&repo)
+                .ok_or_else(|| Error::new("Plain key session closed"))?;
+            let keymaps = shared
+                .config
+                .for_repository(Path::new(&repo))
+                .keymaps();
+            let step = {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                session.set_keymaps(keymaps);
+                session.start_key(&params)?
+            };
+            let outcome = super::view_execution::drive_execution(shared, &repo, step)?;
+            let dispatched = super::view_execution::dispatched_outcome(shared, &repo, outcome)?;
+            for notification in dispatched.notifications {
+                let _ = shared.sender.send(notification);
+            }
+            repair_plain_authoritative(shared, &uri);
+            Ok(())
+        }
+    }
+}
+
+/// Repair one Plain document to its newest retained authoritative render.
+fn repair_plain_authoritative(shared: &Shared, uri: &str) {
+    let (text, version) = {
+        let documents = shared
+            .documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(document) = documents.get(uri).filter(|document| !document.repair) else {
+            return;
+        };
+        (document.text.clone(), document.version)
+    };
+    let _lifecycle = shared
+        .plain_lifecycle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let mut documents = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let Some(entry) = documents.get_mut(uri) else {
+        return;
+    };
+    if entry.key_state.repair_echo.is_some() {
+        return;
+    }
+    let Some((tree, view_id, generation, scope, menu)) = entry.controller.latest_action_meta() else {
+        return;
+    };
+    let (tree, view_id, generation, scope, menu) =
+        (tree.clone(), view_id.to_owned(), generation, scope.to_owned(), menu.cloned());
+    entry.controller.observe(version, text);
+    let edit = entry.controller.render_actions(tree, view_id, generation, scope, menu);
+    if let Some(edit) = edit {
+        let incarnation = entry.incarnation;
+        drop(documents);
+        send_plain_edit(shared, uri.to_owned(), incarnation, edit);
     }
 }
 
@@ -829,6 +1166,11 @@ pub(super) fn route_plain_render(
             return true;
         };
         snapshot.and_then(|(mut tree, generation, scope, menu)| {
+            if entry.key_state.classifier == crate::presentation::keys::State::Executing {
+                if let Some(document) = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri) {
+                    entry.controller.observe(document.version, document.text.clone());
+                }
+            }
             if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
                 append_plain_keys_header(shared, &entry.repo, entry.keys_override, &mut tree);
             }
@@ -851,6 +1193,26 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
     {
         return;
     }
+    let echo = (|| {
+        let mut document = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri)?.clone();
+        let version = document.version.checked_add(1)?;
+        let changes = edit.edit.get("documentChanges").and_then(Value::as_array).and_then(|changes| changes.first());
+        let edits = if let Some(change) = changes {
+            if change.pointer("/textDocument/version")?.as_i64()? != i64::from(document.version) { return None; }
+            change.get("edits")?
+        } else {
+            edit.edit.get("changes")?.get(&uri)?
+        };
+        let mut edits: Vec<lsp_types::TextEdit> = serde_json::from_value(edits.clone()).ok()?;
+        edits.sort_by_key(|edit| std::cmp::Reverse((edit.range.start.line, edit.range.start.character)));
+        let changes: Vec<_> = edits.into_iter().map(|edit| crate::docstore::Change { start: Some((edit.range.start.line, edit.range.start.character)), end: Some((edit.range.end.line, edit.range.end.character)), text: edit.new_text }).collect();
+        let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding;
+        document.change(version, &changes, encoding).ok()?;
+        Some((edit.id, version, crate::presentation::plain::hash_text(&document.text)))
+    })();
+    if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&uri).filter(|entry| entry.incarnation == incarnation) {
+        entry.key_state.repair_echo = echo;
+    }
     let Ok((pending, receiver)) = shared.register_outbound(
         "workspace/applyEdit",
         serde_json::json!({ "edit": edit.edit }),
@@ -871,6 +1233,9 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
         let next = {
             let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
             documents.get_mut(&uri).filter(|entry| entry.incarnation == incarnation).map(|entry| {
+                if !applied && entry.key_state.repair_echo.is_some_and(|(id, _, _)| id == edit.id) {
+                    entry.key_state.repair_echo = None;
+                }
                 let next = entry.controller.response(edit.id, applied);
                 let warning = entry.controller.take_format_warning();
                 (next, warning)

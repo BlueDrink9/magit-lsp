@@ -134,9 +134,20 @@ fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
         .any(|repository| repository.git_dir == dir)
 }
 
+/// Accepted Plain change data captured before replacing the mirrored document.
+pub(super) struct AcceptedChange {
+    pub(super) pre: crate::docstore::Document,
+    pub(super) changes: Vec<crate::docstore::Change>,
+    pub(super) post_version: i32,
+    pub(super) post_text: String,
+}
+
 /// Apply synchronized text and forward accepted snapshots to any pending draft.
 #[cfg(unix)]
-pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
+pub(super) fn draft_notification(
+    shared: &Shared,
+    notification: &Notification,
+) -> Result<Option<AcceptedChange>> {
     use lsp_types::{
         DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     };
@@ -163,7 +174,7 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .open(uri, doc.text, doc.version);
-            Ok(())
+            Ok(None)
         }
         "textDocument/didChange" => {
             let p: DidChangeTextDocumentParams = from_params(notification.params.clone())?;
@@ -191,6 +202,7 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
             let Some(mut candidate) = docs.get(uri).cloned() else {
                 return Err(Error::new("Document is not open"));
             };
+            let pre = candidate.clone();
             if candidate.change(p.text_document.version, &changes, encoding).is_err() {
                 let stale_full_text =
                     p.content_changes.len() == 1 && p.content_changes[0].range.is_none();
@@ -205,6 +217,14 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
                 ));
             }
             let text = candidate.text.clone();
+            let captured = crate::presentation::keys::capture(&pre, &changes, &candidate, encoding)
+                .ok_or_else(|| Error::new("Accepted change did not derive its stored post-state"))?;
+            let handoff = AcceptedChange {
+                pre: captured.pre,
+                changes: captured.changes,
+                post_version: captured.post_version,
+                post_text: captured.post_text,
+            };
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     if draft.opened() {
@@ -218,7 +238,7 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
                 })?;
             }
             docs.replace(uri, candidate).map_err(|_| Error::new("Document is not open"))?;
-            Ok(())
+            Ok(Some(handoff))
         }
         "textDocument/didClose" => {
             let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
@@ -235,7 +255,7 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
             {
                 return if owned {
                     // A close after an abort just detaches the document store.
-                    Ok(())
+                    Ok(None)
                 } else {
                     Err(Error::new(
                         "Commit draft URI is not pending on this connection",
@@ -267,11 +287,12 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
                     )?;
                 }
                 result?;
-                Ok(())
+                Ok(None)
             } else {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     draft.did_close(context)
-                })
+                })?;
+                Ok(None)
             }
         }
         "textDocument/didSave" => {
@@ -284,7 +305,7 @@ pub(super) fn draft_notification(shared: &Shared, notification: &Notification) -
                     .save_text(p.text_document.uri.as_str(), &text)
                     .map_err(|_| Error::new("Save text does not match an open document; synchronize changes before saving"))?;
             }
-            Ok(())
+            Ok(None)
         }
         _ => Err(Error::new("Unknown commit draft notification")),
     }
@@ -298,6 +319,9 @@ pub(super) fn draft_request(_shared: &Shared, _request: &Request) -> Result<Valu
 
 /// Reject managed draft sync on platforms without Unix support.
 #[cfg(not(unix))]
-pub(super) fn draft_notification(_shared: &Shared, _notification: &Notification) -> Result<()> {
+pub(super) fn draft_notification(
+    _shared: &Shared,
+    _notification: &Notification,
+) -> Result<Option<AcceptedChange>> {
     Err(Error::new("managed commit drafts require Unix"))
 }

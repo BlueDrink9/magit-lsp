@@ -25,9 +25,88 @@ pub struct NetEdit {
 /// State of a plain key edit classifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum State { Ready, PendingDeletion { edit: NetEdit, since_ms: u64 }, Executing }
+impl Default for State { fn default() -> Self { Self::Ready } }
+
+/// URI-owned classifier state and repair latch for one Plain document lifetime.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DocumentState {
+    /// Candidate/pairing state for this URI.
+    pub classifier: State,
+    /// Whether a busy edit was dropped and requires authoritative repair.
+    pub repair_due: bool,
+    /// Exact next document version and text hash of the outstanding repair.
+    pub repair_echo: Option<(u64, i32, [u8; 32])>,
+}
+
 /// Classification decision for an edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome { Accept(String), Wait, Reject { repair: bool } }
+
+/// Ingress decision for one accepted document notification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision { Wait, Dispatch(String), Repair, DropBusy }
+
+/// Preflight result for a Plain key against the exact displayed view state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyPreflight {
+    /// The key only extends a pending chord or menu prefix.
+    Pending,
+    /// A safe key may run through the existing session key handler.
+    Allowed { command: Option<String>, key: String, menu: bool },
+    /// The key is not bound in the current view context.
+    Unbound,
+    /// The key was refused, with the user-facing one-line reason.
+    Refused { id: Option<String>, message: String },
+}
+
+/// Captured document transition, preserving the exact accepted inputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedInput {
+    /// Document immediately before the notification.
+    pub pre: crate::docstore::Document,
+    /// Ordered LSP changes as accepted by the document store.
+    pub changes: Vec<Change>,
+    /// Accepted version after applying the notification.
+    pub post_version: i32,
+    /// Exact accepted document text after applying the notification.
+    pub post_text: String,
+}
+
+/// Capture an accepted transition only when its ordered edits derive its exact post-state.
+pub fn capture(pre: &crate::docstore::Document, changes: &[Change], post: &crate::docstore::Document, encoding: Encoding) -> Option<AcceptedInput> {
+    let mut derived = pre.clone();
+    derived.change(post.version, changes, encoding).ok()?;
+    (derived.text == post.text && derived.version == post.version).then(|| AcceptedInput {
+        pre: pre.clone(),
+        changes: changes.to_vec(),
+        post_version: post.version,
+        post_text: post.text.clone(),
+    })
+}
+
+/// Classify an accepted change only when its captured post-state is exact.
+pub fn decide(state: &mut State, pre: &str, changes: &[Change], before: i32, after: i32, post: &str, encoding: Encoding, now_ms: u64, timeout_ms: u64) -> Decision {
+    let edit = derive_edit(pre, before, after, changes, encoding);
+    let mut derived = pre.to_owned();
+    for change in changes {
+        match (change.start, change.end) {
+            (Some(start), Some(end)) => {
+                let (Some(a), Some(b)) = (offset(&derived, start, encoding), offset(&derived, end, encoding)) else { return Decision::Repair };
+                if a > b { return Decision::Repair; }
+                derived.replace_range(a..b, &change.text);
+            }
+            (None, None) => derived.clone_from(&change.text),
+            _ => return Decision::Repair,
+        }
+    }
+    if derived != post || edit.version_after != after { return Decision::Repair; }
+    if matches!(state, State::Executing) { return Decision::DropBusy; }
+    match classify(state, edit, now_ms, timeout_ms) {
+        Outcome::Accept(key) => Decision::Dispatch(key),
+        Outcome::Wait => Decision::Wait,
+        Outcome::Reject { .. } => Decision::Repair,
+    }
+}
 
 /// Whether `command` may accept character input under the active profile keymap.
 pub fn eligible(command: &Command, keymap: &Keymap) -> bool {

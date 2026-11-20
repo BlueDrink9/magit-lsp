@@ -52,6 +52,24 @@ fn unsupported_menu_item(status: MenuStatus, label: &str) -> Option<InvokeResult
     })
 }
 
+/// Preflight one resolved command without running it or touching session state.
+fn preflight_command(id: &str, key: &str, menu: bool, profile_bound: bool) -> crate::presentation::keys::KeyPreflight {
+    use crate::presentation::keys::KeyPreflight;
+    let Some(command) = commands::registry().get(id) else {
+        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "key command is unavailable".into() };
+    };
+    if !matches!(command.status, commands::CommandStatus::Implemented) {
+        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "command is planned and cannot run from a key".into() };
+    }
+    if command.destructive {
+        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "destructive command; use the code action".into() };
+    }
+    if !menu && !profile_bound {
+        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "command is not bound in the active profile".into() };
+    }
+    KeyPreflight::Allowed { command: Some(id.to_owned()), key: key.to_owned(), menu }
+}
+
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
 pub fn status_uri(repo_path: &str) -> String {
     format!("magit://status/{}", repo_path.trim_start_matches('/'))
@@ -1203,6 +1221,57 @@ impl Session {
         let step = self.begin_key(params);
         self.publish();
         step
+    }
+
+    /// Preflight a key against cloned pending state without mutating the session.
+    ///
+    /// Mirrors [`Session::key`] resolution (profile keymap or active menu) but
+    /// runs no command and changes no pending chord or menu state.
+    pub fn preflight_key(&self, params: &ViewKeyParams) -> Result<crate::presentation::keys::KeyPreflight> {
+        let view = self
+            .views
+            .get(&params.view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
+        let cursor_moved = view.key_cursor.is_some() && view.key_cursor != Some(params.cursor);
+        if view.is_menu() {
+            let mut pending = view.menu_pending.clone();
+            if cursor_moved { pending.clear(); }
+            let menu = view.menu();
+            let keys: Vec<String> = menu
+                .as_ref()
+                .into_iter()
+                .flat_map(|menu| &menu.groups)
+                .flat_map(|group| &group.items)
+                .map(|item| item.key().to_string())
+                .collect();
+            return Ok(match keyhandler::resolve_menu(&mut pending, &params.key, &keys) {
+                MenuResolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
+                MenuResolution::Complete(key) => match menu.as_ref().and_then(|menu| menu.item(&key)) {
+                    Some(item) if matches!(item.status(), MenuStatus::Implemented) => match item {
+                        crate::menu::Item::Action { command, .. } => preflight_command(command, &key, true, false),
+                        crate::menu::Item::Switch { .. } | crate::menu::Item::Option { .. } => crate::presentation::keys::KeyPreflight::Allowed { command: None, key, menu: true },
+                    },
+                    Some(crate::menu::Item::Action { command, .. }) => crate::presentation::keys::KeyPreflight::Refused { id: Some(command.clone()), message: "command is planned and cannot run from a key".into() },
+                    Some(_) => crate::presentation::keys::KeyPreflight::Refused { id: None, message: "menu item is planned and cannot run from a key".into() },
+                    None => crate::presentation::keys::KeyPreflight::Unbound,
+                },
+                _ => crate::presentation::keys::KeyPreflight::Unbound,
+            });
+        }
+        let keymap = self.keymap_for(view.descriptor().scope.as_str()).cloned().map(|keymap| {
+            keymap.with_basic_modifiers(
+                self.rich_capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
+            )
+        });
+        let mut pending = view.pending.clone();
+        if cursor_moved { pending.clear(); }
+        Ok(match keyhandler::resolve(keymap.as_ref(), &mut pending, &params.key, params.editor_mode, view.descriptor().capture)? {
+            Resolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
+            Resolution::Run { command, .. } => preflight_command(&command, &params.key, false, true),
+            Resolution::PassThrough { .. } | Resolution::Swallow { .. } => crate::presentation::keys::KeyPreflight::Refused { id: None, message: "key is not bound in the active profile".into() },
+        })
     }
 
     /// Resolve a key without changing pending chords, returning its command when complete.

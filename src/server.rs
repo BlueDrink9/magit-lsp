@@ -51,8 +51,8 @@ use view_execution::CommitEdit;
 
 use plain::{deliver_plain_effects, deliver_render, route_plain_render, schedule_plain_open};
 use plain::{
-    close_plain, deliver_plain_close_outcome, plain_change, reconcile_rich_prompt,
-    refresh_pending_views, report_pending_refresh_error,
+    close_plain, deliver_plain_close_outcome, execute_plain_key, plain_change,
+    reconcile_rich_prompt, refresh_pending_views, report_pending_refresh_error,
 };
 use ui::{custom_ui, dynamic_delivery, refresh_view_keymaps, PickBridge, PromptBridge, ServerUi};
 use requests::{handle_request, Dispatched};
@@ -218,6 +218,8 @@ struct PlainEntry {
     controller: PlainDocument,
     /// Per-document Plain key policy override; absent means inherit settings.
     keys_override: Option<bool>,
+    /// Per-document key classifier and repair latch.
+    key_state: crate::presentation::keys::DocumentState,
 }
 
 #[derive(Clone)]
@@ -1179,7 +1181,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             .as_ref(),
                         Some(Presentation::Plain(_))
                     );
-                    if let Err(error) = drafts::draft_notification(&shared, &notification) {
+                    let notification_result = drafts::draft_notification(&shared, &notification);
+                    if let Err(error) = notification_result.as_ref() {
                         if notification.method == "textDocument/didChange" {
                             shared
                                 .documents
@@ -1238,11 +1241,17 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 deliver_plain_close_outcome(&shared, close);
                             }
                             "textDocument/didChange" => {
-                                plain_change(&shared, uri);
-                                // Delivery of a repaired Rich prompt render
-                                // re-enters the Plain lifecycle guard, so it
-                                // must not be held across this call.
+                                let dispatched =
+                                    plain_change(&shared, uri, notification_result.ok().flatten());
+                                // Delivery of a repaired render re-enters the
+                                // Plain lifecycle guard, so it must not be
+                                // held across the key execution or this call.
                                 drop(_plain);
+                                if let Some(dispatch) = dispatched {
+                                    if let Err(error) = execute_plain_key(&shared, dispatch) {
+                                        tracing::warn!(%error, "failed to execute a Plain key");
+                                    }
+                                }
                                 reconcile_rich_prompt(&shared, uri, &sender);
                             }
                             "textDocument/didClose" => {
