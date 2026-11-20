@@ -76,7 +76,8 @@ Both clients launch an external server. Nothing is published yet: there is no
 GitHub Release asset, Marketplace, Open VSX or registry install, and the VS Code
 extension is built from source or a locally packaged VSIX (`make vscode-package`).
 Full native-package, lazy.nvim and source-extension steps are in
-[client installation and quickstart](docs/CLIENT_INSTALL.md).
+[client installation and quickstart](docs/CLIENT_INSTALL.md); the documented
+lazy spec is exercised against the real manager by `make lazy-install-check`.
 
 Build the server from a checkout first; binary users do not need Rust once an
 approved asset exists.

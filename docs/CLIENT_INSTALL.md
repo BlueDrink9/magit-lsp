@@ -197,8 +197,12 @@ and temporary native package/HOME/XDG directories, without mini.nvim or network
 downloads. It boots the native package, asserts no startup session, then checks
 a rendered status after the explicit action. It also loads the documented lazy
 spec as valid Lua and asserts a key-driven spec that sets no `opts`, `config` or
-`build`. **Running the actual lazy.nvim manager** — its download and key-loading
-machinery — is a pre-release manual gate, not something this test executes.
+`build`. `make lazy-install-check` goes further: it boots the actual lazy.nvim
+manager at pinned tag `v11.17.5` (commit `85c7ff3`) from a disposable cache,
+loads this exact spec with only its source directory adapted to the checkout,
+presses the documented `<leader>gs` mapping through Neovim input, and asserts
+the plugin loads from this checkout, the LSP handshake completes and status
+renders. That is local Linux evidence, not a clean-machine or hosted install.
 Missing Neovim/server prerequisites skip the smoke, so inspect the test output,
 not just the exit code:
 
@@ -210,8 +214,8 @@ PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_TEST_BINARY=target/release/magit-lsp \
 `make vscode-vsix-install` covers the packaged VSIX artifact (the same bytes a
 publication would ship), not a registry download. State of each manual asset:
 the README screenshots under `scripts/readme-shots/` are a human task with no
-CI; the actual lazy.nvim-manager run and the Marketplace/Open VSX publication
-are open release gates (see [release gates/platform limits](RELEASING.md)).
+CI; the Marketplace/Open VSX publication is an open release gate (see
+[release gates/platform limits](RELEASING.md)).
 Local smoke evidence is not clean-machine, hosted-artifact or published-install
 evidence. Native screenshots are separate from headless setup evidence.
 

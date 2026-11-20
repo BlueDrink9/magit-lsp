@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -120,6 +120,9 @@ helix-smoke-stop:
 
 helix-config-check: build
 	$(call run,helix-config-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_helix_config.py --helix "$(HELIX_BIN)" --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/helix-config-check")
+
+lazy-install-check: build
+	$(call run,lazy-install-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_lazy_install.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/lazy-install")
 
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)

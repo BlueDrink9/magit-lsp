@@ -13,8 +13,9 @@ Client setup/discovery and on-demand Neovim examples are in
 [CLIENT_INSTALL](CLIENT_INSTALL.md); human-only README image guidance is in
 [SCREENSHOTS](SCREENSHOTS.md). External adapters use
 [CLIENT_SPEC](CLIENT_SPEC.md). These docs and isolated local setup tests do not
-close R-REL-2/3, hosted/clean-machine, actual lazy.nvim-manager or published-VSIX
-installation gates. The release workflow does not install Neovim, so its setup
+close R-REL-2/3, hosted/clean-machine or published-VSIX installation gates. The
+actual lazy.nvim-manager run (`make lazy-install-check`) is local Linux evidence
+only. The release workflow does not install Neovim, so its setup
 smoke may skip; inspect verbose unittest output rather than counting a skip as
 client evidence. README images are optional human-owned assets; harnesses emit
 text/structured evidence and do not capture screenshots. See the
@@ -52,8 +53,9 @@ and VSCodium 1.140.06880; it is not installation evidence:
   capture/root lifecycle, not complete menu presentation or release readiness.
 
 Both harnesses cleaned up their owned sessions/processes. Evidence is local,
-not uploaded or published. Hosted Ubuntu baseline, actual lazy.nvim-manager,
-clean-machine/VSIX installation and all publication gates remain open.
+not uploaded or published. Hosted Ubuntu baseline, clean-machine/VSIX
+installation and all publication gates remain open; the actual lazy.nvim-manager
+run is local Linux evidence only.
 
 ## Contracts
 
