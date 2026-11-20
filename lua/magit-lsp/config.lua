@@ -6,10 +6,10 @@
 
 local M = {}
 
-local shared = require('magit-lsp.shared')
+local shared = require("magit-lsp.shared")
 
 --- The status placements this client implements (R-UI-7).
-M.PLACEMENTS = { 'replace', 'vsplit', 'split', 'tab' }
+M.PLACEMENTS = { "replace", "vsplit", "split", "tab" }
 
 --- The rich protocol session version this client selects and requires.
 M.PROTOCOL_VERSION = 1
@@ -17,11 +17,11 @@ M.PROTOCOL_VERSION = 1
 --- The project root containing this module, used for `target/` lookups.
 ---@return string
 function M.project_root()
-  local source = debug.getinfo(1, 'S').source
+  local source = debug.getinfo(1, "S").source
   local path = source:sub(2)
-  path = vim.fn.fnamemodify(path, ':h') -- lua/magit-lsp
-  path = vim.fn.fnamemodify(path, ':h') -- lua
-  return vim.fn.fnamemodify(path, ':h') -- project root
+  path = vim.fn.fnamemodify(path, ":h") -- lua/magit-lsp
+  path = vim.fn.fnamemodify(path, ":h") -- lua
+  return vim.fn.fnamemodify(path, ":h") -- project root
 end
 
 --- Validate the client-only `status.placement` option.
@@ -29,7 +29,7 @@ end
 ---@return string name
 function M.placement(value)
   if value == nil then
-    return 'replace'
+    return "replace"
   end
   for _, name in ipairs(M.PLACEMENTS) do
     if value == name then
@@ -37,17 +37,17 @@ function M.placement(value)
     end
   end
   vim.notify(
-    'magit-lsp: unknown status.placement ' .. vim.inspect(value) .. '; using replace',
+    "magit-lsp: unknown status.placement " .. vim.inspect(value) .. "; using replace",
     vim.log.levels.WARN
   )
-  return 'replace'
+  return "replace"
 end
 
 --- True when `path` names an executable file.
 ---@param path string
 ---@return boolean
 local function executable(path)
-  return path ~= '' and vim.fn.executable(path) == 1
+  return path ~= "" and vim.fn.executable(path) == 1
 end
 
 --- The server command to spawn.
@@ -63,38 +63,39 @@ function M.server_command(cmd)
     return cmd
   end
   local env = vim.env.MAGIT_LSP_BIN
-  if env and env ~= '' then
+  if env and env ~= "" then
     if not executable(env) then
-      return nil, 'magit-lsp: $MAGIT_LSP_BIN is not executable: ' .. env
+      return nil, "magit-lsp: $MAGIT_LSP_BIN is not executable: " .. env
     end
     return { env }
   end
   local root = M.project_root()
-  for _, profile in ipairs({ 'release', 'debug' }) do
-    local path = root .. '/target/' .. profile .. '/magit-lsp'
+  for _, profile in ipairs({ "release", "debug" }) do
+    local path = root .. "/target/" .. profile .. "/magit-lsp"
     if executable(path) then
       return { path }
     end
   end
-  local found = vim.fn.exepath('magit-lsp')
-  if found ~= '' then
+  local found = vim.fn.exepath("magit-lsp")
+  if found ~= "" then
     return { found }
   end
-  return nil, 'magit-lsp: server binary not found; set setup({ cmd = ... }) or '
-    .. '$MAGIT_LSP_BIN, build target/debug/magit-lsp, or put magit-lsp on $PATH'
+  return nil,
+    "magit-lsp: server binary not found; set setup({ cmd = ... }) or "
+      .. "$MAGIT_LSP_BIN, build target/debug/magit-lsp, or put magit-lsp on $PATH"
 end
 
 --- How faithfully this client can report key modifiers (§3.8).
 ---@return string
 function M.key_modifiers()
-  if vim.fn.has('gui_running') == 1 then
-    return 'full'
+  if vim.fn.has("gui_running") == 1 then
+    return "full"
   end
   local program = vim.env.TERM_PROGRAM
-  if program == 'iTerm.app' or program == 'WezTerm' or vim.env.KITTY_WINDOW_ID then
-    return 'full'
+  if program == "iTerm.app" or program == "WezTerm" or vim.env.KITTY_WINDOW_ID then
+    return "full"
   end
-  return 'basic'
+  return "basic"
 end
 
 --- The client capabilities the server reads, plus the key-delivery contract.
@@ -105,9 +106,9 @@ function M.client_capabilities()
   capabilities.experimental.magit = {
     v = M.PROTOCOL_VERSION,
     minimumVersion = M.PROTOCOL_VERSION,
-    keys = 'dynamic',
+    keys = "dynamic",
     modifiers = M.key_modifiers(),
-    layout = { 'main', 'side', 'bottom', 'float' },
+    layout = { "main", "side", "bottom", "float" },
     effects = shared.optional_effects,
     prompts = shared.optional_prompt_kinds,
     pick = {

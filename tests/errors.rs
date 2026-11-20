@@ -8,6 +8,7 @@ use magit_lsp::git::GitRepo;
 use magit_lsp::protocol::Cursor;
 use magit_lsp::protocol::{Effect, MessageLevel};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -420,6 +421,7 @@ fn conflicts_from_a_real_repository_are_readable() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn backend_apply_failure_child() {
     let Ok(root) = std::env::var("ERROR_TEST_ROOT") else {
@@ -463,6 +465,7 @@ fn backend_apply_failure_child() {
     assert!(hint.contains("2.30.9"));
 }
 
+#[cfg(unix)]
 #[test]
 fn normal_and_piped_apply_failures_keep_original_details() {
     let initial = (0..20_000)

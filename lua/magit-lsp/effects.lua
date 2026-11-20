@@ -4,7 +4,7 @@
 --- manager; this module owns the client-side presentation of messages,
 --- clipboard copies and native key replay, so `init.lua` stays small.
 
-local keys = require('magit-lsp.keys')
+local keys = require("magit-lsp.keys")
 
 local M = {}
 
@@ -24,16 +24,16 @@ local LEVELS = {
 ---@param effect table
 function M.notify(effect)
   M.last_error_detail = effect.detail
-  local text = effect.text or ''
+  local text = effect.text or ""
   if effect.hint then
-    text = text .. ' - ' .. effect.hint
+    text = text .. " - " .. effect.hint
   end
-  text = text:gsub('%s*\n%s*', ' ')
+  text = text:gsub("%s*\n%s*", " ")
   -- A notification wider than the screen wraps and opens the hit-enter prompt,
   -- so keep a margin below `columns`.
   local limit = math.max(24, vim.o.columns - 12)
   if #text > limit then
-    text = text:sub(1, limit - 3) .. '...'
+    text = text:sub(1, limit - 3) .. "..."
   end
   vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
 end
@@ -44,16 +44,16 @@ end
 --- the unnamed register and a warning instead of an error.
 ---@param text string
 function M.copy(text)
-  local ok = pcall(vim.fn.setreg, '+', text)
+  local ok = pcall(vim.fn.setreg, "+", text)
   pcall(vim.fn.setreg, '"', text)
-  local preview = text:gsub('\n', ' ⏎ ')
+  local preview = text:gsub("\n", " ⏎ ")
   if #preview > 60 then
-    preview = preview:sub(1, 57) .. '...'
+    preview = preview:sub(1, 57) .. "..."
   end
   if ok then
-    vim.notify('Copied: ' .. preview, vim.log.levels.INFO)
+    vim.notify("Copied: " .. preview, vim.log.levels.INFO)
   else
-    vim.notify('Copied: ' .. preview .. ' (clipboard unavailable)', vim.log.levels.WARN)
+    vim.notify("Copied: " .. preview .. " (clipboard unavailable)", vim.log.levels.WARN)
   end
 end
 
@@ -65,7 +65,7 @@ function M.replay(key)
     return
   end
   -- `n` means "do not remap", so the client's own buffer-local map is skipped.
-  vim.api.nvim_feedkeys(keys.termcodes(lhs), 'n', false)
+  vim.api.nvim_feedkeys(keys.termcodes(lhs), "n", false)
 end
 
 --- The window a visited file should open in.
@@ -81,7 +81,7 @@ local function visit_window()
   if #windows < 2 then
     return current
   end
-  local previous_number = vim.fn.winnr('#')
+  local previous_number = vim.fn.winnr("#")
   if previous_number > 0 then
     local previous = vim.fn.win_getid(previous_number)
     if previous ~= 0 and previous ~= current and vim.api.nvim_win_is_valid(previous) then
@@ -99,7 +99,7 @@ end
 --- Open a server-resolved worktree location, keeping the view visible.
 ---@param effect table `visitFile` effect with `uri`, `line` and `column`
 function M.visit_file(effect)
-  if type(effect) ~= 'table' or not effect.uri then
+  if type(effect) ~= "table" or not effect.uri then
     return
   end
   local filename = vim.uri_to_fname(effect.uri)
@@ -107,7 +107,7 @@ function M.visit_file(effect)
   if vim.api.nvim_get_current_win() ~= target then
     vim.api.nvim_set_current_win(target)
   end
-  vim.cmd('edit ' .. vim.fn.fnameescape(filename))
+  vim.cmd("edit " .. vim.fn.fnameescape(filename))
   local line = math.max((effect.line or 0) + 1, 1)
   local column = math.max(effect.column or 0, 0)
   vim.api.nvim_win_set_cursor(0, { line, column })
@@ -116,17 +116,17 @@ end
 --- Open the detail of the last error in a scratch split.
 function M.error_detail()
   local detail = M.last_error_detail
-  if not detail or detail == '' then
-    vim.notify('magit-lsp: no error detail to show', vim.log.levels.INFO)
+  if not detail or detail == "" then
+    vim.notify("magit-lsp: no error detail to show", vim.log.levels.INFO)
     return
   end
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
-  vim.api.nvim_buf_set_name(buf, 'magit-lsp://error')
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(detail, '\n', { plain = true }))
-  vim.cmd('botright split')
+  vim.api.nvim_buf_set_name(buf, "magit-lsp://error")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(detail, "\n", { plain = true }))
+  vim.cmd("botright split")
   vim.api.nvim_win_set_buf(0, buf)
 end
 

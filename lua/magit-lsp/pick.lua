@@ -22,7 +22,7 @@ function M.respond(client_id, pick_id, cancelled, selected)
   if not c then
     return
   end
-  c:request('view/pickRespond', {
+  c:request("view/pickRespond", {
     pickId = pick_id,
     cancelled = cancelled,
     selected = cancelled and {} or (selected or {}),
@@ -41,20 +41,20 @@ end
 ---@param params table `view/pick` params
 ---@param client_id integer|nil originating LSP client
 function M.handle(params, client_id)
-  if type(params) ~= 'table' or type(params.pickId) ~= 'string' or params.pickId == '' then
+  if type(params) ~= "table" or type(params.pickId) ~= "string" or params.pickId == "" then
     return
   end
-  local items = type(params.items) == 'table' and params.items or {}
+  local items = type(params.items) == "table" and params.items or {}
   local reason
   if params.multi == true then
-    reason = 'multi-select picks are not supported'
+    reason = "multi-select picks are not supported"
   elseif params.allowFreeText == true then
-    reason = 'free-text picks are not supported'
+    reason = "free-text picks are not supported"
   elseif #items > MAX_ITEMS then
-    reason = string.format('picks are limited to %d items', MAX_ITEMS)
+    reason = string.format("picks are limited to %d items", MAX_ITEMS)
   end
   if reason then
-    vim.notify('magit-lsp: ' .. reason .. '; the pick was cancelled.', vim.log.levels.WARN)
+    vim.notify("magit-lsp: " .. reason .. "; the pick was cancelled.", vim.log.levels.WARN)
     M.respond(client_id, params.pickId, true)
     return
   end

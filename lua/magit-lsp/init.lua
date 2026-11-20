@@ -5,17 +5,17 @@
 --- module only owns configuration, the LSP transport, prompts and the small
 --- public API used by scripts and tests.
 
-local buffer = require('magit-lsp.buffer')
-local config = require('magit-lsp.config')
-local effects = require('magit-lsp.effects')
-local highlights = require('magit-lsp.highlights')
-local view = require('magit-lsp.view')
-local menu = require('magit-lsp.menu')
-local edit = require('magit-lsp.edit')
-local prompt = require('magit-lsp.prompt')
-local pick = require('magit-lsp.pick')
-local hooks = require('magit-lsp.hooks')
-local version = require('magit-lsp.version')
+local buffer = require("magit-lsp.buffer")
+local config = require("magit-lsp.config")
+local effects = require("magit-lsp.effects")
+local highlights = require("magit-lsp.highlights")
+local view = require("magit-lsp.view")
+local menu = require("magit-lsp.menu")
+local edit = require("magit-lsp.edit")
+local prompt = require("magit-lsp.prompt")
+local pick = require("magit-lsp.pick")
+local hooks = require("magit-lsp.hooks")
+local version = require("magit-lsp.version")
 
 local M = {}
 
@@ -24,7 +24,7 @@ local M = {}
 M.sessions = {}
 
 --- Client-only options; nothing here is sent to the server.
-local options = { status = { placement = 'replace' } }
+local options = { status = { placement = "replace" } }
 
 --- Show `buf` in `win`, hiding an unsaved buffer instead of failing with E37.
 ---@param win integer
@@ -39,7 +39,7 @@ local function show_buffer(win, buf)
   -- The window holds an unsaved buffer and 'hidden' is off; hide it rather
   -- than abort the status view.
   vim.api.nvim_win_call(win, function()
-    pcall(vim.cmd, 'hide')
+    pcall(vim.cmd, "hide")
   end)
   vim.api.nvim_win_set_buf(win, buf)
 end
@@ -70,7 +70,7 @@ local function placement_name(value)
 end
 
 local function error_message(err)
-  if type(err) == 'table' then
+  if type(err) == "table" then
     return tostring(err.message or err)
   end
   return tostring(err)
@@ -124,18 +124,20 @@ end
 local function open_status(session)
   -- Rich views and traffic require a completed protocol handshake: a rejected
   -- or still pending initialize must not open a view.
-  if session.protocol ~= 'ok' then
+  if session.protocol ~= "ok" then
     return
   end
-  if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
+  if not vim.api.nvim_buf_is_valid(session.buf) then
+    session.buf = buffer.fresh()
+  end
   vim.lsp.buf_attach_client(session.buf, session.client_id)
-  view.request(session.buf, session.client_id, 'view/open', {
-    kind = 'status',
+  view.request(session.buf, session.client_id, "view/open", {
+    kind = "status",
     args = { repo_path = session.root },
     viewport = { cols = vim.o.columns, rows = vim.o.lines },
   }, function(descriptor, err)
     if not descriptor then
-      vim.notify('magit-lsp open failed: ' .. error_message(err), vim.log.levels.ERROR)
+      vim.notify("magit-lsp open failed: " .. error_message(err), vim.log.levels.ERROR)
       return
     end
     local record = view.open(descriptor, {
@@ -169,7 +171,7 @@ function M.open(root)
     session = current and session_for_view(current) or nil
   end
   if not session then
-    return nil, 'no magit-lsp session is open'
+    return nil, "no magit-lsp session is open"
   end
   open_status(session)
 end
@@ -192,7 +194,7 @@ end
 
 --- Ask the server to re-read the repository and re-render.
 function M.refresh()
-  return M.invoke('common.refresh')
+  return M.invoke("common.refresh")
 end
 
 --- Send every open view's viewport to the server.
@@ -216,11 +218,11 @@ function M.symbols(on_result)
   local record = target_record()
   if not record then
     if on_result then
-      on_result(nil, 'no view is open')
+      on_result(nil, "no view is open")
     end
     return nil
   end
-  view.request(record.buf, record.client_id, 'textDocument/documentSymbol', {
+  view.request(record.buf, record.client_id, "textDocument/documentSymbol", {
     textDocument = { uri = view.uri(record) },
   }, on_result or function() end)
   return true
@@ -232,7 +234,7 @@ end
 ---@param kind string `section`, `file` or `hunk`
 ---@param dir integer 1 or -1
 function M.jump(kind, dir)
-  return M.invoke('common.jump', { args = { kind = kind, dir = dir } })
+  return M.invoke("common.jump", { args = { kind = kind, dir = dir } })
 end
 
 --- Open the detail of the last error in a scratch split.
@@ -269,36 +271,36 @@ local function configure()
 
   -- The status view's window is the client's choice (R-UI-7); these are window
   -- implementations, not server descriptor placements.
-  view.register_placement('replace', { place = status_placement(nil) })
-  view.register_placement('vsplit', { place = status_placement('vsplit') })
-  view.register_placement('split', { place = status_placement('split') })
-  view.register_placement('tab', { place = status_placement('tabnew') })
+  view.register_placement("replace", { place = status_placement(nil) })
+  view.register_placement("vsplit", { place = status_placement("vsplit") })
+  view.register_placement("split", { place = status_placement("split") })
+  view.register_placement("tab", { place = status_placement("tabnew") })
 
   edit.setup()
   highlights.setup(buffer.filetype)
 
-  vim.api.nvim_create_user_command('MagitLspErrorDetail', M.error_detail, {
-    desc = 'Show the last magit-lsp error detail',
+  vim.api.nvim_create_user_command("MagitLspErrorDetail", M.error_detail, {
+    desc = "Show the last magit-lsp error detail",
     force = true,
   })
 
   -- Every view kind shares one render/keymap path: the view id decides which
   -- record (and therefore which buffer) receives the payload.
-  vim.lsp.handlers['view/render'] = function(_, result, ctx)
+  vim.lsp.handlers["view/render"] = function(_, result, ctx)
     view.apply_render(result, ctx and ctx.client_id)
   end
-  vim.lsp.handlers['view/keymap'] = function(_, result, ctx)
+  vim.lsp.handlers["view/keymap"] = function(_, result, ctx)
     view.apply_keymap(result, ctx and ctx.client_id)
   end
-  vim.lsp.handlers['view/prompt'] = function(_, result, ctx)
+  vim.lsp.handlers["view/prompt"] = function(_, result, ctx)
     prompt.handle(result, ctx and ctx.client_id)
   end
-  vim.lsp.handlers['view/pick'] = function(_, result, ctx)
+  vim.lsp.handlers["view/pick"] = function(_, result, ctx)
     pick.handle(result, ctx and ctx.client_id)
   end
   -- Detached Git work (a commit) still has to reach the user after the request
   -- that started it answered, so keep the client that produced it.
-  vim.lsp.handlers['view/effects'] = function(_, result, ctx)
+  vim.lsp.handlers["view/effects"] = function(_, result, ctx)
     if not result then
       return
     end
@@ -342,17 +344,20 @@ function M.setup(opts)
   menu.setup(opts.menu)
   options.status.placement = placement_name((opts.status or {}).placement)
 
-  local profile = opts.profile or 'vim'
+  local profile = opts.profile or "vim"
   local fold_keys = opts.fold_keys or {}
-  local session = existing or {
-    root = root,
-    profile = profile,
-    fold_keys = fold_keys,
-    buf = buffer.fresh(),
-  }
+  local session = existing
+    or {
+      root = root,
+      profile = profile,
+      fold_keys = fold_keys,
+      buf = buffer.fresh(),
+    }
   M.sessions[root] = session
   session.fold_keys = fold_keys
-  if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
+  if not vim.api.nvim_buf_is_valid(session.buf) then
+    session.buf = buffer.fresh()
+  end
 
   -- The placement owns the window: `replace` uses this one, a split or tab
   -- command opens another. `setup()` never splits on its own (R-UI-7).
@@ -364,10 +369,10 @@ function M.setup(opts)
     -- rejection. Only `ok` opens a rich view or sends rich traffic.
     session.protocol = nil
     session.client_id = vim.lsp.start({
-      name = 'magit-lsp',
+      name = "magit-lsp",
       cmd = function(dispatchers, client_config)
         local rpc
-        if type(cmd) == 'function' then
+        if type(cmd) == "function" then
           rpc = cmd(dispatchers, client_config)
         else
           rpc = vim.lsp.rpc.start(cmd, dispatchers, {
@@ -378,15 +383,17 @@ function M.setup(opts)
         end
         local request = rpc.request
         rpc.request = function(method, params, callback, notify_reply_callback)
-          if method ~= 'initialize' then
+          if method ~= "initialize" then
             return request(method, params, callback, notify_reply_callback)
           end
           return request(method, params, function(err, result, request_id)
-            local failure = err and ('magit-lsp initialize failed: ' .. error_message(err))
+            local failure = err and ("magit-lsp initialize failed: " .. error_message(err))
               or version.protocol_error(result, config.PROTOCOL_VERSION)
             if failure then
-              session.protocol = 'failed'
-              vim.schedule(function() vim.notify(failure, vim.log.levels.ERROR) end)
+              session.protocol = "failed"
+              vim.schedule(function()
+                vim.notify(failure, vim.log.levels.ERROR)
+              end)
               rpc.terminate()
               return
             end
@@ -401,24 +408,26 @@ function M.setup(opts)
       on_init = function(client, result)
         session.client_id = client.id
         version.check(result and result.serverInfo, cmd)
-        session.protocol = 'ok'
+        session.protocol = "ok"
         local capabilities = result and result.capabilities
         local provider = capabilities and capabilities.semanticTokensProvider
         highlights.apply_legend(buffer.filetype, provider and provider.legend)
         open_status(session)
       end,
       on_exit = function()
-        vim.schedule(function() edit.disconnected(session.client_id) end)
+        vim.schedule(function()
+          edit.disconnected(session.client_id)
+        end)
       end,
     }, { attach = false })
     if not session.client_id then
-      vim.notify('Failed to start magit-lsp server', vim.log.levels.ERROR)
-      return nil, 'failed to start client'
+      vim.notify("Failed to start magit-lsp server", vim.log.levels.ERROR)
+      return nil, "failed to start client"
     end
     return
   end
 
-  if session.protocol == 'ok' then
+  if session.protocol == "ok" then
     open_status(session)
   end
 end

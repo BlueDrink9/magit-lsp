@@ -1,4 +1,4 @@
-local MiniTest = require('mini.test')
+local MiniTest = require("mini.test")
 local child = MiniTest.new_child_neovim()
 
 local project = vim.fn.getcwd()
@@ -7,49 +7,49 @@ local repo
 local function sys(cmd)
   local out = vim.fn.system(cmd)
   if vim.v.shell_error ~= 0 then
-    error('command failed: ' .. vim.inspect(cmd) .. '\n' .. out, 2)
+    error("command failed: " .. vim.inspect(cmd) .. "\n" .. out, 2)
   end
   return out
 end
 
 --- Run `git` in the fixture repository and return its stdout.
 local function git_out(args)
-  return sys(vim.list_extend({ 'git', '-C', repo }, args))
+  return sys(vim.list_extend({ "git", "-C", repo }, args))
 end
 
 local function make_repo(with_changes, path)
   if with_changes == nil then
     with_changes = true
   end
-  path = path or (project .. '/build/test-repos/fixture')
-  sys({ 'rm', '-rf', path })
-  vim.fn.mkdir(path, 'p')
-  sys({ 'git', 'init', '-q', '-b', 'main', path })
-  sys({ 'git', '-C', path, 'config', 'user.email', 't@example.com' })
-  sys({ 'git', '-C', path, 'config', 'user.name', 'tester' })
+  path = path or (project .. "/build/test-repos/fixture")
+  sys({ "rm", "-rf", path })
+  vim.fn.mkdir(path, "p")
+  sys({ "git", "init", "-q", "-b", "main", path })
+  sys({ "git", "-C", path, "config", "user.email", "t@example.com" })
+  sys({ "git", "-C", path, "config", "user.name", "tester" })
 
   local lines = {}
   for i = 1, 10 do
-    table.insert(lines, 'line' .. i)
+    table.insert(lines, "line" .. i)
   end
-  vim.fn.writefile(lines, path .. '/f.txt')
+  vim.fn.writefile(lines, path .. "/f.txt")
 
-  sys({ 'git', '-C', path, 'add', '.' })
-  sys({ 'git', '-C', path, 'commit', '-q', '-m', 'init' })
+  sys({ "git", "-C", path, "add", "." })
+  sys({ "git", "-C", path, "commit", "-q", "-m", "init" })
 
   if with_changes then
     local changed = {}
     for i = 1, #lines do
       if i == 3 then
-        table.insert(changed, 'line3 CHANGED')
+        table.insert(changed, "line3 CHANGED")
       elseif i ~= 8 then
         table.insert(changed, lines[i])
       end
       if i == 5 then
-        table.insert(changed, 'NEW line')
+        table.insert(changed, "NEW line")
       end
     end
-    vim.fn.writefile(changed, path .. '/f.txt')
+    vim.fn.writefile(changed, path .. "/f.txt")
   end
 
   return path
@@ -63,9 +63,9 @@ local function setup_child(opts)
   child.lua(
     string.format(
       "VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); "
-        .. 'vim.wait(5000, function() local v = M.status_view(); '
-        .. 'return v ~= nil and v.version ~= nil and v.keymap_ready end, 10); '
-        .. 'STATUS = M.status_view()',
+        .. "vim.wait(5000, function() local v = M.status_view(); "
+        .. "return v ~= nil and v.version ~= nil and v.keymap_ready end, 10); "
+        .. "STATUS = M.status_view()",
       vim.inspect(init)
     )
   )
@@ -337,26 +337,26 @@ local function setup_child(opts)
 end
 
 local function assert_line(needle)
-  local has = child.lua_get(string.format('HELPERS.has_line(%q)', needle))
+  local has = child.lua_get(string.format("HELPERS.has_line(%q)", needle))
   MiniTest.expect.equality(has, true, needle)
 end
 
 local function assert_no_line(needle)
-  local has = child.lua_get(string.format('HELPERS.has_line(%q)', needle))
+  local has = child.lua_get(string.format("HELPERS.has_line(%q)", needle))
   MiniTest.expect.equality(has, false, needle)
 end
 
 --- Place the cursor on the first matching rendered line and invoke a command.
 local function invoke_at(line, command, opts)
   local call = string.format(
-    'vim.api.nvim_win_set_cursor(0, {%d, 0}); R = M.invoke(%q%s)',
+    "vim.api.nvim_win_set_cursor(0, {%d, 0}); R = M.invoke(%q%s)",
     line,
     command,
-    opts and (', ' .. opts) or ''
+    opts and (", " .. opts) or ""
   )
   -- The product client is asynchronous; the test waits for its own idle.
-  child.lua(call .. '; HELPERS.wait_idle()')
-  return child.lua_get('R ~= nil')
+  child.lua(call .. "; HELPERS.wait_idle()")
+  return child.lua_get("R ~= nil")
 end
 
 -- Type keys against the read-only status buffer (TASKS.md IMM-4). Every
@@ -378,15 +378,16 @@ local function type_edit(keys, opts)
   opts = opts or {}
   -- Clear stale `v:errmsg` before typing so the poll below observes this
   -- attempt's error only.
-  child.v.errmsg = ''
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  child.v.errmsg = ""
+  local before = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
   local ok, err, after, modified, native_errmsg
   if opts.native then
     -- Deliberately bypass mappings to exercise the native command itself;
     -- expand termcodes, then `x` (execute now) + `n` (noremap).
     -- The control edits, snapshots and restores in one child call without
     -- yielding to live renders. Cleanup runs even if input/snapshotting fails.
-    local result = child.lua_get(string.format([[
+    local result = child.lua_get(string.format(
+      [[
       (function()
         local buf = STATUS.buf
         local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
@@ -414,7 +415,10 @@ local function type_edit(keys, opts)
         if not success then error(result) end
         return result
       end)()
-    ]], tostring(opts.control == true), keys))
+    ]],
+      tostring(opts.control == true),
+      keys
+    ))
     ok, err, after, modified = result.ok, result.err, result.after, result.modified
     before = result.before
     -- Keep the observed error even though the control restored v:errmsg.
@@ -428,51 +432,64 @@ local function type_edit(keys, opts)
     child.lua_get("HELPERS.wait_for(function() return vim.v.errmsg ~= '' end, 500)")
   end
   local errmsg = native_errmsg or child.v.errmsg
-  child.v.errmsg = ''
+  child.v.errmsg = ""
   -- Any command the refused key mapped to (e.g. `u` on the header) must have
   -- drained before the next step, so a pending render cannot leak out.
-  if not opts.control then child.lua_get('HELPERS.wait_idle()') end
+  if not opts.control then
+    child.lua_get("HELPERS.wait_idle()")
+  end
   -- Independent guards, buffer state first: a silently successful edit (e.g.
   -- the negative control while temporarily modifiable) must be reported as an
   -- unchanged-buffer violation even though no E21 can occur; the E21
   -- classification below then still covers every refusal path, so neither
   -- check is weakened.
-  after = after or child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  after = after or child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
   if modified == nil then
     modified = child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })")
   end
-  MiniTest.expect.equality(after, before, { fail_reason = 'buffer must be unchanged after ' .. keys })
+  MiniTest.expect.equality(
+    after,
+    before,
+    { fail_reason = "buffer must be unchanged after " .. keys }
+  )
   MiniTest.expect.equality(
     modified,
     false,
-    { fail_reason = 'buffer must stay unmodified after ' .. keys }
+    { fail_reason = "buffer must stay unmodified after " .. keys }
   )
   if opts.bound_noop then
     -- A mapped no-op must succeed, not masquerade as a native refusal.
     MiniTest.expect.equality(ok, true, { fail_reason = tostring(err) })
-    MiniTest.expect.equality(errmsg, '', { fail_reason = 'mapped no-op must not set an error: ' .. errmsg })
+    MiniTest.expect.equality(
+      errmsg,
+      "",
+      { fail_reason = "mapped no-op must not set an error: " .. errmsg }
+    )
   elseif not ok then
     -- A mapped path must fail natively, never with a Lua traceback.
     MiniTest.expect.equality(
-      tostring(err):find('E21', 1, true) ~= nil,
+      tostring(err):find("E21", 1, true) ~= nil,
       true,
-      { fail_reason = 'unexpected error: ' .. tostring(err) }
+      { fail_reason = "unexpected error: " .. tostring(err) }
     )
   else
     -- An unbound native edit must actually be refused with E21.
-    MiniTest.expect.equality(errmsg:find('E21', 1, true) ~= nil, true,
-      { fail_reason = 'unexpected error: ' .. errmsg })
+    MiniTest.expect.equality(
+      errmsg:find("E21", 1, true) ~= nil,
+      true,
+      { fail_reason = "unexpected error: " .. errmsg }
+    )
   end
 end
 
 local T = MiniTest.new_set({
   hooks = {
     pre_once = function()
-      sys({ 'cargo', 'build' })
+      sys({ "cargo", "build" })
     end,
     pre_case = function()
       repo = make_repo()
-      child.restart({ '-u', 'scripts/minimal_init.lua' })
+      child.restart({ "-u", "scripts/minimal_init.lua" })
     end,
     post_case = function()
       pcall(
@@ -490,43 +507,44 @@ local T = MiniTest.new_set({
   },
 })
 
-T['creates a server-named virtual buffer and attaches LSP'] = function()
+T["creates a server-named virtual buffer and attaches LSP"] = function()
   setup_child()
   local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = STATUS.buf })")
-  MiniTest.expect.equality(buftype, 'nofile')
+  MiniTest.expect.equality(buftype, "nofile")
 
-  local bufname = child.lua_get('vim.api.nvim_buf_get_name(STATUS.buf)')
-  MiniTest.expect.equality(bufname, 'magit://status' .. repo)
+  local bufname = child.lua_get("vim.api.nvim_buf_get_name(STATUS.buf)")
+  MiniTest.expect.equality(bufname, "magit://status" .. repo)
 
-  local attached = child.lua_get('vim.lsp.buf_is_attached(STATUS.buf, STATUS.client_id)')
+  local attached = child.lua_get("vim.lsp.buf_is_attached(STATUS.buf, STATUS.client_id)")
   MiniTest.expect.equality(attached, true)
 end
 
-T['server version warning only reports mismatch or missing metadata'] = function()
+T["server version warning only reports mismatch or missing metadata"] = function()
   child.lua([[WARNINGS = {}; vim.notify = function(message) table.insert(WARNINGS, message) end
     local version = require('magit-lsp.version')
     CLIENT_VERSION = version.version
     version.check({ version = version.version }, { '/selected/magit-lsp' })
     version.check({ version = '9.9.9' }, { '/selected/magit-lsp' })
     version.check({}, { '/selected/magit-lsp' })]])
-  local warnings = child.lua_get('WARNINGS')
-  local client_version = child.lua_get('CLIENT_VERSION')
-  local expected = string.format('client version %s, server version 9.9.9', client_version)
+  local warnings = child.lua_get("WARNINGS")
+  local client_version = child.lua_get("CLIENT_VERSION")
+  local expected = string.format("client version %s, server version 9.9.9", client_version)
   MiniTest.expect.equality(#warnings, 2)
   MiniTest.expect.equality(warnings[1]:find(expected, 1, true) ~= nil, true)
-  MiniTest.expect.equality(warnings[1]:find('/selected/magit-lsp', 1, true) ~= nil, true)
-  MiniTest.expect.equality(warnings[2]:find('server version missing', 1, true) ~= nil, true)
+  MiniTest.expect.equality(warnings[1]:find("/selected/magit-lsp", 1, true) ~= nil, true)
+  MiniTest.expect.equality(warnings[2]:find("server version missing", 1, true) ~= nil, true)
 end
 
-T['declares exact bundled Neovim capabilities'] = function()
-  local declaration = child.lua_get("require('magit-lsp.config').client_capabilities().experimental.magit")
+T["declares exact bundled Neovim capabilities"] = function()
+  local declaration =
+    child.lua_get("require('magit-lsp.config').client_capabilities().experimental.magit")
   local shared = child.lua_get("require('magit-lsp.shared')")
   MiniTest.expect.equality(declaration, {
     v = 1,
     minimumVersion = 1,
-    keys = 'dynamic',
+    keys = "dynamic",
     modifiers = child.lua_get("require('magit-lsp.config').key_modifiers()"),
-    layout = { 'main', 'side', 'bottom', 'float' },
+    layout = { "main", "side", "bottom", "float" },
     effects = shared.optional_effects,
     prompts = shared.optional_prompt_kinds,
     pick = {
@@ -542,7 +560,7 @@ T['declares exact bundled Neovim capabilities'] = function()
   })
 end
 
-T['the rich protocol declaration and a matching advertisement open rich traffic'] = function()
+T["the rich protocol declaration and a matching advertisement open rich traffic"] = function()
   -- anchor: lua/magit-lsp/config.lua client_capabilities; real startup below.
   child.lua([[
     DECLARED = nil
@@ -590,23 +608,28 @@ T['the rich protocol declaration and a matching advertisement open rich traffic'
     })
     OPENED = vim.wait(5000, function() return client.status_view() ~= nil end, 10)
   ]])
-  MiniTest.expect.equality(child.lua_get('OPENED'), true, 'the matching advertisement opened a rich view')
-  local declared = child.lua_get('DECLARED')
+  MiniTest.expect.equality(
+    child.lua_get("OPENED"),
+    true,
+    "the matching advertisement opened a rich view"
+  )
+  local declared = child.lua_get("DECLARED")
   MiniTest.expect.equality(declared.v, 1)
   MiniTest.expect.equality(declared.minimumVersion, 1)
-  local requests = child.lua_get('REQUESTS')
-  MiniTest.expect.equality(requests[1], 'initialize')
-  MiniTest.expect.equality(vim.tbl_contains(requests, 'view/open'), true, 'rich traffic was sent')
-  MiniTest.expect.equality(child.lua_get('WARNINGS'), {})
+  local requests = child.lua_get("REQUESTS")
+  MiniTest.expect.equality(requests[1], "initialize")
+  MiniTest.expect.equality(vim.tbl_contains(requests, "view/open"), true, "rich traffic was sent")
+  MiniTest.expect.equality(child.lua_get("WARNINGS"), {})
 end
 
-T['a missing, malformed or different protocol advertisement is a readable rejection'] = function()
+T["a missing, malformed or different protocol advertisement is a readable rejection"] = function()
   -- anchor: lua/magit-lsp/version.lua protocol_error; the real initialize wrapper
   -- in lua/magit-lsp/init.lua is exercised below. External containers are
   -- arbitrary JSON, so a malformed one must take this same readable path
   -- instead of throwing out of the initialize callback.
   local function reject(result_expression, expected, label)
-    child.lua(string.format([[
+    child.lua(string.format(
+      [[
       NOTIFIES = {}
       REQUESTS = {}
       NOTIFICATIONS = {}
@@ -636,60 +659,79 @@ T['a missing, malformed or different protocol advertisement is a readable reject
       client.open(root)
       client.setup({ root_dir = root })
       STATUS = client.status_view()
-    ]], result_expression))
+    ]],
+      result_expression
+    ))
 
-    MiniTest.expect.equality(child.lua_get('REJECTED'), true, label)
-    MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1, label)
-    local msg = child.lua_get('NOTIFIES[1].msg')
-    MiniTest.expect.equality(msg:find('rich protocol mismatch', 1, true) ~= nil, true, msg)
-    MiniTest.expect.equality(msg:find('required version 1', 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(child.lua_get("REJECTED"), true, label)
+    MiniTest.expect.equality(child.lua_get("#NOTIFIES"), 1, label)
+    local msg = child.lua_get("NOTIFIES[1].msg")
+    MiniTest.expect.equality(msg:find("rich protocol mismatch", 1, true) ~= nil, true, msg)
+    MiniTest.expect.equality(msg:find("required version 1", 1, true) ~= nil, true, msg)
     MiniTest.expect.equality(msg:find(expected, 1, true) ~= nil, true, msg)
-    MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
-    MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view for ' .. label)
-    MiniTest.expect.equality(child.lua_get('TERMINATED'), true, 'the rejected transport stopped for ' .. label)
-    MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich traffic for ' .. label)
-    MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications for ' .. label)
+    MiniTest.expect.equality(child.lua_get("NOTIFIES[1].level"), vim.log.levels.ERROR)
+    MiniTest.expect.equality(child.lua_get("STATUS == nil"), true, "no rich view for " .. label)
+    MiniTest.expect.equality(
+      child.lua_get("TERMINATED"),
+      true,
+      "the rejected transport stopped for " .. label
+    )
+    MiniTest.expect.equality(
+      child.lua_get("REQUESTS"),
+      { "initialize" },
+      "no rich traffic for " .. label
+    )
+    MiniTest.expect.equality(
+      child.lua_get("NOTIFICATIONS"),
+      {},
+      "no initialized or rich notifications for " .. label
+    )
   end
 
   local versions = {
-    { value = 'nil', expected = 'server advertised none' },
+    { value = "nil", expected = "server advertised none" },
     { value = "'1'", expected = 'server advertised "1"' },
-    { value = '0', expected = 'server advertised 0' },
-    { value = '-1', expected = 'server advertised -1' },
-    { value = '1.5', expected = 'server advertised 1.5' },
-    { value = '2', expected = 'server advertised 2' },
+    { value = "0", expected = "server advertised 0" },
+    { value = "-1", expected = "server advertised -1" },
+    { value = "1.5", expected = "server advertised 1.5" },
+    { value = "2", expected = "server advertised 2" },
   }
   for _, case in ipairs(versions) do
-    reject(string.format(
-      '{ capabilities = { experimental = { magit = { protocolVersion = %s } } } }',
-      case.value
-    ), case.expected, case.expected)
+    reject(
+      string.format(
+        "{ capabilities = { experimental = { magit = { protocolVersion = %s } } } }",
+        case.value
+      ),
+      case.expected,
+      case.expected
+    )
   end
 
   local malformed = {
-    { name = 'boolean initialize result', result = 'true' },
-    { name = 'numeric initialize result', result = '42' },
-    { name = 'null initialize result', result = 'vim.NIL' },
-    { name = 'boolean capabilities', result = '{ capabilities = true }' },
-    { name = 'numeric capabilities', result = '{ capabilities = 42 }' },
-    { name = 'null capabilities', result = '{ capabilities = vim.NIL }' },
-    { name = 'boolean experimental', result = '{ capabilities = { experimental = true } }' },
-    { name = 'numeric experimental', result = '{ capabilities = { experimental = 42 } }' },
-    { name = 'null experimental', result = '{ capabilities = { experimental = vim.NIL } }' },
-    { name = 'boolean magit', result = '{ capabilities = { experimental = { magit = true } } }' },
-    { name = 'numeric magit', result = '{ capabilities = { experimental = { magit = 42 } } }' },
-    { name = 'null magit', result = '{ capabilities = { experimental = { magit = vim.NIL } } }' },
+    { name = "boolean initialize result", result = "true" },
+    { name = "numeric initialize result", result = "42" },
+    { name = "null initialize result", result = "vim.NIL" },
+    { name = "boolean capabilities", result = "{ capabilities = true }" },
+    { name = "numeric capabilities", result = "{ capabilities = 42 }" },
+    { name = "null capabilities", result = "{ capabilities = vim.NIL }" },
+    { name = "boolean experimental", result = "{ capabilities = { experimental = true } }" },
+    { name = "numeric experimental", result = "{ capabilities = { experimental = 42 } }" },
+    { name = "null experimental", result = "{ capabilities = { experimental = vim.NIL } }" },
+    { name = "boolean magit", result = "{ capabilities = { experimental = { magit = true } } }" },
+    { name = "numeric magit", result = "{ capabilities = { experimental = { magit = 42 } } }" },
+    { name = "null magit", result = "{ capabilities = { experimental = { magit = vim.NIL } } }" },
   }
   for _, case in ipairs(malformed) do
-    reject(case.result, 'server advertised none', case.name)
+    reject(case.result, "server advertised none", case.name)
   end
 end
 
-T['an asynchronous initialize rejection reports the server explanation'] = function()
+T["an asynchronous initialize rejection reports the server explanation"] = function()
   -- The real server rejects a declaration that does not select rich v1. The
   -- client must report that asynchronous initialize RPC error, open no rich
   -- view and send no rich traffic.
-  child.lua(string.format([[
+  child.lua(string.format(
+    [[
     NOTIFIES = {}
     vim.notify = function(msg, level) table.insert(NOTIFIES, { msg = msg, level = level }) end
     local config = require('magit-lsp.config')
@@ -731,19 +773,33 @@ T['an asynchronous initialize rejection reports the server explanation'] = funct
     end, 10)
     STATUS = client.status_view()
     PROTOCOL = client.sessions[%q] and client.sessions[%q].protocol
-  ]], repo, repo, repo, repo))
-  MiniTest.expect.equality(child.lua_get('REJECTED'), true, 'the rejection was reported')
-  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
-  local msg = child.lua_get('NOTIFIES[1].msg')
-  MiniTest.expect.equality(msg:find('initialize failed', 1, true) ~= nil, true, msg)
-  MiniTest.expect.equality(msg:find('unsupported rich protocol version', 1, true) ~= nil, true, msg)
-  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
-  MiniTest.expect.equality(child.lua_get('STATUS == nil'), true, 'no rich view opened')
-  MiniTest.expect.equality(child.lua_get('PROTOCOL'), 'failed', 'the session is not rich')
-  MiniTest.expect.equality(child.lua_get('STOPPED and RPC.is_closing()'), true, 'the real server exited')
-  MiniTest.expect.equality(child.lua_get('REQUESTS'), { 'initialize' }, 'no rich requests or retry')
-  MiniTest.expect.equality(child.lua_get('NOTIFICATIONS'), {}, 'no initialized or rich notifications')
-  MiniTest.expect.equality(child.lua_get([[
+  ]],
+    repo,
+    repo,
+    repo,
+    repo
+  ))
+  MiniTest.expect.equality(child.lua_get("REJECTED"), true, "the rejection was reported")
+  MiniTest.expect.equality(child.lua_get("#NOTIFIES"), 1)
+  local msg = child.lua_get("NOTIFIES[1].msg")
+  MiniTest.expect.equality(msg:find("initialize failed", 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(msg:find("unsupported rich protocol version", 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(child.lua_get("NOTIFIES[1].level"), vim.log.levels.ERROR)
+  MiniTest.expect.equality(child.lua_get("STATUS == nil"), true, "no rich view opened")
+  MiniTest.expect.equality(child.lua_get("PROTOCOL"), "failed", "the session is not rich")
+  MiniTest.expect.equality(
+    child.lua_get("STOPPED and RPC.is_closing()"),
+    true,
+    "the real server exited"
+  )
+  MiniTest.expect.equality(child.lua_get("REQUESTS"), { "initialize" }, "no rich requests or retry")
+  MiniTest.expect.equality(
+    child.lua_get("NOTIFICATIONS"),
+    {},
+    "no initialized or rich notifications"
+  )
+  MiniTest.expect.equality(
+    child.lua_get([[
     (function()
       for _, session in pairs(require('magit-lsp').sessions) do
         local c = vim.lsp.get_client_by_id(session.client_id)
@@ -751,29 +807,35 @@ T['an asynchronous initialize rejection reports the server explanation'] = funct
       end
       return false
     end)()
-  ]]), false, 'the client never initialized')
+  ]]),
+    false,
+    "the client never initialized"
+  )
 end
 
-T['staging a visual line range stages only those lines'] = function()
+T["staging a visual line range stages only those lines"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, 'V', 's')
+  child.type_keys(50, "V", "s")
 
   local staged = child.lua_get(
     "HELPERS.wait_for(function() return HELPERS.find_line('+', 'NEW line', 'staged') ~= nil end)"
   )
   MiniTest.expect.equality(staged, true)
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
 
-  local cached = git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' })
-  MiniTest.expect.equality(cached:find('+NEW line', 1, true) ~= nil, true, cached)
-  MiniTest.expect.equality(cached:find('line3 CHANGED', 1, true), nil, cached)
-  MiniTest.expect.equality(git_out({ 'diff', '-U3', '--', 'f.txt' }):find('line3 CHANGED', 1, true) ~= nil, true)
+  local cached = git_out({ "diff", "--cached", "-U3", "--", "f.txt" })
+  MiniTest.expect.equality(cached:find("+NEW line", 1, true) ~= nil, true, cached)
+  MiniTest.expect.equality(cached:find("line3 CHANGED", 1, true), nil, cached)
+  MiniTest.expect.equality(
+    git_out({ "diff", "-U3", "--", "f.txt" }):find("line3 CHANGED", 1, true) ~= nil,
+    true
+  )
 end
 
-T['a failed mutation notifies once with a readable summary'] = function()
+T["a failed mutation notifies once with a readable summary"] = function()
   setup_child()
   child.lua([[
     NOTIFIES = {}
@@ -781,70 +843,70 @@ T['a failed mutation notifies once with a readable summary'] = function()
       table.insert(NOTIFIES, { msg = msg, level = level })
     end
   ]])
-  vim.fn.writefile({}, repo .. '/.git/index.lock')
+  vim.fn.writefile({}, repo .. "/.git/index.lock")
   child.lua("M.invoke('status.stage-all')")
-  local notified = child.lua_get('HELPERS.wait_for(function() return #NOTIFIES > 0 end)')
-  vim.fn.delete(repo .. '/.git/index.lock')
+  local notified = child.lua_get("HELPERS.wait_for(function() return #NOTIFIES > 0 end)")
+  vim.fn.delete(repo .. "/.git/index.lock")
 
-  MiniTest.expect.equality(notified, true, 'the failed mutation notified')
-  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
-  local msg = child.lua_get('NOTIFIES[1].msg')
-  MiniTest.expect.equality(type(msg), 'string')
+  MiniTest.expect.equality(notified, true, "the failed mutation notified")
+  MiniTest.expect.equality(child.lua_get("#NOTIFIES"), 1)
+  local msg = child.lua_get("NOTIFIES[1].msg")
+  MiniTest.expect.equality(type(msg), "string")
   MiniTest.expect.equality(
-    msg:find('Another Git process is running in this repository.', 1, true) ~= nil,
+    msg:find("Another Git process is running in this repository.", 1, true) ~= nil,
     true
   )
-  MiniTest.expect.equality(msg:find('{', 1, true), nil)
-  MiniTest.expect.equality(msg:find('<metatable>', 1, true), nil)
-  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
+  MiniTest.expect.equality(msg:find("{", 1, true), nil)
+  MiniTest.expect.equality(msg:find("<metatable>", 1, true), nil)
+  MiniTest.expect.equality(child.lua_get("NOTIFIES[1].level"), vim.log.levels.ERROR)
 end
 
-T['semantic tokens highlight sections, files, hunks and diff lines'] = function()
+T["semantic tokens highlight sections, files, hunks and diff lines"] = function()
   setup_child()
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('filetype', { buf = STATUS.buf })"),
-    'magit-lsp'
+    "magit-lsp"
   )
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
 
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('Unstaged changes (1)', 0)"),
-    'magit.section'
+    "magit.section"
   )
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('  M f.txt', 2)"),
-    'magit.file.modified'
+    "magit.file.modified"
   )
-  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 4)"), 'magit.file')
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 4)"), "magit.file")
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('    @@ -1,10 +1,10 @@', 4)"),
-    'magit.hunk.header'
+    "magit.hunk.header"
   )
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('    +line3 CHANGED', 4)"),
-    'magit.diff.added'
+    "magit.diff.added"
   )
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('    -line3', 4)"),
-    'magit.diff.removed'
+    "magit.diff.removed"
   )
 end
 
-T['every token type and modifier in the legend links to a theme group'] = function()
+T["every token type and modifier in the legend links to a theme group"] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
-  MiniTest.expect.equality(child.lua_get('HELPERS.missing_links()'), {})
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
+  MiniTest.expect.equality(child.lua_get("HELPERS.missing_links()"), {})
 end
 
-T['theme links survive a colorscheme switch'] = function()
+T["theme links survive a colorscheme switch"] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
 
   local added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
   local removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
-  MiniTest.expect.equality(type(added), 'number', 'added has a foreground')
-  MiniTest.expect.equality(type(removed), 'number', 'removed has a foreground')
-  MiniTest.expect.equality(added ~= removed, true, 'added and removed differ')
+  MiniTest.expect.equality(type(added), "number", "added has a foreground")
+  MiniTest.expect.equality(type(removed), "number", "removed has a foreground")
+  MiniTest.expect.equality(added ~= removed, true, "added and removed differ")
 
   --- Perceived brightness of a 24-bit colour, for relative-dimness checks.
   ---@param colour integer
@@ -858,49 +920,53 @@ T['theme links survive a colorscheme switch'] = function()
 
   local planned = child.lua_get("HELPERS.resolved_fg('magit.menu.planned')")
   local label = child.lua_get("HELPERS.resolved_fg('magit.menu.label')")
-  MiniTest.expect.equality(type(planned), 'number', 'menu.planned has a foreground')
-  MiniTest.expect.equality(type(label), 'number', 'menu.label has a foreground')
+  MiniTest.expect.equality(type(planned), "number", "menu.planned has a foreground")
+  MiniTest.expect.equality(type(label), "number", "menu.label has a foreground")
   MiniTest.expect.equality(
     luminance(planned) < luminance(label),
     true,
-    'menu.planned must be dimmer than menu.label'
+    "menu.planned must be dimmer than menu.label"
   )
 
   child.lua("vim.cmd('colorscheme vim')")
-  MiniTest.expect.equality(child.lua_get('HELPERS.missing_links()'), {})
+  MiniTest.expect.equality(child.lua_get("HELPERS.missing_links()"), {})
 
   local switched_added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
   local switched_removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
-  MiniTest.expect.equality(switched_added ~= switched_removed, true, 'added and removed differ')
-  MiniTest.expect.equality(switched_added ~= added, true, 'the scheme changed the colour')
+  MiniTest.expect.equality(switched_added ~= switched_removed, true, "added and removed differ")
+  MiniTest.expect.equality(switched_added ~= added, true, "the scheme changed the colour")
 
   local headings = {
-    { name = 'section', fg = child.lua_get("HELPERS.resolved_fg('magit.section')") },
-    { name = 'file', fg = child.lua_get("HELPERS.resolved_fg('magit.file')") },
-    { name = 'hunk header', fg = child.lua_get("HELPERS.resolved_fg('magit.hunk.header')") },
-    { name = 'menu key', fg = child.lua_get("HELPERS.resolved_fg('magit.menu.key')") },
+    { name = "section", fg = child.lua_get("HELPERS.resolved_fg('magit.section')") },
+    { name = "file", fg = child.lua_get("HELPERS.resolved_fg('magit.file')") },
+    { name = "hunk header", fg = child.lua_get("HELPERS.resolved_fg('magit.hunk.header')") },
+    { name = "menu key", fg = child.lua_get("HELPERS.resolved_fg('magit.menu.key')") },
   }
   for i = 1, #headings do
-    MiniTest.expect.equality(type(headings[i].fg), 'number', headings[i].name .. ' has a foreground')
+    MiniTest.expect.equality(
+      type(headings[i].fg),
+      "number",
+      headings[i].name .. " has a foreground"
+    )
     for j = 1, i - 1 do
       MiniTest.expect.equality(
         headings[i].fg ~= headings[j].fg,
         true,
-        headings[i].name .. ' must differ from ' .. headings[j].name
+        headings[i].name .. " must differ from " .. headings[j].name
       )
     end
   end
 end
 
-T['tokens are refreshed after a mutation'] = function()
+T["tokens are refreshed after a mutation"] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
 
   child.lua("M.invoke('status.stage-all')")
   MiniTest.expect.equality(
     child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)"),
     true,
-    'the mutation rendered'
+    "the mutation rendered"
   )
 
   local staged = child.lua_get([[
@@ -918,13 +984,13 @@ T['tokens are refreshed after a mutation'] = function()
       end, 20)
     end)()
   ]])
-  MiniTest.expect.equality(staged, true, 'staged tokens after the mutation')
+  MiniTest.expect.equality(staged, true, "staged tokens after the mutation")
 end
 
-T['uses manual folding and serves fold ranges from the server'] = function()
+T["uses manual folding and serves fold ranges from the server"] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('vim.wo.foldmethod'), 'manual')
-  MiniTest.expect.equality(child.lua_get('vim.wo.foldenable'), false)
+  MiniTest.expect.equality(child.lua_get("vim.wo.foldmethod"), "manual")
+  MiniTest.expect.equality(child.lua_get("vim.wo.foldenable"), false)
 
   local count = child.lua_get([[
     (function()
@@ -937,90 +1003,101 @@ T['uses manual folding and serves fold ranges from the server'] = function()
       return 0
     end)()
   ]])
-  MiniTest.expect.equality(count > 0, true, 'expected at least one folding range')
+  MiniTest.expect.equality(count > 0, true, "expected at least one folding range")
 end
 
-T['status buffer is read-only to native edits'] = function()
+T["status buffer is read-only to native edits"] = function()
   setup_child()
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  local before = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
 
   local function opt(name)
-    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name))
+    return child.lua_get(
+      string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name)
+    )
   end
-  MiniTest.expect.equality(opt('buftype'), 'nofile')
-  MiniTest.expect.equality(opt('bufhidden'), 'hide')
-  MiniTest.expect.equality(opt('swapfile'), false)
-  MiniTest.expect.equality(opt('modifiable'), false)
+  MiniTest.expect.equality(opt("buftype"), "nofile")
+  MiniTest.expect.equality(opt("bufhidden"), "hide")
+  MiniTest.expect.equality(opt("swapfile"), false)
+  MiniTest.expect.equality(opt("modifiable"), false)
   -- `readonly` must stay unset: a readonly buffer warns W10 on every
   -- programmatic render (bug 4).
-  MiniTest.expect.equality(opt('readonly'), false)
-  MiniTest.expect.equality(opt('undolevels'), -1)
-  MiniTest.expect.equality(opt('modified'), false)
+  MiniTest.expect.equality(opt("readonly"), false)
+  MiniTest.expect.equality(opt("undolevels"), -1)
+  MiniTest.expect.equality(opt("modified"), false)
 
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
   -- Non-vacuity: enable modifiable only for the guard's actual native x.
   -- It snapshots the successful edit and restores in a finally-style cleanup
   -- before returning, without yielding to a render or retrying input.
-  local guard_ok, guard_err = pcall(type_edit, 'x', { native = true, control = true })
-  MiniTest.expect.equality(guard_ok, false,
-    { fail_reason = 'the guard must reject a successful edit: ' .. tostring(guard_err) })
-  MiniTest.expect.equality(tostring(guard_err):find('unchanged after x', 1, true) ~= nil, true,
-    { fail_reason = 'guard failure must be the buffer-unchanged check: ' .. tostring(guard_err) })
-  MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before,
-    { fail_reason = 'mutation must be fully restored' })
-  MiniTest.expect.equality(opt('modifiable'), false)
-  MiniTest.expect.equality(opt('modified'), false)
+  local guard_ok, guard_err = pcall(type_edit, "x", { native = true, control = true })
+  MiniTest.expect.equality(
+    guard_ok,
+    false,
+    { fail_reason = "the guard must reject a successful edit: " .. tostring(guard_err) }
+  )
+  MiniTest.expect.equality(
+    tostring(guard_err):find("unchanged after x", 1, true) ~= nil,
+    true,
+    { fail_reason = "guard failure must be the buffer-unchanged check: " .. tostring(guard_err) }
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.lines()"),
+    before,
+    { fail_reason = "mutation must be fully restored" }
+  )
+  MiniTest.expect.equality(opt("modifiable"), false)
+  MiniTest.expect.equality(opt("modified"), false)
 
   -- `u` is bound to unstage and is a no-op with the cursor on the header, so
   -- it is classified as a bound no-op (no E21 expected).
-  type_edit('u', { bound_noop = true })
+  type_edit("u", { bound_noop = true })
   -- `J` and `~` are unbound in every profile, so they must fail with E21.
-  type_edit('J')
-  type_edit('~')
+  type_edit("J")
+  type_edit("~")
   -- `c` opens the commit view, so `ciw<Esc>` is not an unbound edit; type the
   -- native `ciw` with mappings bypassed to assert E21 honestly.
-  type_edit('ciw<Esc>', { native = true })
+  type_edit("ciw<Esc>", { native = true })
 
-  local ok, err = pcall(child.cmd, 's/a/b/')
-  MiniTest.expect.equality(ok, false, { fail_reason = 'substitute should be refused' })
+  local ok, err = pcall(child.cmd, "s/a/b/")
+  MiniTest.expect.equality(ok, false, { fail_reason = "substitute should be refused" })
   MiniTest.expect.equality(
-    tostring(err):find('E21', 1, true) ~= nil,
+    tostring(err):find("E21", 1, true) ~= nil,
     true,
-    { fail_reason = 'substitute should fail with E21: ' .. tostring(err) }
+    { fail_reason = "substitute should fail with E21: " .. tostring(err) }
   )
-  child.v.errmsg = ''
+  child.v.errmsg = ""
 
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  local after = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
   MiniTest.expect.equality(after, before)
-  MiniTest.expect.equality(opt('modified'), false)
+  MiniTest.expect.equality(opt("modified"), false)
 end
 
-T['refresh and mutations still work after blocked edits'] = function()
+T["refresh and mutations still work after blocked edits"] = function()
   setup_child()
   -- `d` now opens the diff menu (Magit's key), so use native edits that are
   -- unbound in every profile.
-  type_edit('J')
-  type_edit('~')
+  type_edit("J")
+  type_edit("~")
 
-  local path = repo .. '/f.txt'
+  local path = repo .. "/f.txt"
   local lines = vim.fn.readfile(path)
-  table.insert(lines, 'line11')
+  table.insert(lines, "line11")
   vim.fn.writefile(lines, path)
 
-  child.lua('M.refresh()')
-  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
-  assert_line('    +line11')
+  child.lua("M.refresh()")
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
+  assert_line("    +line11")
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
     false
   )
 
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
-  assert_line('Staged changes (1)')
+  MiniTest.expect.equality(invoke_at(target, "status.stage"), true)
+  assert_line("Staged changes (1)")
 end
 
-T['write is a no-op and keeps the buffer unmodified'] = function()
+T["write is a no-op and keeps the buffer unmodified"] = function()
   setup_child()
   child.lua([[
     HINTS = {}
@@ -1028,36 +1105,36 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
       table.insert(HINTS, { msg = msg, level = level })
     end
   ]])
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  local before = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
 
-  local ok, err = pcall(child.type_keys, 100, ':write<CR>')
-  MiniTest.expect.equality(ok, true, 'write must not raise: ' .. tostring(err))
+  local ok, err = pcall(child.type_keys, 100, ":write<CR>")
+  MiniTest.expect.equality(ok, true, "write must not raise: " .. tostring(err))
   -- Wait until the queued `:write` actually ran (its hint is the observable
   -- result) before reading `v:errmsg` below.
   MiniTest.expect.equality(
     child.lua_get("HELPERS.wait_for(function() return #HINTS >= 1 end, 2000)"),
     true,
-    'write must reach the read-only hint'
+    "write must reach the read-only hint"
   )
-  MiniTest.expect.equality(child.v.errmsg, '', 'write must not produce a Vim error')
-  child.v.errmsg = ''
+  MiniTest.expect.equality(child.v.errmsg, "", "write must not produce a Vim error")
+  child.v.errmsg = ""
 
-  MiniTest.expect.equality(child.lua_get('#HINTS'), 1)
-  local msg = child.lua_get('HINTS[1].msg')
-  MiniTest.expect.equality(type(msg), 'string')
-  MiniTest.expect.equality(msg:find('Read-only view', 1, true) ~= nil, true, msg)
-  MiniTest.expect.equality(child.lua_get('HINTS[1].level'), vim.log.levels.INFO)
+  MiniTest.expect.equality(child.lua_get("#HINTS"), 1)
+  local msg = child.lua_get("HINTS[1].msg")
+  MiniTest.expect.equality(type(msg), "string")
+  MiniTest.expect.equality(msg:find("Read-only view", 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(child.lua_get("HINTS[1].level"), vim.log.levels.INFO)
 
-  child.type_keys(100, ':write<CR>')
+  child.type_keys(100, ":write<CR>")
   -- The second write must not add a hint; poll for the violation until the
   -- queued `:write` has had time to run, so absence is a real observation.
   MiniTest.expect.equality(
     child.lua_get("HELPERS.wait_for(function() return #HINTS > 1 end, 500)"),
     false,
-    'the hint is shown once per session'
+    "the hint is shown once per session"
   )
 
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  local after = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
   MiniTest.expect.equality(after, before)
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
@@ -1069,7 +1146,7 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
   )
 end
 
-T['navigation jumps use server-owned structured headers'] = function()
+T["navigation jumps use server-owned structured headers"] = function()
   setup_child()
   local symbols = child.lua_get([[
     (function()
@@ -1082,41 +1159,43 @@ T['navigation jumps use server-owned structured headers'] = function()
       return {}
     end)()
   ]])
-  MiniTest.expect.equality(#symbols > 0, true, 'documentSymbol returns items')
+  MiniTest.expect.equality(#symbols > 0, true, "documentSymbol returns items")
 
   local staged_line, unstaged_section_line, unstaged_line, hunk_line
-  for i, line in ipairs(child.lua_get('STATUS.lines')) do
-    if line == 'Staged changes (0)' then
+  for i, line in ipairs(child.lua_get("STATUS.lines")) do
+    if line == "Staged changes (0)" then
       staged_line = i
-    elseif line == 'Unstaged changes (1)' then
+    elseif line == "Unstaged changes (1)" then
       unstaged_section_line = i
-    elseif line == '  M f.txt' then
+    elseif line == "  M f.txt" then
       unstaged_line = i
-    elseif line == '    @@ -1,10 +1,10 @@' then
+    elseif line == "    @@ -1,10 +1,10 @@" then
       hunk_line = i
     end
   end
 
   -- Symbol navigation is asynchronous: move, then wait for the cursor to land.
   local function jump_at(kind, dir, from, want)
-    child.lua(string.format(
-      'vim.api.nvim_win_set_cursor(0, {%s}); M.jump(%q, %d); '
-        .. 'J = vim.wait(5000, function() return vim.api.nvim_win_get_cursor(0)[1] == %d end, 10)',
-      from,
-      kind,
-      dir,
-      want
-    ))
-    MiniTest.expect.equality(child.lua_get('J'), true, kind .. ' jumps to ' .. want)
+    child.lua(
+      string.format(
+        "vim.api.nvim_win_set_cursor(0, {%s}); M.jump(%q, %d); "
+          .. "J = vim.wait(5000, function() return vim.api.nvim_win_get_cursor(0)[1] == %d end, 10)",
+        from,
+        kind,
+        dir,
+        want
+      )
+    )
+    MiniTest.expect.equality(child.lua_get("J"), true, kind .. " jumps to " .. want)
   end
 
-  jump_at('section', 1, '1, 0', staged_line)
-  jump_at('file', 1, '1, 0', unstaged_line)
-  jump_at('hunk', 1, '1, 0', hunk_line)
-  jump_at('section', -1, 'vim.fn.line("$"), 0', unstaged_section_line)
+  jump_at("section", 1, "1, 0", staged_line)
+  jump_at("file", 1, "1, 0", unstaged_line)
+  jump_at("hunk", 1, "1, 0", hunk_line)
+  jump_at("section", -1, 'vim.fn.line("$"), 0', unstaged_section_line)
 end
 
-T['gO outline lists document symbols'] = function()
+T["gO outline lists document symbols"] = function()
   setup_child()
   local items = child.lua_get([[
     (function()
@@ -1126,31 +1205,31 @@ T['gO outline lists document symbols'] = function()
       return captured or {}
     end)()
   ]])
-  MiniTest.expect.equality(#items > 0, true, 'the outline has symbols')
+  MiniTest.expect.equality(#items > 0, true, "the outline has symbols")
   local has_section = false
   for _, item in ipairs(items) do
-    if item.text:find('Unstaged changes', 1, true) then
+    if item.text:find("Unstaged changes", 1, true) then
       has_section = true
     end
   end
   MiniTest.expect.equality(has_section, true)
 end
 
-T['<CR> on a change line opens the real file at the new-side line'] = function()
+T["<CR> on a change line opens the real file at the new-side line"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, '<CR>')
+  child.type_keys(50, "<CR>")
 
   local opened = child.lua_get(
     "HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)"
   )
-  MiniTest.expect.equality(opened, true, 'the worktree file opened')
+  MiniTest.expect.equality(opened, true, "the worktree file opened")
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
 
-T['rapid successive invokes keep the buffer consistent with the server'] = function()
+T["rapid successive invokes keep the buffer consistent with the server"] = function()
   setup_child()
   child.lua([[
     for _ = 1, 3 do
@@ -1161,45 +1240,45 @@ T['rapid successive invokes keep the buffer consistent with the server'] = funct
     HELPERS.wait_idle()
   ]])
 
-  local buffer = child.lua_get('HELPERS.lines()')
-  local resync = child.lua_get('HELPERS.resync()')
+  local buffer = child.lua_get("HELPERS.lines()")
+  local resync = child.lua_get("HELPERS.resync()")
   MiniTest.expect.equality(buffer, resync.text)
-  MiniTest.expect.equality(child.lua_get('STATUS.version'), resync.version)
-  assert_line('Staged changes (1)')
+  MiniTest.expect.equality(child.lua_get("STATUS.version"), resync.version)
+  assert_line("Staged changes (1)")
 end
 
-T['a lost update triggers a full resync'] = function()
+T["a lost update triggers a full resync"] = function()
   setup_child()
   -- Pretend the client missed a render: the next edits no longer match.
-  child.lua('STATUS.version = STATUS.version - 1')
+  child.lua("STATUS.version = STATUS.version - 1")
   child.lua("M.invoke('status.stage-all'); HELPERS.wait_idle()")
 
-  local buffer = child.lua_get('HELPERS.lines()')
-  local resync = child.lua_get('HELPERS.resync()')
+  local buffer = child.lua_get("HELPERS.lines()")
+  local resync = child.lua_get("HELPERS.resync()")
   MiniTest.expect.equality(buffer, resync.text)
-  MiniTest.expect.equality(child.lua_get('STATUS.version'), resync.version)
-  assert_line('Staged changes (1)')
+  MiniTest.expect.equality(child.lua_get("STATUS.version"), resync.version)
+  assert_line("Staged changes (1)")
 end
 
-T['buffer-local maps match the server keymap (vim profile)'] = function()
+T["buffer-local maps match the server keymap (vim profile)"] = function()
   setup_child()
-  for _, mode in ipairs({ 'n', 'x' }) do
-    local diff = child.lua_get(string.format('HELPERS.keymap_diff(%q)', mode))
-    MiniTest.expect.equality(diff.missing, {}, 'missing maps in mode ' .. mode)
-    MiniTest.expect.equality(diff.extra, {}, 'stale maps in mode ' .. mode)
+  for _, mode in ipairs({ "n", "x" }) do
+    local diff = child.lua_get(string.format("HELPERS.keymap_diff(%q)", mode))
+    MiniTest.expect.equality(diff.missing, {}, "missing maps in mode " .. mode)
+    MiniTest.expect.equality(diff.extra, {}, "stale maps in mode " .. mode)
   end
 end
 
-T['buffer-local maps match the server keymap (standard profile)'] = function()
-  setup_child({ profile = 'standard' })
-  for _, mode in ipairs({ 'n', 'x' }) do
-    local diff = child.lua_get(string.format('HELPERS.keymap_diff(%q)', mode))
-    MiniTest.expect.equality(diff.missing, {}, 'missing maps in mode ' .. mode)
-    MiniTest.expect.equality(diff.extra, {}, 'stale maps in mode ' .. mode)
+T["buffer-local maps match the server keymap (standard profile)"] = function()
+  setup_child({ profile = "standard" })
+  for _, mode in ipairs({ "n", "x" }) do
+    local diff = child.lua_get(string.format("HELPERS.keymap_diff(%q)", mode))
+    MiniTest.expect.equality(diff.missing, {}, "missing maps in mode " .. mode)
+    MiniTest.expect.equality(diff.extra, {}, "stale maps in mode " .. mode)
   end
 end
 
-T['a second view/keymap replaces the applied maps'] = function()
+T["a second view/keymap replaces the applied maps"] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['u'] ~= nil"), true)
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['gr'] ~= nil"), true)
@@ -1225,119 +1304,129 @@ T['a second view/keymap replaces the applied maps'] = function()
   ]])
 
   local normal = child.lua_get("HELPERS.applied_lhs('n')")
-  MiniTest.expect.equality(normal['u'], nil, 'the old unstage map is gone')
-  MiniTest.expect.equality(normal['gr'], nil, 'the old chord is gone')
-  MiniTest.expect.equality(normal['s'] ~= nil, true, 'the new map is applied')
+  MiniTest.expect.equality(normal["u"], nil, "the old unstage map is gone")
+  MiniTest.expect.equality(normal["gr"], nil, "the old chord is gone")
+  MiniTest.expect.equality(normal["s"] ~= nil, true, "the new map is applied")
 end
 
-T['pressing s stages the change under the cursor'] = function()
+T["pressing s stages the change under the cursor"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, 's')
+  child.type_keys(50, "s")
 
-  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)")
+  local staged =
+    child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)")
   MiniTest.expect.equality(staged, true)
   MiniTest.expect.equality(
-    git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' }):find('+NEW line', 1, true) ~= nil,
+    git_out({ "diff", "--cached", "-U3", "--", "f.txt" }):find("+NEW line", 1, true) ~= nil,
     true
   )
 end
 
-T['the g r chord refreshes the view'] = function()
+T["the g r chord refreshes the view"] = function()
   setup_child()
-  local path = repo .. '/f.txt'
+  local path = repo .. "/f.txt"
   local lines = vim.fn.readfile(path)
-  table.insert(lines, 'line11')
+  table.insert(lines, "line11")
   vim.fn.writefile(lines, path)
 
-  child.type_keys(50, 'g', 'r')
-  local refreshed = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +line11') end)")
+  child.type_keys(50, "g", "r")
+  local refreshed =
+    child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +line11') end)")
   MiniTest.expect.equality(refreshed, true)
 end
 
-T['Tab toggles a file section through the server'] = function()
+T["Tab toggles a file section through the server"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'file line index')
-  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
+  MiniTest.expect.equality(type(target), "number", "file line index")
+  local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, '<Tab>')
+  child.type_keys(50, "<Tab>")
 
-  local collapsed = child.lua_get(string.format(
-    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
-    before
-  ))
-  MiniTest.expect.equality(collapsed, true, 'the file body collapsed')
-  assert_no_line('    +NEW line')
+  local collapsed = child.lua_get(
+    string.format(
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      before
+    )
+  )
+  MiniTest.expect.equality(collapsed, true, "the file body collapsed")
+  assert_no_line("    +NEW line")
 end
 
-T['an unbound key passes through natively'] = function()
+T["an unbound key passes through natively"] = function()
   setup_child()
   child.api.nvim_win_set_cursor(0, { 1, 1 })
-  child.type_keys(50, 'h')
+  child.type_keys(50, "h")
   MiniTest.expect.equality(child.lua_get('vim.fn.col(".")'), 1)
 end
 
-T['Escape with a selection passes through and leaves visual mode'] = function()
+T["Escape with a selection passes through and leaves visual mode"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, 'V', '<Esc>')
-  MiniTest.expect.equality(child.lua_get('vim.fn.mode()'), 'n')
+  child.type_keys(50, "V", "<Esc>")
+  MiniTest.expect.equality(child.lua_get("vim.fn.mode()"), "n")
 end
 
-T['mirrors a user mapping whose rhs is a fold command'] = function()
-  child.cmd('nnoremap <F2> za')
+T["mirrors a user mapping whose rhs is a fold command"] = function()
+  child.cmd("nnoremap <F2> za")
   setup_child()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F2>'] ~= nil"), true)
 
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
+  local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, '<F2>')
+  child.type_keys(50, "<F2>")
 
-  local collapsed = child.lua_get(string.format(
-    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
-    before
-  ))
-  MiniTest.expect.equality(collapsed, true, 'the mirrored fold key collapsed the file')
+  local collapsed = child.lua_get(
+    string.format(
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      before
+    )
+  )
+  MiniTest.expect.equality(collapsed, true, "the mirrored fold key collapsed the file")
 end
 
-T['a user Tab fold mapping toggles the section'] = function()
-  child.cmd('nnoremap <Tab> za')
+T["a user Tab fold mapping toggles the section"] = function()
+  child.cmd("nnoremap <Tab> za")
   setup_child()
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
+  local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, '<Tab>')
+  child.type_keys(50, "<Tab>")
 
-  local collapsed = child.lua_get(string.format(
-    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
-    before
-  ))
-  MiniTest.expect.equality(collapsed, true, 'the user Tab mapping toggled the file')
+  local collapsed = child.lua_get(
+    string.format(
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      before
+    )
+  )
+  MiniTest.expect.equality(collapsed, true, "the user Tab mapping toggled the file")
 end
 
-T['fold_keys mirrors a Lua-function fold mapping'] = function()
-  setup_child({ fold_keys = { ['<F3>'] = 'common.toggle-section' } })
+T["fold_keys mirrors a Lua-function fold mapping"] = function()
+  setup_child({ fold_keys = { ["<F3>"] = "common.toggle-section" } })
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F3>'] ~= nil"), true)
 
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
+  local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, '<F3>')
+  child.type_keys(50, "<F3>")
 
-  local collapsed = child.lua_get(string.format(
-    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
-    before
-  ))
-  MiniTest.expect.equality(collapsed, true, 'the configured fold key collapsed the file')
+  local collapsed = child.lua_get(
+    string.format(
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      before
+    )
+  )
+  MiniTest.expect.equality(collapsed, true, "the configured fold key collapsed the file")
 end
 
-T['capture mode forwards printable keys and shows the server hint'] = function()
+T["capture mode forwards printable keys and shows the server hint"] = function()
   setup_child()
   child.lua([[
     VIEW.apply_keymap({
@@ -1369,98 +1458,102 @@ T['capture mode forwards printable keys and shows the server hint'] = function()
   ]])
 
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['Q'] ~= nil"), true)
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
-  child.type_keys(50, 'Q')
+  local before = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
+  child.type_keys(50, "Q")
   MiniTest.expect.equality(
-    child.lua_get('HELPERS.wait_for(function() return #NOTIFIES == 1 end)'),
+    child.lua_get("HELPERS.wait_for(function() return #NOTIFIES == 1 end)"),
     true,
-    'the unbound key was reported'
+    "the unbound key was reported"
   )
 
-  MiniTest.expect.equality(child.lua_get('SENT'), { 'Q' })
-  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
-  local msg = child.lua_get('NOTIFIES[1].msg')
-  MiniTest.expect.equality(msg:find('Unbound key: Q', 1, true) ~= nil, true, msg)
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  MiniTest.expect.equality(child.lua_get("SENT"), { "Q" })
+  MiniTest.expect.equality(child.lua_get("#NOTIFIES"), 1)
+  local msg = child.lua_get("NOTIFIES[1].msg")
+  MiniTest.expect.equality(msg:find("Unbound key: Q", 1, true) ~= nil, true, msg)
+  local after = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
   MiniTest.expect.equality(after, before)
 end
 
-T['Enter visits the file and new-side line from the server effect'] = function()
+T["Enter visits the file and new-side line from the server effect"] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
 
   -- `common.visit` is a server command now: the effect names the file and line,
   -- and the client only opens it. No rendered text is parsed.
-  child.type_keys(50, '<CR>')
+  child.type_keys(50, "<CR>")
   local opened = child.lua_get(
     "HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)"
   )
-  MiniTest.expect.equality(opened, true, 'Enter opened the visited file')
+  MiniTest.expect.equality(opened, true, "Enter opened the visited file")
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
   MiniTest.expect.equality(
     child.lua_get("#vim.api.nvim_list_wins()"),
     1,
-    'the file opens in the only window'
+    "the file opens in the only window"
   )
 end
 
-T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = function()
+T["ctrl+t makes the buffer editable and ctrl+t restores the server text"] = function()
   setup_child()
-  local before = child.lua_get('STATUS.lines')
+  local before = child.lua_get("STATUS.lines")
   local undo = child.lua_get("require('magit-lsp.buffer').undo_levels(STATUS.buf)")
-  MiniTest.expect.equality(undo ~= -1, true, 'the user undo setting was captured')
+  MiniTest.expect.equality(undo ~= -1, true, "the user undo setting was captured")
 
   local function opt(name)
-    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name))
+    return child.lua_get(
+      string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name)
+    )
   end
   local function mode_is(wanted)
     return vim.wait(5000, function()
-      return child.lua_get('STATUS.mode') == wanted
+      return child.lua_get("STATUS.mode") == wanted
     end, 20)
   end
 
-  child.type_keys(50, '<C-t>')
-  MiniTest.expect.equality(mode_is('text'), true, 'ctrl+t entered text mode')
-  MiniTest.expect.equality(opt('modifiable'), true)
-  MiniTest.expect.equality(opt('undolevels'), undo)
+  child.type_keys(50, "<C-t>")
+  MiniTest.expect.equality(mode_is("text"), true, "ctrl+t entered text mode")
+  MiniTest.expect.equality(opt("modifiable"), true)
+  MiniTest.expect.equality(opt("undolevels"), undo)
   MiniTest.expect.equality(
     child.lua_get("#vim.api.nvim_buf_get_keymap(STATUS.buf, 'n')"),
     1,
-    'only the toggle stays mapped in text mode'
+    "only the toggle stays mapped in text mode"
   )
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['s'] == nil"), true)
 
-  child.type_keys(50, 'dd')
-  child.type_keys(50, 'ihello<Esc>')
+  child.type_keys(50, "dd")
+  child.type_keys(50, "ihello<Esc>")
   -- Wait for the queued edits to land in the buffer instead of a fixed delay.
   MiniTest.expect.equality(
-    child.lua_get("HELPERS.wait_for(function() return vim.deep_equal(HELPERS.lines(), STATUS.lines) == false end)"),
+    child.lua_get(
+      "HELPERS.wait_for(function() return vim.deep_equal(HELPERS.lines(), STATUS.lines) == false end)"
+    ),
     true,
-    'the buffer is editable'
+    "the buffer is editable"
   )
 
-  child.type_keys(50, '<C-t>')
-  MiniTest.expect.equality(mode_is('interactive'), true, 'ctrl+t left text mode')
+  child.type_keys(50, "<C-t>")
+  MiniTest.expect.equality(mode_is("interactive"), true, "ctrl+t left text mode")
   vim.wait(5000, function()
-    return child.lua_get('STATUS.lines') ~= nil
+    return child.lua_get("STATUS.lines") ~= nil
   end, 20)
-  MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before, 'the server text is back')
-  MiniTest.expect.equality(opt('modifiable'), false)
-  MiniTest.expect.equality(opt('readonly'), false)
-  MiniTest.expect.equality(opt('undolevels'), -1)
-  MiniTest.expect.equality(opt('modified'), false)
+  MiniTest.expect.equality(child.lua_get("HELPERS.lines()"), before, "the server text is back")
+  MiniTest.expect.equality(opt("modifiable"), false)
+  MiniTest.expect.equality(opt("readonly"), false)
+  MiniTest.expect.equality(opt("undolevels"), -1)
+  MiniTest.expect.equality(opt("modified"), false)
 
   child.lua('pcall(vim.cmd, "silent! undo")')
   MiniTest.expect.equality(
-    child.lua_get('HELPERS.lines()'),
+    child.lua_get("HELPERS.lines()"),
     before,
-    'undo cannot restore the stale text-mode edits'
+    "undo cannot restore the stale text-mode edits"
   )
 end
 
-T['y y copies the value at point to the clipboard'] = function()
+T["y y copies the value at point to the clipboard"] = function()
   -- A provider keeps `+` deterministic in headless runs.
   child.lua([[
     CLIP = nil
@@ -1483,39 +1576,39 @@ T['y y copies the value at point to the clipboard'] = function()
   end
   local function copied()
     return vim.wait(5000, function()
-      return child.lua_get([[vim.fn.getreg('+')]]) ~= ''
+      return child.lua_get([[vim.fn.getreg('+')]]) ~= ""
     end, 20)
   end
 
   clear()
   local added = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(added), 'number', 'change line index')
+  MiniTest.expect.equality(type(added), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { added, 0 })
-  child.type_keys(50, 'yy')
-  MiniTest.expect.equality(copied(), true, 'the line was copied')
-  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), 'NEW line')
-  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('"')]]), 'NEW line')
+  child.type_keys(50, "yy")
+  MiniTest.expect.equality(copied(), true, "the line was copied")
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), "NEW line")
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('"')]]), "NEW line")
 
   clear()
   local hunk = child.lua_get("HELPERS.find_first('hunk', 'unstaged')")
   child.api.nvim_win_set_cursor(0, { hunk, 0 })
-  child.type_keys(50, 'yy')
-  MiniTest.expect.equality(copied(), true, 'the hunk was copied')
+  child.type_keys(50, "yy")
+  MiniTest.expect.equality(copied(), true, "the hunk was copied")
   local hunk_text = child.lua_get([[vim.fn.getreg('+')]])
-  MiniTest.expect.equality(hunk_text:find('line1\n', 1, true), 1, hunk_text)
-  MiniTest.expect.equality(hunk_text:find('\nNEW line', 1, true) ~= nil, true, hunk_text)
+  MiniTest.expect.equality(hunk_text:find("line1\n", 1, true), 1, hunk_text)
+  MiniTest.expect.equality(hunk_text:find("\nNEW line", 1, true) ~= nil, true, hunk_text)
 
   clear()
   local file = child.lua_get("HELPERS.find_first('file', 'unstaged')")
   child.api.nvim_win_set_cursor(0, { file, 0 })
-  child.type_keys(50, 'yy')
-  MiniTest.expect.equality(copied(), true, 'the path was copied')
-  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), 'f.txt')
+  child.type_keys(50, "yy")
+  MiniTest.expect.equality(copied(), true, "the path was copied")
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), "f.txt")
 end
 
-local wait_menu = dofile('tests/magit_lsp/menu.lua')(T, child, setup_child)
+local wait_menu = dofile("tests/magit_lsp/menu.lua")(T, child, setup_child)
 
-T['debug.snapshot reports the status view state'] = function()
+T["debug.snapshot reports the status view state"] = function()
   setup_child()
   local encoded = child.lua_get([[
     (function()
@@ -1528,20 +1621,20 @@ T['debug.snapshot reports the status view state'] = function()
   ]])
   local snapshot = vim.json.decode(encoded)
 
-  MiniTest.expect.equality(snapshot.mode, 'n')
-  MiniTest.expect.equality(type(snapshot.cursor.row), 'number')
-  MiniTest.expect.equality(type(snapshot.cursor.col), 'number')
+  MiniTest.expect.equality(snapshot.mode, "n")
+  MiniTest.expect.equality(type(snapshot.cursor.row), "number")
+  MiniTest.expect.equality(type(snapshot.cursor.col), "number")
   MiniTest.expect.equality(snapshot.idle, true)
-  MiniTest.expect.equality(snapshot.pending, '')
+  MiniTest.expect.equality(snapshot.pending, "")
 
   MiniTest.expect.equality(#snapshot.view_stack, 1)
-  MiniTest.expect.equality(snapshot.view_stack[1].id, child.lua_get('STATUS.key'))
-  MiniTest.expect.equality(snapshot.view_stack[1].kind, 'status')
+  MiniTest.expect.equality(snapshot.view_stack[1].id, child.lua_get("STATUS.key"))
+  MiniTest.expect.equality(snapshot.view_stack[1].kind, "status")
 
   MiniTest.expect.equality(snapshot.render.version, snapshot.render.acked)
-  MiniTest.expect.equality(snapshot.render.version > 0, true, 'a version was rendered and acked')
+  MiniTest.expect.equality(snapshot.render.version > 0, true, "a version was rendered and acked")
 
-  MiniTest.expect.equality(snapshot.keymap.scope, 'status')
+  MiniTest.expect.equality(snapshot.keymap.scope, "status")
   MiniTest.expect.equality(snapshot.keymap.capture, false)
   local refresh_key = child.lua_get([[
     (function()
@@ -1555,25 +1648,26 @@ T['debug.snapshot reports the status view state'] = function()
   ]])
   MiniTest.expect.equality(vim.tbl_contains(snapshot.keymap.keys, refresh_key), true)
 
-  local status_buf = child.lua_get('STATUS.buf')
+  local status_buf = child.lua_get("STATUS.buf")
   local status_window
   for _, window in ipairs(snapshot.windows) do
     if window.buffer == status_buf then
       status_window = window
     end
   end
-  MiniTest.expect.equality(type(status_window), 'table', 'the status window is reported')
+  MiniTest.expect.equality(type(status_window), "table", "the status window is reported")
   MiniTest.expect.equality(status_window.float, false)
-  MiniTest.expect.equality(status_window.filetype, 'magit-lsp')
+  MiniTest.expect.equality(status_window.filetype, "magit-lsp")
   MiniTest.expect.equality(status_window.width > 0, true)
   MiniTest.expect.equality(status_window.height > 0, true)
 
-  MiniTest.expect.equality(type(snapshot.messages), 'table')
-  MiniTest.expect.equality(type(snapshot.notifications), 'table')
+  MiniTest.expect.equality(type(snapshot.messages), "table")
+  MiniTest.expect.equality(type(snapshot.notifications), "table")
 end
 
-T['buffers renders that beat the view/open response'] = function()
-  child.lua(string.format([[
+T["buffers renders that beat the view/open response"] = function()
+  child.lua(string.format(
+    [[
     DELAYED_OPEN = false
     RENDER_BEFORE_RESPONSE = false
     local config = require('magit-lsp.config')
@@ -1596,23 +1690,25 @@ T['buffers renders that beat the view/open response'] = function()
       end
       return rpc
     end })
-  ]], repo))
+  ]],
+    repo
+  ))
   setup_child()
-  MiniTest.expect.equality(child.lua_get('DELAYED_OPEN'), true, 'the open response was delayed')
+  MiniTest.expect.equality(child.lua_get("DELAYED_OPEN"), true, "the open response was delayed")
   MiniTest.expect.equality(
-    child.lua_get('RENDER_BEFORE_RESPONSE'),
+    child.lua_get("RENDER_BEFORE_RESPONSE"),
     true,
-    'the render beat the view/open response'
+    "the render beat the view/open response"
   )
 
-  assert_line('Head: main')
-  assert_line('Unstaged changes (1)')
-  assert_line('  M f.txt')
-  assert_line('    +NEW line')
+  assert_line("Head: main")
+  assert_line("Unstaged changes (1)")
+  assert_line("  M f.txt")
+  assert_line("    +NEW line")
 
-  local diff = child.lua_get('HELPERS.keymap_diff()')
-  MiniTest.expect.equality(diff.missing, {}, 'the early keymap was applied')
-  MiniTest.expect.equality(diff.extra, {}, 'the early keymap was applied')
+  local diff = child.lua_get("HELPERS.keymap_diff()")
+  MiniTest.expect.equality(diff.missing, {}, "the early keymap was applied")
+  MiniTest.expect.equality(diff.extra, {}, "the early keymap was applied")
 
   local state = child.lua_get([[
     (function()
@@ -1625,13 +1721,14 @@ T['buffers renders that beat the view/open response'] = function()
     end)()
   ]])
   MiniTest.expect.equality(state.version, state.acked)
-  MiniTest.expect.equality(state.version > 0, true, 'the buffered render was applied')
-  MiniTest.expect.equality(state.scope, 'status')
+  MiniTest.expect.equality(state.version > 0, true, "the buffered render was applied")
+  MiniTest.expect.equality(state.scope, "status")
 end
 
-T['a normal setup never loads the debug module'] = function()
-  child.restart({ '-u', 'NONE' })
-  child.lua(string.format([[
+T["a normal setup never loads the debug module"] = function()
+  child.restart({ "-u", "NONE" })
+  child.lua(string.format(
+    [[
     vim.opt.rtp:append(%q)
     M = require('magit-lsp')
     M.setup({ root_dir = %q })
@@ -1639,23 +1736,26 @@ T['a normal setup never loads the debug module'] = function()
       local v = M.status_view()
       return v ~= nil and v.version ~= nil
     end, 10)
-  ]], project, repo))
+  ]],
+    project,
+    repo
+  ))
 
   MiniTest.expect.equality(
     child.lua_get("package.loaded['magit-lsp.debug'] == nil"),
     true,
-    'a normal setup must not load the debug recorder'
+    "a normal setup must not load the debug recorder"
   )
 end
 
-T['debug.trace writes one JSON line per event'] = function()
-  local trace_path = project .. '/build/test-output/trace-lua.jsonl'
-  vim.fn.mkdir(project .. '/build/test-output', 'p')
+T["debug.trace writes one JSON line per event"] = function()
+  local trace_path = project .. "/build/test-output/trace-lua.jsonl"
+  vim.fn.mkdir(project .. "/build/test-output", "p")
   vim.fn.delete(trace_path)
   child.restart({
-    '-u',
-    'scripts/minimal_init.lua',
-    '--cmd',
+    "-u",
+    "scripts/minimal_init.lua",
+    "--cmd",
     string.format('let $MAGIT_LSP_TRACE="%s"', trace_path),
   })
   setup_child()
@@ -1671,46 +1771,48 @@ T['debug.trace writes one JSON line per event'] = function()
   ]])
 
   local lines = vim.fn.readfile(trace_path)
-  MiniTest.expect.equality(#lines > 0, true, 'the trace file has events')
+  MiniTest.expect.equality(#lines > 0, true, "the trace file has events")
   local seen = {}
   local times = {}
   for _, line in ipairs(lines) do
     local ok, decoded = pcall(vim.json.decode, line)
-    MiniTest.expect.equality(ok, true, 'a trace line is JSON: ' .. line)
-    MiniTest.expect.equality(type(decoded.t_ms), 'number', 't_ms is a number')
-    MiniTest.expect.equality(type(decoded.id), 'number', 'id is a number')
-    MiniTest.expect.equality(type(decoded.event), 'string', 'event is a string')
-    MiniTest.expect.equality(decoded.detail ~= nil, true, 'detail is present')
+    MiniTest.expect.equality(ok, true, "a trace line is JSON: " .. line)
+    MiniTest.expect.equality(type(decoded.t_ms), "number", "t_ms is a number")
+    MiniTest.expect.equality(type(decoded.id), "number", "id is a number")
+    MiniTest.expect.equality(type(decoded.event), "string", "event is a string")
+    MiniTest.expect.equality(decoded.detail ~= nil, true, "detail is present")
     seen[decoded.event] = true
     times[#times + 1] = decoded.t_ms
   end
   for _, name in ipairs({
-    'key_pressed',
-    'key_sent',
-    'render_received',
-    'render_applied',
-    'window_opened',
-    'idle',
+    "key_pressed",
+    "key_sent",
+    "render_received",
+    "render_applied",
+    "window_opened",
+    "idle",
   }) do
-    MiniTest.expect.equality(seen[name], true, name .. ' was traced')
+    MiniTest.expect.equality(seen[name], true, name .. " was traced")
   end
   for index = 2, #times do
-    MiniTest.expect.equality(times[index] >= times[index - 1], true, 'the clock is monotonic')
+    MiniTest.expect.equality(times[index] >= times[index - 1], true, "the clock is monotonic")
   end
 end
 
-T['two repositories get independent status views'] = function()
+T["two repositories get independent status views"] = function()
   setup_child()
-  local other = make_repo(true, project .. '/build/test-repos/fixture-other')
-  vim.fn.writefile({ 'other' }, other .. '/other.txt')
+  local other = make_repo(true, project .. "/build/test-repos/fixture-other")
+  vim.fn.writefile({ "other" }, other .. "/other.txt")
 
-  child.lua(string.format(
-    "vim.cmd('tabnew'); M.setup({ root_dir = %q }); "
-      .. 'vim.wait(5000, function() local v = M.status_view(%q); '
-      .. 'return v ~= nil and v.version ~= nil and v.keymap_ready end, 10)',
-    other,
-    other
-  ))
+  child.lua(
+    string.format(
+      "vim.cmd('tabnew'); M.setup({ root_dir = %q }); "
+        .. "vim.wait(5000, function() local v = M.status_view(%q); "
+        .. "return v ~= nil and v.version ~= nil and v.keymap_ready end, 10)",
+      other,
+      other
+    )
+  )
   local state = child.lua_get([==[(function()
     local v = require('magit-lsp.view')
     local out = {}
@@ -1730,40 +1832,47 @@ T['two repositories get independent status views'] = function()
     return out
   end)()]==])
 
-  MiniTest.expect.equality(#state, 2, 'both repositories opened a status view')
+  MiniTest.expect.equality(#state, 2, "both repositories opened a status view")
   local first, second = state[1], state[2]
   MiniTest.expect.equality(first.root, repo)
   MiniTest.expect.equality(second.root, other)
-  MiniTest.expect.equality(first.id, second.id, 'independent servers reuse bare view ids')
+  MiniTest.expect.equality(first.id, second.id, "independent servers reuse bare view ids")
   MiniTest.expect.equality(first.client_id ~= second.client_id, true)
-  MiniTest.expect.equality(first.key ~= second.key, true, 'client/view identities are independent')
-  MiniTest.expect.equality(first.buf ~= second.buf, true, 'buffers are independent')
-  MiniTest.expect.equality(vim.tbl_contains(first.lines, '  ? other.txt'), false)
-  MiniTest.expect.equality(vim.tbl_contains(second.lines, '  ? other.txt'), true)
+  MiniTest.expect.equality(first.key ~= second.key, true, "client/view identities are independent")
+  MiniTest.expect.equality(first.buf ~= second.buf, true, "buffers are independent")
+  MiniTest.expect.equality(vim.tbl_contains(first.lines, "  ? other.txt"), false)
+  MiniTest.expect.equality(vim.tbl_contains(second.lines, "  ? other.txt"), true)
 
   -- A render is routed by view id: applying one for the first view must never
   -- rewrite the second buffer.
-  child.lua(string.format([[
+  child.lua(string.format(
+    [[
     local v = require('magit-lsp.view')
     local record = v.views[%q]
     v.apply_render({ viewId = %q, version = (record.version or 0) + 1, text = { 'FIRST ONLY' } }, record.client_id)
-  ]], first.key, first.id))
+  ]],
+    first.key,
+    first.id
+  ))
   MiniTest.expect.equality(
-    child.lua_get(string.format('vim.api.nvim_buf_get_lines(%d, 0, -1, false)', first.buf)),
-    { 'FIRST ONLY' }
+    child.lua_get(string.format("vim.api.nvim_buf_get_lines(%d, 0, -1, false)", first.buf)),
+    { "FIRST ONLY" }
   )
   MiniTest.expect.equality(
-    child.lua_get(string.format(
-      'vim.tbl_contains(vim.api.nvim_buf_get_lines(%d, 0, -1, false), "FIRST ONLY")',
-      second.buf
-    )),
+    child.lua_get(
+      string.format(
+        'vim.tbl_contains(vim.api.nvim_buf_get_lines(%d, 0, -1, false), "FIRST ONLY")',
+        second.buf
+      )
+    ),
     false,
-    'the second view kept its own text'
+    "the second view kept its own text"
   )
 
   -- Quitting a nested view must focus the existing status record, preserving
   -- its buffer, cursor and folds. The other repository stays live throughout.
-  child.lua(string.format([[
+  child.lua(string.format(
+    [[
     VIEW.focus(%q)
     local status_get = vim.lsp.get_client_by_id(STATUS.client_id)
     local render
@@ -1796,41 +1905,54 @@ T['two repositories get independent status views'] = function()
     RETURNED_STATE = { key = RETURNED.key, buf = RETURNED.buf, version = RETURNED.version,
       cursor = vim.api.nvim_win_get_cursor(RETURNED.win), fold = vim.fn.foldclosed(3),
       text = RETURNED.lines }
-  ]], first.key, first.key, first.key, first.key))
-  MiniTest.expect.equality(child.lua_get('NESTED.placement'), 'main')
-  MiniTest.expect.equality(child.lua_get('RETURNED == STATUS'), true)
-  MiniTest.expect.equality(child.lua_get('RETURNED_STATE'), child.lua_get('PARENT'))
-  MiniTest.expect.equality(child.lua_get('vim.lsp.buf_is_attached(RETURNED.buf, RETURNED.client_id)'), true)
-  MiniTest.expect.equality(child.lua_get(string.format('VIEW.views[%q] ~= nil', second.key)), true)
+  ]],
+    first.key,
+    first.key,
+    first.key,
+    first.key
+  ))
+  MiniTest.expect.equality(child.lua_get("NESTED.placement"), "main")
+  MiniTest.expect.equality(child.lua_get("RETURNED == STATUS"), true)
+  MiniTest.expect.equality(child.lua_get("RETURNED_STATE"), child.lua_get("PARENT"))
+  MiniTest.expect.equality(
+    child.lua_get("vim.lsp.buf_is_attached(RETURNED.buf, RETURNED.client_id)"),
+    true
+  )
+  MiniTest.expect.equality(child.lua_get(string.format("VIEW.views[%q] ~= nil", second.key)), true)
   child.lua([[
     FRESH_BEFORE = RETURNED.version
     M.press({ 'g', 'r' })
     FRESH_REFRESHED = vim.wait(5000, function() return RETURNED.version > FRESH_BEFORE end, 10)
     M.press({ 'c' })
   ]])
-  MiniTest.expect.equality(child.lua_get('FRESH_REFRESHED'), true, 'original status can refresh')
-  MiniTest.expect.equality(type(wait_menu()), 'table', 'original status can open a menu')
+  MiniTest.expect.equality(child.lua_get("FRESH_REFRESHED"), true, "original status can refresh")
+  MiniTest.expect.equality(type(wait_menu()), "table", "original status can open a menu")
   child.lua("M.press({ 'q' })")
   MiniTest.expect.equality(
     child.lua_get(
-      'HELPERS.wait_for(function() local c = VIEW.current(); return c ~= nil and c.key == STATUS.key end)'
+      "HELPERS.wait_for(function() local c = VIEW.current(); return c ~= nil and c.key == STATUS.key end)"
     ),
     true,
-    'closing the menu returns to the status view'
+    "closing the menu returns to the status view"
   )
-  child.lua(string.format([[
+  child.lua(string.format(
+    [[
     VIEW.focus(%q)
     SECOND_STATUS = VIEW.current()
     SECOND_BEFORE = SECOND_STATUS.version
     M.press({ 'g', 'r' })
     SECOND_REFRESHED = vim.wait(5000, function() return SECOND_STATUS.version > SECOND_BEFORE end, 10)
-  ]], second.key))
+  ]],
+    second.key
+  ))
   MiniTest.expect.equality(
-    child.lua_get('SECOND_REFRESHED'), true, 'other repository still refreshes'
+    child.lua_get("SECOND_REFRESHED"),
+    true,
+    "other repository still refreshes"
   )
 end
 
-T['commit files own full sync, exact bytes and native saves without auto attachment'] = function()
+T["commit files own full sync, exact bytes and native saves without auto attachment"] = function()
   setup_child()
   child.lua([[
     EDIT = require('magit-lsp.edit')
@@ -1902,21 +2024,51 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     CONFIRMED = VIEW.views[DOC.key] == nil
     CHECK_WINDOW(false)
   ]])
-  MiniTest.expect.equality(child.lua_get('DOCUMENT'), {
-    name = child.lua_get('STATUS.root') .. '/draft/COMMIT_EDITMSG', buftype = '', filetype = 'gitcommit',
-    editable = true, base = child.lua_get('STATUS.key'), current = true,
-    attached = false, server_views = 1, pending_empty = true, eol = true, lines = { 'α', '' },
+  MiniTest.expect.equality(child.lua_get("DOCUMENT"), {
+    name = child.lua_get("STATUS.root") .. "/draft/COMMIT_EDITMSG",
+    buftype = "",
+    filetype = "gitcommit",
+    editable = true,
+    base = child.lua_get("STATUS.key"),
+    current = true,
+    attached = false,
+    server_views = 1,
+    pending_empty = true,
+    eol = true,
+    lines = { "α", "" },
   })
-  MiniTest.expect.equality(child.lua_get('SAVE_PENDING and SAVE_STAYS and FINISH_PENDING and CONFIRMED'), true)
-  MiniTest.expect.equality(child.lua_get('SYNCS'), {
-    { 'textDocument/didOpen', { textDocument = { uri = child.lua_get('DOC.uri'),
-      languageId = 'gitcommit', version = 1, text = 'α\n\n' } } },
-    { 'textDocument/didChange', { textDocument = { uri = child.lua_get('DOC.uri'), version = 2 },
-      contentChanges = { { text = 'β\n' } } } },
-    { 'textDocument/didChange', { textDocument = { uri = child.lua_get('DOC.uri'), version = 3 },
-      contentChanges = { { text = 'finish β' } } } },
+  MiniTest.expect.equality(
+    child.lua_get("SAVE_PENDING and SAVE_STAYS and FINISH_PENDING and CONFIRMED"),
+    true
+  )
+  MiniTest.expect.equality(child.lua_get("SYNCS"), {
+    {
+      "textDocument/didOpen",
+      {
+        textDocument = {
+          uri = child.lua_get("DOC.uri"),
+          languageId = "gitcommit",
+          version = 1,
+          text = "α\n\n",
+        },
+      },
+    },
+    {
+      "textDocument/didChange",
+      {
+        textDocument = { uri = child.lua_get("DOC.uri"), version = 2 },
+        contentChanges = { { text = "β\n" } },
+      },
+    },
+    {
+      "textDocument/didChange",
+      {
+        textDocument = { uri = child.lua_get("DOC.uri"), version = 3 },
+        contentChanges = { { text = "finish β" } },
+      },
+    },
   })
-  MiniTest.expect.equality(child.lua_get('BARRIERS[1].payload.arguments[1].source'), 'synchronized')
+  MiniTest.expect.equality(child.lua_get("BARRIERS[1].payload.arguments[1].source"), "synchronized")
   child.lua([[
     vim.notify = function() end
     BARRIERS = {}
@@ -1982,14 +2134,20 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     DISCONNECTED = VIEW.current() == DOC and DOC.disconnected and vim.bo[DOC.buf].modifiable
       and vim.bo[DOC.buf].modified and #BARRIERS == count
   ]])
-  MiniTest.expect.equality(child.lua_get('FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH and CANCEL_PENDING'), true)
-  MiniTest.expect.equality(child.lua_get('BLOCKED_FINISH and AMBIGUOUS_CANCEL and REOPENED_AUTHORITY'), true)
-  MiniTest.expect.equality(child.lua_get('DISCONNECTED'), true)
+  MiniTest.expect.equality(
+    child.lua_get("FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH and CANCEL_PENDING"),
+    true
+  )
+  MiniTest.expect.equality(
+    child.lua_get("BLOCKED_FINISH and AMBIGUOUS_CANCEL and REOPENED_AUTHORITY"),
+    true
+  )
+  MiniTest.expect.equality(child.lua_get("DISCONNECTED"), true)
 end
 
-T['native commit buffer close refuses dirty text and recovers a rejected saved close'] = function()
+T["native commit buffer close refuses dirty text and recovers a rejected saved close"] = function()
   setup_child()
-  git_out({ 'add', 'f.txt' })
+  git_out({ "add", "f.txt" })
   child.lua([[
     EDIT = require('magit-lsp.edit')
     VIEW.invoke('commit.create', {}, STATUS.key)
@@ -2021,10 +2179,10 @@ T['native commit buffer close refuses dirty text and recovers a rejected saved c
       messages = vim.fn.execute('messages'), progress = require('magit-lsp.debug').state.progress }))
     assert(vim.api.nvim_get_current_buf() == STATUS.buf)
   ]])
-  MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%s' }), 'init\n')
+  MiniTest.expect.equality(git_out({ "log", "-1", "--format=%s" }), "init\n")
 end
 
-T['descriptor queues, deferred renders and resync preserve client identity and text mode'] = function()
+T["descriptor queues, deferred renders and resync preserve client identity and text mode"] = function()
   child.lua([[
     VIEW = require('magit-lsp.view')
     local debug_api = require('magit-lsp.debug')
@@ -2102,36 +2260,55 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
     CLEAN = vim.wait(1000, function() return debug_api.idle() end, 10)
       and #VIEW.order == 0 and #debug_api.order == 0
   ]])
-  MiniTest.expect.equality(child.lua_get('EARLY'), {
-    a = { '  alpha', '  replacement', '' }, b = { 'second' }, versions = { 2, 1 },
-    editable = { true, false }, keymaps = { 'new-kind', 'new-kind' },
-    pending_empty = true, distinct = true,
+  MiniTest.expect.equality(child.lua_get("EARLY"), {
+    a = { "  alpha", "  replacement", "" },
+    b = { "second" },
+    versions = { 2, 1 },
+    editable = { true, false },
+    keymaps = { "new-kind", "new-kind" },
+    pending_empty = true,
+    distinct = true,
   })
-  MiniTest.expect.equality(child.lua_get('MISMATCH'), {
-    mode = 'text', editable = true, text = { '  alpha', '  replacement', '' },
-    version = 2, acks = 3, resyncs = 1, client_id = 101,
+  MiniTest.expect.equality(child.lua_get("MISMATCH"), {
+    mode = "text",
+    editable = true,
+    text = { "  alpha", "  replacement", "" },
+    version = 2,
+    acks = 3,
+    resyncs = 1,
+    client_id = 101,
   })
-  MiniTest.expect.equality(child.lua_get('HELD'), {
-    text = { '  alpha', '  replacement', '' }, version = 2, deferred = 1,
+  MiniTest.expect.equality(child.lua_get("HELD"), {
+    text = { "  alpha", "  replacement", "" },
+    version = 2,
+    deferred = 1,
   })
-  MiniTest.expect.equality(child.lua_get('RECOVERED'), {
-    mode = 'interactive', editable = false, text = { 'held during resync' },
-    version = 5, other = { 'second' }, deferred = true,
+  MiniTest.expect.equality(child.lua_get("RECOVERED"), {
+    mode = "interactive",
+    editable = false,
+    text = { "held during resync" },
+    version = 5,
+    other = { "second" },
+    deferred = true,
   })
-  local acks = child.lua_get('ACKS')
+  local acks = child.lua_get("ACKS")
   table.sort(acks, function(a, b)
     return a[1] < b[1] or (a[1] == b[1] and a[3] < b[3])
   end)
   MiniTest.expect.equality(acks, {
-    { 101, 'same', 1 }, { 101, 'same', 2 }, { 101, 'same', 4 }, { 101, 'same', 5 },
-    { 202, 'same', 1 },
+    { 101, "same", 1 },
+    { 101, "same", 2 },
+    { 101, "same", 4 },
+    { 101, "same", 5 },
+    { 202, "same", 1 },
   })
-  MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
+  MiniTest.expect.equality(child.lua_get("INDEPENDENT_CLOSE and CLEAN"), true)
 end
 
-T['shared client contract vectors apply through the Neovim adapter'] = function()
-  local fixture = vim.json.decode(table.concat(vim.fn.readfile('tests/data/client-contracts.json'), '\n'))
-  child.lua(string.format('VECTORS = %s', vim.inspect(fixture.renders)))
+T["shared client contract vectors apply through the Neovim adapter"] = function()
+  local fixture =
+    vim.json.decode(table.concat(vim.fn.readfile("tests/data/client-contracts.json"), "\n"))
+  child.lua(string.format("VECTORS = %s", vim.inspect(fixture.renders)))
   local results = child.lua([[
     VIEW = require('magit-lsp.view')
     ACKS, RESYNCS = {}, {}
@@ -2167,35 +2344,42 @@ T['shared client contract vectors apply through the Neovim adapter'] = function(
   ]])
   for index, vector in ipairs(fixture.renders) do
     local result = results[index]
-    MiniTest.expect.equality(result.lines, vector.expectedLines, vector.name .. ': buffer lines')
-    MiniTest.expect.equality(result.version, vector.expectedVersion, vector.name .. ': view version')
+    MiniTest.expect.equality(result.lines, vector.expectedLines, vector.name .. ": buffer lines")
+    MiniTest.expect.equality(
+      result.version,
+      vector.expectedVersion,
+      vector.name .. ": view version"
+    )
     if vector.expectedMetadata then
-      MiniTest.expect.equality(result.mode, vector.expectedMetadata.mode, vector.name .. ': mode')
+      MiniTest.expect.equality(result.mode, vector.expectedMetadata.mode, vector.name .. ": mode")
     end
-    if vector.outcome == 'ack' then
-      MiniTest.expect.equality(result.ack, vector.render.version, vector.name .. ': ACK')
-      MiniTest.expect.equality(result.resync, nil, vector.name .. ': no resync')
+    if vector.outcome == "ack" then
+      MiniTest.expect.equality(result.ack, vector.render.version, vector.name .. ": ACK")
+      MiniTest.expect.equality(result.resync, nil, vector.name .. ": no resync")
     else
-      MiniTest.expect.equality(result.ack, nil, vector.name .. ': no ACK')
-      MiniTest.expect.equality(result.resync, vector.render.viewId, vector.name .. ': resync')
+      MiniTest.expect.equality(result.ack, nil, vector.name .. ": no ACK")
+      MiniTest.expect.equality(result.resync, vector.render.viewId, vector.name .. ": resync")
     end
   end
-  local version = require('magit-lsp.version')
+  local version = require("magit-lsp.version")
   for _, vector in ipairs(fixture.advertisements) do
     local err = version.protocol_error(vector.result, vector.required)
     if vector.accepted then
-      MiniTest.expect.equality(err, nil, vector.name .. ': accepted advertisement')
+      MiniTest.expect.equality(err, nil, vector.name .. ": accepted advertisement")
     else
-      MiniTest.expect.equality(type(err), 'string', vector.name .. ': rejected advertisement')
+      MiniTest.expect.equality(type(err), "string", vector.name .. ": rejected advertisement")
       for _, fragment in ipairs(vector.errorContains) do
-        MiniTest.expect.equality(err ~= nil and err:find(fragment, 1, true) ~= nil, true,
-          vector.name .. ': error contains ' .. fragment)
+        MiniTest.expect.equality(
+          err ~= nil and err:find(fragment, 1, true) ~= nil,
+          true,
+          vector.name .. ": error contains " .. fragment
+        )
       end
     end
   end
 end
 
-T['user wipe requests close once per client and server close never echoes'] = function()
+T["user wipe requests close once per client and server close never echoes"] = function()
   child.lua([[
     local view = require('magit-lsp.view')
     local requests = require('magit-lsp.requests')
@@ -2244,11 +2428,17 @@ T['user wipe requests close once per client and server close never echoes'] = fu
     vim.api.nvim_buf_delete(disconnected.buf, { force = true })
     CLEAN_CLOSE = vim.wait(1000, function() return #view.order == 0 and debug_api.idle() end, 10)
   ]])
-  MiniTest.expect.equality(child.lua_get('CLOSES'), {
-    { 101, 'nested' }, { 101, 'nested' }, { 101, 'nested' }, { 202, 'nested' },
+  MiniTest.expect.equality(child.lua_get("CLOSES"), {
+    { 101, "nested" },
+    { 101, "nested" },
+    { 101, "nested" },
+    { 202, "nested" },
   })
-  MiniTest.expect.equality(child.lua_get('WARNINGS'), { 'magit-lsp view close failed: disconnected' })
-  MiniTest.expect.equality(child.lua_get('CLEAN_CLOSE'), true)
+  MiniTest.expect.equality(
+    child.lua_get("WARNINGS"),
+    { "magit-lsp view close failed: disconnected" }
+  )
+  MiniTest.expect.equality(child.lua_get("CLEAN_CLOSE"), true)
 end
 
 return T
