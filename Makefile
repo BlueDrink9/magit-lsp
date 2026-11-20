@@ -109,7 +109,7 @@ plain-presets: build
 update-capability-presets:
 	$(call run,update-capability-presets,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --generate)
 
-.PHONY: helix-smoke helix-smoke-stop
+.PHONY: helix-smoke helix-smoke-stop helix-config-check
 HELIX_BIN ?= hx
 HELIX_ARGS ?=
 helix-smoke: build
@@ -117,6 +117,9 @@ helix-smoke: build
 
 helix-smoke-stop:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/helix_smoke.py --stop $(HELIX_ARGS)
+
+helix-config-check: build
+	$(call run,helix-config-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_helix_config.py --helix "$(HELIX_BIN)" --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/helix-config-check")
 
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)

@@ -17,6 +17,24 @@ from ui_lib import fixtures
 from ui_lib.process_identity import record_command, signal_owned
 
 ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / "docs/client-helix-reference.md"
+CONFIG_MARKER = "<!-- helix-reference-config -->"
+
+
+def documented_toml(path: Path = DOCS) -> str:
+    """Return the fenced TOML block that the Helix reference presents to users."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        marker = lines.index(CONFIG_MARKER)
+    except ValueError as error:
+        raise RuntimeError(f"documented Helix config marker missing from {path}") from error
+    start = next((index for index in range(marker + 1, len(lines)) if lines[index].strip() == "```toml"), None)
+    if start is None:
+        raise RuntimeError(f"no TOML fence follows the Helix config marker in {path}")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].strip() == "```"), None)
+    if end is None:
+        raise RuntimeError(f"unterminated TOML fence after the Helix config marker in {path}")
+    return "\n".join(lines[start + 1:end]) + "\n"
 
 
 def run(*args: str, **kwargs: object) -> str:
@@ -90,12 +108,7 @@ def main() -> None:
     (repo / ".magit").write_text("")
     config = home / "config/helix"
     config.mkdir(parents=True)
-    (config / "languages.toml").write_text(
-        '[language-server.magit-lsp]\ncommand = "magit-lsp"\n\n'
-        '[[language]]\nname = "magit"\nscope = "source.magit"\n'
-        'file-types = [{ glob = "*.magit" }]\nroots = [".git"]\n'
-        'language-servers = ["magit-lsp"]\n'
-    )
+    (config / "languages.toml").write_text(documented_toml())
     tools = directory / "bin"
     tools.mkdir()
     server = tools / "magit-lsp"

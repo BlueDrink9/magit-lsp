@@ -4,6 +4,7 @@
 
 Illustrative generic Helix TOML (no editor-specific expansions):
 
+<!-- helix-reference-config -->
 ```toml
 [language-server.magit-lsp]
 command = "magit-lsp"
@@ -15,6 +16,12 @@ file-types = [{ glob = "*.magit" }]
 roots = [".git"]
 language-servers = ["magit-lsp"]
 ```
+
+`make helix-config-check` extracts this exact block and runs the installed
+`hx` with an isolated `HOME` and XDG configuration, cache, data and state. It
+fails unless the server attaches, renders the status and stages one file while
+HEAD and the worktree stay unchanged. It needs local `hx`, `tmux` and `git`,
+installs nothing and makes no wider Helix or operating-system promise.
 
 The editor helper is required; repository resolution has no launcher. With this
 generic configuration, `COMMIT_EDITMSG` does not attach automatically. Follow the
