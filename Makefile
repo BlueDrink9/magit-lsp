@@ -47,10 +47,10 @@ docs-check:
 	$(call run,docs-check,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/docs -p 'test_*.py' && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py $(DOC_FILES))
 
 format:
-	python3 scripts/format.py --working-tree --write
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --working-tree --write
 
 format-check:
-	$(call run,format-check,python3 scripts/format.py --working-tree)
+	$(call run,format-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --working-tree)
 
 hooks-install:
 	scripts/install-hooks.sh install
@@ -100,11 +100,11 @@ ui-unit:
 
 PLAIN_ARGS ?=
 plain-neovim: build
-	$(call run,plain-neovim,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" python3 scripts/test_plain_neovim.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
+	$(call run,plain-neovim,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_neovim.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
 
 .PHONY: plain-presets update-capability-presets
 plain-presets: build
-	$(call run,plain-presets,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" python3 scripts/test_plain_presets.py --binary "$(CURDIR)/target/debug/magit-lsp")
+	$(call run,plain-presets,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --binary "$(CURDIR)/target/debug/magit-lsp")
 
 update-capability-presets:
 	$(call run,update-capability-presets,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --generate)
@@ -113,10 +113,10 @@ update-capability-presets:
 HELIX_BIN ?= hx
 HELIX_ARGS ?=
 helix-smoke: build
-	python3 scripts/helix_smoke.py --helix "$(HELIX_BIN)" $(HELIX_ARGS)
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/helix_smoke.py --helix "$(HELIX_BIN)" $(HELIX_ARGS)
 
 helix-smoke-stop:
-	python3 scripts/helix_smoke.py --stop $(HELIX_ARGS)
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/helix_smoke.py --stop $(HELIX_ARGS)
 
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)
@@ -169,7 +169,7 @@ vscode-unit: vscode-deps
 # frozen lockfile with pnpm's hoisted linker first (build tree only).
 .PHONY: vscode-package
 vscode-package:
-	$(call run,vscode-package,pnpm --dir clients/vscode install --frozen-lockfile --node-linker=hoisted --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}" && version=$$(node -p "require('./clients/vscode/package.json').version") && mkdir -p build/vscode && pnpm --dir clients/vscode exec vsce package --out "../../build/vscode/magit-lsp-$$version.vsix" && python3 scripts/check_vsix.py "build/vscode/magit-lsp-$$version.vsix")
+	$(call run,vscode-package,pnpm --dir clients/vscode install --frozen-lockfile --node-linker=hoisted --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}" && version=$$(node -p "require('./clients/vscode/package.json').version") && mkdir -p build/vscode && pnpm --dir clients/vscode exec vsce package --out "../../build/vscode/magit-lsp-$$version.vsix" && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_vsix.py "build/vscode/magit-lsp-$$version.vsix")
 
 # Static guard for the manual publication workflow and its crate metadata.
 # PyYAML is unavailable, so the workflow is checked as text; the Cargo half
