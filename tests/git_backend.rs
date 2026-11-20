@@ -2,10 +2,157 @@ mod common;
 
 use common::*;
 use magit_lsp::git::GitRepo;
+use magit_lsp::git::{IgnoreRule, IgnoreScope};
 use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::ErrorKind;
 use proptest::prelude::*;
 use std::path::Path;
+
+#[test]
+fn ignore_scopes_preserve_content_and_literal_paths_are_exact() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("initial", [("tracked.txt", TEN_LINES)])
+        .build();
+    std::fs::create_dir_all(tmp.path().join("dir")).unwrap();
+    std::fs::write(tmp.path().join("dir/a [x].txt"), "untracked").unwrap();
+    std::fs::write(tmp.path().join("dir/otherx.txt"), "untracked").unwrap();
+    std::fs::write(tmp.path().join(".gitignore"), "# retained").unwrap();
+    repo.add_ignore_rule(
+        IgnoreScope::Root,
+        IgnoreRule::LiteralPath(Path::new("dir/a [x].txt")),
+    )
+    .unwrap();
+    assert!(git(tmp.path(), &["check-ignore", "dir/a [x].txt"]).contains("dir/a [x].txt"));
+    assert!(!std::process::Command::new("git")
+        .args(["check-ignore", "dir/otherx.txt"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let root_contents = std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
+    assert!(root_contents.starts_with("# retained\n"));
+    assert!(root_contents.ends_with("/dir/a\\ \\[x\\].txt\n"));
+    repo.add_ignore_rule(
+        IgnoreScope::Directory,
+        IgnoreRule::LiteralPath(Path::new("dir/otherx.txt")),
+    )
+    .unwrap();
+    assert!(tmp.path().join("dir/.gitignore").exists());
+    assert!(git(tmp.path(), &["check-ignore", "dir/otherx.txt"]).contains("dir/otherx.txt"));
+    repo.add_ignore_rule(IgnoreScope::Repository, IgnoreRule::Pattern("*.cache"))
+        .unwrap();
+    let repository_excludes =
+        std::fs::read_to_string(repo.common_dir().join("info/exclude")).unwrap();
+    assert!(repository_excludes.starts_with("# git ls-files"));
+    assert!(repository_excludes.ends_with("*.cache\n"));
+    std::fs::write(tmp.path().join("intended.cache"), "untracked").unwrap();
+    std::fs::write(tmp.path().join("unrelated.txt"), "untracked").unwrap();
+    assert!(git(tmp.path(), &["check-ignore", "intended.cache"]).contains("intended.cache"));
+    assert!(!std::process::Command::new("git")
+        .args(["check-ignore", "unrelated.txt"])
+        .current_dir(tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    repo.add_ignore_rule(IgnoreScope::User, IgnoreRule::Pattern("*.private"))
+        .unwrap();
+    let default_excludes =
+        std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("git/ignore");
+    assert_eq!(
+        std::fs::read_to_string(default_excludes).unwrap(),
+        "*.private\n"
+    );
+    assert_eq!(git(tmp.path(), &["show", "HEAD:tracked.txt"]), TEN_LINES);
+    assert_eq!(
+        git(tmp.path(), &["write-tree"]),
+        git(tmp.path(), &["rev-parse", "HEAD^{tree}"])
+    );
+}
+
+#[test]
+fn configured_user_excludes_and_linked_worktree_repository_scope_resolve_correctly() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("initial", [("tracked.txt", TEN_LINES)])
+        .build();
+    let configured = tmp.path().join("private/excludes");
+    git(
+        tmp.path(),
+        &[
+            "config",
+            "--local",
+            "core.excludesFile",
+            configured.to_str().unwrap(),
+        ],
+    );
+    repo.add_ignore_rule(
+        IgnoreScope::User,
+        IgnoreRule::Pattern("*.configured-private"),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&configured).unwrap(),
+        "*.configured-private\n"
+    );
+
+    let linked_path = tmp.path().join("linked-worktree");
+    git(
+        tmp.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "ignore-linked",
+            linked_path.to_str().unwrap(),
+        ],
+    );
+    let linked = GitRepo::discover(&linked_path).unwrap().unwrap();
+    assert_ne!(linked.git_dir(), linked.common_dir());
+    assert_eq!(linked.common_dir(), repo.common_dir());
+    linked
+        .add_ignore_rule(
+            IgnoreScope::Repository,
+            IgnoreRule::Pattern("*.linked-cache"),
+        )
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(repo.common_dir().join("info/exclude"))
+            .unwrap()
+            .ends_with("*.linked-cache\n")
+    );
+}
+
+#[test]
+fn ignore_rejects_traversal_symlinks_and_write_failures() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("initial", [("tracked.txt", TEN_LINES)])
+        .build();
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let index = git(tmp.path(), &["write-tree"]);
+    assert!(repo
+        .add_ignore_rule(
+            IgnoreScope::Root,
+            IgnoreRule::LiteralPath(Path::new("../outside"))
+        )
+        .is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(tmp.path().join("elsewhere"), tmp.path().join("linked"))
+            .unwrap();
+        assert!(repo
+            .add_ignore_rule(
+                IgnoreScope::Directory,
+                IgnoreRule::LiteralPath(Path::new("linked/file"))
+            )
+            .is_err());
+        assert!(!tmp.path().join("elsewhere/.gitignore").exists());
+    }
+    std::fs::create_dir(tmp.path().join(".gitignore")).unwrap();
+    assert!(repo
+        .add_ignore_rule(IgnoreScope::Root, IgnoreRule::Pattern("*.tmp"))
+        .is_err());
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(tmp.path(), &["write-tree"]), index);
+}
 
 #[test]
 fn notes_round_trip_on_explicit_commits_and_honor_configured_ref() {

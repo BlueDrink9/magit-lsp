@@ -18,6 +18,28 @@ pub enum PushDefault {
     Matching,
 }
 
+/// Destination for an ignore rule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IgnoreScope {
+    /// The repository root `.gitignore`.
+    Root,
+    /// A `.gitignore` beside the selected repository-relative path.
+    Directory,
+    /// The repository's shared Git directory `info/exclude`.
+    Repository,
+    /// The configured (or default) user excludes file.
+    User,
+}
+
+/// An ignore rule, either a literal repository path or an intentional pattern.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IgnoreRule<'a> {
+    /// Ignore exactly this repository-relative path.
+    LiteralPath(&'a Path),
+    /// Add this explicitly supplied Git ignore pattern.
+    Pattern(&'a str),
+}
+
 impl PushDefault {
     fn as_str(self) -> &'static str {
         match self {
@@ -41,6 +63,59 @@ impl PushDefault {
 }
 
 const RECOMMENDED_GIT_VERSION: &str = include_str!("../RECOMMENDED_GIT_VERSION");
+
+fn validate_repo_path(path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(Error::new(
+            "Ignore path must be a non-empty repository-relative path without traversal",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_symlink_components(root: &Path, path: &Path) -> Result<()> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| Error::new("Ignore destination escapes repository"))?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+            if metadata.file_type().is_symlink() {
+                return Err(Error::new("Ignore destination must not traverse symlinks"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn user_excludes_path(root: &Path) -> Result<PathBuf> {
+    let output = Command::new("git")
+        .args(["config", "--path", "--get", "core.excludesFile"])
+        .current_dir(root)
+        .output()?;
+    if output.status.success() {
+        return Ok(PathBuf::from(
+            String::from_utf8_lossy(&output.stdout).trim(),
+        ));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")));
+    base.map(|base| base.join("git/ignore")).ok_or_else(|| {
+        Error::new("Cannot resolve default user excludes file without HOME or XDG_CONFIG_HOME")
+    })
+}
 
 // Hash only this path's subtree. Never follow symlinks (including directory
 // links), and include sorted membership so collapsed untracked directories are
@@ -1106,6 +1181,72 @@ impl GitRepo {
     /// The repository's working-tree root.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Append an ignore rule to the explicitly selected scope without replacing existing bytes.
+    pub fn add_ignore_rule(&self, scope: IgnoreScope, rule: IgnoreRule<'_>) -> Result<()> {
+        use std::io::Write;
+        let (path, directory_scope) = match scope {
+            IgnoreScope::Root => (self.root.join(".gitignore"), false),
+            IgnoreScope::Directory => {
+                let IgnoreRule::LiteralPath(selected) = rule else {
+                    return Err(Error::new("Directory ignore scope requires a literal path"));
+                };
+                validate_repo_path(selected)?;
+                let parent = selected.parent().unwrap_or(Path::new(""));
+                (self.root.join(parent).join(".gitignore"), true)
+            }
+            IgnoreScope::Repository => (self.common_dir.join("info/exclude"), false),
+            IgnoreScope::User => (user_excludes_path(&self.root)?, false),
+        };
+        let line = match rule {
+            IgnoreRule::LiteralPath(selected) => {
+                validate_repo_path(selected)?;
+                let selected = if directory_scope {
+                    selected
+                        .file_name()
+                        .ok_or_else(|| Error::new("Ignore path must name a file"))?
+                } else {
+                    selected.as_os_str()
+                };
+                let mut escaped = String::new();
+                for ch in selected.to_string_lossy().chars() {
+                    if matches!(ch, '\\' | '*' | '?' | '[' | ']' | '#' | '!' | ' ') {
+                        escaped.push('\\');
+                    }
+                    escaped.push(ch);
+                }
+                format!("/{escaped}")
+            }
+            IgnoreRule::Pattern(pattern)
+                if !pattern.is_empty() && !pattern.contains('\n') && !pattern.contains('\r') =>
+            {
+                pattern.to_owned()
+            }
+            IgnoreRule::Pattern(_) => {
+                return Err(Error::new("Invalid empty or multiline ignore pattern"))
+            }
+        };
+        if path.starts_with(&self.root) {
+            reject_symlink_components(&self.root, &path)?;
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let len = file.metadata()?.len();
+        if len > 0 {
+            let bytes = std::fs::read(&path)?;
+            if !bytes.ends_with(b"\n") {
+                file.write_all(b"\n")?;
+            }
+        }
+        file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
+        Ok(())
     }
 
     /// The per-worktree Git directory.
