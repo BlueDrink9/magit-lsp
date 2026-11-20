@@ -1748,6 +1748,145 @@ fn plain_gate_background_refresh_preserves_todo_offer_without_rich_notifications
 }
 
 #[test]
+fn plain_selection_navigation_waits_for_success_and_ignores_invalid_edits() {
+    for (menu, key) in [("open.commit", "f"), ("open.rebase", "i")] {
+        for outcome in ["success", "unsupported", "rejected", "superseded"] {
+            let (repo, _) = fixtures::RepoFixture::new()
+                .commit("chosen target", [("f.txt", "base\n")])
+                .commit("unselected tip", [("f.txt", "tip\n")])
+                .staged_file("f.txt", "fixup content\n")
+                .build();
+            let uri = format!("file://{}/.magit", repo.path().display());
+            let mut capabilities =
+                editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities();
+            capabilities["window"]["showDocument"] = json!({"support":outcome != "unsupported"});
+            let mut client = ClientPump::new(
+                stdio::TestServer::spawn(&[]),
+                Profile::Standard,
+                capabilities,
+            );
+            let open = client.editor.open(&uri, "");
+            client.send(open);
+            client.until(|c| !c.editor.text(&uri).is_empty());
+            plain_gate_run(&mut client, &uri, "", menu, None);
+            let row = if key == "f" { "Commit" } else { "Rebase" };
+            let action = plain_gate_action(&mut client, &uri, row, "menu.run-action", Some(key));
+            assert!(
+                !client
+                    .editor
+                    .outbound
+                    .iter()
+                    .any(|m| m["method"] == "window/showDocument"),
+                "ordinary status/menu edits must not navigate"
+            );
+            let request = client
+                .editor
+                .execute_command("magit.command", json!([action]));
+            let id = client.send(request);
+            let mut edit = None;
+            let mut completed = false;
+            // Hold the actual selection edit response while the reader continues
+            // processing ordinary LSP requests. No timer or viewport repair is used.
+            while edit.is_none() || !completed {
+                let message = client.server.recv();
+                if message["method"] == "workspace/applyEdit" {
+                    assert!(
+                        edit.replace(message).is_none(),
+                        "only one edit may be in flight"
+                    );
+                } else if message["method"] == "window/showDocument" {
+                    panic!("selection navigation preceded the applyEdit result: {message}");
+                } else if message["id"] == id && message.get("method").is_none() {
+                    assert!(message["error"].is_null(), "{message}");
+                    completed = true;
+                } else if message.get("id").is_some() && message.get("method").is_some() {
+                    client.dispatch(&message);
+                } else {
+                    client.server.notifications.push(message);
+                }
+            }
+            let edit = edit.unwrap();
+            plain_code_actions(&mut client, &uri, 0);
+            assert!(
+                !client
+                    .editor
+                    .outbound
+                    .iter()
+                    .any(|m| m["method"] == "window/showDocument"),
+                "an unanswered applyEdit must not navigate"
+            );
+
+            let mut response = json!({"jsonrpc":"2.0","id":edit["id"],"result":{"applied":false}});
+            if outcome != "rejected" {
+                // Echo the real edit before acknowledging it: even a synchronized
+                // document must not navigate until its correlated result arrives.
+                for frame in client.editor.dispatch(&edit) {
+                    if frame.get("result").is_some() {
+                        response = frame;
+                    } else {
+                        client.server.send(frame);
+                    }
+                }
+                assert_eq!(response["result"]["applied"], true);
+                assert!(client.editor.text(&uri).starts_with("Log —"));
+                plain_code_actions(&mut client, &uri, 0);
+                assert!(
+                    !client
+                        .editor
+                        .outbound
+                        .iter()
+                        .any(|m| m["method"] == "window/showDocument"),
+                    "didChange is not a successful applyEdit response"
+                );
+                if outcome == "superseded" {
+                    plain_gate_run(&mut client, &uri, "chosen target", "common.cancel", None);
+                }
+            }
+            client.server.send(response);
+            if outcome == "success" {
+                client.until(|c| {
+                    c.editor
+                        .outbound
+                        .iter()
+                        .any(|m| m["method"] == "window/showDocument")
+                });
+                let navigation = client
+                    .editor
+                    .outbound
+                    .iter()
+                    .find(|m| m["method"] == "window/showDocument")
+                    .unwrap();
+                assert_eq!(
+                    navigation["params"],
+                    json!({"uri":uri,"external":false,"takeFocus":true,
+                    "selection":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}}})
+                );
+                // A subsequent ordinary render cannot replay the transition intent.
+                plain_gate_run(&mut client, &uri, "chosen target", "common.cancel", None);
+            } else if outcome == "superseded" {
+                client.until(|c| c.editor.text(&uri).contains("Head:"));
+            }
+            // Round trips drain any pending requests, including a wrongly sent
+            // navigation. Controller tests below cover response correlation directly.
+            for _ in 0..5 {
+                plain_code_actions(&mut client, &uri, 0);
+            }
+            assert_eq!(
+                client
+                    .editor
+                    .outbound
+                    .iter()
+                    .filter(|m| m["method"] == "window/showDocument")
+                    .count(),
+                usize::from(outcome == "success"),
+                "{menu}: {outcome}"
+            );
+            plain_gate_finish(client);
+        }
+    }
+}
+
+#[test]
 fn plain_gate_fixup_selected_target_cancel_confirm_and_readable_failure() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("chosen target", [("f.txt", "base\n")])
