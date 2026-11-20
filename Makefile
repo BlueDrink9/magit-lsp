@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -51,6 +51,27 @@ format:
 
 format-check:
 	$(call run,format-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --working-tree)
+
+# Explicit opt-in whole-repository sweep for one formatter. `format-all-list`
+# prints the exact tracked eligible files and counts; use `format-all` only on a
+# clean working copy of the selected files (it refuses to overwrite unstaged
+# changes) and stage exactly those paths afterwards.
+FORMATTER ?= rustfmt
+FORMAT_CHOICES := rustfmt stylua prettier
+
+format-all-list:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --list
+
+format-all-check:
+	@case " $(FORMAT_CHOICES) " in *" $(FORMATTER) "*) ;; *) echo 'format-all-check: FORMATTER must be rustfmt, stylua or prettier' >&2; exit 2;; esac
+	$(call run,format-all-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --all-tracked --formatter $(FORMATTER))
+
+format-all:
+	@case " $(FORMAT_CHOICES) " in *" $(FORMATTER) "*) ;; *) echo 'format-all: FORMATTER must be rustfmt, stylua or prettier' >&2; exit 2;; esac
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --all-tracked --formatter $(FORMATTER) --write
+
+format-test:
+	$(call run,format-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_format.py)
 
 hooks-install:
 	scripts/install-hooks.sh install

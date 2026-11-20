@@ -17,6 +17,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Provision the formatter tools explicitly: this job must not assume a Nix
+      # dev shell is active. rustfmt matches the stable toolchain used by the
+      # test job; the StyLua pin matches scripts/format.py and the flake package.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -24,6 +31,9 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.13.1
+
+      - name: Install pinned StyLua
+        run: cargo install stylua --version 2.6.0 --locked
 
       - name: Install VSCode dependencies
         run: make vscode-deps

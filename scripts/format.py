@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check or format changed source files, including staged index content."""
+"""Check or format changed source files, including staged index content and
+explicit whole-repository tracked sweeps."""
 
 from __future__ import annotations
 
@@ -12,11 +13,11 @@ import sys
 import tempfile
 import tomllib
 
-TOOL_ROOT = Path(__file__).resolve().parents[1]
 ROOT = Path.cwd()
 LUA = {".lua"}
 WEB = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
 RUST = {".rs"}
+FORMATTERS = ("rustfmt", "stylua", "prettier")
 SKIP_PARTS = {"node_modules", "target", "vendor", "fixtures", "generated"}
 
 
@@ -94,6 +95,18 @@ def eligible(path: str) -> bool:
     return suffix in RUST
 
 
+def formatter_for(path: str) -> str | None:
+    """Return the formatter that owns an eligible path."""
+    suffix = Path(path).suffix.lower()
+    if suffix in LUA:
+        return "stylua"
+    if suffix in WEB:
+        return "prettier"
+    if suffix in RUST:
+        return "rustfmt"
+    return None
+
+
 def invoke(command: list[str], cwd: Path, label: str) -> bool:
     """Run one formatter and print readable missing-tool or failure guidance."""
     try:
@@ -109,14 +122,19 @@ def invoke(command: list[str], cwd: Path, label: str) -> bool:
     return True
 
 
-def format_paths(paths: list[str], tree: Path, write: bool) -> bool:
-    """Run shared language formatters for paths in a workspace snapshot."""
-    lua = [path for path in paths if Path(path).suffix.lower() in LUA]
-    web = [path for path in paths if Path(path).suffix.lower() in WEB]
-    rust = [path for path in paths if Path(path).suffix.lower() in RUST]
+def format_paths(paths: list[str], tree: Path, write: bool, selected: list[str] | None = None) -> bool:
+    """Run the selected shared language formatters for paths in a workspace snapshot."""
+    wanted = None if selected is None else set(selected)
+
+    def picked(name: str) -> bool:
+        return wanted is None or name in wanted
+
+    lua = [path for path in paths if formatter_for(path) == "stylua" and picked("stylua")]
+    web = [path for path in paths if formatter_for(path) == "prettier" and picked("prettier")]
+    rust = [path for path in paths if formatter_for(path) == "rustfmt" and picked("rustfmt")]
     okay = True
     stylua = shutil.which("stylua")
-    prettier_path = TOOL_ROOT / "clients/vscode/node_modules/.bin/prettier"
+    prettier_path = ROOT / "clients/vscode/node_modules/.bin/prettier"
     prettier = shutil.which(str(prettier_path))
     for name, tool, files, missing in (
         ("StyLua 2.6.0", stylua, lua, "install StyLua 2.6.0 on PATH, for example by entering the Nix dev shell with nix develop"),
@@ -183,6 +201,33 @@ def staged_records(index_env_vars: dict[str, str]) -> dict[str, tuple[int, str]]
     return records
 
 
+def tracked_eligible(formatters: list[str] | None = None) -> list[str]:
+    """Return tracked regular maintained sources, optionally restricted to formatters."""
+    records = staged_records(os.environ.copy())
+    paths = [path for path in records if eligible(path)]
+    if formatters:
+        paths = [path for path in paths if formatter_for(path) in formatters]
+    return sorted(paths)
+
+
+def ensure_clean_worktree(paths: list[str]) -> None:
+    """Refuse to overwrite tracked inputs that differ from the index."""
+    if not paths:
+        return
+    raw = run_git("diff", "--name-only", "-z", "--", *paths)
+    dirty = [path for path in raw.decode("utf-8", errors="surrogateescape").split("\0") if path]
+    if dirty:
+        raise RuntimeError(
+            "refusing to overwrite unstaged changes in: "
+            + ", ".join(dirty)
+            + "; stage or revert them before the full sweep"
+        )
+    for path in paths:
+        candidate = ROOT / path
+        if candidate.is_symlink() or not candidate.is_file():
+            raise RuntimeError(f"tracked formatter input is not a regular file: {path}")
+
+
 def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_env_vars: dict[str, str], gitdir: Path) -> int:
     """Format staged blobs in isolation, then atomically publish eligible replacements."""
     effective_index = Path(os.environ.get("GIT_INDEX_FILE", str(index_path))).resolve()
@@ -247,27 +292,65 @@ def snapshot(base: str | None, destination: Path) -> None:
             raise RuntimeError("could not materialize HEAD snapshot")
 
 
+def sweep_check(formatter: str) -> int:
+    """Fail unless every tracked file owned by formatter is formatted in the index."""
+    paths = tracked_eligible([formatter])
+    if not paths:
+        print(f"format: no tracked {formatter} sources")
+        return 0
+    with tempfile.TemporaryDirectory(prefix="magit-format-") as temporary:
+        tree = Path(temporary)
+        snapshot(None, tree)
+        return 0 if format_paths(paths, tree, False, [formatter]) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Format or check manual, staged-index or committed changed source paths."""
+    """Format or check changed, staged or all tracked maintained source paths."""
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--working-tree", action="store_true", help="check working-tree changes")
     mode.add_argument("--staged", action="store_true", help="check staged index content")
     mode.add_argument("--base", metavar="COMMIT", help="check HEAD changes against commit, or EMPTY_TREE for a new branch")
-    parser.add_argument("--write", action="store_true", help="write formatted working-tree files (manual mode only)")
+    mode.add_argument("--all-tracked", action="store_true", help="check or write every tracked maintained source")
+    mode.add_argument("--list", action="store_true", help="list tracked maintained sources by formatter")
+    parser.add_argument("--formatter", action="append", choices=FORMATTERS, help="restrict --all-tracked or --list to a formatter (repeatable)")
+    parser.add_argument("--write", action="store_true", help="write formatted working-tree files (working-tree or all-tracked mode)")
     parser.add_argument("--fix", action="store_true", help="safely fix staged content (hook mode only)")
+    parser.add_argument("--sweep", choices=FORMATTERS, help="after --staged --fix, verify all tracked files for one formatter")
     args = parser.parse_args(argv)
     try:
-        if args.write and not args.working_tree:
-            raise RuntimeError("--write is only allowed with --working-tree")
+        if args.write and not (args.working_tree or args.all_tracked):
+            raise RuntimeError("--write is only allowed with --working-tree or --all-tracked")
         if args.fix and (not args.staged or args.write):
             raise RuntimeError("--fix is only allowed with --staged")
+        if args.formatter and not (args.all_tracked or args.list):
+            raise RuntimeError("--formatter is only allowed with --all-tracked or --list")
+        if args.all_tracked and not args.formatter:
+            raise RuntimeError("--all-tracked requires at least one explicit --formatter")
+        if args.sweep and (not args.staged or not args.fix):
+            raise RuntimeError("--sweep is only allowed with --staged --fix")
         global ROOT
         ROOT = Path(run_git("rev-parse", "--show-toplevel").decode().strip())
-        paths = [path for path in (working_paths() if args.working_tree else changed_paths(args.base)) if eligible(path)]
-        if not paths:
-            print("format: no owned source changes")
+        if args.list:
+            for name in args.formatter or FORMATTERS:
+                paths = tracked_eligible([name])
+                print(f"{name}: {len(paths)}")
+                for path in paths:
+                    print(f"  {path}")
             return 0
+        if args.all_tracked:
+            paths = tracked_eligible(args.formatter)
+            if not paths:
+                print(f"format: no tracked {', '.join(args.formatter)} sources")
+                return 0
+            if args.write:
+                ensure_clean_worktree(paths)
+                return 0 if format_paths(paths, ROOT, True, args.formatter) else 1
+            with tempfile.TemporaryDirectory(prefix="magit-format-") as temporary:
+                tree = Path(temporary)
+                snapshot(None, tree)
+                return 0 if format_paths(paths, tree, False, args.formatter) else 1
+        paths = [path for path in (working_paths() if args.working_tree else changed_paths(args.base)) if eligible(path)]
         if args.staged and args.fix:
             if run_git("ls-files", "-u", "-z"):
                 raise RuntimeError("unmerged index entries found; resolve conflicts before formatting")
@@ -276,7 +359,13 @@ def main(argv: list[str] | None = None) -> int:
                 index_path = gitdir / "index"
                 snapshot_root = Path(temporary) / "tree"
                 snapshot_root.mkdir()
-                return staged_fix(paths, snapshot_root, index_path, os.environ.copy(), gitdir)
+                status = staged_fix(paths, snapshot_root, index_path, os.environ.copy(), gitdir)
+                if status:
+                    return status
+                return sweep_check(args.sweep) if args.sweep else 0
+        if not paths:
+            print("format: no owned source changes")
+            return 0
         with tempfile.TemporaryDirectory(prefix="magit-format-") as temporary:
             tree = Path(temporary)
             if not args.working_tree:
