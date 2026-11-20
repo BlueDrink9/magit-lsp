@@ -174,6 +174,20 @@ fn user_excludes_rejects_symlink_destinations_and_parents() {
     let (tmp, repo) = RepoFixture::new()
         .commit("initial", [("tracked.txt", TEN_LINES)])
         .build();
+    let normal = tmp.path().join("normal/excludes");
+    git(
+        tmp.path(),
+        &[
+            "config",
+            "--local",
+            "core.excludesFile",
+            normal.to_str().unwrap(),
+        ],
+    );
+    repo.add_ignore_rule(IgnoreScope::User, IgnoreRule::Pattern("*.normal"))
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&normal).unwrap(), "*.normal\n");
+
     let target = tmp.path().join("target-excludes");
     std::fs::write(&target, "# exact target bytes\n").unwrap();
     let configured = tmp.path().join("linked-excludes");
