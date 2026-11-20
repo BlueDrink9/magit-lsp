@@ -25,9 +25,23 @@ vim.lsp.handlers['workspace/applyEdit'] = function(...)
     file:close()
   end
   log('applyEdit-before')
+  local before = buf and vim.api.nvim_buf_line_count(buf) or 0
   local result = apply(...)
   log('applyEdit-after', result)
   if result and result.applied then applied = applied + 1 end
+  -- A server prompt transition replaces the whole document with a shorter one.
+  -- The window keeps its previous top line, so the new leading prompt rows can
+  -- start above the viewport; restore visibility without touching the cursor.
+  if result and result.applied and buf and params and params.edit then
+    local after = vim.api.nvim_buf_line_count(buf)
+    local first = (params.edit.documentChanges or {})[1]
+    local edits = first and first.edits or {}
+    local range = edits[1] and edits[1].range
+    if before > after and range and range.start.line == 0
+      and range.start.character == 0 and vim.fn.line('w0') > 1 then
+      vim.fn.winrestview({ topline = 1, topfill = 0 })
+    end
+  end
   -- Retain the presentation text this server edit applied so scenarios can poll
   -- for a repair without inferring convergence from document content.
   if result and result.applied and buf and uri:match('/%.magit$')
