@@ -217,6 +217,45 @@ pub struct PlainSettings {
     pub max_section_lines: u32,
     /// Maximum time in milliseconds to wait for a paired delete/insert key edit.
     pub keys_pair_timeout_ms: u64,
+    /// Default Plain key-policy choice, disabled unless explicitly enabled.
+    pub keys_default: bool,
+    /// Per-client Plain key-policy choices, keyed by exact `clientInfo.name`.
+    pub keys_clients: BTreeMap<String, bool>,
+}
+
+/// Stable source for an effective Plain key-policy choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlainKeysSource {
+    /// The built-in disabled default.
+    BuiltIn,
+    /// The configured user-wide default.
+    UserDefault,
+    /// A matching exact client-name setting.
+    ExactClient,
+    /// The per-document toggle.
+    Document,
+    /// A quirk prohibition that forces the setting off.
+    Quirk,
+}
+
+/// Effective Plain key-policy state and the layer that selected it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectivePlainKeys {
+    /// Whether key policy is enabled.
+    pub enabled: bool,
+    /// The highest-precedence source that selected the state.
+    pub source: PlainKeysSource,
+}
+
+/// Resolve key-policy settings without consulting repository state.
+pub fn resolve_plain_keys(settings: &PlainSettings, client_name: Option<&str>, document: Option<bool>, quirk_allowed: bool) -> EffectivePlainKeys {
+    if !quirk_allowed { return EffectivePlainKeys { enabled: false, source: PlainKeysSource::Quirk }; }
+    if let Some(enabled) = document { return EffectivePlainKeys { enabled, source: PlainKeysSource::Document }; }
+    if let Some(enabled) = client_name.and_then(|name| settings.keys_clients.get(name)).copied() {
+        return EffectivePlainKeys { enabled, source: PlainKeysSource::ExactClient };
+    }
+    if settings.keys_default { return EffectivePlainKeys { enabled: true, source: PlainKeysSource::UserDefault }; }
+    EffectivePlainKeys { enabled: false, source: PlainKeysSource::BuiltIn }
 }
 
 /// Pick preference limits, global or per client name.
@@ -284,6 +323,8 @@ impl Default for Config {
             plain: PlainSettings {
                 max_section_lines: 400,
                 keys_pair_timeout_ms: 250,
+                keys_default: false,
+                keys_clients: BTreeMap::new(),
             },
             pick: PickSettings::default(),
             presentation_files: vec![".magit".to_owned()],
@@ -364,6 +405,7 @@ pub struct LoadOptions {
 pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
     let mut config = Config::default();
     let mut files = Vec::new();
+    let mut user_file_pair_timeout_ms = None;
 
     let resolved = resolve_config_path(options.config_path.as_deref());
     if let Some(path) = resolved {
@@ -373,6 +415,7 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
             let mut visiting = Vec::new();
             load_file(&path, &mut layered, &mut visiting)?;
             apply_layered(&mut config, layered);
+            user_file_pair_timeout_ms = Some(config.plain.keys_pair_timeout_ms);
             files.push(path);
         } else if explicit {
             return Err(ConfigError::new("config file not found").at_file(path));
@@ -381,6 +424,11 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
 
     if let Some(init) = &options.initialization {
         apply_initialization(&mut config, init)?;
+        if init.get("plain").and_then(|plain| plain.get("keys")).and_then(|keys| keys.get("pair_timeout_ms")).is_some() {
+            if let Some(timeout) = user_file_pair_timeout_ms {
+                config.plain.keys_pair_timeout_ms = timeout;
+            }
+        }
     }
 
     if config.trust_repo_config {
@@ -394,6 +442,8 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
                 // Per-repo config may only tune keys and display settings.
                 layered.profile = None;
                 layered.trust_repo_config = None;
+                layered.plain_keys_default = None;
+                layered.plain_keys_clients.clear();
                 apply_layered(&mut config, layered);
                 files.push(repo_config);
             }
@@ -485,6 +535,8 @@ struct Layered {
     actions_title_style: Option<TitleStyle>,
     plain_max_section_lines: Option<u32>,
     plain_keys_pair_timeout_ms: Option<u64>,
+    plain_keys_default: Option<bool>,
+    plain_keys_clients: BTreeMap<String, bool>,
     pick_max_items: Option<usize>,
     pick_clients: BTreeMap<String, usize>,
     presentation_files: Option<Vec<String>>,
@@ -528,6 +580,8 @@ fn apply_layered(config: &mut Config, layered: Layered) {
         config.plain.max_section_lines = max;
     }
     if let Some(timeout) = layered.plain_keys_pair_timeout_ms { config.plain.keys_pair_timeout_ms = timeout; }
+    if let Some(enabled) = layered.plain_keys_default { config.plain.keys_default = enabled; }
+    config.plain.keys_clients.extend(layered.plain_keys_clients);
     if let Some(max_items) = layered.pick_max_items {
         config.pick.max_items = Some(max_items);
     }
@@ -802,10 +856,21 @@ fn apply_document(
                         "keys" => {
                             let keys = settings_table(value, "plain.keys", file, line)?;
                             for (key, value) in keys.iter() {
-                                if key != "pair_timeout_ms" { return Err(unknown_key(file, item_line(source, value), "plain.keys", key)); }
-                                let timeout = integer(value, "plain.keys.pair_timeout_ms", file, item_line(source, value))?;
-                                if timeout == 0 { return Err(ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file_line(file, item_line(source, value))); }
-                                layered.plain_keys_pair_timeout_ms = Some(timeout as u64);
+                                match key {
+                                    "pair_timeout_ms" => {
+                                        let timeout = integer(value, "plain.keys.pair_timeout_ms", file, item_line(source, value))?;
+                                        if timeout == 0 { return Err(ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file_line(file, item_line(source, value))); }
+                                        layered.plain_keys_pair_timeout_ms = Some(timeout as u64);
+                                    }
+                                    "default" => layered.plain_keys_default = Some(value.as_bool().ok_or_else(|| ConfigError::new("`plain.keys.default` must be a boolean").at_file_line(file, item_line(source, value)))?),
+                                    "clients" => {
+                                        for (client, enabled) in settings_table(value, "plain.keys.clients", file, item_line(source, value))?.iter() {
+                                            let client_value = enabled.as_bool().ok_or_else(|| ConfigError::new(format!("`plain.keys.clients.{client}` must be a boolean")).at_file_line(file, item_line(source, enabled)))?;
+                                            layered.plain_keys_clients.insert(client.to_string(), client_value);
+                                        }
+                                    }
+                                    _ => return Err(unknown_key(file, item_line(source, value), "plain.keys", key)),
+                                }
                             }
                         }
                         other => return Err(unknown_key(file, line, "plain", other)),
@@ -1086,9 +1151,13 @@ fn apply_initialization(config: &mut Config, value: &serde_json::Value) -> Resul
         for (name, value) in plain {
             if name == "keys" {
                 let keys=value.as_object().ok_or_else(||ConfigError::new("`plain.keys` must be an object").at_file(&label))?;
-                for (key,v) in keys { if key!="pair_timeout_ms" { return Err(ConfigError::new(format!("unknown setting `plain.keys.{key}`")).at_file(&label)); }
-                    let timeout=v.as_u64().filter(|n|*n>0).ok_or_else(||ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file(&label))?;
-                    config.plain.keys_pair_timeout_ms=timeout;
+                for (key,v) in keys {
+                    match key.as_str() {
+                        "pair_timeout_ms" => { let timeout=v.as_u64().filter(|n|*n>0).ok_or_else(||ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file(&label))?; config.plain.keys_pair_timeout_ms=timeout; }
+                        "default" => config.plain.keys_default=v.as_bool().ok_or_else(||ConfigError::new("`plain.keys.default` must be a boolean").at_file(&label))?,
+                        "clients" => { let clients=v.as_object().ok_or_else(||ConfigError::new("`plain.keys.clients` must be an object").at_file(&label))?; for (client,enabled) in clients { config.plain.keys_clients.insert(client.clone(), enabled.as_bool().ok_or_else(||ConfigError::new(format!("`plain.keys.clients.{client}` must be a boolean")).at_file(&label))?); } }
+                        _ => return Err(ConfigError::new(format!("unknown setting `plain.keys.{key}`")).at_file(&label)),
+                    }
                 }
                 continue;
             }
