@@ -110,6 +110,14 @@ impl FakeEditor {
         }
         m
     }
+    /// Replay one recorded didChange verbatim while advancing the modeled document version.
+    pub fn replay_did_change(&mut self, message: Value) {
+        assert_eq!(message["method"], "textDocument/didChange");
+        let uri = message["params"]["textDocument"]["uri"].as_str().expect("trace URI");
+        let version = message["params"]["textDocument"]["version"].as_i64().expect("trace version");
+        self.documents.get_mut(uri).expect("open trace document").version = version;
+        self.outbound.push(message);
+    }
     /// Release deferred didChange notifications.
     pub fn flush(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.pending)

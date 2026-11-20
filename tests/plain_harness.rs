@@ -88,6 +88,34 @@ fn shared_declaration_vectors_match_production_server_admission() {
 }
 
 #[test]
+fn plain_key_edit_shape_profiles_replay_order_versions_and_test_only_classification() {
+    use editor_model::edit_shapes::{classify, notifications, Shape, PROFILES};
+    assert_eq!(PROFILES.iter().map(|profile| profile.name).collect::<Vec<_>>(), [
+        "selection-replace-pair", "selection-replace-single", "rangeless-full-text",
+        "batched-changes", "paste-multichar", "undo-after-repair",
+    ]);
+    for profile in PROFILES {
+        let records = notifications(profile.trace);
+        assert!(!records.is_empty(), "{}", profile.name);
+        assert_eq!(classify(&records), profile.shape, "{}", profile.name);
+        let uri = records[0]["params"]["textDocument"]["uri"].as_str().unwrap();
+        let mut editor = FakeEditor::new(Profile::Standard);
+        editor.open(uri, "abcd");
+        let versions = records.iter().map(|record| record["params"]["textDocument"]["version"].as_i64().unwrap()).collect::<Vec<_>>();
+        for record in records.iter().cloned() { editor.replay_did_change(record); }
+        assert_eq!(editor.outbound, records, "{} payload/order", profile.name);
+        assert_eq!(editor.documents[uri].version, *versions.last().unwrap(), "{} final version", profile.name);
+    }
+    assert_eq!(classify(&notifications(PROFILES[0].trace)), Shape::DeleteThenInsertPair);
+    assert_eq!(classify(&notifications(PROFILES[2].trace)), Shape::Other, "rangeless changes are explicitly outside accepted shapes");
+    assert_eq!(classify(&notifications(PROFILES[3].trace)), Shape::Other, "batched changes are explicitly outside accepted shapes");
+    assert_eq!(classify(&notifications(PROFILES[4].trace)), Shape::Other, "multi-character paste is explicitly outside accepted shapes");
+    assert_eq!(classify(&notifications(PROFILES[5].trace)), Shape::Other, "undo/repair is explicitly outside accepted shapes");
+    let single_insert = json!({"params":{"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"i"}]}});
+    assert_eq!(classify(&[single_insert]), Shape::SingleInsert, "single-insert pattern is classified without production policy");
+}
+
+#[test]
 fn queued_prompt_routing_uses_unique_correlated_request_ids() {
     let prompt_module = editor_model::Module { declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#), behaves: &[] };
     // anchor: rich text-prompt contract in tests/data/client-contracts.json and stdio evidence in tests/server_async.rs.

@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file://[redacted]/.magit","version":8},"contentChanges":[{"text":"authoritative repaired text"}]}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file://[redacted]/.magit","version":9},"contentChanges":[{"text":"undone text"}]}}

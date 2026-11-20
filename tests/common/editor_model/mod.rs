@@ -9,6 +9,8 @@ pub mod rich;
 pub mod prompts;
 #[path = "presets.rs"]
 pub mod presets;
+#[path = "edit_shapes.rs"]
+pub mod edit_shapes;
 
 /// Supported exact minimum declaration bases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

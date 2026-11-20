@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file://[redacted]/.magit","version":2},"contentChanges":[{"text":"axc"}]}}
