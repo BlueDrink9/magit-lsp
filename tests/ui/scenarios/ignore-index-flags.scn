@@ -1,0 +1,56 @@
+# T044 Part 9: index flags are independent, explicit and reversible.
+fixture: modified-two-files
+---
+sh: mkdir -p dir; printf 'tracked\n' > 'dir/a b*.txt'; printf 'tracked\n' > dir/other.txt; git add dir && git commit -m 'index flags fixture' >/dev/null; printf 'changed\n' >> 'dir/a b*.txt'; printf 'changed\n' >> dir/other.txt; printf 'untracked\n' > untracked.txt; git add g.txt; git rev-parse HEAD > .git/flags-head; git ls-files -s > .git/flags-index; git diff --cached --binary > .git/flags-staged; git hash-object 'dir/a b*.txt' > .git/flags-odd; git hash-object dir/other.txt > .git/flags-other
+wait screen contains "dir/a b*.txt"
+goto "M dir/a b*.txt"
+keys: i
+wait
+keys: w
+wait prompt
+expect screen matches /dir\/a b\*\.txt/
+keys: Enter
+wait
+sh: test "$(git ls-files -v -- 'dir/a b*.txt' | cut -c1)" = S && test "$(git ls-files -v -- dir/other.txt | cut -c1)" = H
+goto "0"
+keys: i
+wait
+keys: u
+wait prompt
+keys: C-u 'dir/a b*.txt' Enter
+wait
+sh: test "$(git ls-files -v -- 'dir/a b*.txt' | cut -c1)" = s && test "$(git ls-files -v -- dir/other.txt | cut -c1)" = H
+# The hidden path is cleared from the header by entering its exact path.
+goto "0"
+keys: i
+wait
+keys: W
+wait prompt
+keys: C-u 'dir/a b*.txt' Enter
+wait
+sh: test "$(git ls-files -v -- 'dir/a b*.txt' | cut -c1)" = h
+goto "0"
+keys: i
+wait
+keys: U
+wait prompt
+keys: C-u 'dir/a b*.txt' Enter
+wait
+sh: test "$(git ls-files -v -- 'dir/a b*.txt' | cut -c1)" = H && test "$(git ls-files -v -- dir/other.txt | cut -c1)" = H
+# Cancellation and an untracked path produce readable feedback without writes.
+goto "M dir/other.txt"
+keys: i
+wait
+keys: w
+wait prompt
+keys: Escape
+wait
+goto "M dir/other.txt"
+keys: i
+wait
+keys: w
+wait prompt
+keys: C-u untracked.txt Enter
+wait
+expect screen contains "path is not tracked"
+sh: test "$(git ls-files -v -- 'dir/a b*.txt' | cut -c1)$(git ls-files -v -- dir/other.txt | cut -c1)" = HH && test "$(git rev-parse HEAD)" = "$(cat .git/flags-head)" && git ls-files -s | cmp - .git/flags-index && git diff --cached --binary | cmp - .git/flags-staged && test "$(git hash-object 'dir/a b*.txt')" = "$(cat .git/flags-odd)" && test "$(git hash-object dir/other.txt)" = "$(cat .git/flags-other)"
