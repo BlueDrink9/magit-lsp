@@ -138,6 +138,91 @@ checkout and artifact actions are revision-pinned and Rust is fixed at 1.94.1.
 Update pins through review. Regular CI runs offline contract tests, not expensive
 release builds.
 
+## Portable production toolchain decision (NREL-01)
+
+This is a researched contract, not an executed build. No Nix production
+derivation, archive, Windows executable or macOS output exists yet, and nothing
+below is a runtime result. It binds NREL-02..NREL-12 to one builder/runtime/
+identity contract and names the bounded experiment where a mechanism is still
+unproven. The current rustup `release-locked` path remains the only executed
+release path until NREL-06 replaces it.
+
+### Decision table
+
+| Area | Decision | Status and limits |
+| --- | --- | --- |
+| One compiler source | `rustc`/`cargo` come only from the flake's locked `nixpkgs` input (`flake.lock:4-10`, rev `04906337b6d53e8bb0eaf0470ae9f070a4d4eb55`, `nixos-unstable`). At that rev `rust_1_99` sets `rustcVersion = "1.99.1"`. Every target uses this compiler. The release workflow's separate rustup 1.94.1 install is a legacy release path owned by NREL-06, never the production contract; no rust-overlay or second compiler pin is added. | VERIFIED at the locked rev (`.../pkgs/development/compilers/rust/1_99.nix`). The existing `docs/RELEASING.md` note about local Rust 1.99.0 is a dated local observation, not the locked version. |
+| Linux target and runtime | `x86_64-unknown-linux-gnu`; minimum Ubuntu 22.04, glibc 2.35. **Candidate** mechanism: add one sysroot-only flake input pinned to nixpkgs `nixos-22.11` head `ea4c80b39be4c09702b0cb3b42eab59e2ba4f24b` (its `glibc` is `2.35-224`), then build with the locked compiler via `makeRustPlatform { rustc = locked.rustc; cargo = locked.cargo; stdenv = sysroot.stdenv; }`; set the interpreter to `/lib64/ld-linux-x86-64.so.2`, remove Nix RPATH, and require `DT_NEEDED` to contain only system libraries with every `GLIBC_*` symbol version <= 2.35. | `makeRustPlatform` accepting an explicit `stdenv` is VERIFIED at the locked rev. The final link/ABI is **UNRESOLVED**: the locked compiler wrapper and prebuilt `libstd` may still inject or require newer glibc paths. NREL-02's bounded `make release-nix-linux` experiment decides success and must fail readably on any newer symbol, Nix store reference or unexpected `DT_NEEDED`. |
+| Old-sysroot cost | The extra input supplies only the C runtime/toolchain (`glibc`, GCC, binutils, stdenv) for the Linux link; it is **not** a whole-nixpkgs rollback and does not change the Rust compiler. It is accepted only if the experiment passes; otherwise the decision returns to a human. | Explicit cost: a second, EOL nixpkgs source of security/maintenance updates and a larger closure. It must not become a general downgrade of the project toolchain. |
+| Rejected Linux alternatives | musl/static was not chosen: it changes libc, allocator and NSS behavior and the user rejected an assumed migration. Static glibc has NSS/dlopen limits. rustup on `ubuntu-22.04` is the second compiler policy being retired. Shipping the Nix store closure is not portable off Nix because interpreter/RPATH point into `/nix/store`. | Decision, not a measured comparison. |
+| Windows target | `x86_64-pc-windows-gnu`, cross-built with the locked compiler through `pkgsCross.mingwW64`. The locked rev has mingw-w64 14.0.0 headers and GCC 15. Rust's target spec links executables with `-lgcc_eh`/`-l:libpthread.a` when all crates are statically linked, so no MinGW runtime DLL is expected; expected imports are OS DLLs only (`msvcrt`, `kernel32`, `advapi32`, `bcrypt`, `ntdll`, `userenv`, `ws2_32`, `user32`). | Upstream minima (see evidence): GNU Binutils 2.44, GCC 14.2, mingw-w64 12.0.0. The exact import table and any bundled DLL allowlist are **UNRESOLVED** until NREL-03 inspects the produced `.exe`; if a DLL is needed, bundle an explicit allowlist or declare a supported-system requirement, never ship a silently broken executable. |
+| Windows capability boundary | A Windows GNU server provides LSP, view rendering and Git status/actions only. Managed commit drafts, the editor bridge and askpass return "requires Unix"/"needs a Unix socket" on non-Unix builds, and the non-Unix owned-run fallback makes no cancellation guarantee. | VERIFIED source boundaries: `src/editor.rs:697-700,730-739,790-793,871,1260-1270,1276-1288`; `src/runner/owned.rs:45-53,67-94`. `tests/editor_bridge.rs:4` is `#![cfg(unix)]`, so that suite never counts as Windows coverage. A small explicit follow-up item is required; Windows helper support is not claimed. Git for Windows' MSYS2/BASH layer does not provide the existing bridge's Unix socket. |
+| Darwin outputs | Native `x86_64-darwin` and `aarch64-darwin` builders in the same flake, using the locked compiler; distinct archive and executable identities per architecture. Contract: record `LC_BUILD_VERSION`/minos and `otool -L`; runtime dependencies must be system libraries only (no `/nix/store` install names or RPATH, rewritten with `install_name_tool` if needed). | Rust documents macOS 10.12+ for x86_64 and 11.0+ for arm64. NREL-04 must run on real matching builders; the Nix builder's own minimum macOS is not the artifact deployment baseline. Linux-to-Darwin cross output is not planned: nix.dev documents cross-Darwin only between the two Darwin hosts and barely tested. |
+| Artifact identity | One `.tar.gz` plus `.sha256` per target (existing asset shape), with a `provenance.json` in the CI artifact. Required fields: `source_sha` (`git rev-parse HEAD`, equal to the workflow SHA), `target`, `archive_sha256`, `executable_sha256` (extracted `magit-lsp`/`magit-lsp.exe` before packaging), `cargo_lock_sha256`, `rustc -Vv`, nixpkgs rev, Linux sysroot rev/glibc, Windows mingw-w64/GCC/binutils, Darwin SDK/minos. Consumers verify both SHAs and execute the bytes unchanged; they never rebuild the server. | GitHub `upload-artifact` artifacts are immutable from v4 and expose `artifact-id`/`artifact-digest`, but zipped uploads do not preserve file modes and the artifact bytes are not the released archive bytes; the durable identity is the sidecar SHA over the uploaded `.tar.gz`. VERIFIED against the pinned action README. |
+
+### Native assertion contract
+
+Assertions run on the target OS without Nix installed or its store mounted. The
+same archive and extracted executable bytes are used; only the test harness is
+compiled natively.
+
+* **Linux x86_64 GNU (clean Ubuntu 22.04):** `--version`, initialize, Git status
+  plus one mutation, `editor_bridge` against the selected bytes, and the
+  existing Neovim status/Git/editor-helper scenarios.
+* **Windows x86_64 GNU (native Windows runner):** `--version`, initialize, Git
+  status plus one mutation. Editor helper, askpass, managed drafts and
+  cancellation are not supported and are reported as skipped; skipped Unix
+  suites never count as Windows coverage.
+* **macOS x86_64 and arm64:** the full Unix Rust suite, `--version`, Git status
+  plus one mutation, and the Neovim scenarios on available hosts.
+
+### Upstream evidence (reviewed 2026-11-20)
+
+* Locked input: `flake.lock`; locked `rust_1_99` (1.99.1):
+  <https://github.com/NixOS/nixpkgs/blob/04906337b6d53e8bb0eaf0470ae9f070a4d4eb55/pkgs/development/compilers/rust/1_99.nix>
+* `makeRustPlatform` `stdenv` parameter:
+  <https://github.com/NixOS/nixpkgs/blob/04906337b6d53e8bb0eaf0470ae9f070a4d4eb55/pkgs/development/compilers/rust/make-rust-platform.nix>
+* glibc 2.35-224 at nixos-22.11 head `ea4c80b39be4c09702b0cb3b42eab59e2ba4f24b`:
+  <https://github.com/NixOS/nixpkgs/blob/ea4c80b39be4c09702b0cb3b42eab59e2ba4f24b/pkgs/development/libraries/glibc/common.nix>
+* Rust platform support and minimum OS versions:
+  <https://doc.rust-lang.org/nightly/rustc/platform-support.html>
+* Rust `windows-gnu` requirements and maintenance warning:
+  <https://doc.rust-lang.org/rustc/platform-support/windows-gnu.html>
+* Rust `windows_gnu.rs` static/dynamic unwind link arguments:
+  <https://github.com/rust-lang/rust/blob/master/compiler/rustc_target/src/spec/base/windows_gnu.rs>
+* mingw-w64 14.0.0 at the locked rev:
+  <https://github.com/NixOS/nixpkgs/blob/04906337b6d53e8bb0eaf0470ae9f070a4d4eb55/pkgs/os-specific/windows/mingw-w64/headers.nix>
+* Nix cross-compilation and `pkgsCross.mingwW64`:
+  <https://nix.dev/tutorials/cross-compilation.html>
+* Git for Windows (MSYS2/BASH distribution):
+  <https://gitforwindows.org/> and Git editor configuration:
+  <https://git-scm.com/docs/git-config#Documentation/git-config.txt-coreeditor>
+* GitHub artifacts (workflow outputs, immutable action artifacts):
+  <https://docs.github.com/en/actions/concepts/workflows-and-actions/workflow-artifacts>
+  and the pinned action README:
+  <https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/README.md>
+
+### Unresolved risks and follow-ups
+
+1. Linux mixed-sysroot link/ABI: the locked compiler wrapper or `libstd` may
+   leak newer glibc requirements. NREL-02 must prove interpreter, dependency and
+   symbol versions on the produced ELF and fail readably.
+2. Windows import table and DLL set: NREL-03 must record the actual imports and
+   decide bundling versus a supported-system requirement.
+3. Windows editor helper/askpass/managed drafts/cancellation: unsupported until
+   a dedicated follow-up designs a Windows transport; do not describe the
+   Windows artifact as fully feature-equivalent.
+4. Rust `windows-gnu` has no upstream target maintainers and may be demoted;
+   record this risk rather than substituting MSVC for the production artifact.
+5. Darwin deployment baseline and non-system dylib removal: NREL-04 must verify
+   on both native architectures; unavailable hosts stay explicit CI follow-ups.
+6. Artifact-versus-asset byte identity: the zip upload layer changes bytes and
+   modes, so NREL-07/08 must bind the released archive by `archive_sha256` and
+   provenance, not by artifact digest alone.
+7. CI reuse: build each target once in the Nix derivation and let native lanes
+   consume that archive; no second build recipe and no server rebuild in
+   consumers.
+
 ## Tracked workflows and local checks
 
 `.github/workflows/release.yml` runs on manual dispatch and on `v*` tags. It
