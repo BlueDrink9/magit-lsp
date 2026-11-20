@@ -8,6 +8,9 @@ keys: t
 wait prompt
 expect screen contains "Create tag"
 keys: v1 Enter
+wait prompt
+expect screen contains "Tag revision"
+keys: Enter
 wait
 expect screen contains "Created tag v1"
 sh: test "$(git tag --list)" = v1
