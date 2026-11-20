@@ -837,7 +837,7 @@ Every ticket states **Target Files**, **Reference Files**, **Architectural Const
   - test: supported Plain commit-menu action completes after the held status edit is released, preserving nearest document, queued-render ordering and real commit/draft effect; no timeout or swallowed errors.
   - check: `make test-rust FILTER="--test plain_draft --test commands --test keys_protocol"` passes; record exact diagnosis/evidence and scoped commit. Keep user changes outside worktree untouched; merge only after full gate passes.
   - Verified: queued-render origin `v2` was stale against current `v3` with no acknowledgement, so `commit.create` was rejected despite consuming no document coordinates. Retained-origin dispatch now defaults to source-bound, with only verified coordinate-free `commit.create` and `common.toggle-text-mode` exempt; the required-tree positional predicate excludes optional-cursor consumers. Combined test target passed (113 + 21 tests; `ok: rust (warnings detected; check log: build/test-logs/rust.7dSIHQ)`).
-  - Done: pending
+  - Done: a8d6205
 
 - [x] **Gate — Keep Plain choice-document coverage on supported menu options.**
   - Verified `4d91a63`: full `make test` reaches `tests/plain_actions.rs:1740,1823` failures because two choice-document tests search the retired branch Configure upstream option row; T043 intentionally replaced inert Configure rows with `b C` command-owned settings. Log `build/test-logs/rust.S0J0k0`.
