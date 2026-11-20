@@ -17,8 +17,8 @@ use tempfile::TempDir;
 fn helper_draft_kind_checks_exact_target_and_todo_requires_explicit_intent() {
     use magit_lsp::editor::Reply;
     use magit_lsp::editor::{
-        draft::{Draft, DraftContext, DraftKind},
-        COMMIT_MESSAGE_KIND, REBASE_TODO_KIND,
+        draft::{Draft, DraftContext},
+        DraftKind, COMMIT_MESSAGE_KIND, REBASE_TODO_KIND,
     };
     use magit_lsp::protocol::DraftFinishReason;
 

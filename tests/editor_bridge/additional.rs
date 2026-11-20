@@ -885,7 +885,7 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
         .create(
             tmp.path().to_str().unwrap(),
             "early-test",
-            magit_lsp::editor::draft::DraftKind::CommitMessage,
+            magit_lsp::editor::DraftKind::CommitMessage,
         )
         .unwrap();
     let registry = magit_lsp::editor::registry();
