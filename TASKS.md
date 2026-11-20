@@ -833,6 +833,14 @@ Every ticket states **Target Files**, **Reference Files**, **Architectural Const
 
 ## Ad hoc
 
+- [x] **Gate — Preserve nearest-document text mode through stacked menus.**
+  - Verified `69b81f8`: `make test` fails `dispatch_text_mode_targets_nearest_document_through_stacked_menus` at `tests/keys_protocol.rs:335` (missing document render; log `build/test-logs/rust.sONNJP`). Test directly opens and acknowledges nearest status then optional commit menu and dispatch menu (`:303–332`), invokes ctrl+t and expects nearest document text mode without changing rendered text/version or older document state.
+  - Binding: preserve valid direct/protocol menu opening and nearest-document non-positional actions; never reuse menu cursor as source cursor, remove stale-source protection for positional actions, or weaken test expectation. Determine actual rejection before changing production or test setup.
+  - test: existing nearest-document regression plus delivered ignore retained-origin divergent-cursor/stale-source protections pass.
+  - check: `make test-rust FILTER="--test keys_protocol --test commands"` passes, evidence and scoped commit.
+  - Done: e834d95
+  - Verified: `make test-rust FILTER="--test keys_protocol --test commands"` → exit 0, `ok: rust` (warnings detected; `build/test-logs/rust.DjA3uz`)
+
 - [x] **Gate — Refresh post-release protocol example recordings.**
   - Verified at `47fcd65`: full `make test` reaches two `tests/examples.rs` failures because registry frames gained `branch.configure` and `open.notes` (`build/test-logs/rust.Wf3QMm`). Existing `make update-examples` (Makefile:113–115) regenerates maintained `docs/examples/*.jsonl` via strict real-binary capture, not authored expectations.
   - check: regenerate with `make update-examples`, inspect only delivered command/manifest changes, commit generated artifacts separately, then `make test-rust FILTER="--test examples"` passes; evidence and queue tick separate from generated commit.
