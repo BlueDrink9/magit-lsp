@@ -21,6 +21,7 @@ const OPENERS: &[(&str, &str)] = &[
     ("open.fetch", "Fetch"),
     ("open.pull", "Pull"),
     ("open.ignore", "Ignore"),
+    ("open.notes", "Notes"),
     ("open.log", "Log"),
     ("open.merge", "Merge"),
     ("open.remote", "Remote"),

@@ -432,6 +432,12 @@ pub enum PromptAction {
     },
     /// Delete the answered tag.
     TagDelete,
+    /// Prompt for the explicit commit used by a notes operation.
+    NotesTarget { operation: NotesOperation },
+    /// Apply note content to the already resolved commit.
+    NotesContent { commit: String, replace: bool },
+    /// Confirm removal of a note from the already resolved commit.
+    NotesRemove { commit: String },
     /// Add a remote with the answered name.
     RemoteAdd,
     /// Second half of a remote add: point this validated name at the answered URL.
@@ -486,6 +492,15 @@ pub enum PromptAction {
     },
     /// Reset HEAD and the index to the answered revision, keeping local changes.
     ResetKeep,
+}
+
+/// Notes operation selected before asking for its explicit commit target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotesOperation {
+    Read,
+    Add,
+    Edit,
+    Remove,
 }
 
 /// Content snapshot used to reject external changes during destructive prompts.
@@ -966,6 +981,135 @@ pub fn resume_prompt(
                     branch.map(|b| format!(" for {b}")).unwrap_or_default()
                 )),
                 Err(err) => report_config_error(ctx, &err),
+            }
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
+        }
+        PromptAction::NotesTarget { operation } => {
+            let PromptValue::Text(target) = answer else {
+                return Err(crate::Error::new("Expected a commit target"));
+            };
+            let target = target.trim();
+            if target.is_empty() {
+                ctx.info("Enter a commit target");
+                return Ok(CommandOutcome::default());
+            }
+            let repo = match GitRepo::open(ctx.repo_path) {
+                Ok(repo) => repo,
+                Err(error) => {
+                    report_config_error(ctx, &error);
+                    return Ok(CommandOutcome::default());
+                }
+            };
+            let commit = match repo.resolve_commit(target) {
+                Ok(commit) => commit,
+                Err(_) => {
+                    ctx.info(format!("Invalid commit target: {target}"));
+                    return Ok(CommandOutcome::default());
+                }
+            };
+            match operation {
+                NotesOperation::Read => match repo.note(&commit) {
+                    Ok(Some(note)) => ctx.info(note),
+                    Ok(None) => ctx.info(format!("No note for commit {commit}")),
+                    Err(error) => report_git_error(ctx, &error),
+                },
+                NotesOperation::Add | NotesOperation::Edit => {
+                    let edit = operation == NotesOperation::Edit;
+                    let initial = if edit {
+                        match repo.note(&commit) {
+                            Ok(Some(note)) => note,
+                            Ok(None) => {
+                                ctx.info(format!("No note for commit {commit}"));
+                                return Ok(CommandOutcome::default());
+                            }
+                            Err(error) => {
+                                report_git_error(ctx, &error);
+                                return Ok(CommandOutcome::default());
+                            }
+                        }
+                    } else {
+                        String::new()
+                    };
+                    let mut prompt = branch_name_prompt(
+                        if edit { "Edit note" } else { "Add note" },
+                        &initial,
+                        "Note text",
+                    );
+                    prompt.detail = Some(format!("Commit {commit}"));
+                    return Ok(CommandOutcome {
+                        prompt: Some((
+                            prompt,
+                            PromptAction::NotesContent {
+                                commit,
+                                replace: edit,
+                            },
+                        )),
+                        ..Default::default()
+                    });
+                }
+                NotesOperation::Remove => match repo.note(&commit) {
+                    Ok(Some(_)) => {
+                        let mut prompt = branch_name_prompt(
+                            &format!("Remove note from {commit}?"),
+                            "",
+                            "Confirm removal",
+                        );
+                        prompt.kind = PromptKind::Confirm;
+                        prompt.yes_label = Some("Remove".to_string());
+                        prompt.no_label = Some("Keep".to_string());
+                        prompt.destructive = Some(true);
+                        return Ok(CommandOutcome {
+                            prompt: Some((prompt, PromptAction::NotesRemove { commit })),
+                            ..Default::default()
+                        });
+                    }
+                    Ok(None) => ctx.info(format!("No note for commit {commit}")),
+                    Err(error) => report_git_error(ctx, &error),
+                },
+            }
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
+        }
+        PromptAction::NotesContent { commit, replace } => {
+            let PromptValue::Text(note) = answer else {
+                return Err(crate::Error::new("Expected note text"));
+            };
+            if note.trim().is_empty() {
+                ctx.info("Note text cannot be empty");
+                return Ok(CommandOutcome::default());
+            }
+            let result = GitRepo::open(ctx.repo_path).and_then(|repo| {
+                if replace {
+                    repo.replace_note(&commit, &note)
+                } else {
+                    repo.add_note(&commit, &note)
+                }
+            });
+            match result {
+                Ok(()) => ctx.info(if replace {
+                    "Note updated"
+                } else {
+                    "Note added"
+                }),
+                Err(error) => report_git_error(ctx, &error),
+            }
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
+        }
+        PromptAction::NotesRemove { commit } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
+            match GitRepo::open(ctx.repo_path).and_then(|repo| repo.remove_note(&commit)) {
+                Ok(()) => ctx.info("Note removed"),
+                Err(error) => report_git_error(ctx, &error),
             }
             Ok(CommandOutcome {
                 refresh: true,
@@ -1758,6 +1902,11 @@ fn build() -> Registry {
         menu("open.submodule", "Open the submodule menu", open_submodule),
         menu("open.worktree", "Open the worktree menu", open_worktree),
         menu("open.ignore", "Open the ignore menu", open_ignore),
+        menu("open.notes", "Open the Notes menu", open_notes),
+        command! { id: "notes.read", scope: Scope::MenuAction, doc: "Read a note on an explicit commit", status: CommandStatus::Implemented, run: notes_read, effects: &[] },
+        command! { id: "notes.add", scope: Scope::MenuAction, doc: "Add a note to an explicit commit", status: CommandStatus::Implemented, run: notes_add, effects: &[] },
+        command! { id: "notes.edit", scope: Scope::MenuAction, doc: "Edit a note on an explicit commit", status: CommandStatus::Implemented, run: notes_edit, effects: &[] },
+        command! { id: "notes.remove", scope: Scope::MenuAction, doc: "Remove a note from an explicit commit", status: CommandStatus::Implemented, run: notes_remove, effects: &[] },
         menu(
             "open.patch-apply",
             "Open the apply-patches menu",
@@ -2533,6 +2682,35 @@ fn tag_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
+fn notes_action(ctx: &mut CommandCtx<'_>, operation: NotesOperation) -> Result<CommandOutcome> {
+    if refuse_unsupported_args(ctx, "notes")? {
+        return Ok(CommandOutcome::default());
+    }
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Notes commit", "HEAD", "Commit or revision"),
+            PromptAction::NotesTarget { operation },
+        )),
+        ..Default::default()
+    })
+}
+
+fn notes_read(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    notes_action(ctx, NotesOperation::Read)
+}
+
+fn notes_add(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    notes_action(ctx, NotesOperation::Add)
+}
+
+fn notes_edit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    notes_action(ctx, NotesOperation::Edit)
+}
+
+fn notes_remove(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    notes_action(ctx, NotesOperation::Remove)
+}
+
 /// Prompt for the name of a new remote, then for its URL.
 fn remote_add(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     if refuse_unsupported_args(ctx, "remote.add")? {
@@ -2723,12 +2901,17 @@ fn branch_configure(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
-/// Report a failed configuration read or write with its user-facing Git text.
-fn report_config_error(ctx: &mut CommandCtx<'_>, err: &crate::Error) {
+/// Report a failed Git read or write with its user-facing Git text.
+fn report_git_error(ctx: &mut CommandCtx<'_>, err: &crate::Error) {
     match Effect::from_error(err) {
         Some(effect) => ctx.effects.push(effect),
         None => ctx.info(err.to_string()),
     }
+}
+
+/// Report a failed configuration read or write with its user-facing Git text.
+fn report_config_error(ctx: &mut CommandCtx<'_>, err: &crate::Error) {
+    report_git_error(ctx, err);
 }
 
 /// Parse a configuration boolean or clear it with `unset`.
@@ -3295,6 +3478,7 @@ menu_opener!(open_remote, "remote");
 menu_opener!(open_submodule, "submodule");
 menu_opener!(open_worktree, "worktree");
 menu_opener!(open_ignore, "ignore");
+menu_opener!(open_notes, "notes");
 menu_opener!(open_patch_apply, "patch-apply");
 menu_opener!(open_patch_create, "patch-create");
 

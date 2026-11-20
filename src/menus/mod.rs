@@ -20,6 +20,7 @@ mod fetch;
 mod ignore;
 mod log;
 mod merge;
+mod notes;
 mod patch;
 mod pull;
 mod push;
@@ -240,6 +241,7 @@ pub fn all() -> Vec<MenuDef> {
         pull::definition(),
         push::definition(),
         merge::definition(),
+        notes::definition(),
         rebase::definition(),
         stash::definition(),
         tag::definition(),

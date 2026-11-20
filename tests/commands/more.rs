@@ -2,6 +2,418 @@ use super::additional::{change_identity_file, file_identity_matrix};
 use super::*;
 
 #[test]
+fn notes_menu_opens_through_dispatch_and_reads_explicit_commit_note() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "second\n")])
+        .build();
+    let target = tmp
+        .git(&["rev-list", "--max-parents=0", "HEAD"])
+        .trim()
+        .to_string();
+    tmp.git(&["config", "core.notesRef", "refs/notes/custom"]);
+    let head_target = tmp.git(&["rev-parse", "HEAD"]).trim().to_string();
+    tmp.git(&[
+        "notes",
+        "--ref=refs/notes/custom",
+        "add",
+        "-m",
+        "kept",
+        &head_target,
+    ]);
+    tmp.git(&[
+        "notes",
+        "--ref=refs/notes/custom",
+        "add",
+        "-m",
+        "target note",
+        &target,
+    ]);
+
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let status = tmp.git(&["status", "--porcelain"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    test.press_ui("?");
+    test.ack();
+    test.press_ui("N");
+    test.ack();
+
+    assert!(test.text().iter().any(|line| line.contains("Notes")));
+    test.ui.reply_text(Some(target.clone()));
+    let result = test.press_ui("r");
+    assert!(message_texts(&result.effects)
+        .iter()
+        .any(|message| message.contains("target note")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["write-tree"]), index);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), status);
+}
+
+fn open_notes_menu(tmp: &RepoFixture) -> TestSession {
+    let (mut test, _) = TestSession::open_status(tmp, Profile::Standard);
+    test.ack();
+    test
+}
+
+fn notes_state(tmp: &RepoFixture) -> (String, String, String) {
+    (
+        tmp.git(&["rev-parse", "HEAD"]),
+        tmp.git(&["write-tree"]),
+        tmp.git(&["status", "--porcelain"]),
+    )
+}
+
+fn assert_notes_state(tmp: &RepoFixture, state: &(String, String, String)) {
+    assert_eq!(
+        notes_state(tmp),
+        *state,
+        "notes operation changed HEAD, index, or worktree"
+    );
+}
+
+fn invoke_notes(
+    test: &mut TestSession,
+    command: &str,
+    answers: Vec<Option<magit_lsp::protocol::PromptValue>>,
+) -> magit_lsp::session::Execution {
+    use magit_lsp::protocol::ViewInvokeParams;
+    use magit_lsp::session::Execution;
+    let started = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: command.into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let Execution::Prompt(mut prompt) = started else {
+        panic!("expected notes prompt, got {started:?}");
+    };
+    let mut execution = Execution::Prompt(prompt.clone());
+    for answer in answers {
+        execution = test
+            .session
+            .resume_prompt(&prompt.prompt_id, answer)
+            .unwrap();
+        match execution {
+            Execution::Prompt(ref next) => prompt = next.clone(),
+            Execution::Done(_) => break,
+            Execution::Pick(_) => panic!("unexpected notes picker"),
+        }
+    }
+    execution
+}
+
+#[test]
+fn notes_add_edit_remove_target_explicit_commit_and_preserve_other_state() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "second\n")])
+        .build();
+    let target = tmp
+        .git(&["rev-list", "--max-parents=0", "HEAD"])
+        .trim()
+        .to_string();
+    let head_target = tmp.git(&["rev-parse", "HEAD"]).trim().to_string();
+    tmp.git(&["config", "core.notesRef", "refs/notes/custom"]);
+    tmp.git(&[
+        "notes",
+        "--ref=refs/notes/custom",
+        "add",
+        "-m",
+        "head note",
+        &head_target,
+    ]);
+    let state = notes_state(&tmp);
+    let mut test = open_notes_menu(&tmp);
+
+    use magit_lsp::protocol::PromptValue;
+    let added = invoke_notes(
+        &mut test,
+        "notes.add",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Text("created note".into())),
+        ],
+    );
+    let magit_lsp::session::Execution::Done(added) = added else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&added.effects)
+        .iter()
+        .any(|text| text.contains("Note added")));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
+            .trim(),
+        "created note"
+    );
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &head_target])
+            .trim(),
+        "head note"
+    );
+
+    let magit_lsp::session::Execution::Done(duplicate) = invoke_notes(
+        &mut test,
+        "notes.add",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Text("duplicate".into())),
+        ],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&duplicate.effects)
+        .iter()
+        .any(|text| text.to_lowercase().contains("note") || text.to_lowercase().contains("git")));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
+            .trim(),
+        "created note"
+    );
+
+    use magit_lsp::protocol::ViewInvokeParams;
+    let magit_lsp::session::Execution::Prompt(edit_prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "notes.edit".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected edit target prompt");
+    };
+    let magit_lsp::session::Execution::Prompt(content_prompt) = test
+        .session
+        .resume_prompt(
+            &edit_prompt.prompt_id,
+            Some(PromptValue::Text(target.clone())),
+        )
+        .unwrap()
+    else {
+        panic!("expected edit content prompt");
+    };
+    assert_eq!(
+        content_prompt
+            .default
+            .as_ref()
+            .and_then(serde_json::Value::as_str),
+        Some("created note\n")
+    );
+    let magit_lsp::session::Execution::Done(edited) = test
+        .session
+        .resume_prompt(
+            &content_prompt.prompt_id,
+            Some(PromptValue::Text("edited note".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&edited.effects)
+        .iter()
+        .any(|text| text.contains("Note updated")));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
+            .trim(),
+        "edited note"
+    );
+    assert_notes_state(&tmp, &state);
+
+    let magit_lsp::session::Execution::Done(declined) = invoke_notes(
+        &mut test,
+        "notes.remove",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Bool(false)),
+        ],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(!message_texts(&declined.effects)
+        .iter()
+        .any(|text| text.contains("Note removed")));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
+            .trim(),
+        "edited note"
+    );
+    let magit_lsp::session::Execution::Done(removed) = invoke_notes(
+        &mut test,
+        "notes.remove",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Bool(true)),
+        ],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&removed.effects)
+        .iter()
+        .any(|text| text.contains("Note removed")));
+    assert!(!tmp
+        .git(&["notes", "--ref=refs/notes/custom", "list"])
+        .contains(&target));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &head_target])
+            .trim(),
+        "head note"
+    );
+    assert_notes_state(&tmp, &state);
+}
+
+#[test]
+fn notes_cancel_missing_invalid_and_unborn_targets_do_not_write() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "second\n")])
+        .build();
+    let target = tmp
+        .git(&["rev-list", "--max-parents=0", "HEAD"])
+        .trim()
+        .to_string();
+    tmp.git(&["config", "core.notesRef", "refs/notes/custom"]);
+    let state = notes_state(&tmp);
+    let mut test = open_notes_menu(&tmp);
+
+    use magit_lsp::protocol::PromptValue;
+    let _ = invoke_notes(&mut test, "notes.add", vec![None]);
+    let _ = invoke_notes(
+        &mut test,
+        "notes.add",
+        vec![Some(PromptValue::Text(target.clone())), None],
+    );
+    let _ = invoke_notes(
+        &mut test,
+        "notes.add",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Text("   ".into())),
+        ],
+    );
+    assert!(tmp
+        .git(&["notes", "--ref=refs/notes/custom", "list"])
+        .trim()
+        .is_empty());
+    assert_notes_state(&tmp, &state);
+
+    let magit_lsp::session::Execution::Done(invalid) = invoke_notes(
+        &mut test,
+        "notes.read",
+        vec![Some(PromptValue::Text("not-a-commit".into()))],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&invalid.effects)
+        .iter()
+        .any(|text| text.contains("Invalid commit target")));
+    let _ = invoke_notes(
+        &mut test,
+        "notes.edit",
+        vec![Some(PromptValue::Text("HEAD~99".into()))],
+    );
+    let magit_lsp::session::Execution::Done(missing) = invoke_notes(
+        &mut test,
+        "notes.edit",
+        vec![Some(PromptValue::Text(target.clone()))],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&missing.effects)
+        .iter()
+        .any(|text| text.contains("No note for commit")));
+    let magit_lsp::session::Execution::Done(missing_read) = invoke_notes(
+        &mut test,
+        "notes.read",
+        vec![Some(PromptValue::Text(target.clone()))],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&missing_read.effects)
+        .iter()
+        .any(|text| text.contains("No note for commit")));
+    assert_notes_state(&tmp, &state);
+
+    let _ = invoke_notes(
+        &mut test,
+        "notes.remove",
+        vec![Some(PromptValue::Text(target.clone())), None],
+    );
+    assert_notes_state(&tmp, &state);
+
+    let (unborn, _) = RepoFixture::new().unborn().build();
+    let mut unborn_test = open_notes_menu(&unborn);
+    let magit_lsp::session::Execution::Done(result) = invoke_notes(
+        &mut unborn_test,
+        "notes.read",
+        vec![Some(PromptValue::Text("HEAD".into()))],
+    ) else {
+        panic!("expected completion");
+    };
+    assert!(message_texts(&result.effects)
+        .iter()
+        .any(|text| text.contains("Invalid commit target")));
+    assert!(unborn.git(&["notes", "list"]).trim().is_empty());
+}
+
+#[test]
+fn notes_git_write_failure_is_readable_and_preserves_existing_note() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "second\n")])
+        .build();
+    let target = tmp
+        .git(&["rev-list", "--max-parents=0", "HEAD"])
+        .trim()
+        .to_string();
+    tmp.git(&["config", "core.notesRef", "refs/notes/custom"]);
+    tmp.git(&[
+        "notes",
+        "--ref=refs/notes/custom",
+        "add",
+        "-m",
+        "preserve me",
+        &target,
+    ]);
+    let state = notes_state(&tmp);
+    std::fs::create_dir_all(tmp.path().join(".git/refs/notes")).unwrap();
+    std::fs::write(tmp.path().join(".git/refs/notes/custom.lock"), "locked").unwrap();
+    let mut test = open_notes_menu(&tmp);
+    use magit_lsp::protocol::PromptValue;
+    let magit_lsp::session::Execution::Done(result) = invoke_notes(
+        &mut test,
+        "notes.edit",
+        vec![
+            Some(PromptValue::Text(target.clone())),
+            Some(PromptValue::Text("replacement".into())),
+        ],
+    ) else {
+        panic!("expected completion");
+    };
+    let messages = message_texts(&result.effects);
+    assert!(
+        messages.iter().any(|text| *text == "`git notes` failed."),
+        "{messages:?}"
+    );
+    assert!(!messages.iter().any(|text| text.contains("Note updated")));
+    assert_eq!(
+        tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
+            .trim(),
+        "preserve me"
+    );
+    assert_notes_state(&tmp, &state);
+}
+
+#[test]
 fn complete_file_stage_identity_fresh_and_stale_matrix() {
     for selection in [false, true] {
         file_identity_matrix("stage", false, selection);

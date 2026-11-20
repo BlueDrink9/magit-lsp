@@ -84,6 +84,7 @@ Parent motion goes to the immediate containing header; roots stay put.
 | `open.submodule` | `o` | `o` |
 | `open.worktree` | `%` | `g %` |
 | `open.ignore` | `i` | `i` |
+| `open.notes` | `N` | `N` |
 | `open.refs` | `y` | `g y` |
 | `open.cherries` | `Y` | `g Y` |
 | `open.patch-apply` | `w` | `w` |
@@ -96,6 +97,10 @@ mark/replace motions) because they match Magit and are useless in a read-only
 buffer. `v V ctrl+v` remain Vim's visual modes, which is why reverse is `R`,
 revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 (since `x` is discard) and a few menu keys gain a `g` prefix.
+
+The Notes menu (`N`) offers `r` read, `a` add, `e` edit and `k` remove. Each
+asks for an explicit commit; add and edit write the configured notes ref and
+remove asks for confirmation.
 
 ### 5.3 Select mode (`log.select`, `refs.select`)
 
