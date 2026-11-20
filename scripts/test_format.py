@@ -212,8 +212,8 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual("ok\n", self.git("show", f":{path}"))
         self.assertEqual("worktree\n", self.read(path))
 
-    def test_hook_syncs_matching_working_copy(self) -> None:
-        """A staged-only change is formatted in the index and its working copy."""
+    def test_hook_leaves_matching_working_copy_unchanged(self) -> None:
+        """A staged-only change formats the index and never rewrites the working file."""
         self.install_hook()
         path = "lua/magit-lsp/ok.lua"
         self.write(path, "bad\n")
@@ -221,8 +221,8 @@ class FormatSweepTest(unittest.TestCase):
         result = self.run_hook()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.assertEqual("ok\n", self.read(path))
-        self.assertEqual("", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
+        self.assertEqual(b"bad\n", (self.repo / path).read_bytes())
+        self.assertEqual(f" M {path}\n", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
 
     def test_hook_preserves_partially_staged_working_edits(self) -> None:
         """Unstaged additions to a staged file survive while the index formats."""
