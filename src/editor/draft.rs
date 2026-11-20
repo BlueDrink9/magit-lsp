@@ -362,9 +362,10 @@ impl Target {
     fn open(expected: &Path, supplied: &Path) -> Result<Self> {
         // A helper may report the Git file through a symlinked parent directory:
         // macOS temp/repository paths can be `/var/...` while their canonical
-        // form is `/private/var/...`. Compare resolved identities, then open the
-        // pinned expected path with O_NOFOLLOW below.
-        if std::fs::canonicalize(supplied)? != std::fs::canonicalize(expected)? {
+        // form is `/private/var/...`. Resolve only the supplied path and compare
+        // it with the stored canonical expected identity; re-resolving the
+        // trusted path would accept an ancestor substituted after allocation.
+        if std::fs::canonicalize(supplied)?.as_path() != expected {
             return Err(Error::new(
                 "Helper target is not the expected Git draft file",
             ));
