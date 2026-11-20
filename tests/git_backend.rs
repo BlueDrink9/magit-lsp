@@ -8,6 +8,92 @@ use proptest::prelude::*;
 use std::path::Path;
 
 #[test]
+fn notes_round_trip_on_explicit_commits_and_honor_configured_ref() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("first", [("f.txt", TEN_LINES)])
+        .commit("second", [("g.txt", TEN_LINES)])
+        .build();
+    let first = git(tmp.path(), &["rev-parse", "HEAD~"]);
+    let second = git(tmp.path(), &["rev-parse", "HEAD"]);
+    git(
+        tmp.path(),
+        &["config", "core.notesRef", "refs/notes/custom"],
+    );
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let index = git(tmp.path(), &["write-tree"]);
+    let worktree = git(tmp.path(), &["status", "--porcelain"]);
+    repo.add_note(&first, "first note").expect("add note");
+    assert!(repo.add_note(&first, "must not overwrite").is_err());
+    assert_eq!(
+        repo.note(&first).expect("read note").as_deref(),
+        Some("first note\n")
+    );
+    repo.add_note(&second, "second note")
+        .expect("add other note");
+    repo.replace_note(&first, "replaced").expect("replace note");
+    assert_eq!(
+        repo.note(&first).expect("read replaced note").as_deref(),
+        Some("replaced\n")
+    );
+    assert_eq!(
+        repo.note(&second).expect("read other note").as_deref(),
+        Some("second note\n")
+    );
+    assert_eq!(
+        git(tmp.path(), &["notes", "--ref=refs/notes/commits", "list"]).trim(),
+        ""
+    );
+    repo.remove_note(&first).expect("remove note");
+    assert_eq!(repo.note(&first).expect("missing note"), None);
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(tmp.path(), &["write-tree"]), index);
+    assert_eq!(git(tmp.path(), &["status", "--porcelain"]), worktree);
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD~"]), first);
+    assert!(repo.note("not-a-commit").is_err());
+    assert_eq!(
+        repo.note("HEAD").expect("read HEAD note").as_deref(),
+        Some("second note\n")
+    );
+    let lock = repo.git_dir().join("refs/notes/custom.lock");
+    std::fs::create_dir_all(lock.parent().unwrap()).expect("notes directory");
+    write(&lock, "locked\n");
+    assert!(repo.replace_note(&second, "failed replacement").is_err());
+    std::fs::remove_file(lock).expect("remove notes lock");
+    assert_eq!(
+        repo.note(&second)
+            .expect("note retained after failure")
+            .as_deref(),
+        Some("second note\n")
+    );
+    git(
+        tmp.path(),
+        &["config", "core.notesRef", "refs/notes/broken"],
+    );
+    write(
+        &repo.git_dir().join("refs/notes/broken"),
+        "not-an-object-id\n",
+    );
+    assert!(repo.note(&second).is_err());
+    git(
+        tmp.path(),
+        &["config", "core.notesRef", "refs/notes/custom"],
+    );
+    assert_eq!(
+        repo.note(&second)
+            .expect("original note retained")
+            .as_deref(),
+        Some("second note\n")
+    );
+}
+
+#[test]
+fn notes_reject_unborn_targets_and_propagate_read_failures() {
+    let (_tmp, repo) = RepoFixture::new().unborn().build();
+    assert!(repo.note("HEAD").is_err());
+    assert!(repo.add_note("HEAD", "unborn").is_err());
+}
+
+#[test]
 fn configuration_read_failures_are_not_reported_as_unset() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

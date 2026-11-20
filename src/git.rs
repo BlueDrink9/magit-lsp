@@ -481,6 +481,60 @@ impl Drop for RebaseTodoLock {
 }
 
 impl GitRepo {
+    /// Read the note attached to an explicit commit, or `None` when it has no note.
+    pub fn note(&self, commit: &str) -> Result<Option<String>> {
+        let commit = self.validate_note_target(commit)?;
+        let listed = match self.run(&["notes", "list", &commit]) {
+            Ok(listed) => listed,
+            Err(error)
+                if error.git.as_ref().is_some_and(|failure| {
+                    failure.args == ["notes", "list", commit.as_str()]
+                        && failure.exit_code == 1
+                        && failure.stderr == format!("error: no note found for object {commit}.")
+                }) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        if listed.trim().is_empty() {
+            return Ok(None);
+        }
+        self.run(&["notes", "show", &commit]).map(Some)
+    }
+
+    /// Add a note to an explicit commit, failing if it already has one.
+    pub fn add_note(&self, commit: &str, note: &str) -> Result<()> {
+        let commit = self.validate_note_target(commit)?;
+        self.command_with_input(&["notes", "add", "-F", "-", &commit], note.as_bytes())?;
+        Ok(())
+    }
+
+    /// Explicitly replace the note attached to an explicit commit.
+    pub fn replace_note(&self, commit: &str, note: &str) -> Result<()> {
+        let commit = self.validate_note_target(commit)?;
+        self.command_with_input(&["notes", "add", "-f", "-F", "-", &commit], note.as_bytes())?;
+        Ok(())
+    }
+
+    /// Remove the note attached to an explicit commit.
+    pub fn remove_note(&self, commit: &str) -> Result<()> {
+        let commit = self.validate_note_target(commit)?;
+        self.run(&["notes", "remove", &commit])?;
+        Ok(())
+    }
+
+    fn validate_note_target(&self, target: &str) -> Result<String> {
+        Self::reject_option_like("commit", target)?;
+        self.run(&[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{}^{{commit}}", target.trim()),
+        ])
+        .map(|commit| commit.trim().to_string())
+    }
+
     /// Detect an active merge/apply rebase in this worktree, including conflict state.
     pub fn rebase_state(&self) -> Result<Option<RebaseState>> {
         let merge = self.git_dir.join("rebase-merge").is_dir();
