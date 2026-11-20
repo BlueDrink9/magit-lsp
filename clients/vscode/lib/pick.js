@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Pure mapping between `view/pick` parameters and QuickPick items/answers.

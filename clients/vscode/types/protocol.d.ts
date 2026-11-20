@@ -30,59 +30,60 @@ export namespace PlainActionParams {
 
   /**
    * A content mutation target or a non-mutating logical-view target.
-   * 
+   *
    * The wire object always carries a camelCase `kind` discriminator so clients
    * can forward an offered target without inspecting its fields.
    */
-  export type PlainActionTarget = {
-    kind: "content";
-    /**
-     * Hash of the exact content the action is permitted to mutate.
-     */
-    mutationHash: string;
-    /**
-     * Existing path/content-derived tree node identity.
-     */
-    nodeId: string;
-    /**
-     * Exact inclusive document rows selected in the offered render, when this
-     * action represents a visual selection rather than a cursor action.
-     */
-    selection?: SelectionIntent | null;
-  }
-  | {
-    kind: "view";
-    /**
-     * Logical view identity in the offering render.
-     */
-    viewId: string;
-  }
-  | {
-    kind: "node";
-    /**
-     * Existing node identity in the offering tree.
-     */
-    nodeId: string;
-    /**
-     * Logical view identity in the offering render.
-     */
-    viewId: string;
-  }
-  | {
-    /**
-     * Exact retained menu item key.
-     */
-    itemKey: string;
-    kind: "menuItem";
-    /**
-     * Structured menu identity in the offering render.
-     */
-    menuId: string;
-    /**
-     * Logical view identity in the offering render.
-     */
-    viewId: string;
-  };
+  export type PlainActionTarget =
+    | {
+        kind: "content";
+        /**
+         * Hash of the exact content the action is permitted to mutate.
+         */
+        mutationHash: string;
+        /**
+         * Existing path/content-derived tree node identity.
+         */
+        nodeId: string;
+        /**
+         * Exact inclusive document rows selected in the offered render, when this
+         * action represents a visual selection rather than a cursor action.
+         */
+        selection?: SelectionIntent | null;
+      }
+    | {
+        kind: "view";
+        /**
+         * Logical view identity in the offering render.
+         */
+        viewId: string;
+      }
+    | {
+        kind: "node";
+        /**
+         * Existing node identity in the offering tree.
+         */
+        nodeId: string;
+        /**
+         * Logical view identity in the offering render.
+         */
+        viewId: string;
+      }
+    | {
+        /**
+         * Exact retained menu item key.
+         */
+        itemKey: string;
+        kind: "menuItem";
+        /**
+         * Structured menu identity in the offering render.
+         */
+        menuId: string;
+        /**
+         * Logical view identity in the offering render.
+         */
+        viewId: string;
+      };
 
   /**
    * Normalized inclusive row coordinates retained as Plain selection input metadata.
@@ -196,64 +197,65 @@ export namespace Effect {
   /**
    * A user-facing consequence of a request.
    */
-  export type Root = {
-    detail?: string | null;
-    hint?: string | null;
-    level: MessageLevel;
-    text: string;
-    type: "message";
-  }
-  | {
-    key: string;
-    type: "passThrough";
-  }
-  | {
-    text: string;
-    type: "clipboard";
-  }
-  | {
-    descriptor: ViewDescriptor;
-    type: "pushView";
-  }
-  | {
-    type: "popView";
-    viewId: string;
-  }
-  | {
-    type: "focusView";
-    viewId: string;
-  }
-  | {
-    type: "quit";
-  }
-  | {
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    column: number;
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    line: number;
-    type: "visitFile";
-    uri: string;
-  }
-  | {
-    kind: string;
-    mode: EditDocumentMode;
-    runId: string;
-    scope: string;
-    text: string;
-    title: string;
-    type: "editDocument";
-    uri: string;
-    /**
-     * @format int32
-     */
-    version: number;
-  };
+  export type Root =
+    | {
+        detail?: string | null;
+        hint?: string | null;
+        level: MessageLevel;
+        text: string;
+        type: "message";
+      }
+    | {
+        key: string;
+        type: "passThrough";
+      }
+    | {
+        text: string;
+        type: "clipboard";
+      }
+    | {
+        descriptor: ViewDescriptor;
+        type: "pushView";
+      }
+    | {
+        type: "popView";
+        viewId: string;
+      }
+    | {
+        type: "focusView";
+        viewId: string;
+      }
+    | {
+        type: "quit";
+      }
+    | {
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        column: number;
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        line: number;
+        type: "visitFile";
+        uri: string;
+      }
+    | {
+        kind: string;
+        mode: EditDocumentMode;
+        runId: string;
+        scope: string;
+        text: string;
+        title: string;
+        type: "editDocument";
+        uri: string;
+        /**
+         * @format int32
+         */
+        version: number;
+      };
 
   /**
    * How an editor-bridge document is edited.
@@ -360,13 +362,14 @@ export namespace Menu {
   /**
    * Whether a menu item can run yet.
    */
-  export type MenuStatus = {
-    status: "implemented";
-  }
-  | {
-    roadmapId: string;
-    status: "planned";
-  };
+  export type MenuStatus =
+    | {
+        status: "implemented";
+      }
+    | {
+        roadmapId: string;
+        status: "planned";
+      };
 
   /**
    * How an option's value is collected. Prompts arrive in R-3.1.
@@ -377,30 +380,32 @@ export namespace Menu {
    * One menu item as serialized: the item's own fields plus `activationSteps`.
    * This is both the actual serializer model and the output schema model.
    */
-  export type SerializedItem = ({
-    flag: string;
-    key: string;
-    kind: "switch";
-    label: string;
-    on: boolean;
-    status: MenuStatus;
-  }
-  | {
-    flag: string;
-    key: string;
-    kind: "option";
-    label: string;
-    reader: Reader;
-    status: MenuStatus;
-    value: string | null;
-  }
-  | {
-    command: string;
-    key: string;
-    kind: "action";
-    label: string;
-    status: MenuStatus;
-  }) & {
+  export type SerializedItem = (
+    | {
+        flag: string;
+        key: string;
+        kind: "switch";
+        label: string;
+        on: boolean;
+        status: MenuStatus;
+      }
+    | {
+        flag: string;
+        key: string;
+        kind: "option";
+        label: string;
+        reader: Reader;
+        status: MenuStatus;
+        value: string | null;
+      }
+    | {
+        command: string;
+        key: string;
+        kind: "action";
+        label: string;
+        status: MenuStatus;
+      }
+  ) & {
     activationSteps: string[];
   };
 }
@@ -511,13 +516,14 @@ export namespace ViewRender {
   /**
    * Whether a menu item can run yet.
    */
-  export type MenuStatus = {
-    status: "implemented";
-  }
-  | {
-    roadmapId: string;
-    status: "planned";
-  };
+  export type MenuStatus =
+    | {
+        status: "implemented";
+      }
+    | {
+        roadmapId: string;
+        status: "planned";
+      };
 
   /**
    * How an option's value is collected. Prompts arrive in R-3.1.
@@ -528,30 +534,32 @@ export namespace ViewRender {
    * One menu item as serialized: the item's own fields plus `activationSteps`.
    * This is both the actual serializer model and the output schema model.
    */
-  export type SerializedItem = ({
-    flag: string;
-    key: string;
-    kind: "switch";
-    label: string;
-    on: boolean;
-    status: MenuStatus;
-  }
-  | {
-    flag: string;
-    key: string;
-    kind: "option";
-    label: string;
-    reader: Reader;
-    status: MenuStatus;
-    value: string | null;
-  }
-  | {
-    command: string;
-    key: string;
-    kind: "action";
-    label: string;
-    status: MenuStatus;
-  }) & {
+  export type SerializedItem = (
+    | {
+        flag: string;
+        key: string;
+        kind: "switch";
+        label: string;
+        on: boolean;
+        status: MenuStatus;
+      }
+    | {
+        flag: string;
+        key: string;
+        kind: "option";
+        label: string;
+        reader: Reader;
+        status: MenuStatus;
+        value: string | null;
+      }
+    | {
+        command: string;
+        key: string;
+        kind: "action";
+        label: string;
+        status: MenuStatus;
+      }
+  ) & {
     activationSteps: string[];
   };
 
@@ -721,64 +729,65 @@ export namespace ViewInvokeResponse {
   /**
    * A user-facing consequence of a request.
    */
-  export type Effect = {
-    detail?: string | null;
-    hint?: string | null;
-    level: MessageLevel;
-    text: string;
-    type: "message";
-  }
-  | {
-    key: string;
-    type: "passThrough";
-  }
-  | {
-    text: string;
-    type: "clipboard";
-  }
-  | {
-    descriptor: ViewDescriptor;
-    type: "pushView";
-  }
-  | {
-    type: "popView";
-    viewId: string;
-  }
-  | {
-    type: "focusView";
-    viewId: string;
-  }
-  | {
-    type: "quit";
-  }
-  | {
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    column: number;
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    line: number;
-    type: "visitFile";
-    uri: string;
-  }
-  | {
-    kind: string;
-    mode: EditDocumentMode;
-    runId: string;
-    scope: string;
-    text: string;
-    title: string;
-    type: "editDocument";
-    uri: string;
-    /**
-     * @format int32
-     */
-    version: number;
-  };
+  export type Effect =
+    | {
+        detail?: string | null;
+        hint?: string | null;
+        level: MessageLevel;
+        text: string;
+        type: "message";
+      }
+    | {
+        key: string;
+        type: "passThrough";
+      }
+    | {
+        text: string;
+        type: "clipboard";
+      }
+    | {
+        descriptor: ViewDescriptor;
+        type: "pushView";
+      }
+    | {
+        type: "popView";
+        viewId: string;
+      }
+    | {
+        type: "focusView";
+        viewId: string;
+      }
+    | {
+        type: "quit";
+      }
+    | {
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        column: number;
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        line: number;
+        type: "visitFile";
+        uri: string;
+      }
+    | {
+        kind: string;
+        mode: EditDocumentMode;
+        runId: string;
+        scope: string;
+        text: string;
+        title: string;
+        type: "editDocument";
+        uri: string;
+        /**
+         * @format int32
+         */
+        version: number;
+      };
 
   /**
    * Severity of a message effect.
@@ -964,64 +973,65 @@ export namespace ViewEffectsParams {
   /**
    * A user-facing consequence of a request.
    */
-  export type Effect = {
-    detail?: string | null;
-    hint?: string | null;
-    level: MessageLevel;
-    text: string;
-    type: "message";
-  }
-  | {
-    key: string;
-    type: "passThrough";
-  }
-  | {
-    text: string;
-    type: "clipboard";
-  }
-  | {
-    descriptor: ViewDescriptor;
-    type: "pushView";
-  }
-  | {
-    type: "popView";
-    viewId: string;
-  }
-  | {
-    type: "focusView";
-    viewId: string;
-  }
-  | {
-    type: "quit";
-  }
-  | {
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    column: number;
-    /**
-     * @format uint32
-     * @minimum 0
-     */
-    line: number;
-    type: "visitFile";
-    uri: string;
-  }
-  | {
-    kind: string;
-    mode: EditDocumentMode;
-    runId: string;
-    scope: string;
-    text: string;
-    title: string;
-    type: "editDocument";
-    uri: string;
-    /**
-     * @format int32
-     */
-    version: number;
-  };
+  export type Effect =
+    | {
+        detail?: string | null;
+        hint?: string | null;
+        level: MessageLevel;
+        text: string;
+        type: "message";
+      }
+    | {
+        key: string;
+        type: "passThrough";
+      }
+    | {
+        text: string;
+        type: "clipboard";
+      }
+    | {
+        descriptor: ViewDescriptor;
+        type: "pushView";
+      }
+    | {
+        type: "popView";
+        viewId: string;
+      }
+    | {
+        type: "focusView";
+        viewId: string;
+      }
+    | {
+        type: "quit";
+      }
+    | {
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        column: number;
+        /**
+         * @format uint32
+         * @minimum 0
+         */
+        line: number;
+        type: "visitFile";
+        uri: string;
+      }
+    | {
+        kind: string;
+        mode: EditDocumentMode;
+        runId: string;
+        scope: string;
+        text: string;
+        title: string;
+        type: "editDocument";
+        uri: string;
+        /**
+         * @format int32
+         */
+        version: number;
+      };
 
   /**
    * Severity of a message effect.
@@ -1212,22 +1222,24 @@ export namespace ViewPromptRespondParams {
   /**
    * A `choice` answer: one item id, or the text the user typed instead.
    */
-  export type PromptChoiceAnswer = {
-    id: string;
-  }
-  | {
-    custom: string;
-  };
+  export type PromptChoiceAnswer =
+    | {
+        id: string;
+      }
+    | {
+        custom: string;
+      };
 
   /**
    * The value of a prompt answer; its shape follows the prompt kind.
    */
-  export type PromptValue = boolean
-  | string
-  | PromptChoiceAnswer
-  | {
-    ids: string[];
-  };
+  export type PromptValue =
+    | boolean
+    | string
+    | PromptChoiceAnswer
+    | {
+        ids: string[];
+      };
 }
 
 export namespace ViewPickParams {

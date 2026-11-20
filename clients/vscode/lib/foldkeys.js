@@ -1,6 +1,6 @@
-'use strict';
+"use strict";
 
-const jsonc = require('jsonc-parser');
+const jsonc = require("jsonc-parser");
 
 /**
 /**
@@ -14,8 +14,10 @@ function parseJsonc(text) {
   const value = jsonc.parse(text, errors, { allowTrailingComma: true, disallowComments: false });
   if (errors.length) {
     const error = errors[0];
-    const line = text.slice(0, error.offset).split('\n').length;
-    throw new Error(`Invalid JSONC at line ${line}, offset ${error.offset}: ${jsonc.printParseErrorCode(error.error)}`);
+    const line = text.slice(0, error.offset).split("\n").length;
+    throw new Error(
+      `Invalid JSONC at line ${line}, offset ${error.offset}: ${jsonc.printParseErrorCode(error.error)}`,
+    );
   }
   return value;
 }
@@ -27,20 +29,20 @@ function parseJsonc(text) {
  * @returns {{command: string, args?: object}|undefined}
  */
 function mapFoldCommand(command) {
-  if (typeof command !== 'string') {
+  if (typeof command !== "string") {
     return undefined;
   }
   if (FOLD_COMMANDS[command]) {
     return FOLD_COMMANDS[command];
   }
-  if (command === 'editor.toggleFold') {
-    return { command: 'common.toggle-section' };
+  if (command === "editor.toggleFold") {
+    return { command: "common.toggle-section" };
   }
-  if (command.startsWith('editor.unfold')) {
-    return { command: 'common.show-section' };
+  if (command.startsWith("editor.unfold")) {
+    return { command: "common.show-section" };
   }
-  if (command.startsWith('editor.fold')) {
-    return { command: 'common.hide-section' };
+  if (command.startsWith("editor.fold")) {
+    return { command: "common.hide-section" };
   }
   return undefined;
 }
@@ -55,14 +57,14 @@ function mapFoldCommand(command) {
  * @returns {object[]}
  */
 function mapFoldKeys(input) {
-  const entries = typeof input === 'string' ? parseJsonc(input) : input;
+  const entries = typeof input === "string" ? parseJsonc(input) : input;
   if (!Array.isArray(entries)) {
     return [];
   }
 
   const mapped = [];
   for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') {
+    if (!entry || typeof entry !== "object") {
       continue;
     }
     const target = mapFoldCommand(entry.command);
@@ -72,16 +74,16 @@ function mapFoldKeys(input) {
 
     const result = {
       key: entry.key,
-      command: 'magit.invoke',
+      command: "magit.invoke",
       args: { command: target.command },
-      when: 'magit.active && !magit.textMode && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
+      when: "magit.active && !magit.textMode && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible",
     };
     if (target.args) {
       result.args.args = target.args;
     }
     // Keep platform-specific key overrides as VSCode's own schema expects.
-    for (const platform of ['mac', 'linux', 'win']) {
-      if (typeof entry[platform] === 'string') {
+    for (const platform of ["mac", "linux", "win"]) {
+      if (typeof entry[platform] === "string") {
         result[platform] = entry[platform];
       }
     }
@@ -91,22 +93,22 @@ function mapFoldKeys(input) {
 }
 
 const FOLD_COMMANDS = {
-  'editor.fold': { command: 'common.hide-section' },
-  'editor.foldRecursively': { command: 'common.hide-section', args: { recursive: true } },
-  'editor.foldAll': { command: 'common.hide-all' },
-  'editor.foldAllBlockComment': { command: 'common.hide-all' },
-  'editor.foldAllMarkerRegions': { command: 'common.hide-all' },
-  'editor.foldAllExcept': { command: 'common.hide-all' },
-  'editor.unfold': { command: 'common.show-section' },
-  'editor.unfoldRecursively': { command: 'common.show-section', args: { recursive: true } },
-  'editor.unfoldAll': { command: 'common.show-all' },
-  'editor.unfoldAllMarkerRegions': { command: 'common.show-all' },
-  'editor.unfoldAllExcept': { command: 'common.show-all' },
-  'editor.toggleFold': { command: 'common.toggle-section' },
+  "editor.fold": { command: "common.hide-section" },
+  "editor.foldRecursively": { command: "common.hide-section", args: { recursive: true } },
+  "editor.foldAll": { command: "common.hide-all" },
+  "editor.foldAllBlockComment": { command: "common.hide-all" },
+  "editor.foldAllMarkerRegions": { command: "common.hide-all" },
+  "editor.foldAllExcept": { command: "common.hide-all" },
+  "editor.unfold": { command: "common.show-section" },
+  "editor.unfoldRecursively": { command: "common.show-section", args: { recursive: true } },
+  "editor.unfoldAll": { command: "common.show-all" },
+  "editor.unfoldAllMarkerRegions": { command: "common.show-all" },
+  "editor.unfoldAllExcept": { command: "common.show-all" },
+  "editor.toggleFold": { command: "common.toggle-section" },
 };
 
 for (let level = 1; level <= 7; level += 1) {
-  FOLD_COMMANDS[`editor.foldLevel${level}`] = { command: 'common.less-detail' };
+  FOLD_COMMANDS[`editor.foldLevel${level}`] = { command: "common.less-detail" };
 }
 
 module.exports = {

@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Pre-seed the isolated profile's server cache for the automatic startup test.
@@ -10,17 +10,17 @@
  * needs a published or network-reachable release.
  */
 
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 
-const root = path.resolve(__dirname, '../../../..');
-const FIXTURE_PROGRAM = path.join(root, 'scripts', 'test_release_archive_fixture.py');
-const ASSET = 'x86_64-unknown-linux-gnu';
-const EXTENSION_ID = 'magit-lsp.magit-lsp';
+const root = path.resolve(__dirname, "../../../..");
+const FIXTURE_PROGRAM = path.join(root, "scripts", "test_release_archive_fixture.py");
+const ASSET = "x86_64-unknown-linux-gnu";
+const EXTENSION_ID = "magit-lsp.magit-lsp";
 
 /**
  * Hex SHA-256 of bytes.
@@ -29,7 +29,7 @@ const EXTENSION_ID = 'magit-lsp.magit-lsp';
  * @returns {string}
  */
 function digest(bytes) {
-  return crypto.createHash('sha256').update(bytes).digest('hex');
+  return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
 /**
@@ -42,12 +42,12 @@ function digest(bytes) {
  * @returns {Buffer} gzip release archive bytes
  */
 function packagedArchive(binary, stem, archiveName) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-lsp-download-startup-archive-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "magit-lsp-download-startup-archive-"));
   try {
-    const binaryPath = path.join(directory, 'magit-lsp');
+    const binaryPath = path.join(directory, "magit-lsp");
     fs.copyFileSync(binary, binaryPath);
     const archivePath = path.join(directory, archiveName);
-    execFileSync('python3', [FIXTURE_PROGRAM, archivePath, stem, binaryPath], { stdio: 'pipe' });
+    execFileSync("python3", [FIXTURE_PROGRAM, archivePath, stem, binaryPath], { stdio: "pipe" });
     return fs.readFileSync(archivePath);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -67,7 +67,7 @@ function packagedArchive(binary, stem, archiveName) {
  */
 function releasePayload(binary) {
   const version = JSON.parse(
-    fs.readFileSync(path.join(root, 'clients/vscode/package.json'), 'utf8')
+    fs.readFileSync(path.join(root, "clients/vscode/package.json"), "utf8"),
   ).version;
   const stem = `magit-lsp-v${version}-${ASSET}`;
   const archiveName = `${stem}.tar.gz`;
@@ -96,12 +96,12 @@ function releasePayload(binary) {
  */
 async function prepareDownloadCache({ directory, binary }) {
   const payload = releasePayload(binary);
-  const cacheRoot = path.join(directory, 'user', 'User', 'globalStorage', EXTENSION_ID);
-  const { resolveServer } = require('../../lib/server-download.js');
+  const cacheRoot = path.join(directory, "user", "User", "globalStorage", EXTENSION_ID);
+  const { resolveServer } = require("../../lib/server-download.js");
   const resolved = await resolveServer({
     version: payload.version,
     cacheRoot,
-    runtime: { platform: 'linux', arch: 'x64', glibc: '2.36' },
+    runtime: { platform: "linux", arch: "x64", glibc: "2.36" },
     transport: async (url) => {
       if (url === `${payload.base}/${payload.archiveName}.sha256`) {
         return Buffer.from(payload.sidecar);
@@ -110,9 +110,12 @@ async function prepareDownloadCache({ directory, binary }) {
       throw new Error(`unexpected download ${url}`);
     },
   });
-  assert.equal(resolved.version, payload.version, 'the seeded cache names the extension version');
-  assert.equal(resolved.executable.startsWith(`${cacheRoot}${path.sep}`), true,
-    'the production helper installs the server below the extension cache root');
+  assert.equal(resolved.version, payload.version, "the seeded cache names the extension version");
+  assert.equal(
+    resolved.executable.startsWith(`${cacheRoot}${path.sep}`),
+    true,
+    "the production helper installs the server below the extension cache root",
+  );
   return { version: payload.version, asset: ASSET, cacheRoot, executable: resolved.executable };
 }
 

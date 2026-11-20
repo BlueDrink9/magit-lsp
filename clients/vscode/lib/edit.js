@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Pure helpers for native commit-message editing (§3.10).
@@ -10,14 +10,14 @@
  */
 
 /** Native document scheme for commit-message files. */
-const SCHEME = 'file';
+const SCHEME = "file";
 
 /** The only editor-bridge kind the server announces today. */
-const KIND = 'commit-message';
+const KIND = "commit-message";
 
 /** VSCode language ids for each managed-draft kind. */
 const LANGUAGES = {
-  'commit-message': 'git-commit',
+  "commit-message": "git-commit",
 };
 
 /**
@@ -31,12 +31,12 @@ const LANGUAGES = {
  */
 function draftAction(command) {
   switch (command) {
-    case 'common.confirm':
-      return 'confirm';
-    case 'common.cancel':
-      return 'cancel';
-    case 'common.quit':
-      return 'close';
+    case "common.confirm":
+      return "confirm";
+    case "common.cancel":
+      return "cancel";
+    case "common.quit":
+      return "close";
     default:
       return undefined;
   }
@@ -53,20 +53,20 @@ function draftAction(command) {
  */
 function isEditEffect(effect) {
   return Boolean(
-    effect
-    && effect.type === 'editDocument'
-    && effect.mode === 'realFile'
-    && typeof effect.runId === 'string'
-    && effect.runId.length > 0
-    && typeof effect.uri === 'string'
-    && effect.uri.startsWith('file:///')
-    && effect.uri.endsWith('/COMMIT_EDITMSG')
-    && typeof effect.text === 'string'
-    && effect.version === 1
-    && effect.kind === KIND
-    && Object.keys(effect).every((key) => [
-      'type', 'mode', 'runId', 'uri', 'text', 'version', 'kind', 'title', 'scope',
-    ].includes(key))
+    effect &&
+    effect.type === "editDocument" &&
+    effect.mode === "realFile" &&
+    typeof effect.runId === "string" &&
+    effect.runId.length > 0 &&
+    typeof effect.uri === "string" &&
+    effect.uri.startsWith("file:///") &&
+    effect.uri.endsWith("/COMMIT_EDITMSG") &&
+    typeof effect.text === "string" &&
+    effect.version === 1 &&
+    effect.kind === KIND &&
+    Object.keys(effect).every((key) =>
+      ["type", "mode", "runId", "uri", "text", "version", "kind", "title", "scope"].includes(key),
+    ),
   );
 }
 
@@ -77,7 +77,7 @@ function isEditEffect(effect) {
  * @returns {string}
  */
 function languageForKind(kind) {
-  return LANGUAGES[kind] || 'git-commit';
+  return LANGUAGES[kind] || "git-commit";
 }
 
 /**
@@ -92,11 +92,11 @@ function languageForKind(kind) {
  */
 function editingContext(effect) {
   return {
-    'magit.active': false,
-    'magit.scope': '',
-    'magit.textMode': false,
-    'magit.capture': false,
-    'magit.editing': Boolean(effect),
+    "magit.active": false,
+    "magit.scope": "",
+    "magit.textMode": false,
+    "magit.capture": false,
+    "magit.editing": Boolean(effect),
   };
 }
 
@@ -106,7 +106,7 @@ function editingContext(effect) {
  * @returns {{'magit.editing': boolean}}
  */
 function inactiveContext() {
-  return { 'magit.editing': false };
+  return { "magit.editing": false };
 }
 
 module.exports = {

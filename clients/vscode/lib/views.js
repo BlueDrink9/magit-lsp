@@ -1,12 +1,12 @@
-'use strict';
+"use strict";
 
-const vscode = require('vscode');
+const vscode = require("vscode");
 
-const { deriveContext, inactiveContext } = require('./context');
-const { showMenu, hideMenu } = require('./menus');
-const { applyRender } = require('./requests');
-const { SCHEME, store } = require('./store');
-const { message } = require('./util');
+const { deriveContext, inactiveContext } = require("./context");
+const { showMenu, hideMenu } = require("./menus");
+const { applyRender } = require("./requests");
+const { SCHEME, store } = require("./store");
+const { message } = require("./util");
 
 /**
  * The view state that owns a virtual document.
@@ -35,7 +35,7 @@ function activeState() {
  * @returns {boolean}
  */
 function isMenuKind(kind) {
-  return typeof kind === 'string' && kind.startsWith('menu.');
+  return typeof kind === "string" && kind.startsWith("menu.");
 }
 
 /**
@@ -60,7 +60,7 @@ function ensureView(descriptor) {
   const uri = vscode.Uri.from({
     scheme: SCHEME,
     authority: descriptor.id,
-    path: `/${encodeURIComponent(descriptor.title || descriptor.kind || 'Magit')}`,
+    path: `/${encodeURIComponent(descriptor.title || descriptor.kind || "Magit")}`,
   });
   let resolveFirstRender;
   const state = {
@@ -76,7 +76,9 @@ function ensureView(descriptor) {
     quickPick: undefined,
     quickPickHiding: false,
     pressQueue: Promise.resolve(),
-    firstRender: new Promise((resolve) => { resolveFirstRender = resolve; }),
+    firstRender: new Promise((resolve) => {
+      resolveFirstRender = resolve;
+    }),
     resolveFirstRender: undefined,
   };
   state.resolveFirstRender = resolveFirstRender;
@@ -121,7 +123,7 @@ async function showDocument(state) {
   const document = await vscode.workspace.openTextDocument(state.uri);
   state.changingLanguage = true;
   try {
-    await vscode.languages.setTextDocumentLanguage(document, 'magit');
+    await vscode.languages.setTextDocumentLanguage(document, "magit");
   } catch (error) {
     store.output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
   } finally {
@@ -145,7 +147,7 @@ function applyCursor(state, cursor) {
     return;
   }
   const editor = vscode.window.visibleTextEditors.find(
-    (candidate) => candidate.document.uri.toString() === state.uri.toString()
+    (candidate) => candidate.document.uri.toString() === state.uri.toString(),
   );
   if (!editor) {
     return;
@@ -157,7 +159,7 @@ function applyCursor(state, cursor) {
   editor.selection = new vscode.Selection(position, position);
   editor.revealRange(
     new vscode.Range(position, position),
-    vscode.TextEditorRevealType.InCenterIfOutsideViewport
+    vscode.TextEditorRevealType.InCenterIfOutsideViewport,
   );
 }
 
@@ -168,11 +170,9 @@ function applyCursor(state, cursor) {
  */
 function activateView(state) {
   store.activeViewId = state ? state.id : undefined;
-  const values = state
-    ? deriveContext(state.descriptor, state.mode)
-    : inactiveContext();
+  const values = state ? deriveContext(state.descriptor, state.mode) : inactiveContext();
   for (const [key, value] of Object.entries(values)) {
-    void vscode.commands.executeCommand('setContext', key, value);
+    void vscode.commands.executeCommand("setContext", key, value);
   }
 }
 
@@ -216,7 +216,7 @@ async function closeView(viewId, focusPrevious) {
  */
 function tabUri(tab) {
   const input = tab.input;
-  if (!input || typeof input !== 'object' || !('uri' in input) || !input.uri) {
+  if (!input || typeof input !== "object" || !("uri" in input) || !input.uri) {
     return undefined;
   }
   return /** @type {vscode.Uri} */ (input.uri).toString();
@@ -234,10 +234,12 @@ async function closeRoot(rootId) {
     store.pendingRenders.delete(state.id);
     store.documentsChanged.fire(state.uri);
   }
-  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
-    const uri = tabUri(tab);
-    return uri !== undefined && uris.has(uri);
-  });
+  const tabs = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => {
+      const uri = tabUri(tab);
+      return uri !== undefined && uris.has(uri);
+    });
   if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
   if (states.some((state) => state.id === store.activeViewId)) activateView(undefined);
 }

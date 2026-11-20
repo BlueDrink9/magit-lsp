@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Apply one `LineEdit` to a line array. `endLine` is exclusive.
@@ -28,8 +28,8 @@ function applyEdit(lines, edit) {
 function applyRender(lines, version, render) {
   const current = Array.isArray(lines) ? lines.slice() : [];
 
-  if (!render || typeof render !== 'object') {
-    return { lines: current, version, mode: undefined, status: 'none' };
+  if (!render || typeof render !== "object") {
+    return { lines: current, version, mode: undefined, status: "none" };
   }
 
   if (Array.isArray(render.text)) {
@@ -37,18 +37,16 @@ function applyRender(lines, version, render) {
       lines: render.text.slice(),
       version: render.version,
       mode: render.mode,
-      status: 'full',
+      status: "full",
     };
   }
 
   if (Array.isArray(render.edits)) {
     if (render.baseVersion !== version) {
-      return { lines: current, version, mode: render.mode, status: 'resync' };
+      return { lines: current, version, mode: render.mode, status: "resync" };
     }
     // Bottom-up keeps earlier offsets valid while splicing.
-    const edits = render.edits
-      .slice()
-      .sort((left, right) => right.startLine - left.startLine);
+    const edits = render.edits.slice().sort((left, right) => right.startLine - left.startLine);
     for (const edit of edits) {
       applyEdit(current, edit);
     }
@@ -56,11 +54,11 @@ function applyRender(lines, version, render) {
       lines: current,
       version: render.version,
       mode: render.mode,
-      status: 'edits',
+      status: "edits",
     };
   }
 
-  return { lines: current, version, mode: render.mode, status: 'none' };
+  return { lines: current, version, mode: render.mode, status: "none" };
 }
 
 module.exports = { applyRender };

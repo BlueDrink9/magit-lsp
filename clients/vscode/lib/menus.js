@@ -1,11 +1,11 @@
-'use strict';
+"use strict";
 
-const vscode = require('vscode');
+const vscode = require("vscode");
 
-const { quickPickItems, routeTyped } = require('./menu');
-const { press } = require('./requests');
-const { store } = require('./store');
-const { message } = require('./util');
+const { quickPickItems, routeTyped } = require("./menu");
+const { press } = require("./requests");
+const { store } = require("./store");
+const { message } = require("./util");
 
 /**
  * A menu QuickPick row: a VSCode item plus the canonical menu key and steps.
@@ -29,7 +29,7 @@ const { message } = require('./util');
  */
 function showMenu(state) {
   // `views` requires this module; resolve its export after the cycle loads.
-  const { activateView } = require('./views');
+  const { activateView } = require("./views");
   if (state.quickPick) {
     updateQuickPick(state);
     state.quickPick.show();
@@ -40,7 +40,7 @@ function showMenu(state) {
   /** @type {vscode.QuickPick<MenuQuickPickItem>} */
   const quickPick = vscode.window.createQuickPick();
   quickPick.title = state.menu ? state.menu.title : state.descriptor.title;
-  quickPick.placeholder = 'Press a menu key';
+  quickPick.placeholder = "Press a menu key";
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
   quickPick.items = menuItems(state.menu);
@@ -53,7 +53,7 @@ function showMenu(state) {
     }
     const steps = routeTyped(value);
     // Clearing the input raises one empty change event, which is ignored.
-    quickPick.value = '';
+    quickPick.value = "";
     queueSteps(state, steps);
   });
 
@@ -72,7 +72,7 @@ function showMenu(state) {
     state.quickPickHiding = true;
     // Escape in the QuickPick never reaches a keybinding; tell the server to
     // pop the menu so the view stack stays in sync.
-    queueSteps(state, ['Escape']);
+    queueSteps(state, ["Escape"]);
   });
 
   quickPick.show();
@@ -100,7 +100,7 @@ function updateQuickPick(state) {
  */
 function menuItems(model) {
   return quickPickItems(model).map((row) => {
-    if (row.kind === 'separator') {
+    if (row.kind === "separator") {
       return { label: row.label, kind: vscode.QuickPickItemKind.Separator };
     }
     return {

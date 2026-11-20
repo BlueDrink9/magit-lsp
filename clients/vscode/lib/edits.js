@@ -1,11 +1,11 @@
-'use strict';
+"use strict";
 
-const vscode = require('vscode');
-const { cancel, confirm, current, forUri, onClosed, setContext } = require('./drafts');
-const { editingContext, inactiveContext } = require('./edit');
-const { activateView, closeView, stateForUri } = require('./views');
-const { SCHEME, store } = require('./store');
-const { message } = require('./util');
+const vscode = require("vscode");
+const { cancel, confirm, current, forUri, onClosed, setContext } = require("./drafts");
+const { editingContext, inactiveContext } = require("./edit");
+const { activateView, closeView, stateForUri } = require("./views");
+const { SCHEME, store } = require("./store");
+const { message } = require("./util");
 
 /** Detach draft documents safely; close server-owned status views separately. */
 async function onDocumentClosed(document) {
@@ -18,7 +18,7 @@ async function onDocumentClosed(document) {
   if (!client) return;
   try {
     await store.clientReady;
-    if (store.client === client) await client.sendRequest('view/close', { viewId });
+    if (store.client === client) await client.sendRequest("view/close", { viewId });
   } catch (error) {
     store.output.appendLine(`view/close failed: ${message(error)}`);
     vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);

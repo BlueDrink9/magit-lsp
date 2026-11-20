@@ -1,18 +1,18 @@
-'use strict';
+"use strict";
 
-const fs = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
 
-const vscode = require('vscode');
+const vscode = require("vscode");
 
-const { currentEdit, confirmEditCommand, cancelEditCommand } = require('./edits');
-const { mapFoldKeys } = require('./foldkeys');
-const { queueSteps } = require('./menus');
-const { press, invoke } = require('./requests');
-const { focusView, ensureView, showView, activeState, isMenuKind } = require('./views');
-const { SCHEME, store } = require('./store');
-const { message } = require('./util');
+const { currentEdit, confirmEditCommand, cancelEditCommand } = require("./edits");
+const { mapFoldKeys } = require("./foldkeys");
+const { queueSteps } = require("./menus");
+const { press, invoke } = require("./requests");
+const { focusView, ensureView, showView, activeState, isMenuKind } = require("./views");
+const { SCHEME, store } = require("./store");
+const { message } = require("./util");
 
 /**
  * The editor mode, cursor and selection a key press reports.
@@ -34,9 +34,10 @@ function editorInfo() {
     cursor,
     selection: {
       startLine: selection.start.line,
-      endLine: selection.end.line > selection.start.line && selection.end.character === 0
-        ? selection.end.line - 1
-        : selection.end.line,
+      endLine:
+        selection.end.line > selection.start.line && selection.end.character === 0
+          ? selection.end.line - 1
+          : selection.end.line,
     },
   };
 }
@@ -53,7 +54,7 @@ async function openStatus() {
   }
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
-    vscode.window.showErrorMessage('magit-lsp: open a repository folder first.');
+    vscode.window.showErrorMessage("magit-lsp: open a repository folder first.");
     return;
   }
 
@@ -68,17 +69,17 @@ async function openStatus() {
       await store.statusOpens.get(repo);
     }
     const existing = Array.from(store.views.values()).find(
-      (state) => state.repo === repo && state.descriptor.kind === 'status'
+      (state) => state.repo === repo && state.descriptor.kind === "status",
     );
     if (existing) {
       await focusView(existing.id);
       return;
     }
     const opening = (async () => {
-      const descriptor = await client.sendRequest('view/open', {
-      kind: 'status',
-      args: { repo_path: repo },
-      viewport: viewport(),
+      const descriptor = await client.sendRequest("view/open", {
+        kind: "status",
+        args: { repo_path: repo },
+        viewport: viewport(),
       });
       const state = ensureView(descriptor);
       state.repo = repo;
@@ -141,7 +142,7 @@ async function pressCommand(args) {
  * @param {{command?: string, args?: unknown}|string|undefined} args
  */
 async function invokeCommand(args) {
-  const command = typeof args === 'string' ? args : args && args.command;
+  const command = typeof args === "string" ? args : args && args.command;
   if (!command) {
     return;
   }
@@ -149,8 +150,8 @@ async function invokeCommand(args) {
   // identify the server-owned edit actions.
   const edit = currentEdit();
   if (edit && edit.effect.scope) {
-    if (command === 'common.confirm') await confirmEditCommand();
-    else if (command === 'common.cancel') await cancelEditCommand();
+    if (command === "common.confirm") await confirmEditCommand();
+    else if (command === "common.cancel") await cancelEditCommand();
     return;
   }
   const state = activeState();
@@ -160,12 +161,7 @@ async function invokeCommand(args) {
 
   const info = state.quickPick ? { cursor: { line: 0, column: 0 } } : editorInfo();
   state.pressQueue = state.pressQueue
-    .then(() => invoke(
-      state.id,
-      command,
-      typeof args === 'object' ? args.args : undefined,
-      info
-    ))
+    .then(() => invoke(state.id, command, typeof args === "object" ? args.args : undefined, info))
     .catch((error) => {
       store.output.appendLine(`invoke failed: ${message(error)}`);
     });
@@ -180,7 +176,7 @@ async function mirrorFoldShortcuts() {
   const file = keybindingsPath();
   let text;
   try {
-    text = await fs.readFile(file, 'utf8');
+    text = await fs.readFile(file, "utf8");
   } catch (error) {
     vscode.window.showInformationMessage(`magit-lsp: no keybindings.json at ${file}`);
     return;
@@ -195,19 +191,19 @@ async function mirrorFoldShortcuts() {
   }
 
   if (entries.length === 0) {
-    vscode.window.showInformationMessage('magit-lsp: no editor fold shortcuts found.');
+    vscode.window.showInformationMessage("magit-lsp: no editor fold shortcuts found.");
     return;
   }
 
   const content = `${JSON.stringify(entries, null, 2)}\n`;
-  const document = await vscode.workspace.openTextDocument({ language: 'jsonc', content });
+  const document = await vscode.workspace.openTextDocument({ language: "jsonc", content });
   await vscode.window.showTextDocument(document, { preview: true });
 
   const choice = await vscode.window.showInformationMessage(
     `magit-lsp: ${entries.length} fold shortcut(s) can be mirrored.`,
-    'Copy to clipboard'
+    "Copy to clipboard",
   );
-  if (choice === 'Copy to clipboard') {
+  if (choice === "Copy to clipboard") {
     await vscode.env.clipboard.writeText(content);
   }
 }
@@ -218,28 +214,28 @@ async function mirrorFoldShortcuts() {
  * @returns {string}
  */
 function keybindingsPath() {
-  const configured = vscode.workspace.getConfiguration('magit-lsp').get('keybindingsPath');
+  const configured = vscode.workspace.getConfiguration("magit-lsp").get("keybindingsPath");
   if (configured) {
     return configured;
   }
 
   const home = os.homedir();
-  if (process.platform === 'darwin') {
-    return path.join(home, 'Library', 'Application Support', 'Code', 'User', 'keybindings.json');
+  if (process.platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "Code", "User", "keybindings.json");
   }
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     return path.join(
-      process.env.APPDATA || path.join(home, 'AppData', 'Roaming'),
-      'Code',
-      'User',
-      'keybindings.json'
+      process.env.APPDATA || path.join(home, "AppData", "Roaming"),
+      "Code",
+      "User",
+      "keybindings.json",
     );
   }
   return path.join(
-    process.env.XDG_CONFIG_HOME || path.join(home, '.config'),
-    'Code',
-    'User',
-    'keybindings.json'
+    process.env.XDG_CONFIG_HOME || path.join(home, ".config"),
+    "Code",
+    "User",
+    "keybindings.json",
   );
 }
 
