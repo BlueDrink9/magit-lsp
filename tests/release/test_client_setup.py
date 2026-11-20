@@ -22,9 +22,16 @@ class ClientSetupTests(unittest.TestCase):
         binary = (ROOT / binary).resolve()
         self.assertTrue(binary.is_file(), str(binary))
         document = (ROOT / 'docs/CLIENT_INSTALL.md').read_text()
-        snippets = re.findall(r'```lua\n(.*?)\n```', document, re.S)
-        self.assertEqual(len(snippets), 2)
-        for mode, snippet in zip(('native-pack', 'lazy-spec-callback'), snippets):
+        snippets = {}
+        for mode, marker in (
+                ('native-pack', '-- native-pack init.lua'),
+                ('lazy-spec-callback', '-- lazy.nvim plugin spec')):
+            match = re.search(
+                r'```lua\n(' + re.escape(marker) + r'\n.*?)\n```', document, re.S)
+            self.assertIsNotNone(
+                match, f'docs/CLIENT_INSTALL.md has no {mode} snippet {marker!r}')
+            snippets[mode] = match.group(1)
+        for mode, snippet in snippets.items():
             with self.subTest(mode=mode), tempfile.TemporaryDirectory(prefix='magit-setup-') as temporary:
                 base = Path(temporary)
                 home = base / 'home'
