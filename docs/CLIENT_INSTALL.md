@@ -87,6 +87,62 @@ precedence, then `$MAGIT_LSP_BIN` (one executable path), the plugin checkout's
 An invalid `$MAGIT_LSP_BIN` reports an error rather than falling through. There
 is no `cargo run` fallback. Profiles are `vim` (Neovim default) and `standard`.
 
+## Neovim plugin-free (Plain) LSP
+
+A general LSP client needs no plugin: this `init.lua` starts the external server
+for repository `.magit` documents and commit drafts and keeps the session in
+Plain presentation. It declares no `capabilities.experimental.magit` block and
+disables `window.showDocument`, so the server advertises only standard methods
+and Plain actions; see [client implementation
+levels](CLIENT_SPEC.md#client-implementation-levels). The test harness loads this
+exact block, so it is the tested reference setup.
+
+<!-- plugin-free-plain-config -->
+```lua
+-- Plugin-free Plain Neovim configuration (copy into init.lua).
+local server = vim.env.MAGIT_LSP_BIN or vim.fn.expand('~/.local/bin/magit-lsp')
+
+local function attach_magit(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  if not (name:match('/%.magit$') or name:match('/COMMIT_EDITMSG$')) then
+    return
+  end
+  local capabilities = vim.lsp.protocol.make_client_capabilities()
+  capabilities.window.showDocument = { support = false }
+  vim.lsp.start({
+    name = 'magit-lsp',
+    cmd = { server },
+    root_dir = vim.fn.getcwd(),
+    capabilities = capabilities,
+  }, { bufnr = buf })
+end
+
+vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
+  callback = function(args) attach_magit(args.buf) end,
+})
+vim.api.nvim_create_autocmd('VimEnter', {
+  callback = function() attach_magit(vim.api.nvim_get_current_buf()) end,
+})
+vim.api.nvim_create_user_command('MagitPlainStatus', function()
+  vim.cmd.edit('.magit')
+end, { desc = 'Open the magit-lsp status document' })
+```
+
+Start Neovim in the repository root (the snippet passes `vim.fn.getcwd()` as
+`root_dir`), then run `:MagitPlainStatus` or `:edit .magit`. The status view is
+rendered into that buffer; the `.magit` file on disk is presentation only and is
+not written by the server. To act, put the cursor on a rendered row and run
+`:lua vim.lsp.buf.code_action()`. Commit prompts open the real
+`.git/COMMIT_EDITMSG` draft: edit it with ordinary Neovim input and choose the
+offered **Confirm commit** or **Abort commit** code action. The optional
+`$MAGIT_LSP_BIN` override in the snippet matches the plugin's server-discovery
+rule; without it the server is read from `~/.local/bin`.
+
+`make plain-neovim` boots this exact block in an isolated Neovim configuration
+with a temporary repository and asserts the rendered status text and Git state.
+Test probes and state observations live in `tests/ui/plain_init.lua`, outside
+the block, so the snippet above stays user-facing.
+
 ## VSCode source quickstart (no published install)
 
 In a source checkout, install locked client dependencies with Node.js 22+:

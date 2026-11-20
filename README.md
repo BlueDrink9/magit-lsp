@@ -65,7 +65,9 @@ A general LSP client can drive the server in Plain mode by following the
 [client implementation levels](docs/CLIENT_SPEC.md#client-implementation-levels):
 omit `capabilities.experimental.magit` and declare the standard capabilities it
 supports. The tested clients are the bundled Neovim client (Lua and UI scenarios,
-`make test`) and the VS Code extension (`make vscode-test`). The Helix TOML in
+`make test`), the [plugin-free Neovim Plain
+configuration](docs/CLIENT_INSTALL.md#neovim-plugin-free-plain-lsp) (`make
+plain-neovim`) and the VS Code extension (`make vscode-test`). The Helix TOML in
 the specification is a reference configuration, not a tested client.
 
 ## Quickstart

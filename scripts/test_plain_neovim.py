@@ -19,6 +19,25 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / "build/ui/plain-render"
 DEFAULT_BINARY = Path(os.environ.get("MAGIT_LSP_BIN", ROOT / "target/debug/magit-lsp"))
+DOCUMENTED_CONFIG_MARKER = "<!-- plugin-free-plain-config -->"
+DOCUMENTED_CLIENT_NAME = "magit-lsp"
+TEST_ONLY_CONFIG_TOKENS = ("MAGIT_LSP_UI", "plain_smoke", "PLAIN_REPO", "PLAIN_SERVER")
+
+
+def documented_plain_config(path: Path) -> str:
+    """Return the fenced Lua block that the install guide presents to users."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    try:
+        marker = lines.index(DOCUMENTED_CONFIG_MARKER)
+    except ValueError as error:
+        raise RuntimeError(f"documented Plain config marker missing from {path}") from error
+    start = next((index for index in range(marker + 1, len(lines)) if lines[index].strip() == "```lua"), None)
+    if start is None:
+        raise RuntimeError(f"no Lua fence follows the Plain config marker in {path}")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].strip() == "```"), None)
+    if end is None:
+        raise RuntimeError(f"unterminated Lua fence after the Plain config marker in {path}")
+    return "\n".join(lines[start + 1:end]) + "\n"
 
 
 def normalize_scalar_output(output: str) -> str:
@@ -140,6 +159,18 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
     socket = ""
     server_id = ""
     report: dict[str, object] = {"final_newline": final_newline}
+    documented = documented_plain_config(ROOT / "docs/CLIENT_INSTALL.md")
+    leaked = [token for token in TEST_ONLY_CONFIG_TOKENS if token in documented]
+    if leaked:
+        raise AssertionError(f"documented Plain config contains test-only plumbing: {leaked}")
+    expected_client = f"name = '{DOCUMENTED_CLIENT_NAME}'"
+    if expected_client not in documented:
+        raise AssertionError(f"documented Plain config does not define {expected_client}")
+    report["documented_config"] = {
+        "marker": DOCUMENTED_CONFIG_MARKER,
+        "client": DOCUMENTED_CLIENT_NAME,
+        "lines": len(documented.splitlines()),
+    }
     owned_pids: set[int] = set()
     ownership: dict[str, int | None] = {}
     failure: BaseException | None = None
@@ -218,7 +249,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             while True:
                 try:
                     initial = state()
-                    if "magit-lsp-plain-smoke" in initial["clients"] and "stale presentation sentinel" not in initial["text"] and "Head:" in initial["text"]:
+                    if DOCUMENTED_CLIENT_NAME in initial["clients"] and "stale presentation sentinel" not in initial["text"] and "Head:" in initial["text"]:
                         break
                 except (RuntimeError, json.JSONDecodeError) as error:
                     rpc_error = str(error)
@@ -720,7 +751,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                                         "index_tree_before": pre_confirm_tree}
             run(["nvim", "--server", socket, "--remote-send", f":edit {confirm_path}<CR>"], timeout=8)
             draft = wait_state("ordinary edit attaches commit draft", lambda value: value["name"] == confirm_path)
-            assert "magit-lsp-plain-smoke" in draft["clients"], draft
+            assert DOCUMENTED_CLIENT_NAME in draft["clients"], draft
             exact_message = "Native manual commit\n\nEdited through ordinary Neovim input."
             run(["nvim", "--server", socket, "--remote-send",
                  "ggdGiNative manual commit<CR><CR>Edited through ordinary Neovim input.<Esc>"], timeout=8)
@@ -766,7 +797,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             run(["nvim", "--server", socket, "--remote-send", f":edit {abort_path}<CR>"], timeout=8)
             abort_draft = wait_state("ordinary edit attaches abort draft", lambda value: value["name"] == abort_path)
             assert abort_draft["buffer"] != confirmed_buffer, (confirmed_buffer, abort_draft)
-            assert "magit-lsp-plain-smoke" in abort_draft["clients"], abort_draft
+            assert DOCUMENTED_CLIENT_NAME in abort_draft["clients"], abort_draft
             picker("manual-abort-action", "gg", "Abort commit")
             run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
             abort_retired = wait_state("manual abort status row retirement", lambda value:

@@ -191,7 +191,7 @@ The generated capability declaration summary is [what you get for what you decla
 |---|---|
 | Neovim | Dynamic keymaps and buffer-local capture (`lua/magit-lsp/init.lua`, `view.lua`). Modifier declaration is GUI/terminal-specific; do not promise `full` unconditionally. |
 | VS Code | Static contributed bindings plus focus guards (`clients/vscode/lib/session.js`). Presents main/bottom layouts and menus with QuickPick; pass-through replay and placement are limited (`views.js`, `menus.js`, `effects.js`). |
-| Plain | Standard document and code-action client; no clipboard or secret-prompt support. Optional capabilities degrade as documented in [Client implementation levels](#client-implementation-levels). `tests/ui/plain_init.lua` is the minimal reference client. |
+| Plain | Standard document and code-action client; no clipboard or secret-prompt support. Optional capabilities degrade as documented in [Client implementation levels](#client-implementation-levels). The [plugin-free Neovim configuration](CLIENT_INSTALL.md#neovim-plugin-free-plain-lsp) is the minimal reference client; `tests/ui/plain_init.lua` boots that block with test instrumentation. |
 
 These are client-specific, not parity guarantees. Consult the listed sources and `src/session.rs` for actual behavior.
 

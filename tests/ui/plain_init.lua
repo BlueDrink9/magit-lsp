@@ -1,10 +1,40 @@
 -- Standalone standard-LSP init for the Plain native smoke. No project Lua modules.
+-- Test-only editor options and process plumbing; user config is in the guide.
 vim.opt.swapfile = false
 vim.opt.undofile = false
 vim.opt.hidden = true
 vim.opt.shortmess:append('I')
 vim.g.plain_smoke_rich_notifications = 0
 vim.lsp.log.set_level('trace')
+if vim.env.MAGIT_LSP_SERVER_WRAPPER then
+  vim.env.MAGIT_LSP_BIN = vim.env.MAGIT_LSP_SERVER_WRAPPER
+end
+
+-- Load the exact plugin-free configuration published in the install guide, so
+-- this harness never maintains a second copy of the user-facing setup.
+local function documented_plain_config()
+  local source = debug.getinfo(1, 'S').source:sub(2)
+  local doc = vim.fn.fnamemodify(source, ':h:h:h') .. '/docs/CLIENT_INSTALL.md'
+  local marker = '<!-- plugin-free-plain-config -->'
+  local block, in_fence, seen_marker = {}, false, false
+  for line in io.lines(doc) do
+    if line:find(marker, 1, true) then
+      seen_marker = true
+    elseif seen_marker and not in_fence and line == '```lua' then
+      in_fence = true
+    elseif in_fence and line == '```' then
+      break
+    elseif in_fence then
+      block[#block + 1] = line
+    end
+  end
+  assert(seen_marker, 'documented Plain config marker missing from ' .. doc)
+  assert(#block > 0, 'documented Plain config block missing from ' .. doc)
+  return table.concat(block, '\n')
+end
+local documented_config, documented_error = load(documented_plain_config(), '@CLIENT_INSTALL.md')
+assert(documented_config, documented_error)
+documented_config()
 if vim.env.MAGIT_LSP_UI_PROBE_FILE then
   local probe_path = vim.env.MAGIT_LSP_UI_PROBE_FILE
   local function write_probe(record)
@@ -89,32 +119,8 @@ vim.lsp.handlers['view/render'] = function()
   vim.g.plain_smoke_rich_notifications = vim.g.plain_smoke_rich_notifications + 1
 end
 
-local repo = vim.env.PLAIN_REPO
-local server = vim.env.PLAIN_SERVER
-local server_wrapper = vim.env.MAGIT_LSP_SERVER_WRAPPER
-if server_wrapper then server = server_wrapper end
-assert(repo and server)
-
-vim.api.nvim_create_autocmd('VimEnter', {
-  once = true,
-  callback = function()
-    local capabilities = vim.lsp.protocol.make_client_capabilities()
-    capabilities.window.showDocument = { support = vim.env.MAGIT_LSP_UI_CLIENT == 'plain' }
-    local client_id = vim.lsp.start({
-      name = 'magit-lsp-plain-smoke',
-      cmd = { server },
-      root_dir = repo,
-      capabilities = capabilities,
-    })
-    assert(client_id, 'vim.lsp.start did not create a client')
-    vim.g.plain_smoke_client_id = client_id
-    vim.lsp.buf_attach_client(0, client_id)
-    vim.api.nvim_create_autocmd('BufReadPost', {
-      callback = function(event)
-        vim.lsp.buf_attach_client(event.buf, client_id)
-      end,
-    })
-  end,
+vim.api.nvim_create_autocmd('LspAttach', {
+  callback = function(args) vim.g.plain_smoke_client_id = args.data.client_id end,
 })
 
 -- The standalone smoke deliberately keeps its original declarations and setup.

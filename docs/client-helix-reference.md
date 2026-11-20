@@ -26,4 +26,6 @@ for the next run; its new template is synchronized through a versioned edit.
 The [manual Helix 25.07.1 checklist](evidence/plain-helix.md) records Linux
 open/status/stage/menu/log, Confirm, Abort and connection reuse. Helix did not
 declare `window.showDocument`; no automatic attachment or general Helix support
-promise follows. For a minimal Plain Neovim client, follow `tests/ui/plain_init.lua`.
+promise follows. For a minimal Plain Neovim client, use the [plugin-free Neovim
+configuration](CLIENT_INSTALL.md#neovim-plugin-free-plain-lsp); the test init
+`tests/ui/plain_init.lua` boots that exact block with test instrumentation.
