@@ -25,9 +25,7 @@ pub fn matches_type(kind: &str, value: &Value) -> bool {
         "object" => value.is_object(),
         "array" => value.is_array(),
         "string" => value.is_string(),
-        "integer" => value
-            .as_f64()
-            .is_some_and(|number| number.fract() == 0.0),
+        "integer" => value.as_f64().is_some_and(|number| number.fract() == 0.0),
         "number" => value.is_number(),
         "boolean" => value.is_boolean(),
         "null" => value.is_null(),

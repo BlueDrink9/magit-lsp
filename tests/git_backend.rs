@@ -154,17 +154,31 @@ fn remote_configuration_preserves_exact_urls_and_rejects_invalid_input_without_c
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
     repo.add_remote("origin", "original").expect("add remote");
-    repo.add_remote("other", "other-original").expect("second remote");
+    repo.add_remote("other", "other-original")
+        .expect("second remote");
     fixture.git(&["config", "--add", "remote.origin.url", "extra-fetch"]);
     fixture.git(&["config", "--add", "remote.origin.pushurl", "extra-push"]);
     fixture.git(&["config", "remote.origin.prune", "true"]);
     let fetch = "https://example.invalid/repo with spaces?x=1&y=2";
     let push = "git@example.invalid:team/push repo.git";
-    repo.remote_configure("origin", fetch, push).expect("configure URLs");
-    assert_eq!(fixture.git(&["config", "--get-all", "remote.origin.url"]), format!("{fetch}\n"));
-    assert_eq!(fixture.git(&["config", "--get-all", "remote.origin.pushurl"]), format!("{push}\n"));
-    assert_eq!(fixture.git(&["config", "--get", "remote.origin.prune"]), "true\n");
-    assert_eq!(fixture.git(&["config", "--get", "remote.other.url"]), "other-original\n");
+    repo.remote_configure("origin", fetch, push)
+        .expect("configure URLs");
+    assert_eq!(
+        fixture.git(&["config", "--get-all", "remote.origin.url"]),
+        format!("{fetch}\n")
+    );
+    assert_eq!(
+        fixture.git(&["config", "--get-all", "remote.origin.pushurl"]),
+        format!("{push}\n")
+    );
+    assert_eq!(
+        fixture.git(&["config", "--get", "remote.origin.prune"]),
+        "true\n"
+    );
+    assert_eq!(
+        fixture.git(&["config", "--get", "remote.other.url"]),
+        "other-original\n"
+    );
     let before = fixture.git(&["config", "--local", "--list"]);
     for (name, fetch, push) in [
         ("origin", "", "valid"),
@@ -179,7 +193,10 @@ fn remote_configuration_preserves_exact_urls_and_rejects_invalid_input_without_c
         ("missing", "valid", "valid"),
         ("", "valid", "valid"),
     ] {
-        assert!(repo.remote_configure(name, fetch, push).is_err(), "accepted {name:?}, {fetch:?}, {push:?}");
+        assert!(
+            repo.remote_configure(name, fetch, push).is_err(),
+            "accepted {name:?}, {fetch:?}, {push:?}"
+        );
         assert_eq!(fixture.git(&["config", "--local", "--list"]), before);
     }
     assert!(repo.add_remote("origin", "replacement").is_err());
@@ -198,8 +215,12 @@ fn lightweight_tag_selects_commit_and_rejects_invalid_or_conflicting_input_witho
     fixture.git(&["tag", "-a", "annotated", "-m", "selected commit", "HEAD^"]);
     fixture.git(&["config", "tag.gpgSign", "true"]);
     fixture.git(&["config", "gpg.program", "/nonexistent/tag-signing-program"]);
-    repo.create_lightweight_tag("selected", "annotated").expect("tag selected commit");
-    assert_eq!(fixture.git(&["cat-file", "-t", "refs/tags/selected"]), "commit\n");
+    repo.create_lightweight_tag("selected", "annotated")
+        .expect("tag selected commit");
+    assert_eq!(
+        fixture.git(&["cat-file", "-t", "refs/tags/selected"]),
+        "commit\n"
+    );
     assert_eq!(fixture.git(&["rev-parse", "refs/tags/selected"]), selected);
     let refs = fixture.git(&["show-ref"]);
     let status = fixture.git(&["status", "--porcelain=v1"]);
@@ -213,14 +234,18 @@ fn lightweight_tag_selects_commit_and_rejects_invalid_or_conflicting_input_witho
         ("new", "--all"),
         ("new", ""),
     ] {
-        assert!(repo.create_lightweight_tag(name, revision).is_err(), "accepted {name:?}, {revision:?}");
+        assert!(
+            repo.create_lightweight_tag(name, revision).is_err(),
+            "accepted {name:?}, {revision:?}"
+        );
         assert_eq!(fixture.git(&["show-ref"]), refs);
         assert_eq!(fixture.git(&["status", "--porcelain=v1"]), status);
     }
     assert!(repo.create_tag("selected").is_err());
     assert!(repo.create_tag("-tag").is_err());
     assert_eq!(fixture.git(&["show-ref"]), refs);
-    repo.delete_tag("selected").expect("existing tag deletion still works");
+    repo.delete_tag("selected")
+        .expect("existing tag deletion still works");
 }
 
 #[test]
@@ -230,9 +255,18 @@ fn create_tag_is_lightweight_even_when_signing_is_enabled() {
         .build();
     fixture.git(&["config", "tag.gpgSign", "true"]);
     fixture.git(&["config", "gpg.program", "/nonexistent/tag-signing-program"]);
-    repo.create_tag("unsigned").expect("lightweight tag ignores signing config");
-    assert_eq!(fixture.git(&["cat-file", "-t", "refs/tags/unsigned"]).trim(), "commit");
-    assert_eq!(fixture.git(&["rev-parse", "refs/tags/unsigned"]), fixture.git(&["rev-parse", "HEAD"]));
+    repo.create_tag("unsigned")
+        .expect("lightweight tag ignores signing config");
+    assert_eq!(
+        fixture
+            .git(&["cat-file", "-t", "refs/tags/unsigned"])
+            .trim(),
+        "commit"
+    );
+    assert_eq!(
+        fixture.git(&["rev-parse", "refs/tags/unsigned"]),
+        fixture.git(&["rev-parse", "HEAD"])
+    );
 }
 
 #[test]

@@ -1,5 +1,5 @@
-use super::*;
 use super::rich::{invoke_rich, limited_rich};
+use super::*;
 
 #[test]
 fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
@@ -1370,7 +1370,10 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
         .unwrap_or_else(|| panic!("the prompt view: {answer}"))["descriptor"]
         .clone();
     assert_eq!(descriptor["kind"], json!("prompt"), "{answer}");
-    let prompt_view = descriptor["id"].as_str().expect("prompt view id").to_string();
+    let prompt_view = descriptor["id"]
+        .as_str()
+        .expect("prompt view id")
+        .to_string();
     assert_eq!(
         descriptor["uri"],
         json!(format!("magit://prompt/{prompt_view}")),
@@ -1385,7 +1388,10 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
         json!(prompt_view),
         "{prompt_render}"
     );
-    assert!(prompt_render["result"]["text"].is_array(), "{prompt_render}");
+    assert!(
+        prompt_render["result"]["text"].is_array(),
+        "{prompt_render}"
+    );
 
     // The pending document prompt refuses the next command without answering it.
     let refused = invoke_rich(&mut server, 6, &view_id, "status.stage-all");
@@ -1399,10 +1405,10 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
     shutdown_and_exit(&mut server);
     let observed = &server.notifications;
     assert!(
-        !observed
-            .iter()
-            .any(|message| matches!(message["method"].as_str(),
-                Some("view/prompt" | "view/render" | "view/keymap"))),
+        !observed.iter().any(|message| matches!(
+            message["method"].as_str(),
+            Some("view/prompt" | "view/render" | "view/keymap")
+        )),
         "a Plain client must never receive Rich UI pushes: {observed:?}"
     );
 
@@ -1560,10 +1566,7 @@ fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
             .modify_standard()
             .build();
         let mut server = TestServer::spawn(&[]);
-        server.initialize(limited_rich(
-            json!(["editDocument"]),
-            json!(["confirm"]),
-        ));
+        server.initialize(limited_rich(json!(["editDocument"]), json!(["confirm"])));
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
             "params":{"viewId":view,"command":"commit.create"}}));
@@ -1811,8 +1814,12 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                         .any(|effect| effect["type"] == "message" && effect["level"] == "error"), "{message}");
                 }
                 if message["method"] == "view/effects" {
-                    if let Some(edit) = message["params"]["effects"].as_array().unwrap()
-                        .iter().find(|effect| effect["type"] == "editDocument") {
+                    if let Some(edit) = message["params"]["effects"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|effect| effect["type"] == "editDocument")
+                    {
                         break edit.clone();
                     }
                 }
@@ -1834,8 +1841,10 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                             assert!(Instant::now() < deadline, "configured signer did not start");
                             thread::sleep(Duration::from_millis(20));
                         }
-                        server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel",
-                            "params":{"token":token}}));
+                        server.send(
+                            json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel",
+                            "params":{"token":token}}),
+                        );
                         cancelled = true;
                     }
                 }
@@ -1844,46 +1853,89 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                     progress.push(event);
                 }
                 if message["method"] == "view/effects" {
-                    if let Some(effect) = message["params"]["effects"].as_array().unwrap().iter()
-                        .find(|effect| effect["type"] == "message" && effect["level"] == "error") {
+                    if let Some(effect) = message["params"]["effects"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|effect| effect["type"] == "message" && effect["level"] == "error")
+                    {
                         failure = Some(effect.clone());
                     }
                 }
-                if progress.iter().any(|(_, phase)| phase == "end") && (!signed || failure.is_some()) {
+                if progress.iter().any(|(_, phase)| phase == "end")
+                    && (!signed || failure.is_some())
+                {
                     break;
                 }
             }
-            assert_eq!(progress.iter().map(|(_, phase)| phase.as_str()).filter(|phase| *phase != "report").collect::<Vec<_>>(),
-                ["create", "begin", "end"]);
+            assert_eq!(
+                progress
+                    .iter()
+                    .map(|(_, phase)| phase.as_str())
+                    .filter(|phase| *phase != "report")
+                    .collect::<Vec<_>>(),
+                ["create", "begin", "end"]
+            );
             assert!(progress.windows(2).all(|pair| pair[0].0 == pair[1].0));
             if signed {
                 assert_eq!(cancelled, cancel);
                 let failure = failure.expect("readable signing failure");
                 assert_eq!(failure["text"], "`git commit` failed.", "{failure}");
                 if cancel {
-                    assert!(failure["hint"].as_str().unwrap().contains("Cancellation may leave Git lock files"), "{failure}");
+                    assert!(
+                        failure["hint"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Cancellation may leave Git lock files"),
+                        "{failure}"
+                    );
                 } else {
-                    assert!(failure["detail"].as_str().unwrap().contains("deterministic signer refused"), "{failure}");
+                    assert!(
+                        failure["detail"]
+                            .as_str()
+                            .unwrap()
+                            .contains("deterministic signer refused"),
+                        "{failure}"
+                    );
                 }
                 let env = read(&observed);
-                assert!(env.starts_with(&format!("{}\nsigning-test-context\n", home.display())), "{env}");
-                assert!(env.lines().any(|line| line.contains("deterministic-test-key")), "{env}");
+                assert!(
+                    env.starts_with(&format!("{}\nsigning-test-context\n", home.display())),
+                    "{env}"
+                );
+                assert!(
+                    env.lines()
+                        .any(|line| line.contains("deterministic-test-key")),
+                    "{env}"
+                );
                 assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
                 assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
                 assert_eq!(tmp.git(&["diff", "--cached", "--binary"]), patch);
                 assert_eq!(read(&tmp.path().join("f.txt")), worktree);
-                assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), "Retained signing draft\n");
+                assert_eq!(
+                    read(&tmp.path().join(".git/COMMIT_EDITMSG")),
+                    "Retained signing draft\n"
+                );
                 assert!(!tmp.path().join(".git/index.lock").exists());
                 server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose",
                     "params":{"textDocument":{"uri":edit["uri"]}}}));
-                let refreshed = invoke_rich(&mut server, id+2, &view, "common.refresh");
+                let refreshed = invoke_rich(&mut server, id + 2, &view, "common.refresh");
                 assert!(refreshed.get("error").is_none(), "{refreshed}");
             } else {
                 assert!(failure.is_none(), "unsigned recovery failed: {failure:?}");
                 assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
-                assert_eq!(tmp.git(&["log", "-1", "--format=%B"]).trim(), "Retained signing draft");
+                assert_eq!(
+                    tmp.git(&["log", "-1", "--format=%B"]).trim(),
+                    "Retained signing draft"
+                );
                 assert_eq!(tmp.git(&["diff", "--cached"]), "");
-                assert_eq!(tmp.git(&["cat-file", "commit", "HEAD"]).lines().filter(|line| line.starts_with("gpgsig ")).count(), 0);
+                assert_eq!(
+                    tmp.git(&["cat-file", "commit", "HEAD"])
+                        .lines()
+                        .filter(|line| line.starts_with("gpgsig "))
+                        .count(),
+                    0
+                );
             }
         }
         shutdown_and_exit(&mut server);
@@ -1981,7 +2033,10 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     let failure = failure.expect("the failed commit effect");
     let error = failure["params"]["message"].as_str().unwrap();
     assert!(error.contains("`git commit` failed."), "{failure}");
-    assert!(error.contains("pre-commit refused"), "hook output: {failure}");
+    assert!(
+        error.contains("pre-commit refused"),
+        "hook output: {failure}"
+    );
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));

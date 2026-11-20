@@ -41,7 +41,10 @@ pub(super) struct PromptBridge {
 }
 
 impl PromptBridge {
-    pub(super) fn new(sender: &mpsc::UnboundedSender<Message>, client: Arc<Mutex<ClientCaps>>) -> Self {
+    pub(super) fn new(
+        sender: &mpsc::UnboundedSender<Message>,
+        client: Arc<Mutex<ClientCaps>>,
+    ) -> Self {
         Self {
             closed: AtomicBool::new(false),
             sender: sender.downgrade(),
@@ -111,7 +114,12 @@ impl PromptBridge {
     }
 
     /// Deliver an answer to the waiting question.
-    pub(super) fn respond(&self, prompt_id: &str, cancelled: bool, value: Option<PromptValue>) -> Result<()> {
+    pub(super) fn respond(
+        &self,
+        prompt_id: &str,
+        cancelled: bool,
+        value: Option<PromptValue>,
+    ) -> Result<()> {
         let sender = self
             .lock()
             .remove(prompt_id)
@@ -165,7 +173,11 @@ impl PickBridge {
     ///
     /// `None` means the user cancelled or the notification could not be
     /// delivered (the writer is gone or the operation was cancelled).
-    pub(super) fn ask(&self, ui: &CustomRender, pick: &ViewPickParams) -> Option<ViewPickRespondParams> {
+    pub(super) fn ask(
+        &self,
+        ui: &CustomRender,
+        pick: &ViewPickParams,
+    ) -> Option<ViewPickRespondParams> {
         let pick_id = format!("k{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         let params = ViewPickParams {
             pick_id: pick_id.clone(),

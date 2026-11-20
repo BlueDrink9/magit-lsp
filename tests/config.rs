@@ -533,18 +533,45 @@ fn invalid_plain_section_limits_are_rejected() {
 
 #[test]
 fn plain_pair_timeout_defaults_layers_and_rejects_invalid_values() {
-    let d=load_config(&LoadOptions::default()).unwrap();
-    assert_eq!(d.plain.keys_pair_timeout_ms,250);
-    let initialized=load_config(&LoadOptions{initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),..Default::default()}).unwrap();
-    assert_eq!(initialized.plain.keys_pair_timeout_ms,300);
-    let dir=TempDir::new().unwrap(); let cfg=dir.path().join("config.toml");
-    write(&cfg,"[plain.keys]\npair_timeout_ms = 500\n");
-    let file_only=load_config(&LoadOptions{config_path:Some(cfg.clone()),..Default::default()}).unwrap();
-    assert_eq!(file_only.plain.keys_pair_timeout_ms,500);
-    let v=load_config(&LoadOptions{config_path:Some(cfg.clone()),initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),..Default::default()}).unwrap();
-    assert_eq!(v.plain.keys_pair_timeout_ms,300);
-    for invalid in ["0","-1","1.5","\"4\""] { write(&cfg,&format!("[plain.keys]\npair_timeout_ms = {invalid}\n")); assert!(load(&cfg).unwrap_err().message.contains("plain.keys.pair_timeout_ms")); }
-    let bad=load_config(&LoadOptions{initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":0}}})),..Default::default()}).unwrap_err();
+    let d = load_config(&LoadOptions::default()).unwrap();
+    assert_eq!(d.plain.keys_pair_timeout_ms, 250);
+    let initialized = load_config(&LoadOptions {
+        initialization: Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(initialized.plain.keys_pair_timeout_ms, 300);
+    let dir = TempDir::new().unwrap();
+    let cfg = dir.path().join("config.toml");
+    write(&cfg, "[plain.keys]\npair_timeout_ms = 500\n");
+    let file_only = load_config(&LoadOptions {
+        config_path: Some(cfg.clone()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(file_only.plain.keys_pair_timeout_ms, 500);
+    let v = load_config(&LoadOptions {
+        config_path: Some(cfg.clone()),
+        initialization: Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(v.plain.keys_pair_timeout_ms, 300);
+    for invalid in ["0", "-1", "1.5", "\"4\""] {
+        write(
+            &cfg,
+            &format!("[plain.keys]\npair_timeout_ms = {invalid}\n"),
+        );
+        assert!(load(&cfg)
+            .unwrap_err()
+            .message
+            .contains("plain.keys.pair_timeout_ms"));
+    }
+    let bad = load_config(&LoadOptions {
+        initialization: Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":0}}})),
+        ..Default::default()
+    })
+    .unwrap_err();
     assert!(bad.message.contains("plain.keys.pair_timeout_ms"));
 }
 
@@ -552,29 +579,81 @@ fn plain_pair_timeout_defaults_layers_and_rejects_invalid_values() {
 fn plain_key_policy_settings_parse_and_resolve_by_precedence() {
     use magit_lsp::config::{resolve_plain_keys, PlainKeysSource};
     let defaults = load_config(&LoadOptions::default()).unwrap();
-    assert_eq!(resolve_plain_keys(&defaults.plain, None, None, true), magit_lsp::config::EffectivePlainKeys { enabled: false, source: PlainKeysSource::BuiltIn });
+    assert_eq!(
+        resolve_plain_keys(&defaults.plain, None, None, true),
+        magit_lsp::config::EffectivePlainKeys {
+            enabled: false,
+            source: PlainKeysSource::BuiltIn
+        }
+    );
     let initialized = load_config(&LoadOptions { initialization: Some(serde_json::json!({"plain":{"keys":{"default":true,"clients":{"Editor":false},"pair_timeout_ms":310}}})), ..Default::default() }).unwrap();
     assert!(initialized.plain.keys_default);
     assert_eq!(initialized.plain.keys_clients.get("Editor"), Some(&false));
     assert_eq!(initialized.plain.keys_pair_timeout_ms, 310);
-    assert_eq!(resolve_plain_keys(&initialized.plain, Some("Editor"), None, true), magit_lsp::config::EffectivePlainKeys { enabled: false, source: PlainKeysSource::ExactClient });
-    assert_eq!(resolve_plain_keys(&initialized.plain, Some("editor"), None, true).source, PlainKeysSource::UserDefault);
-    assert_eq!(resolve_plain_keys(&initialized.plain, Some("Editor"), Some(true), true).source, PlainKeysSource::Document);
-    assert_eq!(resolve_plain_keys(&initialized.plain, Some("Editor"), Some(true), false), magit_lsp::config::EffectivePlainKeys { enabled: false, source: PlainKeysSource::Quirk });
-    let dir = TempDir::new().unwrap(); let cfg = dir.path().join("keys.toml");
-    write(&cfg, "[plain.keys]\ndefault = true\n[plain.keys.clients]\nEditor = false\n");
+    assert_eq!(
+        resolve_plain_keys(&initialized.plain, Some("Editor"), None, true),
+        magit_lsp::config::EffectivePlainKeys {
+            enabled: false,
+            source: PlainKeysSource::ExactClient
+        }
+    );
+    assert_eq!(
+        resolve_plain_keys(&initialized.plain, Some("editor"), None, true).source,
+        PlainKeysSource::UserDefault
+    );
+    assert_eq!(
+        resolve_plain_keys(&initialized.plain, Some("Editor"), Some(true), true).source,
+        PlainKeysSource::Document
+    );
+    assert_eq!(
+        resolve_plain_keys(&initialized.plain, Some("Editor"), Some(true), false),
+        magit_lsp::config::EffectivePlainKeys {
+            enabled: false,
+            source: PlainKeysSource::Quirk
+        }
+    );
+    let dir = TempDir::new().unwrap();
+    let cfg = dir.path().join("keys.toml");
+    write(
+        &cfg,
+        "[plain.keys]\ndefault = true\n[plain.keys.clients]\nEditor = false\n",
+    );
     let parsed = load(&cfg).unwrap();
     assert!(parsed.plain.keys_default);
     assert_eq!(parsed.plain.keys_clients.get("Editor"), Some(&false));
-    for invalid in ["[plain.keys]\ndefault = 1\n", "[plain.keys]\nunknown = true\n"] { write(&cfg, invalid); assert!(load(&cfg).is_err()); }
-    for init in [serde_json::json!({"plain":{"keys":{"default":1}}}), serde_json::json!({"plain":{"keys":{"unknown":true}}})] {
-        assert!(load_config(&LoadOptions { initialization: Some(init), ..Default::default() }).is_err());
+    for invalid in [
+        "[plain.keys]\ndefault = 1\n",
+        "[plain.keys]\nunknown = true\n",
+    ] {
+        write(&cfg, invalid);
+        assert!(load(&cfg).is_err());
+    }
+    for init in [
+        serde_json::json!({"plain":{"keys":{"default":1}}}),
+        serde_json::json!({"plain":{"keys":{"unknown":true}}}),
+    ] {
+        assert!(load_config(&LoadOptions {
+            initialization: Some(init),
+            ..Default::default()
+        })
+        .is_err());
     }
     let repo = TempDir::new().unwrap();
-    write(&repo.path().join(".magit-lsp.toml"), "[plain.keys]\ndefault = true\n[plain.keys.clients]\nEditor = true\n");
+    write(
+        &repo.path().join(".magit-lsp.toml"),
+        "[plain.keys]\ndefault = true\n[plain.keys.clients]\nEditor = true\n",
+    );
     let global = dir.path().join("trusted.toml");
-    write(&global, "trust_repo_config = true\n[plain.keys]\ndefault = false\n");
-    let trusted = load_config(&LoadOptions { config_path: Some(global), repo_path: Some(repo.path().to_path_buf()), ..Default::default() }).unwrap();
+    write(
+        &global,
+        "trust_repo_config = true\n[plain.keys]\ndefault = false\n",
+    );
+    let trusted = load_config(&LoadOptions {
+        config_path: Some(global),
+        repo_path: Some(repo.path().to_path_buf()),
+        ..Default::default()
+    })
+    .unwrap();
     assert!(!trusted.plain.keys_default);
     assert!(!trusted.plain.keys_clients.contains_key("Editor"));
 }

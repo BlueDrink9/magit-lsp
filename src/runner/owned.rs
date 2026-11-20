@@ -642,17 +642,14 @@ mod unix {
         #[cfg(target_os = "linux")]
         #[test]
         fn child_starts_as_session_and_group_leader_without_a_tty() {
-            let result = run_owned(
-                Command::new("sh")
-                    .arg("-c")
-                    .arg("cat /proc/$$/stat"),
-                None,
-            )
-            .unwrap();
+            let result =
+                run_owned(Command::new("sh").arg("-c").arg("cat /proc/$$/stat"), None).unwrap();
             assert!(result.status.unwrap().success());
             let text = String::from_utf8(result.stdout).unwrap();
             let pid = text.split_whitespace().next().unwrap();
-            let (_, tail) = text.rsplit_once(')').expect("Linux proc stat command terminator");
+            let (_, tail) = text
+                .rsplit_once(')')
+                .expect("Linux proc stat command terminator");
             let fields: Vec<_> = tail.split_whitespace().collect();
             assert_eq!(pid, fields[2], "new process group before exec");
             assert_eq!(pid, fields[3], "new session before exec");

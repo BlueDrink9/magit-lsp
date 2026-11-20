@@ -32,7 +32,10 @@ fn assert_node(tree: &Tree, id: &str, kind: NodeKind, label: &str, line: usize) 
     assert_eq!(node.label, label, "{id}");
     assert_eq!(node.start_line, line, "{id}");
     assert_eq!(node.end_line, line, "{id}");
-    let entry = tree.line_nodes.get(line).unwrap_or_else(|| panic!("no line {line}"));
+    let entry = tree
+        .line_nodes
+        .get(line)
+        .unwrap_or_else(|| panic!("no line {line}"));
     assert_eq!(entry.node, id, "line {line}");
     assert_eq!(entry.kind, kind, "line {line}");
 }
@@ -61,7 +64,13 @@ fn confirm_renders_title_detail_blank_and_custom_yes_no_rows() {
         ]
     );
     assert_eq!(tree.nodes.len(), 6);
-    assert_node(&tree, "prompt:del:title", NodeKind::Header, "Delete branch feature/x?", 0);
+    assert_node(
+        &tree,
+        "prompt:del:title",
+        NodeKind::Header,
+        "Delete branch feature/x?",
+        0,
+    );
     assert_node(
         &tree,
         "prompt:del:detail:0",
@@ -96,10 +105,23 @@ fn text_renders_one_prefilled_field_and_submit_cancel_rows() {
 
     assert_eq!(
         tree.lines,
-        vec!["Revision", "Commit to use.", "", "HEAD~1", "Submit", "Cancel"]
+        vec![
+            "Revision",
+            "Commit to use.",
+            "",
+            "HEAD~1",
+            "Submit",
+            "Cancel"
+        ]
     );
     assert_node(&tree, "prompt:rev:title", NodeKind::Header, "Revision", 0);
-    assert_node(&tree, "prompt:rev:detail:0", NodeKind::Message, "Commit to use.", 1);
+    assert_node(
+        &tree,
+        "prompt:rev:detail:0",
+        NodeKind::Message,
+        "Commit to use.",
+        1,
+    );
     assert_node(&tree, "prompt:rev:blank", NodeKind::Blank, "", 2);
     assert_node(&tree, "prompt:rev:field", NodeKind::Field, "Value", 3);
     assert_node(&tree, "prompt:rev:submit", NodeKind::Line, "Submit", 4);
@@ -111,7 +133,10 @@ fn text_renders_one_prefilled_field_and_submit_cancel_rows() {
     assert_eq!(document.field_ids(), vec!["prompt:rev:field"]);
     assert_eq!(document.field_label("prompt:rev:field"), Some("Value"));
     assert_eq!(document.field_text("prompt:rev:field"), Some("HEAD~1"));
-    assert_eq!(document.row_ids(), vec!["prompt:rev:submit", "prompt:rev:cancel"]);
+    assert_eq!(
+        document.row_ids(),
+        vec!["prompt:rev:submit", "prompt:rev:cancel"]
+    );
 }
 
 #[test]
@@ -145,13 +170,39 @@ fn choice_renders_item_rows_a_default_marker_and_a_custom_field_with_the_label()
 
     assert_eq!(
         tree.lines,
-        vec!["Pick a branch", "", "Main", "> Feature x", "Feature x", "Submit", "Cancel"]
+        vec![
+            "Pick a branch",
+            "",
+            "Main",
+            "> Feature x",
+            "Feature x",
+            "Submit",
+            "Cancel"
+        ]
     );
-    assert_node(&tree, "prompt:pick:title", NodeKind::Header, "Pick a branch", 0);
+    assert_node(
+        &tree,
+        "prompt:pick:title",
+        NodeKind::Header,
+        "Pick a branch",
+        0,
+    );
     assert_node(&tree, "prompt:pick:blank", NodeKind::Blank, "", 1);
     assert_node(&tree, "prompt:pick:item:main", NodeKind::Line, "Main", 2);
-    assert_node(&tree, "prompt:pick:item:feature/x", NodeKind::Line, "Feature x", 3);
-    assert_node(&tree, "prompt:pick:custom", NodeKind::Field, "Custom value", 4);
+    assert_node(
+        &tree,
+        "prompt:pick:item:feature/x",
+        NodeKind::Line,
+        "Feature x",
+        3,
+    );
+    assert_node(
+        &tree,
+        "prompt:pick:custom",
+        NodeKind::Field,
+        "Custom value",
+        4,
+    );
     assert_node(&tree, "prompt:pick:submit", NodeKind::Line, "Submit", 5);
     assert_node(&tree, "prompt:pick:cancel", NodeKind::Line, "Cancel", 6);
 
@@ -192,7 +243,10 @@ fn multi_choice_renders_toggles_preselection_and_a_done_row() {
     }));
     let tree = document.render(80);
 
-    assert_eq!(tree.lines, vec!["Pick tags", "", "[x] Alpha", "[ ] Beta", "Done", "Cancel"]);
+    assert_eq!(
+        tree.lines,
+        vec!["Pick tags", "", "[x] Alpha", "[ ] Beta", "Done", "Cancel"]
+    );
     assert_node(&tree, "prompt:tags:item:a", NodeKind::Line, "Alpha", 2);
     assert_node(&tree, "prompt:tags:item:b", NodeKind::Line, "Beta", 3);
     assert_node(&tree, "prompt:tags:done", NodeKind::Line, "Done", 4);
@@ -212,7 +266,10 @@ fn multi_choice_renders_toggles_preselection_and_a_done_row() {
 
     assert!(document.toggle_item("b").unwrap());
     assert!(document.is_selected("b"));
-    assert_eq!(tree.lines[3], "[ ] Beta", "toggling changes state without re-rendering");
+    assert_eq!(
+        tree.lines[3], "[ ] Beta",
+        "toggling changes state without re-rendering"
+    );
     let rerendered = document.render(80);
     assert_eq!(rerendered.lines[3], "[x] Beta");
 
@@ -231,7 +288,10 @@ fn choice_rows_add_cancel_and_submit_only_when_custom_is_allowed() {
             {"id": "next", "label": "Next"}
         ]
     }));
-    assert_eq!(plain.render(80).lines, vec!["Pick", "", "Main", "Next", "Cancel"]);
+    assert_eq!(
+        plain.render(80).lines,
+        vec!["Pick", "", "Main", "Next", "Cancel"]
+    );
     assert_eq!(
         plain.row_ids(),
         vec![
@@ -295,7 +355,9 @@ fn choice_answers_by_item_default_custom_or_cancel() {
         "an untouched default field answers the item id, not its label"
     );
 
-    choice.set_field_text("prompt:pick:custom", "topic").unwrap();
+    choice
+        .set_field_text("prompt:pick:custom", "topic")
+        .unwrap();
     assert_eq!(
         choice.answer("prompt:pick:submit").unwrap(),
         PromptAction::Answer(Some(PromptValue::Choice(PromptChoiceAnswer::Custom {
@@ -439,8 +501,14 @@ fn rows_render_even_when_the_item_list_is_empty() {
         "title": "Pick tags",
         "items": []
     }));
-    assert_eq!(multi.render(80).lines, vec!["Pick tags", "", "Done", "Cancel"]);
-    assert_eq!(multi.row_ids(), vec!["prompt:tags:done", "prompt:tags:cancel"]);
+    assert_eq!(
+        multi.render(80).lines,
+        vec!["Pick tags", "", "Done", "Cancel"]
+    );
+    assert_eq!(
+        multi.row_ids(),
+        vec!["prompt:tags:done", "prompt:tags:cancel"]
+    );
 
     let confirm = document(json!({
         "promptId": "ok",
@@ -454,7 +522,10 @@ fn rows_render_even_when_the_item_list_is_empty() {
         "kind": "text",
         "title": "Revision"
     }));
-    assert_eq!(text.render(80).lines, vec!["Revision", "", "", "Submit", "Cancel"]);
+    assert_eq!(
+        text.render(80).lines,
+        vec!["Revision", "", "", "Submit", "Cancel"]
+    );
 }
 
 #[test]
@@ -476,7 +547,10 @@ fn kind_specific_shapes_are_validated() {
         "title": "Continue?",
         "items": [{"id": "a", "label": "A"}]
     }));
-    assert!(confirm_with_items.contains("cannot carry items"), "{confirm_with_items}");
+    assert!(
+        confirm_with_items.contains("cannot carry items"),
+        "{confirm_with_items}"
+    );
 
     let text_with_items = refusal(json!({
         "promptId": "rev",
@@ -484,21 +558,30 @@ fn kind_specific_shapes_are_validated() {
         "title": "Revision",
         "items": [{"id": "a", "label": "A"}]
     }));
-    assert!(text_with_items.contains("cannot carry items"), "{text_with_items}");
+    assert!(
+        text_with_items.contains("cannot carry items"),
+        "{text_with_items}"
+    );
 
     let choice_without_items = refusal(json!({
         "promptId": "pick",
         "kind": "choice",
         "title": "Pick"
     }));
-    assert!(choice_without_items.contains("require items"), "{choice_without_items}");
+    assert!(
+        choice_without_items.contains("require items"),
+        "{choice_without_items}"
+    );
 
     let multi_without_items = refusal(json!({
         "promptId": "tags",
         "kind": "multiChoice",
         "title": "Pick"
     }));
-    assert!(multi_without_items.contains("require items"), "{multi_without_items}");
+    assert!(
+        multi_without_items.contains("require items"),
+        "{multi_without_items}"
+    );
 
     let unknown_preselection = refusal(json!({
         "promptId": "tags",
@@ -525,7 +608,10 @@ fn field_text_is_exact_single_line_and_bounded() {
     let tree = document.render(80);
     let field = tree.node(id).expect("the field node");
     assert_eq!(field.start_line, field.end_line);
-    assert_eq!(tree.lines[field.start_line], document.field_text(id).unwrap());
+    assert_eq!(
+        tree.lines[field.start_line],
+        document.field_text(id).unwrap()
+    );
 
     let at_limit = "x".repeat(MAX_FIELD_BYTES);
     document.set_field_text(id, &at_limit).unwrap();
@@ -537,7 +623,11 @@ fn field_text_is_exact_single_line_and_bounded() {
     let over_limit = "x".repeat(MAX_FIELD_BYTES + 1);
     let error = document.set_field_text(id, &over_limit).unwrap_err();
     assert!(error.contains("limit"), "{error}");
-    assert_eq!(document.field_text(id), Some(at_limit.as_str()), "no truncation");
+    assert_eq!(
+        document.field_text(id),
+        Some(at_limit.as_str()),
+        "no truncation"
+    );
 
     let error = document.set_field_text(id, "two\nlines").unwrap_err();
     assert!(error.contains("single line"), "{error}");
@@ -747,8 +837,16 @@ fn delivery_routes_each_kind_by_native_declaration() {
     ];
     for value in kinds {
         let request = params(value);
-        assert_eq!(delivery(&request, true), PromptDelivery::Native, "{request:?}");
-        assert_eq!(delivery(&request, false), PromptDelivery::Document, "{request:?}");
+        assert_eq!(
+            delivery(&request, true),
+            PromptDelivery::Native,
+            "{request:?}"
+        );
+        assert_eq!(
+            delivery(&request, false),
+            PromptDelivery::Document,
+            "{request:?}"
+        );
     }
 }
 

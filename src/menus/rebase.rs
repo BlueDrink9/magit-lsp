@@ -119,7 +119,13 @@ pub fn definition() -> MenuDef {
                         "magit-reshelve-since",
                         "R-7.3",
                     ),
-                    action("T", "rebase.edit-todo", "edit paused todo", "magit-rebase-edit-todo", ""),
+                    action(
+                        "T",
+                        "rebase.edit-todo",
+                        "edit paused todo",
+                        "magit-rebase-edit-todo",
+                        "",
+                    ),
                 ],
             ),
             group(

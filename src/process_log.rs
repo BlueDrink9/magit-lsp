@@ -127,7 +127,8 @@ fn output_lines(tree: &mut Tree, record_id: &str, label: &str, output: &str, fai
         let line = tree.lines.len();
         let text = format!("  {label}: {output_line}");
         tree.lines.push(text.clone());
-        tree.line_nodes.push(LineNode::new(record_id, NodeKind::Line));
+        tree.line_nodes
+            .push(LineNode::new(record_id, NodeKind::Line));
         if label == "stderr" {
             tree.tokens.push(Token {
                 line,
@@ -144,4 +145,3 @@ fn output_lines(tree: &mut Tree, record_id: &str, label: &str, output: &str, fai
         }
     }
 }
-

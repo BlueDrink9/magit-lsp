@@ -1,8 +1,8 @@
 //! Deterministic tests for the reusable Plain document synchronization controller.
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::docstore::Encoding;
@@ -151,7 +151,8 @@ fn workaround_server(root: &std::path::Path, client: Value, overrides: Value) ->
     init["params"]["clientInfo"] = client;
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
     init["params"]["initializationOptions"] = json!({"quirks":overrides});
-    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] =
+        json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -160,7 +161,10 @@ fn workaround_server(root: &std::path::Path, client: Value, overrides: Value) ->
 
 #[test]
 fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety() {
-    let workaround_names: Vec<_> = magit_lsp::quirks::REGISTRY.iter().filter_map(|q| q.workaround).collect();
+    let workaround_names: Vec<_> = magit_lsp::quirks::REGISTRY
+        .iter()
+        .filter_map(|q| q.workaround)
+        .collect();
     assert_eq!(workaround_names, vec!["reconcile-apply-result"]);
     for name in workaround_names {
         match name {
@@ -168,29 +172,67 @@ fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safe
             other => panic!("uncovered server workaround: {other}"),
         }
         for (client, overrides, server_override) in [
-            (json!({"name":"Neovim","version":"0.12.6"}), json!({"apply-result-unreliable":true}), json!({})),
-            (json!({"name":"Neovim","version":"0.12.6"}), json!({"apply-result-unreliable":true}), json!({"apply-result-unreliable":false})),
-            (json!({"name":"Unknown","version":"1"}), json!({"apply-result-unreliable":true}), json!({})),
+            (
+                json!({"name":"Neovim","version":"0.12.6"}),
+                json!({"apply-result-unreliable":true}),
+                json!({}),
+            ),
+            (
+                json!({"name":"Neovim","version":"0.12.6"}),
+                json!({"apply-result-unreliable":true}),
+                json!({"apply-result-unreliable":false}),
+            ),
+            (
+                json!({"name":"Unknown","version":"1"}),
+                json!({"apply-result-unreliable":true}),
+                json!({}),
+            ),
         ] {
-            let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+            let (repo, _) = fixtures::RepoFixture::new()
+                .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+                .build();
             let path = repo.path().join(".magit");
             fixtures::write(&path, "disk sentinel\n");
             let uri = format!("file://{}", path.display());
             let mut server = workaround_server(repo.path(), client.clone(), server_override);
             let empty_capabilities = json!({});
-            let resolution = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: client["name"].as_str(), version: client["version"].as_str(), capabilities: &empty_capabilities }, Some(&overrides)).unwrap();
+            let resolution = magit_lsp::quirks::resolve(
+                magit_lsp::quirks::Client {
+                    name: client["name"].as_str(),
+                    version: client["version"].as_str(),
+                    capabilities: &empty_capabilities,
+                },
+                Some(&overrides),
+            )
+            .unwrap();
             let mut editor = FakeEditor::from_resolution(Profile::Standard, &resolution);
             server.send(editor.open(&uri, "stale"));
             let initial = next_edit(&mut server);
-            assert_eq!(initial["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
-            assert_eq!(editor.apply_edit(&initial["params"]["edit"])["applied"], true);
+            assert_eq!(
+                initial["params"]["edit"]["documentChanges"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(
+                editor.apply_edit(&initial["params"]["edit"])["applied"],
+                true
+            );
             let authoritative = editor.text(&uri).to_owned();
             server.send(json!({"jsonrpc":"2.0","id":initial["id"],"result":{"applied":true}}));
             server.send(editor.edit(&uri, "rapid one"));
             server.send(editor.edit(&uri, "rapid two"));
             let stale = next_edit(&mut server);
-            assert_eq!(stale["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
-            let stale_version = stale["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
+            assert_eq!(
+                stale["params"]["edit"]["documentChanges"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            let stale_version =
+                stale["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
             let latest = editor.edit(&uri, "rapid three");
             let latest_version = latest["params"]["textDocument"]["version"].clone();
             server.send(latest);
@@ -200,23 +242,51 @@ fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safe
             assert_ne!(editor.text(&uri), authoritative);
             server.send(json!({"jsonrpc":"2.0","id":stale["id"],"result":stale_result}));
             let retry = next_edit(&mut server);
-            assert_eq!(retry["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
-            assert_eq!(retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], latest_version);
+            assert_eq!(
+                retry["params"]["edit"]["documentChanges"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(
+                retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+                latest_version
+            );
             server.send(json!({"jsonrpc":"2.0","id":70,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
-            assert!(server.response_with_id(70)["result"].as_array().unwrap().is_empty());
-            for frame in editor.dispatch(&retry) { server.send(frame); }
+            assert!(server.response_with_id(70)["result"]
+                .as_array()
+                .unwrap()
+                .is_empty());
+            for frame in editor.dispatch(&retry) {
+                server.send(frame);
+            }
             assert_eq!(editor.text(&uri), authoritative);
             server.send(editor.edit(&uri, &authoritative));
             server.send(json!({"jsonrpc":"2.0","id":71,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
-            assert!(!server.response_with_id(71)["result"].as_array().unwrap().is_empty());
+            assert!(!server.response_with_id(71)["result"]
+                .as_array()
+                .unwrap()
+                .is_empty());
             let watcher_path = repo.path().join("retry-readiness-watcher.txt");
             fixtures::write(&watcher_path, "retry readiness watcher\n");
             let follow_up = next_edit(&mut server);
-            assert_eq!(follow_up["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
-            for frame in editor.dispatch(&follow_up) { server.send(frame); }
+            assert_eq!(
+                follow_up["params"]["edit"]["documentChanges"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            for frame in editor.dispatch(&follow_up) {
+                server.send(frame);
+            }
             assert!(editor.text(&uri).contains("retry-readiness-watcher.txt"));
             assert_eq!(std::fs::read(&path).unwrap(), b"disk sentinel\n");
-            assert_eq!(std::fs::read(&watcher_path).unwrap(), b"retry readiness watcher\n");
+            assert_eq!(
+                std::fs::read(&watcher_path).unwrap(),
+                b"retry readiness watcher\n"
+            );
             server.shutdown_and_exit();
             assert!(server.finish(std::time::Duration::from_secs(10)).success());
         }
@@ -309,25 +379,35 @@ fn binary_stale_rapid_repair_retries_latest_version_and_repairs_undo() {
     let mut editor = FakeEditor::new(Profile::Standard);
     server.send(editor.open(&uri, "stale"));
     let initial = next_edit(&mut server);
-    assert_eq!(editor.apply_edit(&initial["params"]["edit"])["applied"], true);
+    assert_eq!(
+        editor.apply_edit(&initial["params"]["edit"])["applied"],
+        true
+    );
     let expected = editor.text(&uri).to_owned();
     server.send(json!({"jsonrpc":"2.0","id":initial["id"],"result":{"applied":true}}));
 
     server.send(editor.edit(&uri, "rapid edit one"));
     server.send(editor.edit(&uri, "rapid edit two"));
     let stale_repair = next_edit(&mut server);
-    let stale_version = stale_repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
+    let stale_version =
+        stale_repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
     let latest_change = editor.edit(&uri, "rapid edit three");
     let latest_version = latest_change["params"]["textDocument"]["version"].clone();
     server.send(latest_change);
     assert_ne!(stale_version, latest_version);
     let rejected = editor.apply_edit(&stale_repair["params"]["edit"]);
     assert_eq!(rejected["applied"], false);
-    assert!(rejected["failureReason"].as_str().unwrap().contains("version"));
+    assert!(rejected["failureReason"]
+        .as_str()
+        .unwrap()
+        .contains("version"));
     server.send(json!({"jsonrpc":"2.0","id":stale_repair["id"],"result":rejected}));
 
     let retry = next_edit(&mut server);
-    assert_eq!(retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], latest_version);
+    assert_eq!(
+        retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+        latest_version
+    );
     assert_eq!(editor.apply_edit(&retry["params"]["edit"])["applied"], true);
     assert_eq!(editor.text(&uri), expected);
     server.send(json!({"jsonrpc":"2.0","id":retry["id"],"result":{"applied":true}}));
@@ -336,7 +416,10 @@ fn binary_stale_rapid_repair_retries_latest_version_and_repairs_undo() {
     // Undo restores the user's pre-repair text; server must repair it again.
     server.send(editor.edit(&uri, "rapid edit three"));
     let undo_repair = next_edit(&mut server);
-    assert_eq!(editor.apply_edit(&undo_repair["params"]["edit"])["applied"], true);
+    assert_eq!(
+        editor.apply_edit(&undo_repair["params"]["edit"])["applied"],
+        true
+    );
     assert_eq!(editor.text(&uri), expected);
     server.send(json!({"jsonrpc":"2.0","id":undo_repair["id"],"result":{"applied":true}}));
     server.send(editor.edit(&uri, &expected));
@@ -765,10 +848,13 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
     let disk_before = std::fs::read(&path).unwrap();
     let uri = format!("file://{}", path.display());
     let root_uri = format!("file://{}", repo.path().display());
-    for (overrides, expected_format) in [(json!({}), "documentChanges"), (
-        json!({"quirks":{"assume-document-changes":false}}),
-        "changes",
-    )] {
+    for (overrides, expected_format) in [
+        (json!({}), "documentChanges"),
+        (
+            json!({"quirks":{"assume-document-changes":false}}),
+            "changes",
+        ),
+    ] {
         let mut server = stdio::TestServer::spawn(&[]);
         let mut initialize = stdio::initialize_message();
         initialize["params"]["clientInfo"] = json!({"name":"Neovim","version":"0.12.6"});
@@ -789,14 +875,26 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
             if message["method"] == "workspace/applyEdit" {
                 break message;
             }
-            assert_ne!(message["method"], "view/render", "Plain must not receive custom renders");
+            assert_ne!(
+                message["method"], "view/render",
+                "Plain must not receive custom renders"
+            );
         };
-        assert!(request["params"]["edit"][expected_format].is_object() || request["params"]["edit"][expected_format].is_array());
-        let opposite = if expected_format == "changes" { "documentChanges" } else { "changes" };
+        assert!(
+            request["params"]["edit"][expected_format].is_object()
+                || request["params"]["edit"][expected_format].is_array()
+        );
+        let opposite = if expected_format == "changes" {
+            "documentChanges"
+        } else {
+            "changes"
+        };
         assert!(request["params"]["edit"][opposite].is_null());
         let frames = editor.dispatch(&request);
         assert!(frames.iter().any(|frame| frame["id"] == request["id"]));
-        assert!(frames.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+        assert!(frames
+            .iter()
+            .any(|frame| frame["method"] == "textDocument/didChange"));
         assert!(editor.text(&uri).contains("line3 CHANGED"));
         assert!(!editor.text(&uri).contains("stale"));
         for frame in frames {
@@ -804,23 +902,33 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
         }
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline
-            && !server.sent.iter().any(|frame| frame["method"] == "textDocument/didChange")
+            && !server
+                .sent
+                .iter()
+                .any(|frame| frame["method"] == "textDocument/didChange")
         {
             std::thread::yield_now();
         }
-        assert!(server.sent.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+        assert!(server
+            .sent
+            .iter()
+            .any(|frame| frame["method"] == "textDocument/didChange"));
         assert!(editor.text(&uri).contains("line3 CHANGED"));
         assert_eq!(std::fs::read(&path).unwrap(), disk_before);
         server.shutdown_and_exit();
         let (status, messages) = server.finish_with_messages(Duration::from_secs(10));
         assert!(status.success(), "{messages:?}");
-        assert!(messages.iter().all(|frame| frame["method"] != "view/render"));
+        assert!(messages
+            .iter()
+            .all(|frame| frame["method"] != "view/render"));
     }
 }
 
 #[test]
 fn silent_stale_success_without_echo_recovers_after_watcher_render() {
-    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+        .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel\n");
     let disk_before = std::fs::read(&path).unwrap();
@@ -835,36 +943,71 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
     let empty = json!({});
-    let resolution = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: Some("Neovim"), version: Some("0.12.6"), capabilities: &empty }, None).unwrap();
+    let resolution = magit_lsp::quirks::resolve(
+        magit_lsp::quirks::Client {
+            name: Some("Neovim"),
+            version: Some("0.12.6"),
+            capabilities: &empty,
+        },
+        None,
+    )
+    .unwrap();
     let mut editor = FakeEditor::from_resolution(Profile::Standard, &resolution);
     server.send(editor.open(&uri, "stale editor text\n"));
     let first = next_edit(&mut server);
-    assert_eq!(first["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        first["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let newer_snapshot = editor.edit(&uri, "newer client snapshot\n");
     let response = editor.dispatch(&first);
     assert_eq!(response[0]["result"]["applied"], true);
-    assert!(!response.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+    assert!(!response
+        .iter()
+        .any(|frame| frame["method"] == "textDocument/didChange"));
     server.send(response[0].clone());
     let watcher = repo.path().join("watcher-recovery.txt");
     fixtures::write(&watcher, "recovery bytes\n");
     let repair = next_edit(&mut server);
-    assert_eq!(repair["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        repair["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let repair_response = editor.dispatch(&repair);
     assert_eq!(repair_response[0]["result"]["applied"], true);
     let repair_id = repair["id"].clone();
     assert_eq!(repair_response[0]["id"], repair_id);
-    assert!(!repair_response.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+    assert!(!repair_response
+        .iter()
+        .any(|frame| frame["method"] == "textDocument/didChange"));
     for frame in repair_response {
         server.send(frame);
     }
     server.send(json!({"jsonrpc":"2.0","id":70,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
-    assert!(server.response_with_id(70)["result"].as_array().unwrap().is_empty());
+    assert!(server.response_with_id(70)["result"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     server.send(newer_snapshot);
     let current_repair = next_edit(&mut server);
-    assert_eq!(current_repair["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        current_repair["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let current_response = editor.dispatch(&current_repair);
     let current_id = current_repair["id"].clone();
-    assert!(current_response.iter().any(|frame| frame["id"] == current_id && frame["result"]["applied"] == true));
+    assert!(current_response
+        .iter()
+        .any(|frame| frame["id"] == current_id && frame["result"]["applied"] == true));
     let authoritative = editor.text(&uri).to_owned();
     assert!(authoritative.contains("watcher-recovery.txt"));
     for frame in current_response {
@@ -873,11 +1016,19 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     let second_watcher = repo.path().join("watcher-ready.txt");
     fixtures::write(&second_watcher, "ready watcher bytes\n");
     let ready_update = next_edit(&mut server);
-    assert_eq!(ready_update["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        ready_update["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let ready_response = editor.dispatch(&ready_update);
     let ready_id = ready_update["id"].clone();
     let next_authoritative = editor.text(&uri).to_owned();
-    assert!(ready_response.iter().any(|frame| frame["id"] == ready_id && frame["result"]["applied"] == true));
+    assert!(ready_response
+        .iter()
+        .any(|frame| frame["id"] == ready_id && frame["result"]["applied"] == true));
     assert!(next_authoritative.contains("watcher-ready.txt"));
     for frame in ready_response {
         server.send(frame);

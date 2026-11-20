@@ -328,21 +328,39 @@ pub fn build(status: &Status) -> Tree {
 }
 
 fn add_rebase(tree: &mut Tree, state: Option<RebaseState>) {
-    let Some(state) = state else { return; };
+    let Some(state) = state else {
+        return;
+    };
     let id = "section:rebase";
     let line = tree.lines.len();
-    let label = if state.conflicted { "Rebase (conflicted)" } else { "Rebase (active)" };
+    let label = if state.conflicted {
+        "Rebase (conflicted)"
+    } else {
+        "Rebase (active)"
+    };
     tree.lines.push(label.to_string());
     tree.line_nodes.push(LineNode::new(id, NodeKind::Section));
     let mut section = Node::new(id, NodeKind::Section, "Rebase", line);
     section.section = Some("rebase".to_string());
     let mut children = Vec::new();
-    for (action, available) in [("continue", !state.conflicted), ("skip", true), ("abort", true)] {
+    for (action, available) in [
+        ("continue", !state.conflicted),
+        ("skip", true),
+        ("abort", true),
+    ] {
         let child_id = format!("rebase:{action}");
         let child_line = tree.lines.len();
-        let text = format!("  {action}: {}", if available { "available" } else { "unavailable (resolve conflicts)" });
+        let text = format!(
+            "  {action}: {}",
+            if available {
+                "available"
+            } else {
+                "unavailable (resolve conflicts)"
+            }
+        );
         tree.lines.push(text.clone());
-        tree.line_nodes.push(LineNode::new(&child_id, NodeKind::Message));
+        tree.line_nodes
+            .push(LineNode::new(&child_id, NodeKind::Message));
         let mut child = Node::new(&child_id, NodeKind::Message, text, child_line);
         child.section = Some(if available { action } else { "unavailable" }.to_string());
         child.status = Some("rebase_operation".to_string());
@@ -501,7 +519,9 @@ where
             let text = format!("{hidden} more lines: expand");
             let row = self.tree.lines.len();
             self.tree.lines.push(text.clone());
-            self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Message));
+            self.tree
+                .line_nodes
+                .push(LineNode::new(&id, NodeKind::Message));
             self.tree
                 .nodes
                 .push(Node::new(&id, NodeKind::Message, text, row));

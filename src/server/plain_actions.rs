@@ -258,14 +258,16 @@ pub(super) fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeAction
             }
             let unavailable = crate::commands::registry()
                 .get(command)
-                .and_then(|registered| match capabilities
-                    .as_ref()
-                    .map(|caps| caps.plain_availability(registered))
-                {
-                    Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
-                        Some(reason)
+                .and_then(|registered| {
+                    match capabilities
+                        .as_ref()
+                        .map(|caps| caps.plain_availability(registered))
+                    {
+                        Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
+                            Some(reason)
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 });
             if unavailable.is_some()
                 && !capabilities
@@ -378,8 +380,7 @@ pub(super) fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeAction
             let semantic = (matches!(
                 command.id,
                 "open.commit" | "open.branch" | "open.log" | "open.rebase" | "rebase.todo-submit"
-            )
-                && command.applies_to(&scope))
+            ) && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
                 let args = serde_json::json!({
@@ -468,14 +469,15 @@ pub(super) fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeAction
             // (a commit run whose draft was never opened, or a missing
             // capability). Prefer that readable reason over the generic adapter
             // notice; a planned command keeps its roadmap reason.
-            let plain_reason = capabilities.as_ref().and_then(|caps| {
-                match caps.plain_availability(command) {
-                    crate::presentation::PlainAvailability::Unavailable { reason } => {
-                        Some(reason)
-                    }
-                    crate::presentation::PlainAvailability::Available => None,
-                }
-            });
+            let plain_reason =
+                capabilities
+                    .as_ref()
+                    .and_then(|caps| match caps.plain_availability(command) {
+                        crate::presentation::PlainAvailability::Unavailable { reason } => {
+                            Some(reason)
+                        }
+                        crate::presentation::PlainAvailability::Available => None,
+                    });
             let reason = match registry_availability {
                 Some(crate::commands::Availability::Planned(roadmap)) => {
                     Some(format!("Planned: roadmap {roadmap}"))
@@ -526,7 +528,9 @@ pub(super) fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeAction
                 .as_ref()
                 .map(|caps| caps.plain_availability(command))
             {
-                Some(crate::presentation::PlainAvailability::Unavailable { reason }) => Some(reason),
+                Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
+                    Some(reason)
+                }
                 Some(crate::presentation::PlainAvailability::Available) => None,
                 None => continue,
             };
@@ -635,7 +639,11 @@ mod plain_action_title_tests {
 }
 
 /// Validate a Plain document position in the negotiated encoding.
-pub(super) fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Encoding) -> bool {
+pub(super) fn plain_position_valid(
+    text: &str,
+    position: lsp_types::Position,
+    encoding: Encoding,
+) -> bool {
     let Some(line) = text.split('\n').nth(position.line as usize) else {
         return false;
     };
@@ -670,13 +678,14 @@ fn prompt_row_id(id: &str) -> bool {
     id.strip_prefix("prompt:")
         .and_then(|rest| rest.split_once(':'))
         .is_some_and(|(_, row)| {
-            matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
-                || row.starts_with("item:")
+            matches!(row, "yes" | "no" | "submit" | "cancel" | "done") || row.starts_with("item:")
         })
 }
 
 /// Parse the Plain action shape from an `executeCommand` request.
-pub(super) fn plain_execute_params(request: &Request) -> Option<crate::dispatch::PlainActionParams> {
+pub(super) fn plain_execute_params(
+    request: &Request,
+) -> Option<crate::dispatch::PlainActionParams> {
     let params: lsp_types::ExecuteCommandParams =
         serde_json::from_value(request.params.clone()).ok()?;
     if params.command != "magit.command" || params.arguments.len() != 1 {
@@ -691,14 +700,15 @@ pub(super) fn plain_execute_params(request: &Request) -> Option<crate::dispatch:
 
 /// Stale Plain action feedback without running the command or touching Git.
 fn plain_stale_message() -> Result<Dispatched> {
-    Ok(Dispatched::with(serde_json::to_value(
-        ViewInvokeResponse {
+    Ok(Dispatched::with(
+        serde_json::to_value(ViewInvokeResponse {
             effects: vec![Effect::message(
                 MessageLevel::Warn,
                 crate::errors::STALE_VIEW,
             )],
-        },
-    )?, vec![show_message(2, crate::errors::STALE_VIEW.to_string())]))
+        })?,
+        vec![show_message(2, crate::errors::STALE_VIEW.to_string())],
+    ))
 }
 
 /// Refuse an unsupported Plain action without entering dispatch or registering prompts.
@@ -759,9 +769,14 @@ pub(super) fn execute_plain_action(
             return plain_stale_message();
         };
         if view_id != entry.view_id || generation != params.view_generation {
-            tracing::warn!(view_id, active_view = entry.view_id, generation,
-                offered_generation = params.view_generation, command = params.command,
-                "Plain action retained snapshot identity/generation mismatch");
+            tracing::warn!(
+                view_id,
+                active_view = entry.view_id,
+                generation,
+                offered_generation = params.view_generation,
+                command = params.command,
+                "Plain action retained snapshot identity/generation mismatch"
+            );
             return plain_stale_message();
         }
         let mut effective_command = params.command.clone();
@@ -779,7 +794,12 @@ pub(super) fn execute_plain_action(
             crate::dispatch::PlainActionTarget::View(target) => {
                 let supported = matches!(
                     params.command.as_str(),
-                    "open.commit" | "open.branch" | "open.log" | "open.rebase" | "common.cancel" | "rebase.todo-submit"
+                    "open.commit"
+                        | "open.branch"
+                        | "open.log"
+                        | "open.rebase"
+                        | "common.cancel"
+                        | "rebase.todo-submit"
                 );
                 let applies = crate::commands::registry()
                     .get(&params.command)
@@ -797,15 +817,17 @@ pub(super) fn execute_plain_action(
                     let valid = scope == "prompt"
                         && target.view_id == view_id
                         && tree.node(&target.node_id).is_some_and(|node| {
-                            node.kind == crate::tree::NodeKind::Line
-                                && prompt_row_id(&node.id)
+                            node.kind == crate::tree::NodeKind::Line && prompt_row_id(&node.id)
                         });
                     if !valid {
                         return plain_stale_message();
                     }
                 } else if crate::dispatch::plain_todo_action(&params.command) {
-                    if scope != "rebase-todo" || target.view_id != view_id
-                        || !tree.node(&target.node_id).is_some_and(|node| node.commit.is_some())
+                    if scope != "rebase-todo"
+                        || target.view_id != view_id
+                        || !tree
+                            .node(&target.node_id)
+                            .is_some_and(|node| node.commit.is_some())
                     {
                         return plain_stale_message();
                     }
@@ -986,10 +1008,10 @@ pub(super) fn execute_plain_action(
             selection: match &params.target {
                 crate::dispatch::PlainActionTarget::Content(target) => {
                     target
-                    .selection
-                    .map(|selection| crate::protocol::Selection {
-                        start_line: selection.start_line as usize,
-                        end_line: selection.end_line as usize,
+                        .selection
+                        .map(|selection| crate::protocol::Selection {
+                            start_line: selection.start_line as usize,
+                            end_line: selection.end_line as usize,
                         })
                 }
                 _ => None,
@@ -1024,9 +1046,16 @@ fn toggle_plain_keys(
         }
     };
     let edit = {
-        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(entry) = documents.get_mut(uri) else { return plain_stale_message(); };
-        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text) else {
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get_mut(uri) else {
+            return plain_stale_message();
+        };
+        let Some((tree, view_id, generation, scope, menu)) =
+            entry.controller.action_snapshot(&text)
+        else {
             return plain_stale_message();
         };
         if generation != params.view_generation
@@ -1039,14 +1068,25 @@ fn toggle_plain_keys(
             return plain_stale_message();
         }
         let mut tree = tree.clone();
-        let next = !super::plain::plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled;
+        let next =
+            !super::plain::plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled;
         entry.keys_override = Some(next);
         super::plain::append_plain_keys_header(shared, &entry.repo, entry.keys_override, &mut tree);
-        entry.controller.render_actions(tree, view_id.to_owned(), generation, scope.to_owned(), menu.cloned())
+        entry
+            .controller
+            .render_actions(
+                tree,
+                view_id.to_owned(),
+                generation,
+                scope.to_owned(),
+                menu.cloned(),
+            )
             .map(|edit| (entry.incarnation, edit))
     };
     if let Some((incarnation, edit)) = edit {
         super::plain::send_plain_edit(shared, uri.to_owned(), incarnation, edit);
     }
-    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse { effects: vec![] })?))
+    Ok(Dispatched::value(serde_json::to_value(
+        ViewInvokeResponse { effects: vec![] },
+    )?))
 }

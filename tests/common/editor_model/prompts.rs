@@ -46,7 +46,11 @@ pub fn answer(params: &ViewPromptParams, input: &PromptInput) -> PromptOutcome {
             PromptKind::Text => response.clone(),
             PromptKind::Choice if response == "__custom__" => {
                 let custom = input.custom_response.as_ref().filter(|v| !v.is_null());
-                if let Some(custom) = custom { json!({"custom":custom}) } else { Value::Null }
+                if let Some(custom) = custom {
+                    json!({"custom":custom})
+                } else {
+                    Value::Null
+                }
             }
             PromptKind::Choice => json!({"id":response}),
             PromptKind::MultiChoice => json!({"ids":response}),
@@ -54,6 +58,8 @@ pub fn answer(params: &ViewPromptParams, input: &PromptInput) -> PromptOutcome {
     };
     let cancelled = value.as_ref().is_none_or(Value::is_null);
     let mut answer = json!({"cancelled":cancelled});
-    if !cancelled { answer["value"] = value.unwrap(); }
+    if !cancelled {
+        answer["value"] = value.unwrap();
+    }
     PromptOutcome { answer, focus }
 }

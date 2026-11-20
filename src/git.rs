@@ -436,7 +436,10 @@ pub(crate) struct InstantRebaseState {
 }
 
 /// Own and remove one create-new rebase todo lock.
-struct RebaseTodoLock { path: PathBuf, file: std::fs::File }
+struct RebaseTodoLock {
+    path: PathBuf,
+    file: std::fs::File,
+}
 
 impl Drop for RebaseTodoLock {
     fn drop(&mut self) {
@@ -458,7 +461,10 @@ impl GitRepo {
         }
         let status = self.run(&["status", "--porcelain"])?;
         let conflicted = status.lines().any(|line| {
-            matches!(line.get(..2), Some("UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD"))
+            matches!(
+                line.get(..2),
+                Some("UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD")
+            )
         });
         Ok(Some(RebaseState { conflicted }))
     }
@@ -709,14 +715,26 @@ impl GitRepo {
         for url in [fetch_url, push_url] {
             Self::reject_option_like("remote URL", url)?;
             if url.is_empty() || url.contains(['\n', '\r', '\0']) {
-                return Err(Error::new("Remote URL must be non-empty and contain no line breaks"));
+                return Err(Error::new(
+                    "Remote URL must be non-empty and contain no line breaks",
+                ));
             }
         }
         if !self.remote_names()?.iter().any(|remote| remote == name) {
             return Err(Error::new(format!("Remote '{name}' does not exist")));
         }
-        self.run(&["config", "--replace-all", &format!("remote.{name}.url"), fetch_url])?;
-        self.run(&["config", "--replace-all", &format!("remote.{name}.pushurl"), push_url])?;
+        self.run(&[
+            "config",
+            "--replace-all",
+            &format!("remote.{name}.url"),
+            fetch_url,
+        ])?;
+        self.run(&[
+            "config",
+            "--replace-all",
+            &format!("remote.{name}.pushurl"),
+            push_url,
+        ])?;
         Ok(())
     }
 
@@ -878,22 +896,41 @@ impl GitRepo {
 
     /// Resolve Git's worktree-specific interactive rebase todo path.
     pub fn rebase_todo_path(&self) -> Result<PathBuf> {
-        let args = ["rev-parse", "--path-format=absolute", "--git-path", "rebase-merge/git-rebase-todo"];
+        let args = [
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "rebase-merge/git-rebase-todo",
+        ];
         let mut command = git_command(&self.root, &args, Stdio::null(), &[]);
         let out = runner::run_owned(&mut command, None)
             .map_err(|error| Error::new(format!("Cannot resolve rebase todo: {error}")))?;
-        let status = out.status.ok_or_else(|| Error::new("Rebase todo lookup was cancelled"))?;
+        let status = out
+            .status
+            .ok_or_else(|| Error::new("Rebase todo lookup was cancelled"))?;
         if !status.success() {
-            return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr)));
+            return Err(Error::git(GitFailure::from_output(
+                &args,
+                status,
+                &out.stderr,
+            )));
         }
-        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+        if out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete
+        {
             return Err(Error::new("Rebase todo lookup returned incomplete output"));
         }
-        let output = std::str::from_utf8(&out.stdout).map_err(|_| Error::new("Git rebase todo path is not UTF-8"))?;
-        let path = output.strip_suffix('\n').filter(|path| !path.is_empty() && !path.contains(['\n', '\r', '\0']))
+        let output = std::str::from_utf8(&out.stdout)
+            .map_err(|_| Error::new("Git rebase todo path is not UTF-8"))?;
+        let path = output
+            .strip_suffix('\n')
+            .filter(|path| !path.is_empty() && !path.contains(['\n', '\r', '\0']))
             .ok_or_else(|| Error::new("Git returned an invalid rebase todo path"))?;
         let path = Path::new(path);
-        if !path.is_absolute() { return Err(Error::new("Git returned a relative rebase todo path")); }
+        if !path.is_absolute() {
+            return Err(Error::new("Git returned a relative rebase todo path"));
+        }
         Ok(path.to_path_buf())
     }
 
@@ -911,13 +948,28 @@ impl GitRepo {
             metadata.push((name.to_owned(), std::fs::read(merge.join(name))?));
         }
         let path = self.rebase_todo_path()?;
-        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge.as_path()) {
-            return Err(Error::new("rebase todo path is outside the paused operation"));
+        if path
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .as_deref()
+            != Some(merge.as_path())
+        {
+            return Err(Error::new(
+                "rebase todo path is outside the paused operation",
+            ));
         }
         let source = std::fs::read(path)?;
-        let owner = RebaseTodoOwner { git_dir, metadata, merge_identity };
-        if self.rebase_todo_identity()? != owner || std::fs::read(self.rebase_todo_path()?)? != source {
-            return Err(Error::new("rebase todo operation changed while it was loaded"));
+        let owner = RebaseTodoOwner {
+            git_dir,
+            metadata,
+            merge_identity,
+        };
+        if self.rebase_todo_identity()? != owner
+            || std::fs::read(self.rebase_todo_path()?)? != source
+        {
+            return Err(Error::new(
+                "rebase todo operation changed while it was loaded",
+            ));
         }
         Ok(RebaseTodoSnapshot { source, owner })
     }
@@ -931,26 +983,62 @@ impl GitRepo {
         let merge = git_dir.join("rebase-merge");
         let merge_identity = std::sync::Arc::new(same_file::Handle::from_path(&merge)?);
         let mut metadata = Vec::new();
-        for name in ["orig-head", "onto", "head-name"] { metadata.push((name.to_owned(), std::fs::read(merge.join(name))?)); }
-        Ok(RebaseTodoOwner { git_dir, metadata, merge_identity })
+        for name in ["orig-head", "onto", "head-name"] {
+            metadata.push((name.to_owned(), std::fs::read(merge.join(name))?));
+        }
+        Ok(RebaseTodoOwner {
+            git_dir,
+            metadata,
+            merge_identity,
+        })
     }
 
     /// Atomically replace the todo of this repository's paused merge-backend rebase.
-    pub(crate) fn write_rebase_todo(&self, identity: &RebaseTodoOwner, expected: &[u8], contents: &[u8]) -> Result<()> {
+    pub(crate) fn write_rebase_todo(
+        &self,
+        identity: &RebaseTodoOwner,
+        expected: &[u8],
+        contents: &[u8],
+    ) -> Result<()> {
         if !self.rebase_state()?.is_some() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
         let path = self.rebase_todo_path()?;
         let merge_dir = std::fs::canonicalize(self.git_dir.join("rebase-merge"))?;
-        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge_dir.as_path()) {
-            return Err(Error::new("rebase todo path is outside the paused operation"));
+        if path
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .as_deref()
+            != Some(merge_dir.as_path())
+        {
+            return Err(Error::new(
+                "rebase todo path is outside the paused operation",
+            ));
         }
         let lock_path = merge_dir.join("git-rebase-todo.lock");
-        let lock_file = std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path)
-            .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { Error::new("rebase todo is locked by another process") } else { Error::from(error) })?;
-        let _lock = RebaseTodoLock { path: lock_path, file: lock_file };
-        if &self.rebase_todo_identity()? != identity { return Err(Error::new("rebase todo operation changed since it was loaded")); }
-        if std::fs::read(&path)? != expected { return Err(Error::new("rebase todo changed since it was loaded")); }
+        let lock_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    Error::new("rebase todo is locked by another process")
+                } else {
+                    Error::from(error)
+                }
+            })?;
+        let _lock = RebaseTodoLock {
+            path: lock_path,
+            file: lock_file,
+        };
+        if &self.rebase_todo_identity()? != identity {
+            return Err(Error::new(
+                "rebase todo operation changed since it was loaded",
+            ));
+        }
+        if std::fs::read(&path)? != expected {
+            return Err(Error::new("rebase todo changed since it was loaded"));
+        }
         let mut temporary = tempfile::NamedTempFile::new_in(&merge_dir)?;
         std::io::Write::write_all(&mut temporary, contents)?;
         std::io::Write::flush(&mut temporary)?;
@@ -988,7 +1076,9 @@ impl GitRepo {
     /// argv entries and paths are separated from revisions by `--`.
     pub fn log(&self, options: &GitLogOptions) -> Result<GitLogPage> {
         if options.merges_only && options.no_merges {
-            return Err(Error::new("Log filters cannot include and exclude merges at the same time."));
+            return Err(Error::new(
+                "Log filters cannot include and exclude merges at the same time.",
+            ));
         }
         let size = if options.page_size == 0 {
             100
@@ -1025,9 +1115,15 @@ impl GitRepo {
                 });
             }
         }
-        if options.merges_only { args.push("--merges".into()); }
-        if options.no_merges { args.push("--no-merges".into()); }
-        if options.first_parent { args.push("--first-parent".into()); }
+        if options.merges_only {
+            args.push("--merges".into());
+        }
+        if options.no_merges {
+            args.push("--no-merges".into());
+        }
+        if options.first_parent {
+            args.push("--first-parent".into());
+        }
         let revision = options.revision.as_deref().unwrap_or("HEAD");
         if let Some(selection) = &options.ref_selection {
             if selection != "local" && selection != "branches" && selection != "all" {
@@ -1063,11 +1159,15 @@ impl GitRepo {
                 args.push("--all".into());
             } else {
                 args.push("--branches".into());
-                if selection == "branches" { args.push("--remotes".into()); }
+                if selection == "branches" {
+                    args.push("--remotes".into());
+                }
             }
         }
         args.push("--end-of-options".into());
-        if options.ref_selection.is_none() { args.push(revision.to_string()); }
+        if options.ref_selection.is_none() {
+            args.push(revision.to_string());
+        }
         if !options.paths.is_empty() {
             args.push("--".into());
             args.extend(options.paths.iter().map(|path| format!(":(literal){path}")));
@@ -1146,24 +1246,43 @@ impl GitRepo {
 
     /// Stable identity for the selected worktree and Git directory.
     pub fn repository_identity(&self) -> Result<String> {
-        Ok(format!("{}\0{}", std::fs::canonicalize(&self.root)?.display(), std::fs::canonicalize(&self.git_dir)?.display()))
+        Ok(format!(
+            "{}\0{}",
+            std::fs::canonicalize(&self.root)?.display(),
+            std::fs::canonicalize(&self.git_dir)?.display()
+        ))
     }
 
     /// Identify HEAD by its resolved commit and exact symbolic ref, or detached state.
     pub fn head_identity(&self) -> Result<(String, Option<String>)> {
         let commit = self.resolve_commit("HEAD")?;
-        let reference = self.run(&["symbolic-ref", "--quiet", "HEAD"]).ok().map(|value| value.trim().to_owned());
+        let reference = self
+            .run(&["symbolic-ref", "--quiet", "HEAD"])
+            .ok()
+            .map(|value| value.trim().to_owned());
         Ok((commit, reference))
     }
 
     /// Capture exact index bytes and require a clean, operation-free worktree.
     pub fn rebase_launch_preconditions(&self) -> Result<(String, String)> {
-        if self.rebase_state()?.is_some() { return Err(Error::new("cannot prepare rebase while a Git operation is in progress")); }
+        if self.rebase_state()?.is_some() {
+            return Err(Error::new(
+                "cannot prepare rebase while a Git operation is in progress",
+            ));
+        }
         let status = self.run(&["status", "--porcelain", "--untracked-files=all"])?;
-        if !status.is_empty() { return Err(Error::new("cannot prepare rebase with staged, unstaged, or untracked changes")); }
+        if !status.is_empty() {
+            return Err(Error::new(
+                "cannot prepare rebase with staged, unstaged, or untracked changes",
+            ));
+        }
         let index = self.run(&["rev-parse", "--git-path", "index"])?;
         let path = PathBuf::from(index.trim());
-        let path = if path.is_absolute() { path } else { self.root.join(path) };
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.root.join(path)
+        };
         let bytes = std::fs::read(path)?;
         use sha2::{Digest, Sha256};
         let index = format!("{:x}", Sha256::digest(&bytes));
@@ -1176,18 +1295,29 @@ impl GitRepo {
         if self.git_dir.join("rebase-merge").exists()
             || self.git_dir.join("rebase-apply").exists()
             || self.git_dir.join("sequencer").exists()
-            || ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
-                .iter()
-                .any(|name| self.git_dir.join(name).exists())
+            || [
+                "MERGE_HEAD",
+                "CHERRY_PICK_HEAD",
+                "REVERT_HEAD",
+                "BISECT_LOG",
+            ]
+            .iter()
+            .any(|name| self.git_dir.join(name).exists())
         {
-            return Err(Error::new("cannot prepare instant autosquash while a Git operation is in progress"));
+            return Err(Error::new(
+                "cannot prepare instant autosquash while a Git operation is in progress",
+            ));
         }
         let status = self.status_listing()?;
         if !status.untracked.is_empty() {
-            return Err(Error::new("cannot prepare instant autosquash with untracked files"));
+            return Err(Error::new(
+                "cannot prepare instant autosquash with untracked files",
+            ));
         }
         if !status.unstaged.is_empty() {
-            return Err(Error::new("cannot prepare instant autosquash with tracked unstaged changes"));
+            return Err(Error::new(
+                "cannot prepare instant autosquash with tracked unstaged changes",
+            ));
         }
         if status.staged.is_empty() {
             return Err(Error::new("instant autosquash requires a staged change"));
@@ -1198,48 +1328,115 @@ impl GitRepo {
         }
         let index = self.run(&["rev-parse", "--git-path", "index"])?;
         let path = PathBuf::from(index.trim());
-        let path = if path.is_absolute() { path } else { self.root.join(path) };
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.root.join(path)
+        };
         use sha2::{Digest, Sha256};
         let index = format!("{:x}", Sha256::digest(std::fs::read(path)?));
-        Ok(InstantRebaseState { index, staged_patch })
+        Ok(InstantRebaseState {
+            index,
+            staged_patch,
+        })
     }
 
     /// Launch Git's interactive rebase using a validated external todo plan.
     /// Launch interactive rebase with either an exact prepared todo or Git-preserved autosquash todo.
-    pub fn launch_interactive_rebase(&self, base: &str, plan: Option<&[u8]>, policy: crate::rebase_sequence_editor::SequenceEditorPolicy, executable: &Path) -> Result<()> {
+    pub fn launch_interactive_rebase(
+        &self,
+        base: &str,
+        plan: Option<&[u8]>,
+        policy: crate::rebase_sequence_editor::SequenceEditorPolicy,
+        executable: &Path,
+    ) -> Result<()> {
         self.launch_interactive_rebase_with_env(base, plan, policy, executable, &[])
     }
 
     /// Launch interactive rebase with editor variables inherited by Git's replay callbacks.
-    pub fn launch_interactive_rebase_with_env(&self, base: &str, plan: Option<&[u8]>, policy: crate::rebase_sequence_editor::SequenceEditorPolicy, executable: &Path, editor_env: &[(&str, &str)]) -> Result<()> {
-        let directory = tempfile::Builder::new().prefix("magit-lsp-rebase-").tempdir()?;
-        let plan_path = if let Some(plan) = plan { let path = directory.path().join("todo plan"); std::fs::write(&path, plan)?; Some(path) } else { None };
+    pub fn launch_interactive_rebase_with_env(
+        &self,
+        base: &str,
+        plan: Option<&[u8]>,
+        policy: crate::rebase_sequence_editor::SequenceEditorPolicy,
+        executable: &Path,
+        editor_env: &[(&str, &str)],
+    ) -> Result<()> {
+        let directory = tempfile::Builder::new()
+            .prefix("magit-lsp-rebase-")
+            .tempdir()?;
+        let plan_path = if let Some(plan) = plan {
+            let path = directory.path().join("todo plan");
+            std::fs::write(&path, plan)?;
+            Some(path)
+        } else {
+            None
+        };
         let editor = crate::rebase_sequence_editor::command_for(executable, policy);
         let plan_path = plan_path.map(|path| path.to_string_lossy().into_owned());
-        let mut command_args = vec!["-c", if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash { "rebase.autoSquash=true" } else { "rebase.autoSquash=false" }, "rebase", "--interactive"];
-        if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash { command_args.push("--autosquash"); } else { command_args.push("--no-autosquash"); }
+        let mut command_args = vec![
+            "-c",
+            if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash {
+                "rebase.autoSquash=true"
+            } else {
+                "rebase.autoSquash=false"
+            },
+            "rebase",
+            "--interactive",
+        ];
+        if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash {
+            command_args.push("--autosquash");
+        } else {
+            command_args.push("--no-autosquash");
+        }
         command_args.push(base);
         let args = command_args;
         let mut env = vec![("GIT_SEQUENCE_EDITOR", editor.as_str())];
         env.extend_from_slice(editor_env);
-        if let Some(path) = plan_path.as_deref() { env.push((crate::rebase_sequence_editor::PLAN_FILE_ENV, path)); }
+        if let Some(path) = plan_path.as_deref() {
+            env.push((crate::rebase_sequence_editor::PLAN_FILE_ENV, path));
+        }
         let started = Instant::now();
         let mut command = git_command(&self.root, &args, Stdio::null(), &env);
-        let out = runner::run_owned(&mut command, None).map_err(|error| Error::new(format!("failed to run git: {error}")))?;
-        let status = out.status.ok_or_else(|| Error::new("git command was cancelled; process reap is incomplete"))?;
-        log_finished(&self.root, &args, status, started.elapsed(), &out.stdout, &out.stderr);
-        if !status.success() { return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr))); }
+        let out = runner::run_owned(&mut command, None)
+            .map_err(|error| Error::new(format!("failed to run git: {error}")))?;
+        let status = out
+            .status
+            .ok_or_else(|| Error::new("git command was cancelled; process reap is incomplete"))?;
+        log_finished(
+            &self.root,
+            &args,
+            status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
+        if !status.success() {
+            return Err(Error::git(GitFailure::from_output(
+                &args,
+                status,
+                &out.stderr,
+            )));
+        }
         Ok(())
     }
 
     /// Verify exact autosquash marker subject, identity, and expected captured HEAD parent.
-    pub fn verify_autosquash_marker(&self, marker: &str, expected_parent: &str, expected_subject: &str) -> Result<()> {
+    pub fn verify_autosquash_marker(
+        &self,
+        marker: &str,
+        expected_parent: &str,
+        expected_subject: &str,
+    ) -> Result<()> {
         let head = self.run(&["rev-parse", "HEAD"])?;
         let parent = self.run(&["rev-parse", &format!("{marker}^")])?;
         let subject = self.run(&["show", "-s", "--format=%s", marker])?;
         let subject = subject.strip_suffix('\n').unwrap_or(&subject);
-        if head.trim() != marker || parent.trim() != expected_parent || subject != expected_subject {
-            return Err(Error::new("created autosquash marker does not match captured target and HEAD"));
+        if head.trim() != marker || parent.trim() != expected_parent || subject != expected_subject
+        {
+            return Err(Error::new(
+                "created autosquash marker does not match captured target and HEAD",
+            ));
         }
         Ok(())
     }
@@ -1247,17 +1444,31 @@ impl GitRepo {
     /// Return full commit IDs after an exclusive base, rejecting non-linear history.
     pub fn linear_replay_membership(&self, base: &str, head: &str) -> Result<Vec<String>> {
         let ancestry = self.run(&["merge-base", "--is-ancestor", base, head]);
-        if ancestry.is_err() { return Err(Error::new("selected base is not an ancestor of HEAD")); }
-        let output = self.run(&["rev-list", "--reverse", "--topo-order", "--parents", &format!("{base}..{head}")])?;
+        if ancestry.is_err() {
+            return Err(Error::new("selected base is not an ancestor of HEAD"));
+        }
+        let output = self.run(&[
+            "rev-list",
+            "--reverse",
+            "--topo-order",
+            "--parents",
+            &format!("{base}..{head}"),
+        ])?;
         let mut result = Vec::new();
         let mut expected_parent = base;
         for line in output.lines() {
             let fields = line.split_whitespace().collect::<Vec<_>>();
-            if fields.len() != 2 || fields[1] != expected_parent { return Err(Error::new("selected range is not a supported linear history")); }
+            if fields.len() != 2 || fields[1] != expected_parent {
+                return Err(Error::new(
+                    "selected range is not a supported linear history",
+                ));
+            }
             result.push(fields[0].to_owned());
             expected_parent = fields[0];
         }
-        if expected_parent != head { return Err(Error::new("selected range does not end at captured HEAD")); }
+        if expected_parent != head {
+            return Err(Error::new("selected range does not end at captured HEAD"));
+        }
         Ok(result)
     }
 
@@ -1265,10 +1476,16 @@ impl GitRepo {
     pub fn resolve_todo_commits(&self, tokens: &[String]) -> Result<Vec<Result<String>>> {
         for (index, token) in tokens.iter().enumerate() {
             if token.len() < 4 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(Error::new(format!("todo batch row {} identity must be at least four hexadecimal characters", index + 1)));
+                return Err(Error::new(format!(
+                    "todo batch row {} identity must be at least four hexadecimal characters",
+                    index + 1
+                )));
             }
         }
-        let input = tokens.iter().map(|token| format!("{token}\n")).collect::<String>();
+        let input = tokens
+            .iter()
+            .map(|token| format!("{token}\n"))
+            .collect::<String>();
         let output = self.command_with_input(
             &["cat-file", "--batch-check=%(objectname) %(objecttype)"],
             input.as_bytes(),
@@ -2054,13 +2271,29 @@ impl GitRepo {
         let out = runner::run_owned(&mut command, Some(input))
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
         let Some(status) = out.status else {
-            return Err(Error::new("git command was cancelled; process reap is incomplete"));
+            return Err(Error::new(
+                "git command was cancelled; process reap is incomplete",
+            ));
         };
-        log_finished(&self.root, args, status, started.elapsed(), &out.stdout, &out.stderr);
+        log_finished(
+            &self.root,
+            args,
+            status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
         if !status.success() {
-            return Err(Error::git(GitFailure::from_output(args, status, &out.stderr)));
+            return Err(Error::git(GitFailure::from_output(
+                args,
+                status,
+                &out.stderr,
+            )));
         }
-        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+        if out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete
+        {
             return Err(Error::new("git command completed with incomplete output"));
         }
         if out.outcome.stdin_error {
@@ -2421,22 +2654,43 @@ fn log_finished(
 fn decode_todo_commit_batch(output: &str, expected: usize) -> Result<Vec<Result<String>>> {
     let lines = output.lines().collect::<Vec<_>>();
     if lines.len() != expected {
-        return Err(Error::new(format!("malformed todo object batch response: expected {expected} records, received {}", lines.len())));
+        return Err(Error::new(format!(
+            "malformed todo object batch response: expected {expected} records, received {}",
+            lines.len()
+        )));
     }
-    Ok(lines.into_iter().enumerate().map(|(index, line)| {
-        let fields = line.split_whitespace().collect::<Vec<_>>();
-        if fields.len() != 2 {
-            return Err(Error::new(format!("malformed todo object response on batch row {}", index + 1)));
-        }
-        match fields[1] {
-            "missing" => Err(Error::new("missing todo commit object")),
-            "ambiguous" => Err(Error::new("ambiguous todo commit identity")),
-            "commit" if matches!(fields[0].len(), 40 | 64) && fields[0].bytes().all(|byte| byte.is_ascii_hexdigit()) => Ok(fields[0].to_owned()),
-            "commit" => Err(Error::new(format!("malformed todo object response on batch row {}", index + 1))),
-            "blob" | "tree" | "tag" => Err(Error::new("todo identity is not a commit")),
-            _ => Err(Error::new(format!("malformed todo object response on batch row {}", index + 1))),
-        }
-    }).collect())
+    Ok(lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 2 {
+                return Err(Error::new(format!(
+                    "malformed todo object response on batch row {}",
+                    index + 1
+                )));
+            }
+            match fields[1] {
+                "missing" => Err(Error::new("missing todo commit object")),
+                "ambiguous" => Err(Error::new("ambiguous todo commit identity")),
+                "commit"
+                    if matches!(fields[0].len(), 40 | 64)
+                        && fields[0].bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+                {
+                    Ok(fields[0].to_owned())
+                }
+                "commit" => Err(Error::new(format!(
+                    "malformed todo object response on batch row {}",
+                    index + 1
+                ))),
+                "blob" | "tree" | "tag" => Err(Error::new("todo identity is not a commit")),
+                _ => Err(Error::new(format!(
+                    "malformed todo object response on batch row {}",
+                    index + 1
+                ))),
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -2494,16 +2748,29 @@ mod tests {
     fn todo_batch_decoder_rejects_malformed_incomplete_and_extra_records() {
         let oid = "0123456789abcdef0123456789abcdef01234567";
         let malformed = decode_todo_commit_batch(&format!("{oid} commit\nbroken\n"), 2).unwrap();
-        assert!(malformed[1].as_ref().unwrap_err().to_string().contains("malformed"));
-        assert!(malformed[1].as_ref().unwrap_err().to_string().contains("row 2"));
+        assert!(malformed[1]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("malformed"));
+        assert!(malformed[1]
+            .as_ref()
+            .unwrap_err()
+            .to_string()
+            .contains("row 2"));
 
         for output in [
             format!("{oid} commit\n"),
             format!("{oid} commit\n{oid} commit\n{oid} commit\n"),
         ] {
-            let message = decode_todo_commit_batch(&output, 2).unwrap_err().to_string();
+            let message = decode_todo_commit_batch(&output, 2)
+                .unwrap_err()
+                .to_string();
             assert!(message.contains("malformed"), "unreadable error: {message}");
-            assert!(message.contains("expected 2 records"), "missing cardinality: {message}");
+            assert!(
+                message.contains("expected 2 records"),
+                "missing cardinality: {message}"
+            );
         }
     }
 }

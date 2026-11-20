@@ -655,9 +655,7 @@ impl Session {
                     reader,
                 },
             );
-            let pick = self
-                .pending_pick_request()
-                .expect("pick just staged");
+            let pick = self.pending_pick_request().expect("pick just staged");
             self.publish();
             return Ok(Execution::Pick(pick));
         }

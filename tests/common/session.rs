@@ -17,8 +17,8 @@ use magit_lsp::protocol::{
 };
 use magit_lsp::session::{InvokeResult, Session};
 use magit_lsp::tree::{Node, NodeKind, Tree};
-use magit_lsp::ui::ScriptedUi;
 use magit_lsp::ui::PromptUi;
+use magit_lsp::ui::ScriptedUi;
 use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, ViewMode, Viewport};
 use magit_lsp::Error;
 use serde_json::Value;

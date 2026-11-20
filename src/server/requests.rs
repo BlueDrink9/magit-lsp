@@ -364,7 +364,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         }
         "textDocument/codeAction" => {
             let p: lsp_types::CodeActionParams = from_params(params)?;
-            Ok(Dispatched::value(plain_actions::plain_code_actions(shared, &p)))
+            Ok(Dispatched::value(plain_actions::plain_code_actions(
+                shared, &p,
+            )))
         }
         "textDocument/definition" => {
             let p: lsp_types::GotoDefinitionParams = from_params(params)?;

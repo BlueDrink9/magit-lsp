@@ -47,7 +47,6 @@ impl ViewKind {
     pub fn wire_name(&self) -> String {
         self.as_str().to_string()
     }
-
 }
 
 impl fmt::Display for ViewKind {

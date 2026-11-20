@@ -246,9 +246,7 @@ fn adopting_client_text_stops_the_next_change_from_reverting_it() {
     assert!(doc.change(2, "edited\n").is_some());
 
     doc.adopt(3, "adopted\n".to_string());
-    assert!(doc
-        .change(4, "adopted\n")
-        .is_none());
+    assert!(doc.change(4, "adopted\n").is_none());
 }
 
 #[test]
@@ -346,7 +344,13 @@ fn queued_render_survives_echo_and_response_in_either_order() {
         let mut doc = PlainDocument::new("file:///prompt", Encoding::Utf16, true, format);
         doc.open(1, "seed\n");
         let older = doc
-            .render_actions(tree(1, "alpha"), "view-old".into(), 1, "prompt".into(), None)
+            .render_actions(
+                tree(1, "alpha"),
+                "view-old".into(),
+                1,
+                "prompt".into(),
+                None,
+            )
             .expect("the older tree starts a flight");
         assert!(
             doc.render_actions(tree(2, "beta"), "view-new".into(), 2, "prompt".into(), None)

@@ -18,14 +18,18 @@ pub(super) fn draft_request(shared: &Shared, request: &Request) -> Result<Value>
                     || editor::registry().run_for_uri(&shared.draft_owner, &command.uri)?
                         != command.run_id
                 {
-                    return Err(Error::new("Commit draft abort identity is stale or foreign"));
+                    return Err(Error::new(
+                        "Commit draft abort identity is stale or foreign",
+                    ));
                 }
                 let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
                 if !documents
                     .get(&command.uri)
                     .is_some_and(|doc| !doc.repair && doc.version == command.version)
                 {
-                    return Err(Error::new("Wait for the exact synchronized document version"));
+                    return Err(Error::new(
+                        "Wait for the exact synchronized document version",
+                    ));
                 }
                 drop(documents);
                 if !editor::registry().resolve(&command.run_id, editor::Reply::Abort) {
@@ -118,7 +122,10 @@ fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
     let Some(path) = file_uri_path(uri) else {
         return false;
     };
-    if !path.file_name().is_some_and(|name| name == "COMMIT_EDITMSG") {
+    if !path
+        .file_name()
+        .is_some_and(|name| name == "COMMIT_EDITMSG")
+    {
         return false;
     }
     let Some(dir) = path.parent() else {
@@ -203,7 +210,10 @@ pub(super) fn draft_notification(
                 return Err(Error::new("Document is not open"));
             };
             let pre = candidate.clone();
-            if candidate.change(p.text_document.version, &changes, encoding).is_err() {
+            if candidate
+                .change(p.text_document.version, &changes, encoding)
+                .is_err()
+            {
                 let stale_full_text =
                     p.content_changes.len() == 1 && p.content_changes[0].range.is_none();
                 drop(docs);
@@ -218,7 +228,9 @@ pub(super) fn draft_notification(
             }
             let text = candidate.text.clone();
             let captured = crate::presentation::keys::capture(&pre, &changes, &candidate, encoding)
-                .ok_or_else(|| Error::new("Accepted change did not derive its stored post-state"))?;
+                .ok_or_else(|| {
+                    Error::new("Accepted change did not derive its stored post-state")
+                })?;
             let handoff = AcceptedChange {
                 pre: captured.pre,
                 changes: captured.changes,
@@ -237,7 +249,8 @@ pub(super) fn draft_notification(
                     }
                 })?;
             }
-            docs.replace(uri, candidate).map_err(|_| Error::new("Document is not open"))?;
+            docs.replace(uri, candidate)
+                .map_err(|_| Error::new("Document is not open"))?;
             Ok(Some(handoff))
         }
         "textDocument/didClose" => {

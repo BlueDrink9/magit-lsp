@@ -153,7 +153,11 @@ pub enum EditConfirmation {
 pub enum EditAbortResult {
     /// The pending editor run was aborted.
     #[serde(rename = "aborted")]
-    Aborted { run_id: String, uri: String, version: i32 },
+    Aborted {
+        run_id: String,
+        uri: String,
+        version: i32,
+    },
 }
 
 impl Effect {

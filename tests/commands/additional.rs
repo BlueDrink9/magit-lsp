@@ -518,4 +518,3 @@ pub(super) fn file_identity_matrix(action: &str, stale: bool, selection: bool) {
         }
     }
 }
-

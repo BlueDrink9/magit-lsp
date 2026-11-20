@@ -276,7 +276,16 @@ fn consumed_child_cancellation_retains_operation_intent_only_on_its_handle() {
     wait_for_start(&markers.path().join("ready"));
     handle.cancel();
     let result = worker.join().expect("worker thread").expect("owned child");
-    assert!(result.outcome.cancelled, "the running child consumed cancellation");
-    assert!(handle.was_requested(), "operation intent survives child consumption");
-    assert!(!CancelHandle::new().was_requested(), "an unrelated handle starts clear");
+    assert!(
+        result.outcome.cancelled,
+        "the running child consumed cancellation"
+    );
+    assert!(
+        handle.was_requested(),
+        "operation intent survives child consumption"
+    );
+    assert!(
+        !CancelHandle::new().was_requested(),
+        "an unrelated handle starts clear"
+    );
 }

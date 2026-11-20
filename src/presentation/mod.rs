@@ -104,7 +104,9 @@ pub struct MagitCapabilities {
 const LAYOUT_PLACEMENTS: &[&str] = &["main", "bottom", "side", "float"];
 
 /// Optional native picker shapes a rich client opts into.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct PickCapabilities {
     /// The client can select more than one item.
@@ -172,7 +174,11 @@ pub struct RichCapabilityDeclaration {
     /// Oldest server session version the client can use; absent means `v`.
     ///
     /// A present value must be a positive integer no greater than `v`.
-    #[serde(default, rename = "minimumVersion", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "minimumVersion",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(schema_with = "minimum_version_schema")]
     pub minimum_version: Option<u64>,
     /// Client keymap delivery strategy.

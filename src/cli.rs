@@ -225,14 +225,20 @@ fn run_sequence_editor_helper(args: &[String], err: &mut impl Write) -> Outcome 
     let (mode, path) = match args {
         [mode, path] => (mode.as_str(), path),
         _ => {
-            let _ = writeln!(err, "`--sequence-editor-helper` needs a mode and todo path\n\n{USAGE}");
+            let _ = writeln!(
+                err,
+                "`--sequence-editor-helper` needs a mode and todo path\n\n{USAGE}"
+            );
             return Outcome::Done(2);
         }
     };
     let policy = match mode {
         "prepared" => crate::rebase_sequence_editor::SequenceEditorPolicy::PreparedReplacement,
         "preserve" => crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash,
-        _ => { let _ = writeln!(err, "unknown sequence-editor mode `{mode}`"); return Outcome::Done(2); }
+        _ => {
+            let _ = writeln!(err, "unknown sequence-editor mode `{mode}`");
+            return Outcome::Done(2);
+        }
     };
     match crate::rebase_sequence_editor::apply_policy(std::path::Path::new(path), policy) {
         Ok(()) => Outcome::Done(0),

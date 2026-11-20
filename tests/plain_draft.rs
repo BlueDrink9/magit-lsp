@@ -1,8 +1,8 @@
 //! Plain-mode commit draft delivery: replace an already-open buffer first.
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "common/stdio.rs"]
@@ -90,10 +90,11 @@ fn open_plain_inner(
 /// Whether an apply edit targets the pending commit draft URI.
 fn draft_edit(message: &Value, draft_uri: &str) -> bool {
     let edit = &message["params"]["edit"];
-    edit["documentChanges"]
-        .as_array()
-        .is_some_and(|changes| changes.iter().any(|change| change["textDocument"]["uri"] == draft_uri))
-        || edit["changes"].get(draft_uri).is_some()
+    edit["documentChanges"].as_array().is_some_and(|changes| {
+        changes
+            .iter()
+            .any(|change| change["textDocument"]["uri"] == draft_uri)
+    }) || edit["changes"].get(draft_uri).is_some()
 }
 
 /// Receive one frame, answering requests; a draft edit is applied without an echo.
@@ -320,7 +321,8 @@ fn wait_for_status_action(
             .text(uri)
             .lines()
             .position(|line| line.contains(needle))
-            .unwrap_or_else(|| panic!("status view shows {needle}: {}", editor.text(uri))) as u32;
+            .unwrap_or_else(|| panic!("status view shows {needle}: {}", editor.text(uri)))
+            as u32;
         let offered = code_actions(server, editor, draft_uri, seen, uri, line, id);
         id += 1;
         if let Some(action) = offered
@@ -344,11 +346,28 @@ fn prepare_commit(
     seen: &mut Vec<Value>,
     uri: &str,
 ) -> Value {
-    let stage = wait_for_status_action(server, editor, draft_uri, seen, uri, "f.txt", "status.stage", 90);
+    let stage = wait_for_status_action(
+        server,
+        editor,
+        draft_uri,
+        seen,
+        uri,
+        "f.txt",
+        "status.stage",
+        90,
+    );
     assert!(execute_action(server, editor, draft_uri, seen, stage, 91)["error"].is_null());
 
-    let open_commit =
-        wait_for_status_action(server, editor, draft_uri, seen, uri, "f.txt", "open.commit", 92);
+    let open_commit = wait_for_status_action(
+        server,
+        editor,
+        draft_uri,
+        seen,
+        uri,
+        "f.txt",
+        "open.commit",
+        92,
+    );
     assert!(execute_action(server, editor, draft_uri, seen, open_commit, 93)["error"].is_null());
 
     wait_for_commit_menu(server, editor, draft_uri, seen, uri)
@@ -369,7 +388,11 @@ fn start_open_draft(
     status_uri: &str,
     seen: &mut Vec<Value>,
 ) -> String {
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let draft_uri = format!("file://{expected_path}");
     let create = prepare_commit(server, editor, &draft_uri, seen, status_uri);
     assert!(execute_action(server, editor, &draft_uri, seen, create, 95)["error"].is_null());
@@ -377,7 +400,10 @@ fn start_open_draft(
     while !seen.iter().any(|message| {
         message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
     }) {
-        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "draft delivery timed out: seen {seen:#?}"
+        );
         pump(server, editor, &draft_uri, seen);
     }
     let template = std::fs::read_to_string(&expected_path).expect("commit template");
@@ -405,7 +431,10 @@ fn wait_for_status_view(
 ) {
     let deadline = Instant::now() + Duration::from_secs(15);
     while editor.text(status_uri).contains(expected_path) {
-        assert!(Instant::now() < deadline, "status view timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "status view timed out: seen {seen:#?}"
+        );
         pump(server, editor, draft_uri, seen);
     }
 }
@@ -417,10 +446,17 @@ fn wait_for_draft_messages(
     seen: &mut Vec<Value>,
 ) {
     let deadline = Instant::now() + Duration::from_secs(15);
-    while !seen.iter().any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, draft_uri))
-        || !seen.iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri)
+    while !seen
+        .iter()
+        .any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, draft_uri))
+        || !seen.iter().any(|message| {
+            message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
+        })
     {
-        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "draft delivery timed out: seen {seen:#?}"
+        );
         pump(server, editor, draft_uri, seen);
     }
 }
@@ -468,7 +504,11 @@ fn open_plain_commit_buffer_is_replaced_before_show_document() {
         .modify_standard()
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let expected_uri = format!("file://{expected_path}");
     let stale = "Previous commit message\n";
     // The client opened this buffer before the new run issued its template.
@@ -476,33 +516,61 @@ fn open_plain_commit_buffer_is_replaced_before_show_document() {
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &expected_uri,
+        &mut seen,
+        create,
+        95
+    )["error"]
+        .is_null());
     wait_for_draft_messages(&mut server, &mut editor, &expected_uri, &mut seen);
 
     let apply_index = seen
         .iter()
-        .position(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, &expected_uri))
+        .position(|message| {
+            message["method"] == "workspace/applyEdit" && draft_edit(message, &expected_uri)
+        })
         .expect("open buffer receives the new template");
     let show_index = seen
         .iter()
-        .position(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri)
+        .position(|message| {
+            message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri
+        })
         .expect("the draft is shown");
-    assert!(apply_index < show_index, "applyEdit must precede showDocument: {seen:#?}");
+    assert!(
+        apply_index < show_index,
+        "applyEdit must precede showDocument: {seen:#?}"
+    );
 
     let apply = &seen[apply_index];
     let change = &apply["params"]["edit"]["documentChanges"][0];
     assert_eq!(change["textDocument"]["uri"], expected_uri);
-    assert_eq!(change["textDocument"]["version"], 1, "the store's current version: {apply}");
+    assert_eq!(
+        change["textDocument"]["version"], 1,
+        "the store's current version: {apply}"
+    );
     let edits = change["edits"].as_array().unwrap();
     assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0]["range"], json!({"start":{"line":0,"character":0},"end":{"line":1,"character":0}}));
+    assert_eq!(
+        edits[0]["range"],
+        json!({"start":{"line":0,"character":0},"end":{"line":1,"character":0}})
+    );
     let template = fixtures::read(std::path::Path::new(&expected_path));
     assert_eq!(edits[0]["newText"], template.as_str());
     assert_ne!(edits[0]["newText"], stale);
-    assert_eq!(editor.text(&expected_uri), template, "the client applied the replacement");
+    assert_eq!(
+        editor.text(&expected_uri),
+        template,
+        "the client applied the replacement"
+    );
 
     let show = &seen[show_index];
-    assert_eq!(show["params"], json!({"uri":expected_uri,"external":false,"takeFocus":true}));
+    assert_eq!(
+        show["params"],
+        json!({"uri":expected_uri,"external":false,"takeFocus":true})
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
@@ -516,7 +584,11 @@ fn rejected_draft_template_edit_is_reported_and_cancels_the_run() {
         .build();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let draft_uri = format!("file://{expected_path}");
     let stale = "Previous commit message\n";
     // The client opened this buffer before the new run issued its template.
@@ -534,18 +606,39 @@ fn rejected_draft_template_edit_is_reported_and_cancels_the_run() {
                 .as_str()
                 .is_some_and(|text| text.contains("could not be applied"))
     }) {
-        assert!(Instant::now() < deadline, "rejection report timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "rejection report timed out: seen {seen:#?}"
+        );
         pump_rejecting_draft(&mut server, &mut editor, &draft_uri, &mut seen);
     }
     assert!(
-        seen.iter().any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, &draft_uri)),
+        seen.iter()
+            .any(|message| message["method"] == "workspace/applyEdit"
+                && draft_edit(message, &draft_uri)),
         "the rejected template edit was offered: {seen:#?}"
     );
-    assert_eq!(editor.text(&draft_uri), stale, "the rejection leaves the buffer as it was");
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a rejected draft must not commit");
+    assert_eq!(
+        editor.text(&draft_uri),
+        stale,
+        "the rejection leaves the buffer as it was"
+    );
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a rejected draft must not commit"
+    );
 
     // The canceled run leaves no pending draft to confirm or abort.
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        96,
+    );
     assert!(
         offered.iter().all(|action| {
             let command = action["command"]["arguments"][0]["command"].as_str();
@@ -571,7 +664,15 @@ fn stale_explicit_confirm_is_refused_and_keeps_the_draft_pending() {
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
     server.send(editor.edit(&draft_uri, "Uncommitted body\n"));
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 200);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        200,
+    );
     let confirm = draft_action(&offered, "common.confirm");
     let current = confirm["version"].as_i64().expect("commit version");
     let mut stale = confirm.clone();
@@ -582,10 +683,26 @@ fn stale_explicit_confirm_is_refused_and_keeps_the_draft_pending() {
         "Wait for the exact synchronized document version; full-text repair may be required",
     );
 
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a stale confirm must not commit");
-    let still = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 202);
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a stale confirm must not commit"
+    );
+    let still = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        202,
+    );
     draft_action(&still, "common.confirm");
-    assert_eq!(editor.text(&draft_uri), "Uncommitted body\n", "the draft stays pending");
+    assert_eq!(
+        editor.text(&draft_uri),
+        "Uncommitted body\n",
+        "the draft stays pending"
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
@@ -597,14 +714,26 @@ fn explicit_abort_creates_no_commit_and_restores_the_status_view() {
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
         .build();
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
     let mut seen = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
     server.send(editor.edit(&draft_uri, "Aborted body\n"));
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 210);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        210,
+    );
     let abort = offered
         .iter()
         .find(|action| action["title"] == "Abort commit")
@@ -614,11 +743,28 @@ fn explicit_abort_creates_no_commit_and_restores_the_status_view() {
     let aborted = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 211);
     assert!(aborted["error"].is_null(), "Abort failed: {aborted}");
     assert_eq!(aborted["result"]["type"], "aborted");
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "Abort must not commit");
-    assert!(repo.git(&["status", "--porcelain"]).contains("f.txt"), "Abort keeps staged work");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "Abort must not commit"
+    );
+    assert!(
+        repo.git(&["status", "--porcelain"]).contains("f.txt"),
+        "Abort keeps staged work"
+    );
 
-    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
-    assert!(editor.text(&uri).contains("f.txt"), "the status view is shown again");
+    wait_for_status_view(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        &expected_path,
+    );
+    assert!(
+        editor.text(&uri).contains("f.txt"),
+        "the status view is shown again"
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
@@ -641,11 +787,43 @@ fn effective_plain_mutations_are_refused_during_registered_commit_wait() {
 
     // Opening the draft queued a status render. The first query drains its
     // applyEdit/echo; the second obtains the acknowledged snapshot, not a retry.
-    let _ = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 205);
-    let discard = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 207);
-    let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, discard, 206);
-    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
-        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    let _ = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.discard",
+        205,
+    );
+    let discard = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.discard",
+        207,
+    );
+    let refused = execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        discard,
+        206,
+    );
+    assert!(
+        refused["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"
+                && effect["text"] == "Wait for the current Git operation to finish"),
+        "{refused}"
+    );
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["write-tree"]), index);
     assert_eq!(repo.git(&["status", "--porcelain=v1"]), worktree);
@@ -653,28 +831,95 @@ fn effective_plain_mutations_are_refused_during_registered_commit_wait() {
     assert!(!repo.path().join(".git/rebase-merge").exists());
     assert!(!repo.path().join(".git/rebase-apply").exists());
 
-    let _ = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 210);
-    let stage = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 220);
+    let _ = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.stage",
+        210,
+    );
+    let stage = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.stage",
+        220,
+    );
     let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage, 230);
-    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
-        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert!(
+        refused["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"
+                && effect["text"] == "Wait for the current Git operation to finish"),
+        "{refused}"
+    );
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["write-tree"]), index);
     assert_eq!(repo.git(&["status", "--porcelain=v1"]), worktree);
 
-    let open = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "open.commit", 231);
+    let open = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "open.commit",
+        231,
+    );
     let opened = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open, 232);
     assert!(opened["error"].is_null(), "{opened}");
-    assert!(opened["result"]["effects"].as_array().unwrap().iter().any(|effect|
-        effect["type"] == "pushView" && effect["descriptor"]["scope"] == "menu.commit"), "{opened}");
+    assert!(
+        opened["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "pushView"
+                && effect["descriptor"]["scope"] == "menu.commit"),
+        "{opened}"
+    );
     // The first query drains the menu edit/echo; the second observes its acknowledged snapshot.
-    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 233);
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 234);
-    let create = offered.iter().find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
-        .expect("fresh commit creation menu action")["command"]["arguments"][0].clone();
+    let _ = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        233,
+    );
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        234,
+    );
+    let create = offered
+        .iter()
+        .find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
+        .expect("fresh commit creation menu action")["command"]["arguments"][0]
+        .clone();
     let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 235);
-    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
-        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert!(
+        refused["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"
+                && effect["text"] == "Wait for the current Git operation to finish"),
+        "{refused}"
+    );
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["write-tree"]), index);
     assert_eq!(repo.git(&["diff", "--binary"]), diff);
@@ -682,50 +927,161 @@ fn effective_plain_mutations_are_refused_during_registered_commit_wait() {
     assert!(!repo.path().join(".git/rebase-merge").exists());
     assert!(!repo.path().join(".git/rebase-apply").exists());
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 236);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        236,
+    );
     let cancel = draft_action(&offered, "common.cancel");
     let cancelled = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, cancel, 237);
     assert!(cancelled["error"].is_null(), "{cancelled}");
-    assert!(cancelled["result"]["effects"].as_array().unwrap().iter().any(|effect|
-        effect["type"] == "popView"), "{cancelled}");
+    assert!(
+        cancelled["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "popView"),
+        "{cancelled}"
+    );
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 240);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        240,
+    );
     let abort = draft_action(&offered, "common.cancel");
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 250)["error"].is_null());
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
-    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 250)["error"]
+            .is_null()
+    );
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
+    wait_for_status_view(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        &expected_path,
+    );
     server.send(editor.close(&draft_uri));
-    let discard = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 260);
-    let result = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, discard, 270);
+    let discard = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.discard",
+        260,
+    );
+    let result = execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        discard,
+        270,
+    );
     assert!(result["error"].is_null(), "{result}");
-    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 271);
+    let _ = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        271,
+    );
     // Text locates only the cursor; the offered opaque target owns identity.
-    let yes = editor.text(&uri).lines().position(|line| line.trim() == "Yes").expect("discard confirmation") as u32;
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, yes, 272);
+    let yes = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.trim() == "Yes")
+        .expect("discard confirmation") as u32;
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        yes,
+        272,
+    );
     let answer = draft_action(&offered, "prompt.answer");
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, answer, 273)["error"].is_null());
-    assert_eq!(std::fs::read_to_string(repo.path().join("g.txt")).unwrap(), "unchanged\n");
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, answer, 273)["error"]
+            .is_null()
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("g.txt")).unwrap(),
+        "unchanged\n"
+    );
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["write-tree"]), index);
 
-    let open = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "open.commit", 280);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open, 281)["error"].is_null());
+    let open = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "f.txt",
+        "open.commit",
+        280,
+    );
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open, 281)["error"]
+            .is_null()
+    );
     let create = wait_for_commit_menu(&mut server, &mut editor, &draft_uri, &mut seen, &uri)
-        .into_iter().find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
-        .expect("same commit creation after release")["command"]["arguments"][0].clone();
+        .into_iter()
+        .find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
+        .expect("same commit creation after release")["command"]["arguments"][0]
+        .clone();
     let start = seen.len();
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 282)["error"].is_null());
-    while !seen[start..].iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri) {
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 282)["error"]
+            .is_null()
+    );
+    while !seen[start..].iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
+    }) {
         pump(&mut server, &mut editor, &draft_uri, &mut seen);
     }
     let template = std::fs::read_to_string(&expected_path).expect("second commit template");
     server.send(editor.open(&draft_uri, &template));
     server.send(editor.edit(&draft_uri, "Commit after deferred ownership release\n"));
     let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 300);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 301)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        confirm,
+        301
+    )["error"]
+        .is_null());
     wait_for_head_change(&repo, &head);
-    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), "Commit after deferred ownership release\n\n");
-    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]),
+        "Commit after deferred ownership release\n\n"
+    );
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes()
+    );
     assert_eq!(repo.git(&["status", "--porcelain=v1"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
@@ -738,28 +1094,55 @@ fn close_after_abort_is_ignored() {
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
         .build();
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
     let mut seen = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 220);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        220,
+    );
     let abort = offered
         .iter()
         .find(|action| action["title"] == "Abort commit")
         .expect("attached draft offers Abort")["command"]["arguments"][0]
         .clone();
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 221)["error"].is_null());
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 221)["error"]
+            .is_null()
+    );
 
     let before_close = seen.len();
     server.send(editor.close(&draft_uri));
     // The server stays responsive and the late close changes nothing.
-    let after = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 222);
-    assert!(after.iter().all(|action| {
-        action["command"]["arguments"][0]["command"] != "common.confirm"
-    }));
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a close after abort must not commit");
+    let after = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        222,
+    );
+    assert!(after
+        .iter()
+        .all(|action| { action["command"]["arguments"][0]["command"] != "common.confirm" }));
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a close after abort must not commit"
+    );
     assert!(
         !seen[before_close..].iter().any(|message| {
             message["method"] == "window/showMessage"
@@ -798,7 +1181,11 @@ fn saved_file_close_commits_the_disk_text() {
     server.send(editor.close(&draft_uri));
 
     wait_for_head_message(&repo, "Saved disk body");
-    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close must commit");
+    assert_ne!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "the close must commit"
+    );
     assert_eq!(
         repo.git(&["log", "-1", "--format=%B"]).trim(),
         "Saved disk body",
@@ -850,19 +1237,38 @@ fn empty_saved_message_is_refused_by_git_and_reported() {
         }) {
             break;
         }
-        assert!(Instant::now() < deadline, "no empty-message report: {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "no empty-message report: {seen:#?}"
+        );
         pump(&mut server, &mut editor, &draft_uri, &mut seen);
     }
 
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "an empty message must not commit");
-    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n", "no commit is created");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "an empty message must not commit"
+    );
+    assert_eq!(
+        repo.git(&["rev-list", "--count", "HEAD"]),
+        "1\n",
+        "no commit is created"
+    );
     assert!(
         repo.git(&["status", "--porcelain"]).contains("f.txt"),
         "the staged change survives the refusal"
     );
 
     // The server stays responsive after the refused commit.
-    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 500);
+    let _ = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        0,
+        500,
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
@@ -891,13 +1297,25 @@ fn dirty_close_commits_the_prior_saved_disk_text() {
     server.send(editor.save(&draft_uri));
     server.send(editor.edit(&draft_uri, dirty));
     assert_eq!(editor.text(&draft_uri), dirty, "the buffer is dirty");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved, "the file keeps the saved text");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        saved,
+        "the file keeps the saved text"
+    );
     server.send(editor.close(&draft_uri));
 
     wait_for_head_message(&repo, "Prior saved body");
-    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close must commit");
+    assert_ne!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "the close must commit"
+    );
     let message = repo.git(&["log", "-1", "--format=%B"]);
-    assert_eq!(message.trim(), "Prior saved body", "the prior saved text is committed");
+    assert_eq!(
+        message.trim(),
+        "Prior saved body",
+        "the prior saved text is committed"
+    );
     assert!(
         !message.contains("Unsaved dirty body"),
         "the dirty buffer must not be committed: {message:?}"
@@ -938,17 +1356,40 @@ fn dirty_save_creates_no_commit_and_keeps_the_draft_pending() {
     server.send(editor.save(&draft_uri));
 
     // A save checkpoints only: it never commits and never ends the run.
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a save must not commit");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a save must not commit"
+    );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 400);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        400,
+    );
     draft_action(&offered, "common.confirm");
-    assert_eq!(editor.text(&draft_uri), dirty, "the saved draft stays editable");
+    assert_eq!(
+        editor.text(&draft_uri),
+        dirty,
+        "the saved draft stays editable"
+    );
 
     // Only a later close commits, and it commits the saved text.
     server.send(editor.close(&draft_uri));
     wait_for_head_message(&repo, "Dirty saved body");
-    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close commits the saved text");
-    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Dirty saved body");
+    assert_ne!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "the close commits the saved text"
+    );
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]).trim(),
+        "Dirty saved body"
+    );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2\n");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
@@ -979,15 +1420,31 @@ fn dirty_cancel_keeps_the_draft_pending_and_the_editor_open() {
 
     // The dirty-close dialog is cancelled, so the editor and run are retained
     // and Confirm is still offered without a commit.
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 410);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        410,
+    );
     draft_action(&offered, "common.confirm");
-    assert_eq!(editor.text(&draft_uri), dirty, "the dirty buffer stays open");
+    assert_eq!(
+        editor.text(&draft_uri),
+        dirty,
+        "the dirty buffer stays open"
+    );
     assert!(
         editor.text(&uri).contains("f.txt"),
         "the status view is still shown: {}",
         editor.text(&uri)
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a cancelled close must not commit");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a cancelled close must not commit"
+    );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
 
     // The non-confirming close only detaches the transport: no commit, and the
@@ -998,7 +1455,11 @@ fn dirty_cancel_keeps_the_draft_pending_and_the_editor_open() {
         .expect("open draft document")
         .version;
     server.send(editor.close(&draft_uri));
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a non-confirming close must not commit");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a non-confirming close must not commit"
+    );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":draft_uri,"languageId":"plaintext","version":version,"text":dirty}}}));
     editor.documents.insert(
@@ -1008,11 +1469,24 @@ fn dirty_cancel_keeps_the_draft_pending_and_the_editor_open() {
             version,
         },
     );
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 411);
+    let offered = code_actions(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &draft_uri,
+        0,
+        411,
+    );
     draft_action(&offered, "common.confirm");
-    assert_eq!(editor.text(&draft_uri), dirty, "the pending run keeps the buffer open");
+    assert_eq!(
+        editor.text(&draft_uri),
+        dirty,
+        "the pending run keeps the buffer open"
+    );
     assert!(
-        !std::path::Path::new(&expected_path).exists() || std::fs::read_to_string(&expected_path).unwrap() != dirty,
+        !std::path::Path::new(&expected_path).exists()
+            || std::fs::read_to_string(&expected_path).unwrap() != dirty,
         "a cancelled close must not write the draft"
     );
 
@@ -1027,7 +1501,11 @@ fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
         .build();
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
     let mut seen = Vec::new();
@@ -1041,12 +1519,32 @@ fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":unrelated}}}));
 
     let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 230);
-    let confirmed = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 240);
-    assert!(confirmed["error"].is_null(), "draft confirm failed: {confirmed}");
+    let confirmed = execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        confirm,
+        240,
+    );
+    assert!(
+        confirmed["error"].is_null(),
+        "draft confirm failed: {confirmed}"
+    );
 
-    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    wait_for_status_view(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        &expected_path,
+    );
     wait_for_head_change(&repo, &head);
-    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), format!("{edited}\n"));
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]),
+        format!("{edited}\n")
+    );
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
@@ -1060,26 +1558,51 @@ fn unopened_plain_commit_buffer_is_only_shown() {
         .modify_standard()
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let expected_uri = format!("file://{expected_path}");
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &expected_uri,
+        &mut seen,
+        create,
+        95
+    )["error"]
+        .is_null());
     let deadline = Instant::now() + Duration::from_secs(15);
-    while !seen.iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri) {
-        assert!(Instant::now() < deadline, "showDocument timed out: seen {seen:#?}");
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri
+    }) {
+        assert!(
+            Instant::now() < deadline,
+            "showDocument timed out: seen {seen:#?}"
+        );
         pump(&mut server, &mut editor, &expected_uri, &mut seen);
     }
     assert!(
-        !seen.iter().any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, &expected_uri)),
+        !seen
+            .iter()
+            .any(|message| message["method"] == "workspace/applyEdit"
+                && draft_edit(message, &expected_uri)),
         "a closed buffer must not receive applyEdit: {seen:#?}"
     );
     let show = seen
         .iter()
-        .find(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri)
+        .find(|message| {
+            message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri
+        })
         .unwrap();
-    assert_eq!(show["params"], json!({"uri":expected_uri,"external":false,"takeFocus":true}));
+    assert_eq!(
+        show["params"],
+        json!({"uri":expected_uri,"external":false,"takeFocus":true})
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
@@ -1092,28 +1615,49 @@ fn manual_plain_commit_instructions_have_no_apply_edit() {
         .modify_standard()
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo, caps(false));
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let expected_uri = format!("file://{expected_path}");
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &expected_uri,
+        &mut seen,
+        create,
+        95
+    )["error"]
+        .is_null());
     let deadline = Instant::now() + Duration::from_secs(15);
     while !seen.iter().any(|message| {
         message["method"] == "window/showMessage"
-            && message["params"]["message"]
-                .as_str()
-                .is_some_and(|text| text.contains(&expected_path) && text.contains("Confirm") && text.contains("Abort"))
+            && message["params"]["message"].as_str().is_some_and(|text| {
+                text.contains(&expected_path) && text.contains("Confirm") && text.contains("Abort")
+            })
     }) {
-        assert!(Instant::now() < deadline, "manual instructions timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "manual instructions timed out: seen {seen:#?}"
+        );
         pump(&mut server, &mut editor, &expected_uri, &mut seen);
     }
     assert!(
-        !seen.iter().any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, &expected_uri)),
+        !seen
+            .iter()
+            .any(|message| message["method"] == "workspace/applyEdit"
+                && draft_edit(message, &expected_uri)),
         "the manual path must not apply edits: {seen:#?}"
     );
     assert!(
-        !seen.iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri),
+        !seen
+            .iter()
+            .any(|message| message["method"] == "window/showDocument"
+                && message["params"]["uri"] == expected_uri),
         "the manual path must not request showDocument: {seen:#?}"
     );
     server.shutdown_and_exit();
@@ -1129,31 +1673,62 @@ fn manual_preopened_draft_attaches_on_exact_template_echo() {
         .build();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain_with_env(
-        &repo, caps(false), &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "800")],
+        &repo,
+        caps(false),
+        &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "800")],
     );
     let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", repo.path().display());
     server.send(editor.open(&draft_uri, "Previous message\n"));
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 95)["error"]
+            .is_null()
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !seen.iter().any(|m| m["method"] == "workspace/applyEdit" && draft_edit(m, &draft_uri)) {
-        assert!(Instant::now() < deadline, "preopened manual draft needs template delivery: {seen:#?}");
+    while !seen
+        .iter()
+        .any(|m| m["method"] == "workspace/applyEdit" && draft_edit(m, &draft_uri))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "preopened manual draft needs template delivery: {seen:#?}"
+        );
         // Querying ensures bounded progress even when no template is delivered.
-        code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+        code_actions(
+            &mut server,
+            &mut editor,
+            &draft_uri,
+            &mut seen,
+            &draft_uri,
+            0,
+            96,
+        );
     }
     let template = editor.text(&draft_uri).to_owned();
     server.send(editor.edit(&draft_uri, &template));
     std::thread::sleep(Duration::from_millis(1100));
     server.send(editor.edit(&draft_uri, "Preopened manual commit\n"));
     let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"]
+            .is_null()
+    );
     wait_for_head_change(&repo, &head);
-    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Preopened manual commit");
-    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]).trim(),
+        "Preopened manual commit"
+    );
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes()
+    );
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
-    assert!(server.finish_with_messages(Duration::from_secs(10)).0.success());
+    assert!(server
+        .finish_with_messages(Duration::from_secs(10))
+        .0
+        .success());
 }
 
 /// A commit menu queued behind an in-flight status render stays reachable.
@@ -1172,21 +1747,52 @@ fn commit_menu_is_offered_after_a_queued_status_render_is_released() {
     std::fs::write(repo.path().join("g.txt"), "new file\n").expect("write untracked g.txt");
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let draft_uri = format!("file://{expected_path}");
     let mut seen = Vec::new();
 
     // Stage f.txt and wait until the synced document offers open.commit.
-    let stage_f =
-        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "status.stage", 90);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage_f, 91)["error"].is_null());
-    let open_commit =
-        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "open.commit", 92);
+    let stage_f = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "f.txt",
+        "status.stage",
+        90,
+    );
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage_f, 91)["error"]
+            .is_null()
+    );
+    let open_commit = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "f.txt",
+        "open.commit",
+        92,
+    );
 
     // Stage the untracked file but keep its reply and echo: one status render
     // stays in flight when the commit run starts.
-    let stage_g =
-        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 93);
+    let stage_g = wait_for_status_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        "g.txt",
+        "status.stage",
+        93,
+    );
     server.send(json!({"jsonrpc":"2.0","id":94,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[stage_g]}}));
     let held = loop {
         let message = server.recv();
@@ -1203,7 +1809,15 @@ fn commit_menu_is_offered_after_a_queued_status_render_is_released() {
 
     // The menu render is retained, not delivered: the pre-release document
     // offers no menu, which is exactly what the old one-shot query observed.
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open_commit, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        open_commit,
+        95
+    )["error"]
+        .is_null());
     let mut early = Vec::new();
     for line in 0..editor.text(&uri).lines().count() as u32 {
         early.extend(code_actions(
@@ -1232,31 +1846,52 @@ fn commit_menu_is_offered_after_a_queued_status_render_is_released() {
         .find(|action| action["command"]["arguments"][0]["target"]["itemKey"].is_string())
         .expect("commit creation offered")["command"]["arguments"][0]
         .clone();
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 96)["error"].is_null());
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 96)["error"]
+            .is_null()
+    );
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while !seen.iter().any(|message| {
         message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
     }) {
-        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "draft delivery timed out: seen {seen:#?}"
+        );
         pump(&mut server, &mut editor, &draft_uri, &mut seen);
     }
     let template = std::fs::read_to_string(&expected_path).expect("commit template");
     server.send(editor.open(&draft_uri, &template));
     server.send(editor.edit(&draft_uri, "Delayed menu commit\n"));
     let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+    assert!(
+        execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"]
+            .is_null()
+    );
 
-    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    wait_for_status_view(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        &uri,
+        &expected_path,
+    );
     wait_for_head_change(&repo, &head);
-    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Delayed menu commit");
-    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]).trim(),
+        "Delayed menu commit"
+    );
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes()
+    );
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
 }
-
 
 /// Read the status view's code actions for the four commit commands.
 ///
@@ -1271,7 +1906,10 @@ fn commit_command_actions(
     uri: &str,
 ) -> Vec<Value> {
     let text = editor.text(uri).to_owned();
-    let line = text.lines().position(|line| line.contains("Staged")).unwrap_or(0) as u32;
+    let line = text
+        .lines()
+        .position(|line| line.contains("Staged"))
+        .unwrap_or(0) as u32;
     code_actions(server, editor, draft_uri, seen, uri, line, 120)
         .into_iter()
         .filter(|action| {
@@ -1299,12 +1937,24 @@ fn unopened_plain_commit_draft_expires_and_allows_retry() {
         caps(true),
         &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "300")],
     );
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let expected_uri = format!("file://{expected_path}");
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &expected_uri,
+        &mut seen,
+        create,
+        95
+    )["error"]
+        .is_null());
 
     // The client never opens the draft, so the run expires and reports it.
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -1314,12 +1964,19 @@ fn unopened_plain_commit_draft_expires_and_allows_retry() {
                 .as_str()
                 .is_some_and(|text| text.contains("not opened in time"))
     }) {
-        assert!(Instant::now() < deadline, "draft expiry timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "draft expiry timed out: seen {seen:#?}"
+        );
         pump(&mut server, &mut editor, &expected_uri, &mut seen);
     }
 
     let actions = commit_command_actions(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert_eq!(actions.len(), 4, "all commit commands offered: {actions:#?}");
+    assert_eq!(
+        actions.len(),
+        4,
+        "all commit commands offered: {actions:#?}"
+    );
     for action in &actions {
         assert!(
             !action["disabled"]["reason"]
@@ -1344,26 +2001,48 @@ fn opened_plain_commit_draft_is_not_expired() {
         caps(true),
         &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "300")],
     );
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_path = repo
+        .path()
+        .join(".git/COMMIT_EDITMSG")
+        .to_string_lossy()
+        .to_string();
     let expected_uri = format!("file://{expected_path}");
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &expected_uri,
+        &mut seen,
+        create,
+        95
+    )["error"]
+        .is_null());
 
     // The client opens the draft, so the run must survive the deadline.
     let deadline = Instant::now() + Duration::from_secs(15);
     while !seen.iter().any(|message| {
         message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri
     }) {
-        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "draft delivery timed out: seen {seen:#?}"
+        );
         pump(&mut server, &mut editor, &expected_uri, &mut seen);
     }
-    server.send(editor.open(&expected_uri, &std::fs::read_to_string(&expected_path).unwrap()));
+    server.send(editor.open(
+        &expected_uri,
+        &std::fs::read_to_string(&expected_path).unwrap(),
+    ));
     std::thread::sleep(Duration::from_millis(800));
 
     let actions = commit_command_actions(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
-    assert_eq!(actions.len(), 4, "all commit commands offered: {actions:#?}");
+    assert_eq!(
+        actions.len(),
+        4,
+        "all commit commands offered: {actions:#?}"
+    );
     assert!(
         !seen.iter().any(|message| {
             message["method"] == "window/showMessage"
@@ -1398,18 +2077,37 @@ fn second_session_gets_no_draft_actions_and_cannot_forge_confirm() {
     let (mut server_a, mut editor_a, uri_a) = open_plain(&repo, caps(true));
     let mut seen_a = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server_a, &mut editor_a, &uri_a, &mut seen_a);
-    let offered_a = code_actions(&mut server_a, &mut editor_a, &draft_uri, &mut seen_a, &draft_uri, 0, 300);
+    let offered_a = code_actions(
+        &mut server_a,
+        &mut editor_a,
+        &draft_uri,
+        &mut seen_a,
+        &draft_uri,
+        0,
+        300,
+    );
     let confirm = draft_action(&offered_a, "common.confirm");
     let abort = draft_action(&offered_a, "common.cancel");
 
     // Session B is an independent connection pointed at the same repository.
     let (mut server_b, mut editor_b, uri_b) = open_plain(&repo, caps(true));
-    assert_eq!(uri_b, uri_a, "both sessions address the same status document");
+    assert_eq!(
+        uri_b, uri_a,
+        "both sessions address the same status document"
+    );
     let mut seen_b = Vec::new();
 
     // A draft run belongs to the connection that created it, so B offers no
     // Confirm/Abort for A's draft URI.
-    let offered_b = code_actions(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, &draft_uri, 0, 310);
+    let offered_b = code_actions(
+        &mut server_b,
+        &mut editor_b,
+        &draft_uri,
+        &mut seen_b,
+        &draft_uri,
+        0,
+        310,
+    );
     assert!(
         offered_b.iter().all(|action| {
             let command = action["command"]["arguments"][0]["command"].as_str();
@@ -1420,18 +2118,47 @@ fn second_session_gets_no_draft_actions_and_cannot_forge_confirm() {
 
     // A forged Confirm/Abort carrying A's exact identity is refused without a
     // commit, because B's owner has no such pending run.
-    let refused = execute_action(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, confirm, 320);
-    assert_eq!(refused["error"]["message"], "Commit draft is no longer pending");
-    let refused = execute_action(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, abort, 321);
+    let refused = execute_action(
+        &mut server_b,
+        &mut editor_b,
+        &draft_uri,
+        &mut seen_b,
+        confirm,
+        320,
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "Commit draft is no longer pending"
+    );
+    let refused = execute_action(
+        &mut server_b,
+        &mut editor_b,
+        &draft_uri,
+        &mut seen_b,
+        abort,
+        321,
+    );
     assert_eq!(
         refused["error"]["message"],
         "Commit draft URI is not pending on this connection"
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a foreign confirm must not commit");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "a foreign confirm must not commit"
+    );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
 
     // A's own run stays pending and still offers both actions.
-    let still = code_actions(&mut server_a, &mut editor_a, &draft_uri, &mut seen_a, &draft_uri, 0, 330);
+    let still = code_actions(
+        &mut server_a,
+        &mut editor_a,
+        &draft_uri,
+        &mut seen_a,
+        &draft_uri,
+        0,
+        330,
+    );
     draft_action(&still, "common.confirm");
     draft_action(&still, "common.cancel");
 
@@ -1456,7 +2183,11 @@ fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeo
             caps(true),
             &[("MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS", "300")],
         );
-        let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+        let expected_path = repo
+            .path()
+            .join(".git/COMMIT_EDITMSG")
+            .to_string_lossy()
+            .to_string();
         let draft_uri = format!("file://{expected_path}");
         server.send(editor.open(&draft_uri, "Previous commit message\n"));
 
@@ -1470,11 +2201,26 @@ fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeo
         // with a readable report and Git never commits.
         let deadline = Instant::now() + Duration::from_secs(15);
         while !reported_delivery_failure(&seen) {
-            assert!(Instant::now() < deadline, "{outcome} report timed out: {seen:#?}");
+            assert!(
+                Instant::now() < deadline,
+                "{outcome} report timed out: {seen:#?}"
+            );
             pump(&mut server, &mut editor, &draft_uri, &mut seen);
         }
-        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{outcome} must not commit");
-        let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+        assert_eq!(
+            repo.git(&["rev-parse", "HEAD"]),
+            head,
+            "{outcome} must not commit"
+        );
+        let offered = code_actions(
+            &mut server,
+            &mut editor,
+            &draft_uri,
+            &mut seen,
+            &draft_uri,
+            0,
+            96,
+        );
         assert!(
             offered.iter().all(|action| {
                 let command = action["command"]["arguments"][0]["command"].as_str();
@@ -1501,7 +2247,11 @@ fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
             caps(true),
             &[("MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS", "300")],
         );
-        let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+        let expected_path = repo
+            .path()
+            .join(".git/COMMIT_EDITMSG")
+            .to_string_lossy()
+            .to_string();
         let draft_uri = format!("file://{expected_path}");
         server.send(editor.open(&draft_uri, "Previous commit message\n"));
 
@@ -1518,7 +2268,10 @@ fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
 
         // The opened run is still the current one: it confirms and commits.
         let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
-        assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+        assert!(
+            execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"]
+                .is_null()
+        );
         wait_for_head_message(&repo, "Late delivery survives");
         assert!(
             !reported_delivery_failure(&seen),

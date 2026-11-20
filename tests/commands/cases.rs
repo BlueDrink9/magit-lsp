@@ -575,4 +575,3 @@ fn offered_rename_and_unborn_targets_validate_both_endpoints_and_absent_head() {
         }
     }
 }
-

@@ -256,10 +256,7 @@ impl PromptDocument {
 
         let row_ids = match kind {
             PromptKind::Confirm => vec![row_id(&prompt_id, "yes"), row_id(&prompt_id, "no")],
-            PromptKind::Text => vec![
-                row_id(&prompt_id, "submit"),
-                row_id(&prompt_id, "cancel"),
-            ],
+            PromptKind::Text => vec![row_id(&prompt_id, "submit"), row_id(&prompt_id, "cancel")],
             PromptKind::Choice => {
                 let mut ids: Vec<String> = items
                     .iter()
@@ -473,48 +470,49 @@ impl PromptDocument {
         let row = row_id
             .strip_prefix(&prefix)
             .expect("row ids carry the prompt id");
-        let action = match self.kind {
-            PromptKind::Confirm => match row {
-                "yes" => PromptAction::Answer(Some(PromptValue::Bool(true))),
-                "no" => PromptAction::Answer(Some(PromptValue::Bool(false))),
-                _ => return Err(format!("unknown prompt row: {row_id}")),
-            },
-            PromptKind::Text => match row {
-                "submit" => {
-                    let field = self
-                        .fields
-                        .first()
-                        .ok_or_else(|| "the prompt has no field".to_string())?;
-                    PromptAction::Answer(Some(PromptValue::Text(field.value.clone())))
-                }
-                "cancel" => PromptAction::Answer(None),
-                _ => return Err(format!("unknown prompt row: {row_id}")),
-            },
-            PromptKind::Choice => match row {
-                "submit" => PromptAction::Answer(self.choice_answer()),
-                "cancel" => PromptAction::Answer(None),
-                _ => match row.strip_prefix("item:") {
-                    Some(id) => PromptAction::Answer(Some(PromptValue::Choice(
-                        PromptChoiceAnswer::Id { id: id.to_string() },
-                    ))),
-                    None => return Err(format!("unknown prompt row: {row_id}")),
+        let action =
+            match self.kind {
+                PromptKind::Confirm => match row {
+                    "yes" => PromptAction::Answer(Some(PromptValue::Bool(true))),
+                    "no" => PromptAction::Answer(Some(PromptValue::Bool(false))),
+                    _ => return Err(format!("unknown prompt row: {row_id}")),
                 },
-            },
-            PromptKind::MultiChoice => match row {
-                "done" => PromptAction::Answer(Some(PromptValue::Multi {
-                    ids: self
-                        .selected_ids()
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>(),
-                })),
-                "cancel" => PromptAction::Answer(None),
-                _ => match row.strip_prefix("item:") {
-                    Some(id) => PromptAction::Toggle(id.to_string()),
-                    None => return Err(format!("unknown prompt row: {row_id}")),
+                PromptKind::Text => match row {
+                    "submit" => {
+                        let field = self
+                            .fields
+                            .first()
+                            .ok_or_else(|| "the prompt has no field".to_string())?;
+                        PromptAction::Answer(Some(PromptValue::Text(field.value.clone())))
+                    }
+                    "cancel" => PromptAction::Answer(None),
+                    _ => return Err(format!("unknown prompt row: {row_id}")),
                 },
-            },
-        };
+                PromptKind::Choice => match row {
+                    "submit" => PromptAction::Answer(self.choice_answer()),
+                    "cancel" => PromptAction::Answer(None),
+                    _ => match row.strip_prefix("item:") {
+                        Some(id) => PromptAction::Answer(Some(PromptValue::Choice(
+                            PromptChoiceAnswer::Id { id: id.to_string() },
+                        ))),
+                        None => return Err(format!("unknown prompt row: {row_id}")),
+                    },
+                },
+                PromptKind::MultiChoice => match row {
+                    "done" => PromptAction::Answer(Some(PromptValue::Multi {
+                        ids: self
+                            .selected_ids()
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>(),
+                    })),
+                    "cancel" => PromptAction::Answer(None),
+                    _ => match row.strip_prefix("item:") {
+                        Some(id) => PromptAction::Toggle(id.to_string()),
+                        None => return Err(format!("unknown prompt row: {row_id}")),
+                    },
+                },
+            };
         Ok(action)
     }
 
@@ -594,7 +592,10 @@ impl PromptDocument {
                 for item in &self.items {
                     let is_default = self.default_item.as_deref() == Some(item.id.as_str());
                     let (line, marker) = if is_default {
-                        (format!("> {}", clip(&item.label, cols.saturating_sub(2))), Some('>'))
+                        (
+                            format!("> {}", clip(&item.label, cols.saturating_sub(2))),
+                            Some('>'),
+                        )
                     } else {
                         (clip(&item.label, cols), None)
                     };
@@ -658,14 +659,7 @@ impl PromptDocument {
         }
     }
 
-    fn push_node(
-        &self,
-        tree: &mut Tree,
-        id: String,
-        kind: NodeKind,
-        label: String,
-        text: String,
-    ) {
+    fn push_node(&self, tree: &mut Tree, id: String, kind: NodeKind, label: String, text: String) {
         let line = tree.lines.len();
         tree.lines.push(text);
         tree.line_nodes.push(LineNode::new(&id, kind));
@@ -750,7 +744,6 @@ impl PromptDocument {
             children: Vec::new(),
         });
     }
-
 }
 
 /// What one rendered prompt row does when it is answered.
@@ -872,4 +865,3 @@ fn empty_tree() -> Tree {
         links: Vec::new(),
     }
 }
-

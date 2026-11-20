@@ -12,7 +12,9 @@ use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::menu::Menu;
 use crate::patch::{FileLayout, SelectionOp};
-use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, PromptValue, Selection, ViewPromptParams};
+use crate::protocol::{
+    Cursor, Effect, MessageLevel, PromptKind, PromptValue, Selection, ViewPromptParams,
+};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{Placement, ViewKind, ViewMode, VisibilityCommand};
@@ -284,7 +286,10 @@ impl Command {
     /// Whether shipped profiles must explicitly bind or unbind this command.
     pub fn requires_profile_binding(&self) -> bool {
         !matches!(self.scope, Scope::MenuAction)
-            && !matches!(self.id, "rebase.todo-set-action" | "rebase.todo-move-before")
+            && !matches!(
+                self.id,
+                "rebase.todo-set-action" | "rebase.todo-move-before"
+            )
     }
 
     /// Whether this command applies to a view scope, including command-specific exceptions.
@@ -758,7 +763,11 @@ pub fn resume_prompt(
                 return Err(crate::Error::new("Expected a branch name"));
             };
             let name = name.trim().to_owned();
-            branch_action(ctx, |repo| repo.delete_branch(&name), format!("Deleted branch {name}"))
+            branch_action(
+                ctx,
+                |repo| repo.delete_branch(&name),
+                format!("Deleted branch {name}"),
+            )
         }
         PromptAction::BranchDescription => {
             let PromptValue::Text(name) = answer else {
@@ -805,14 +814,22 @@ pub fn resume_prompt(
             let PromptValue::Text(revision) = answer else {
                 return Err(crate::Error::new("Expected a revision"));
             };
-            branch_action(ctx, |repo| repo.create_lightweight_tag(&name, revision.trim()), format!("Created tag {name}"))
+            branch_action(
+                ctx,
+                |repo| repo.create_lightweight_tag(&name, revision.trim()),
+                format!("Created tag {name}"),
+            )
         }
         PromptAction::TagDelete => {
             let PromptValue::Text(name) = answer else {
                 return Err(crate::Error::new("Expected a tag name"));
             };
             let name = name.trim().to_owned();
-            branch_action(ctx, |repo| repo.delete_tag(&name), format!("Deleted tag {name}"))
+            branch_action(
+                ctx,
+                |repo| repo.delete_tag(&name),
+                format!("Deleted tag {name}"),
+            )
         }
         PromptAction::RemoteAdd => {
             let PromptValue::Text(name) = answer else {
@@ -872,7 +889,9 @@ pub fn resume_prompt(
             Ok(CommandOutcome {
                 prompt: Some((
                     branch_name_prompt("Remote fetch URL", "", "Fetch URL"),
-                    PromptAction::RemoteConfigureFetch { name: name.trim().to_owned() },
+                    PromptAction::RemoteConfigureFetch {
+                        name: name.trim().to_owned(),
+                    },
                 )),
                 ..Default::default()
             })
@@ -884,7 +903,10 @@ pub fn resume_prompt(
             Ok(CommandOutcome {
                 prompt: Some((
                     branch_name_prompt("Remote push URL", "", "Push URL"),
-                    PromptAction::RemoteConfigurePush { name, fetch: fetch.trim().to_owned() },
+                    PromptAction::RemoteConfigurePush {
+                        name,
+                        fetch: fetch.trim().to_owned(),
+                    },
                 )),
                 ..Default::default()
             })
@@ -893,7 +915,11 @@ pub fn resume_prompt(
             let PromptValue::Text(push) = answer else {
                 return Err(crate::Error::new("Expected a remote URL"));
             };
-            branch_action(ctx, |repo| repo.remote_configure(&name, &fetch, push.trim()), format!("Configured remote {name}"))
+            branch_action(
+                ctx,
+                |repo| repo.remote_configure(&name, &fetch, push.trim()),
+                format!("Configured remote {name}"),
+            )
         }
         PromptAction::RemoteRename => {
             let PromptValue::Text(source) = answer else {
@@ -1697,7 +1723,10 @@ fn rebase_abort(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 fn rebase_edit_todo(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    Ok(CommandOutcome { open_view: Some((ViewKind::RebaseTodo, Placement::Main)), ..Default::default() })
+    Ok(CommandOutcome {
+        open_view: Some((ViewKind::RebaseTodo, Placement::Main)),
+        ..Default::default()
+    })
 }
 
 fn rebase_initial(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -1717,70 +1746,249 @@ fn rebase_initial(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 fn rebase_todo_set_action(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
-    let action = ctx.args.and_then(|args| args.get("action")).and_then(serde_json::Value::as_str).unwrap_or("");
-    let action = match action { "pick" => crate::rebase_todo::TodoAction::Pick, "reword" => crate::rebase_todo::TodoAction::Reword, "edit" => crate::rebase_todo::TodoAction::Edit, "squash" => crate::rebase_todo::TodoAction::Squash, "fixup" => crate::rebase_todo::TodoAction::Fixup, "drop" => crate::rebase_todo::TodoAction::Drop, _ => { ctx.effects.push(Effect::message(MessageLevel::Warn, "Invalid rebase todo action")); return Ok(CommandOutcome::default()); } };
-    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
-    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.set_action(&oid, action) {
-        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
-        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+    let oid = ctx
+        .cursor
+        .and_then(|cursor| {
+            ctx.view
+                .command_source_tree()
+                .unwrap_or_else(|| ctx.view.tree())
+                .navigation_node(cursor.line)
+        })
+        .and_then(|node| node.commit.clone());
+    let action = ctx
+        .args
+        .and_then(|args| args.get("action"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let action = match action {
+        "pick" => crate::rebase_todo::TodoAction::Pick,
+        "reword" => crate::rebase_todo::TodoAction::Reword,
+        "edit" => crate::rebase_todo::TodoAction::Edit,
+        "squash" => crate::rebase_todo::TodoAction::Squash,
+        "fixup" => crate::rebase_todo::TodoAction::Fixup,
+        "drop" => crate::rebase_todo::TodoAction::Drop,
+        _ => {
+            ctx.effects.push(Effect::message(
+                MessageLevel::Warn,
+                "Invalid rebase todo action",
+            ));
+            return Ok(CommandOutcome::default());
+        }
+    };
+    let Some(oid) = oid else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Select a todo commit first",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    match ctx
+        .view
+        .rebase_todo_mut()
+        .ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?
+        .set_action(&oid, action)
+    {
+        Ok(()) => Ok(CommandOutcome {
+            refresh: true,
+            ..Default::default()
+        }),
+        Err(error) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome::default())
+        }
     }
 }
 
 fn rebase_todo_move_before(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
-    let before = ctx.args.and_then(|args| args.get("before")).and_then(serde_json::Value::as_str).map(str::to_owned);
-    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
-    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.move_before(&oid, before.as_deref()) {
-        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
-        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+    let oid = ctx
+        .cursor
+        .and_then(|cursor| {
+            ctx.view
+                .command_source_tree()
+                .unwrap_or_else(|| ctx.view.tree())
+                .navigation_node(cursor.line)
+        })
+        .and_then(|node| node.commit.clone());
+    let before = ctx
+        .args
+        .and_then(|args| args.get("before"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let Some(oid) = oid else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Select a todo commit first",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    match ctx
+        .view
+        .rebase_todo_mut()
+        .ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?
+        .move_before(&oid, before.as_deref())
+    {
+        Ok(()) => Ok(CommandOutcome {
+            refresh: true,
+            ..Default::default()
+        }),
+        Err(error) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome::default())
+        }
     }
 }
 
 fn rebase_todo_submit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.submit() {
-        Ok(crate::rebase_todo_view::SubmitOutcome::Saved) => Ok(CommandOutcome { pop: true, ..Default::default() }),
-        Ok(crate::rebase_todo_view::SubmitOutcome::Started(Ok(()))) => Ok(CommandOutcome { pop: true, refresh: true, ..Default::default() }),
-        Ok(crate::rebase_todo_view::SubmitOutcome::Started(Err(error))) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome { pop: true, refresh: true, ..Default::default() }) },
-        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome { refresh: true, ..Default::default() }) }
+    match ctx
+        .view
+        .rebase_todo_mut()
+        .ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?
+        .submit()
+    {
+        Ok(crate::rebase_todo_view::SubmitOutcome::Saved) => Ok(CommandOutcome {
+            pop: true,
+            ..Default::default()
+        }),
+        Ok(crate::rebase_todo_view::SubmitOutcome::Started(Ok(()))) => Ok(CommandOutcome {
+            pop: true,
+            refresh: true,
+            ..Default::default()
+        }),
+        Ok(crate::rebase_todo_view::SubmitOutcome::Started(Err(error))) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome {
+                pop: true,
+                refresh: true,
+                ..Default::default()
+            })
+        }
+        Err(error) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
+        }
     }
 }
 
-fn rebase_todo_pick(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Pick) }
-fn rebase_todo_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Reword) }
-fn rebase_todo_edit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Edit) }
-fn rebase_todo_squash(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Squash) }
-fn rebase_todo_fixup(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Fixup) }
-fn rebase_todo_drop(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Drop) }
+fn rebase_todo_pick(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Pick)
+}
+fn rebase_todo_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Reword)
+}
+fn rebase_todo_edit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Edit)
+}
+fn rebase_todo_squash(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Squash)
+}
+fn rebase_todo_fixup(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Fixup)
+}
+fn rebase_todo_drop(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Drop)
+}
 
-fn rebase_todo_action_key(ctx: &mut CommandCtx<'_>, action: crate::rebase_todo::TodoAction) -> Result<CommandOutcome> {
-    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
-    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
-    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.set_action(&oid, action) {
-        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
-        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+fn rebase_todo_action_key(
+    ctx: &mut CommandCtx<'_>,
+    action: crate::rebase_todo::TodoAction,
+) -> Result<CommandOutcome> {
+    let oid = ctx
+        .cursor
+        .and_then(|cursor| {
+            ctx.view
+                .command_source_tree()
+                .unwrap_or_else(|| ctx.view.tree())
+                .navigation_node(cursor.line)
+        })
+        .and_then(|node| node.commit.clone());
+    let Some(oid) = oid else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Select a todo commit first",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    match ctx
+        .view
+        .rebase_todo_mut()
+        .ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?
+        .set_action(&oid, action)
+    {
+        Ok(()) => Ok(CommandOutcome {
+            refresh: true,
+            ..Default::default()
+        }),
+        Err(error) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome::default())
+        }
     }
 }
 
-fn rebase_todo_up(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_move_key(ctx, true) }
-fn rebase_todo_down(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_move_key(ctx, false) }
+fn rebase_todo_up(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_move_key(ctx, true)
+}
+fn rebase_todo_down(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_todo_move_key(ctx, false)
+}
 fn rebase_todo_move_key(ctx: &mut CommandCtx<'_>, up: bool) -> Result<CommandOutcome> {
-    let tree = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
-    let selected = ctx.cursor.and_then(|cursor| tree.navigation_node(cursor.line)).and_then(|node| node.commit.clone());
-    let Some(selected) = selected else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
-    let view = ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?;
+    let tree = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
+    let selected = ctx
+        .cursor
+        .and_then(|cursor| tree.navigation_node(cursor.line))
+        .and_then(|node| node.commit.clone());
+    let Some(selected) = selected else {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "Select a todo commit first",
+        ));
+        return Ok(CommandOutcome::default());
+    };
+    let view = ctx
+        .view
+        .rebase_todo_mut()
+        .ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?;
     match view.move_relative(&selected, up) {
-        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
-        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+        Ok(()) => Ok(CommandOutcome {
+            refresh: true,
+            ..Default::default()
+        }),
+        Err(error) => {
+            ctx.effects
+                .push(Effect::message(MessageLevel::Warn, error.to_string()));
+            Ok(CommandOutcome::default())
+        }
     }
 }
 
-fn rebase_action(ctx: &mut CommandCtx<'_>, action: impl FnOnce(&GitRepo) -> Result<()>) -> Result<CommandOutcome> {
+fn rebase_action(
+    ctx: &mut CommandCtx<'_>,
+    action: impl FnOnce(&GitRepo) -> Result<()>,
+) -> Result<CommandOutcome> {
     let repo = GitRepo::open(ctx.repo_path)?;
     if let Err(err) = action(&repo) {
-        ctx.effects.push(Effect::Message { level: MessageLevel::Warn, text: err.to_string(), hint: None, detail: None });
+        ctx.effects.push(Effect::Message {
+            level: MessageLevel::Warn,
+            text: err.to_string(),
+            hint: None,
+            detail: None,
+        });
     }
-    Ok(CommandOutcome { refresh: true, ..Default::default() })
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
 }
 
 /// Run a branch operation, reporting Git failures as a readable message.
@@ -1799,7 +2007,10 @@ fn branch_action(
             detail: None,
         }),
     }
-    Ok(CommandOutcome { refresh: true, ..Default::default() })
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
 }
 
 /// Which `git reset` mode an answered revision applies with.
@@ -1890,7 +2101,9 @@ fn reset_revision_prompt() -> ViewPromptParams {
 /// Build the confirmation prompt shown before a hard reset discards changes.
 fn hard_reset_confirm_prompt(revision: &str) -> ViewPromptParams {
     branch_name_prompt(
-        &format!("Working tree has changes; hard reset to {revision} discards them. Type yes to proceed"),
+        &format!(
+            "Working tree has changes; hard reset to {revision} discards them. Type yes to proceed"
+        ),
         "",
         "yes",
     )
@@ -2028,9 +2241,14 @@ fn spin_answered(
     };
     match spin_branch(&repo, &name, &source, checkout, note) {
         Ok(message) => ctx.info(message),
-        Err(err) => ctx.effects.push(Effect::message(MessageLevel::Warn, err.to_string())),
+        Err(err) => ctx
+            .effects
+            .push(Effect::message(MessageLevel::Warn, err.to_string())),
     }
-    Ok(CommandOutcome { refresh: true, ..Default::default() })
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
 }
 
 /// Create `new` at `source` tracking it, then move `source` off its unpushed
@@ -2057,7 +2275,9 @@ fn spin_branch(
     }
     let merge_base = match merge_base {
         None => {
-            message.push_str(&format!("; {source} has no upstream, so it was left untouched"));
+            message.push_str(&format!(
+                "; {source} has no upstream, so it was left untouched"
+            ));
             return Ok(message);
         }
         Some((upstream, None)) => {
@@ -2680,7 +2900,11 @@ fn open_all_reference_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 fn open_log_with_refs(ctx: &mut CommandCtx<'_>, refs: &str) -> Result<CommandOutcome> {
     let mut args = crate::session::log_options_from_args(ctx.args)?;
     args.ref_selection = Some(refs.into());
-    Ok(CommandOutcome { open_view: Some((ViewKind::Log, Placement::Main)), open_args: Some(serde_json::to_value(args)?), ..Default::default() })
+    Ok(CommandOutcome {
+        open_view: Some((ViewKind::Log, Placement::Main)),
+        open_args: Some(serde_json::to_value(args)?),
+        ..Default::default()
+    })
 }
 
 /// Push a commit-selection log used to copy one or more commit IDs.
@@ -2967,7 +3191,9 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             ..Default::default()
         });
     }
-    if ctx.view.commit_selection().is_some() || *ctx.view.kind() == crate::view::ViewKind::RebaseTodo {
+    if ctx.view.commit_selection().is_some()
+        || *ctx.view.kind() == crate::view::ViewKind::RebaseTodo
+    {
         return Ok(CommandOutcome {
             pop: true,
             ..Default::default()

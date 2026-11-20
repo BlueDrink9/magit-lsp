@@ -36,7 +36,10 @@ pub fn protocol_declarations() -> Result<Declarations, String> {
             continue;
         }
         let name = root_name(&artifact.schema)?;
-        if roots.insert(artifact.file.to_string(), name.clone()).is_some() {
+        if roots
+            .insert(artifact.file.to_string(), name.clone())
+            .is_some()
+        {
             return Err(format!("duplicate schema artifact {}", artifact.file));
         }
         body.push_str(&render_root(&artifact.schema, &name)?);
@@ -241,8 +244,7 @@ fn type_expr(schema: &Value, indent: usize) -> Result<String, String> {
                 }
                 Some(other) => return Err(format!("unsupported `type` value {other}")),
                 None => {
-                    if map.contains_key("properties") || map.contains_key("additionalProperties")
-                    {
+                    if map.contains_key("properties") || map.contains_key("additionalProperties") {
                         return object_type(map, indent);
                     }
                     return Ok("unknown".to_string());
@@ -295,9 +297,7 @@ fn combinator_siblings(
             if value == "object" {
                 continue;
             }
-            return Err(format!(
-                "unsupported `type` {value} beside `{combinator}`"
-            ));
+            return Err(format!("unsupported `type` {value} beside `{combinator}`"));
         }
         if !matches!(
             key.as_str(),
@@ -337,10 +337,7 @@ fn primitive(
 }
 
 /// Render an object type with optionality and index signatures.
-fn object_type(
-    map: &serde_json::Map<String, Value>,
-    indent: usize,
-) -> Result<String, String> {
+fn object_type(map: &serde_json::Map<String, Value>, indent: usize) -> Result<String, String> {
     let properties = map.get("properties").and_then(Value::as_object);
     let additional = map.get("additionalProperties");
     let required: BTreeSet<&str> = map
@@ -565,7 +562,8 @@ fn validate_identifier(name: &str) -> Result<(), String> {
         Some(first) if first.is_ascii_alphabetic() || first == '_' || first == '$' => {}
         _ => return Err(format!("{name:?} is not a valid TypeScript identifier")),
     }
-    if chars.all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '$')
+    if chars
+        .all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '$')
     {
         Ok(())
     } else {

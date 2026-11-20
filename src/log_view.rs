@@ -79,8 +79,7 @@ impl LogView {
     ) -> std::result::Result<(crate::presentation::prompt::Reconcile, Tree), String> {
         let tree = self.selection_tree();
         let fields = [("log:field:rev", "Revision")];
-        let Some(values) =
-            crate::presentation::prompt::reconcile_fields(&tree, document, &fields)?
+        let Some(values) = crate::presentation::prompt::reconcile_fields(&tree, document, &fields)?
         else {
             return Ok((
                 crate::presentation::prompt::Reconcile { repaired: true },
@@ -122,8 +121,7 @@ impl LogView {
                 .map(|c| c.oid.clone())
                 .collect();
         }
-        if let Some(oid) =
-            cursor_oid.filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid))
+        if let Some(oid) = cursor_oid.filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid))
         {
             return vec![oid.to_string()];
         }
@@ -227,7 +225,8 @@ fn render(
     };
     let heading = selection.map_or_else(|| "Log".to_string(), |s| format!("Log — {}", s.purpose));
     tree.lines.push(heading.clone());
-    tree.line_nodes.push(LineNode::new("log:header", NodeKind::Header));
+    tree.line_nodes
+        .push(LineNode::new("log:header", NodeKind::Header));
     tree.nodes.push(node(
         "log:header",
         NodeKind::Header,
@@ -247,13 +246,15 @@ fn render(
         );
         let index = tree.lines.len();
         tree.lines.push(text.clone());
-        tree.line_nodes.push(LineNode::new("log:prompt", NodeKind::Message));
+        tree.line_nodes
+            .push(LineNode::new("log:prompt", NodeKind::Message));
         tree.nodes
             .push(node("log:prompt", NodeKind::Message, text, None, index));
         if selection.allow_free_text {
             let index = tree.lines.len();
             tree.lines.push(revision.to_string());
-            tree.line_nodes.push(LineNode::new("log:field:rev", NodeKind::Field));
+            tree.line_nodes
+                .push(LineNode::new("log:field:rev", NodeKind::Field));
             tree.nodes.push(node(
                 "log:field:rev",
                 NodeKind::Field,
@@ -290,7 +291,8 @@ fn render(
     if page.commits.is_empty() {
         tree.lines.push("(no commits)".into());
         let n = tree.lines.len() - 1;
-        tree.line_nodes.push(LineNode::new("log:empty", NodeKind::Message));
+        tree.line_nodes
+            .push(LineNode::new("log:empty", NodeKind::Message));
         tree.nodes.push(node(
             "log:empty",
             NodeKind::Message,
@@ -302,7 +304,8 @@ fn render(
     if page.has_more {
         let n = tree.lines.len();
         tree.lines.push("  ... load more ...".into());
-        tree.line_nodes.push(LineNode::new("log:more", NodeKind::Message));
+        tree.line_nodes
+            .push(LineNode::new("log:more", NodeKind::Message));
         tree.nodes
             .push(node("log:more", NodeKind::Message, "load more", None, n));
     }

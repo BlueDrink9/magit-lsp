@@ -216,7 +216,9 @@ fn hierarchy_targets_use_retained_ids_after_refresh_and_reject_stale_coordinates
         test.ack();
         let status_before_stale = tmp.git(&["status", "--porcelain"]);
         let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
-        let recovery = result.render.expect("stale positional request refreshes the view");
+        let recovery = result
+            .render
+            .expect("stale positional request refreshes the view");
         assert_eq!(recovery.version, test.version());
         assert_eq!(
             message_texts(&result.effects),

@@ -189,50 +189,173 @@ fn typed_options_support_page_size_graph_decoration_grep_and_literal_paths() {
 fn log_query_applies_until_merge_and_first_parent_filters() {
     let (_fixture, repo) = common::log_variants_fixture();
     for (options, expected) in [
-        (GitLogOptions { until: Some("2000-01-01T23:59:59+0000".into()), ..Default::default() }, vec!["base history", "main history", "side history"]),
-        (GitLogOptions { merges_only: true, ..Default::default() }, vec!["merge history"]),
-        (GitLogOptions { no_merges: true, ..Default::default() }, vec!["base history", "main history", "side history"]),
-        (GitLogOptions { first_parent: true, ..Default::default() }, vec!["base history", "main history", "merge history"]),
-        (GitLogOptions { first_parent: true, no_merges: true, author: Some("Test User".into()), grep: Some("main history".into()), paths: vec!["main.txt".into()], ..Default::default() }, vec!["main history"]),
+        (
+            GitLogOptions {
+                until: Some("2000-01-01T23:59:59+0000".into()),
+                ..Default::default()
+            },
+            vec!["base history", "main history", "side history"],
+        ),
+        (
+            GitLogOptions {
+                merges_only: true,
+                ..Default::default()
+            },
+            vec!["merge history"],
+        ),
+        (
+            GitLogOptions {
+                no_merges: true,
+                ..Default::default()
+            },
+            vec!["base history", "main history", "side history"],
+        ),
+        (
+            GitLogOptions {
+                first_parent: true,
+                ..Default::default()
+            },
+            vec!["base history", "main history", "merge history"],
+        ),
+        (
+            GitLogOptions {
+                first_parent: true,
+                no_merges: true,
+                author: Some("Test User".into()),
+                grep: Some("main history".into()),
+                paths: vec!["main.txt".into()],
+                ..Default::default()
+            },
+            vec!["main history"],
+        ),
     ] {
         let page = repo.log(&options).unwrap();
-        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|c| c.subject.as_str()).collect();
+        let subjects: std::collections::BTreeSet<_> =
+            page.commits.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, expected.into_iter().collect(), "{options:?}");
     }
-    let error = repo.log(&GitLogOptions { merges_only: true, no_merges: true, ..Default::default() }).unwrap_err();
-    assert!(error.to_string().contains("cannot include and exclude merges"), "{error}");
+    let error = repo
+        .log(&GitLogOptions {
+            merges_only: true,
+            no_merges: true,
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot include and exclude merges"),
+        "{error}"
+    );
 }
 
 #[test]
 fn ref_variants_have_distinct_reachability_sets() {
     let (_fixture, repo) = common::log_variants_fixture();
-    for (selection, extra) in [(None, vec![]), (Some("local"), vec!["local only"]), (Some("branches"), vec!["local only", "remote only"]), (Some("all"), vec!["local only", "remote only", "tag only"])] {
-        let page = repo.log(&GitLogOptions { ref_selection: selection.map(str::to_owned), ..Default::default() }).unwrap();
-        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|c| c.subject.as_str()).collect();
-        let expected = ["base history", "main history", "side history", "merge history"].into_iter().chain(extra).collect();
+    for (selection, extra) in [
+        (None, vec![]),
+        (Some("local"), vec!["local only"]),
+        (Some("branches"), vec!["local only", "remote only"]),
+        (Some("all"), vec!["local only", "remote only", "tag only"]),
+    ] {
+        let page = repo
+            .log(&GitLogOptions {
+                ref_selection: selection.map(str::to_owned),
+                ..Default::default()
+            })
+            .unwrap();
+        let subjects: std::collections::BTreeSet<_> =
+            page.commits.iter().map(|c| c.subject.as_str()).collect();
+        let expected = [
+            "base history",
+            "main history",
+            "side history",
+            "merge history",
+        ]
+        .into_iter()
+        .chain(extra)
+        .collect();
         assert_eq!(subjects, expected, "{selection:?}");
         assert!(page.commits.iter().any(|c| !c.graph_prefix.is_empty()));
-        assert!(page.commits.iter().any(|c| c.decorations.iter().any(|decoration| decoration.contains("main"))));
+        assert!(page.commits.iter().any(|c| c
+            .decorations
+            .iter()
+            .any(|decoration| decoration.contains("main"))));
     }
-    assert!(repo.log(&GitLogOptions { ref_selection: Some("--evil".into()), ..Default::default() }).is_err());
+    assert!(repo
+        .log(&GitLogOptions {
+            ref_selection: Some("--evil".into()),
+            ..Default::default()
+        })
+        .is_err());
 }
 
 #[test]
 fn ref_wide_logs_work_with_unborn_current_branch() {
     let (fixture, repo) = common::log_variants_fixture();
-    common::git(fixture.path(), &["symbolic-ref", "HEAD", "refs/heads/unborn"]);
+    common::git(
+        fixture.path(),
+        &["symbolic-ref", "HEAD", "refs/heads/unborn"],
+    );
     let default_page = repo.log(&GitLogOptions::default()).unwrap();
     assert!(default_page.commits.is_empty());
     assert!(!default_page.has_more);
-    assert!(repo.log(&GitLogOptions { ref_selection: Some("invalid".into()), ..Default::default() }).is_err());
+    assert!(repo
+        .log(&GitLogOptions {
+            ref_selection: Some("invalid".into()),
+            ..Default::default()
+        })
+        .is_err());
 
     for (selection, expected) in [
-        ("local", ["base history", "main history", "side history", "merge history", "local only"].as_slice()),
-        ("branches", ["base history", "main history", "side history", "merge history", "local only", "remote only"].as_slice()),
-        ("all", ["base history", "main history", "side history", "merge history", "local only", "remote only", "tag only"].as_slice()),
+        (
+            "local",
+            [
+                "base history",
+                "main history",
+                "side history",
+                "merge history",
+                "local only",
+            ]
+            .as_slice(),
+        ),
+        (
+            "branches",
+            [
+                "base history",
+                "main history",
+                "side history",
+                "merge history",
+                "local only",
+                "remote only",
+            ]
+            .as_slice(),
+        ),
+        (
+            "all",
+            [
+                "base history",
+                "main history",
+                "side history",
+                "merge history",
+                "local only",
+                "remote only",
+                "tag only",
+            ]
+            .as_slice(),
+        ),
     ] {
-        let page = repo.log(&GitLogOptions { ref_selection: Some(selection.into()), ..Default::default() }).unwrap();
-        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|commit| commit.subject.as_str()).collect();
+        let page = repo
+            .log(&GitLogOptions {
+                ref_selection: Some(selection.into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let subjects: std::collections::BTreeSet<_> = page
+            .commits
+            .iter()
+            .map(|commit| commit.subject.as_str())
+            .collect();
         assert_eq!(subjects, expected.iter().copied().collect(), "{selection}");
     }
 }

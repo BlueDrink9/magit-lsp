@@ -148,7 +148,11 @@ impl PlainDocument {
     /// Record server-authoritative rendered text and start an edit if the client is ready.
     pub fn render(&mut self, text: impl Into<String>) -> Option<ApplyEdit> {
         let snapshot = self.snapshot_for(text.into(), 0);
-        if self.authoritative.as_ref().map_or(true, |old| old.hash != snapshot.hash) {
+        if self
+            .authoritative
+            .as_ref()
+            .map_or(true, |old| old.hash != snapshot.hash)
+        {
             self.rejected = None;
         }
         self.authoritative = Some(snapshot);
@@ -180,13 +184,7 @@ impl PlainDocument {
         scope: &str,
         menu: Option<crate::menu::Menu>,
     ) {
-        let _ = self.retain_action(
-            tree,
-            view_id.to_owned(),
-            generation,
-            scope.to_owned(),
-            menu,
-        );
+        let _ = self.retain_action(tree, view_id.to_owned(), generation, scope.to_owned(), menu);
     }
 
     /// Adopt client text as both the observed and authoritative snapshot.

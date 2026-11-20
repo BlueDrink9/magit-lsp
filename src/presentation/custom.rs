@@ -53,9 +53,7 @@ impl CustomRender {
     }
 
     /// Bind delivery to the connection's current negotiated prompt support.
-    pub fn negotiated(
-        source: impl Fn() -> PromptSupport + Send + Sync + 'static,
-    ) -> Self {
+    pub fn negotiated(source: impl Fn() -> PromptSupport + Send + Sync + 'static) -> Self {
         Self {
             prompt_support: Arc::new(source),
         }
@@ -299,7 +297,9 @@ mod tests {
                 ui.prompt(prompt(kind));
             });
         }
-        let ui = CustomRender::negotiated(|| PromptSupport::Rich(caps(&[], &["text", "confirm"], &["main"])));
+        let ui = CustomRender::negotiated(|| {
+            PromptSupport::Rich(caps(&[], &["text", "confirm"], &["main"]))
+        });
         let mut value = prompt(PromptKind::Text);
         value.secret = Some(true);
         assert!(!ui.allows_prompt(&value));

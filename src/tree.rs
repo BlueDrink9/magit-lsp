@@ -282,11 +282,19 @@ impl Tree {
         let line = self.lines.len();
         self.lines.push(label.clone());
         self.line_nodes.push(LineNode {
-            node: id.clone(), kind: NodeKind::Header, section: None, path: None,
-            hunk_id: None, status: None, marker: None, line_index: None,
-            new_line: None, text: None,
+            node: id.clone(),
+            kind: NodeKind::Header,
+            section: None,
+            path: None,
+            hunk_id: None,
+            status: None,
+            marker: None,
+            line_index: None,
+            new_line: None,
+            text: None,
         });
-        self.nodes.push(Node::new(id, NodeKind::Header, label, line));
+        self.nodes
+            .push(Node::new(id, NodeKind::Header, label, line));
     }
 
     /// Append registry-derived pending draft rows with stable run identity and exact URI metadata.

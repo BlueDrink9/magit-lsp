@@ -1,9 +1,9 @@
 //! Generate or check registry-derived documentation references.
 
-#[path = "../../scripts/generate_plain_support.rs"]
-mod plain_support;
 #[path = "../../scripts/generate_client_behaviors.rs"]
 mod client_behaviors;
+#[path = "../../scripts/generate_plain_support.rs"]
+mod plain_support;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -15,7 +15,10 @@ fn main() -> ExitCode {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         if arg == "--output-root" {
-            let Some(value) = iter.next() else { eprintln!("--output-root needs a path"); return ExitCode::FAILURE; };
+            let Some(value) = iter.next() else {
+                eprintln!("--output-root needs a path");
+                return ExitCode::FAILURE;
+            };
             root = PathBuf::from(value);
         }
     }
@@ -29,13 +32,19 @@ fn main() -> ExitCode {
         let path = root.join(name);
         if check {
             if std::fs::read_to_string(&path).ok().as_deref() != Some(&content) {
-                println!("stale: {}", path.display()); failed = true;
+                println!("stale: {}", path.display());
+                failed = true;
             }
         } else if let Err(error) = write(&root, &path, &content) {
-            eprintln!("{}: {error}", path.display()); failed = true;
+            eprintln!("{}: {error}", path.display());
+            failed = true;
         }
     }
-    if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn write(_root: &Path, path: &Path, content: &str) -> std::io::Result<()> {

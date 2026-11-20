@@ -20,7 +20,10 @@ fn option_value(test: &TestSession, view: &str, key: &str) -> Option<String> {
 }
 
 /// Stage `open.commit`'s `--author` option prompt and return its request.
-fn stage_author_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+fn stage_author_prompt(
+    test: &mut TestSession,
+    view_id: &str,
+) -> magit_lsp::protocol::ViewPromptParams {
     use magit_lsp::keymap::EditorMode;
     use magit_lsp::protocol::{Cursor, ViewKeyParams};
     use magit_lsp::session::Execution;
@@ -69,12 +72,18 @@ fn stage_option_pick(
 }
 
 /// Stage `open.branch`'s `--set-upstream-to` option prompt and return its request.
-fn stage_ref_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+fn stage_ref_prompt(
+    test: &mut TestSession,
+    view_id: &str,
+) -> magit_lsp::protocol::ViewPromptParams {
     stage_option_pick(test, view_id, "u")
 }
 
 /// Stage `commit.create`'s staging confirm on an unstaged status view.
-fn stage_commit_confirm(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+fn stage_commit_confirm(
+    test: &mut TestSession,
+    view_id: &str,
+) -> magit_lsp::protocol::ViewPromptParams {
     use magit_lsp::protocol::ViewInvokeParams;
     use magit_lsp::session::Execution;
     let params = ViewInvokeParams {
@@ -353,7 +362,11 @@ fn opening_a_document_prompt_pushes_one_prompt_view_above_its_origin() {
     }
     assert_eq!(result.opened.len(), 1);
     let (render, _keymap) = &result.opened[0];
-    let text = render.text.as_ref().expect("a full initial render").join("\n");
+    let text = render
+        .text
+        .as_ref()
+        .expect("a full initial render")
+        .join("\n");
     assert!(text.contains("Override the author"), "{text}");
     let previous = test
         .session()
@@ -387,7 +400,10 @@ fn finishing_a_document_prompt_pops_it_and_applies_the_answer() {
 
     let completion = test
         .session
-        .finish_document_prompt(&request.prompt_id, Some(PromptValue::Text("Alice".to_string())))
+        .finish_document_prompt(
+            &request.prompt_id,
+            Some(PromptValue::Text("Alice".to_string())),
+        )
         .unwrap();
 
     assert_eq!(
@@ -405,7 +421,10 @@ fn finishing_a_document_prompt_pops_it_and_applies_the_answer() {
     assert!(!test.session.prompt_active());
     assert!(test.session.prompt_view_id().is_none());
     assert!(!test.session.has_pending_prompt());
-    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    assert_eq!(
+        option_value(&test, &menu.id, "=A").as_deref(),
+        Some("Alice")
+    );
     let Execution::Done(done) = completion.next else {
         panic!("finishing cannot prompt again");
     };
@@ -476,12 +495,12 @@ fn finishing_with_a_mismatched_prompt_id_changes_nothing() {
 
     let error = test
         .session
-        .finish_document_prompt("session-prompt-unknown", Some(PromptValue::Text("Alice".to_string())))
+        .finish_document_prompt(
+            "session-prompt-unknown",
+            Some(PromptValue::Text("Alice".to_string())),
+        )
         .expect_err("an unknown prompt id must fail");
-    assert!(
-        error.to_string().contains("no longer active"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("no longer active"), "{error}");
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(test.session.prompt_active());
     assert_eq!(test.session.prompt_view_id(), Some(prompt_id.as_str()));
@@ -495,7 +514,10 @@ fn finishing_with_a_mismatched_prompt_id_changes_nothing() {
             ..request.clone()
         })
         .expect_err("a mismatched open must fail");
-    assert!(unknown.to_string().contains("no longer active"), "{unknown}");
+    assert!(
+        unknown.to_string().contains("no longer active"),
+        "{unknown}"
+    );
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(test.session.prompt_active());
 }
@@ -558,7 +580,11 @@ fn finishing_a_document_prompt_renders_a_held_dirty_origin_once() {
 
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(!test.session.has_pending_prompt());
-    let origin_view = test.session.views().get(&origin).expect("the origin stays open");
+    let origin_view = test
+        .session
+        .views()
+        .get(&origin)
+        .expect("the origin stays open");
     assert_eq!(origin_view.version(), version + 1);
     assert!(!origin_view.dirty());
     assert_eq!(
@@ -600,7 +626,10 @@ fn finishing_a_document_prompt_renders_a_held_dirty_origin_once() {
         completion.result.opened.is_empty(),
         "a clean origin renders no extra copy"
     );
-    assert_eq!(test.session.views().get(&origin).unwrap().version(), version);
+    assert_eq!(
+        test.session.views().get(&origin).unwrap().version(),
+        version
+    );
 }
 
 #[test]
@@ -701,7 +730,10 @@ fn a_held_refresh_keeps_text_mode_edits_queued_until_text_mode_ends() {
         status_version,
         "a text-mode view is not replaced"
     );
-    assert!(status_view.dirty(), "its queued refresh survives the prompt");
+    assert!(
+        status_view.dirty(),
+        "its queued refresh survives the prompt"
+    );
     assert_eq!(
         test.text_of(&status),
         status_text,
@@ -761,11 +793,7 @@ fn closing_a_document_prompt_returns_every_surviving_refresh() {
         assert!(test.session.views().get(&status).unwrap().dirty());
         assert!(test.session.views().get(&log).unwrap().dirty());
 
-        let target = if close_origin {
-            &status
-        } else {
-            &prompt_id
-        };
+        let target = if close_origin { &status } else { &prompt_id };
         let result = test.session.close(target).unwrap();
 
         assert!(!test.session.has_pending_prompt());
@@ -799,10 +827,9 @@ fn closing_a_document_prompt_returns_every_surviving_refresh() {
             );
             assert!(!view.dirty(), "{view_id} has no queued refresh left");
             assert!(
-                result
-                    .opened
-                    .iter()
-                    .any(|(render, _)| render.view_id == view_id.as_str() && render.version > before),
+                result.opened.iter().any(
+                    |(render, _)| render.view_id == view_id.as_str() && render.version > before
+                ),
                 "{view_id} has a close render above its held version"
             );
         }
@@ -876,7 +903,10 @@ fn closing_a_document_prompt_keeps_text_mode_refreshes_queued() {
         if close_origin {
             assert!(test.session.views().get(&menu).is_none());
         } else {
-            assert!(test.session.views().get(&menu).is_some(), "origin stays open");
+            assert!(
+                test.session.views().get(&menu).is_some(),
+                "origin stays open"
+            );
         }
 
         test.focus(&status);
@@ -911,7 +941,10 @@ fn closing_the_prompt_view_clears_the_continuation() {
     assert!(!test.session.has_pending_prompt());
     assert!(!test.session.prompt_active());
     assert!(test.session.views().get(&prompt_id).is_none());
-    assert!(test.session.views().get(&menu.id).is_some(), "origin stays open");
+    assert!(
+        test.session.views().get(&menu.id).is_some(),
+        "origin stays open"
+    );
     assert_eq!(test.session().views().iter().count(), depth);
 }
 
@@ -1002,7 +1035,10 @@ fn answering_a_text_document_prompt_submits_the_edited_field() {
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(!test.session.prompt_active());
     assert!(test.session.active_prompt_id().is_none());
-    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    assert_eq!(
+        option_value(&test, &menu.id, "=A").as_deref(),
+        Some("Alice")
+    );
     assert!(matches!(completion.next, Execution::Done(_)));
 }
 
@@ -1083,7 +1119,10 @@ fn a_ref_option_stages_a_pick_with_ref_items() {
     let document = prompt_document(&test, &prompt_id, None);
     let completion = test
         .session
-        .answer_document_prompt(&format!("prompt:{}:item:main", request.prompt_id), &document)
+        .answer_document_prompt(
+            &format!("prompt:{}:item:main", request.prompt_id),
+            &document,
+        )
         .unwrap();
     assert!(matches!(completion.next, Execution::Done(_)));
     assert_eq!(option_value(&test, &menu.id, "=u").as_deref(), Some("main"));
@@ -1127,7 +1166,10 @@ fn a_remote_option_lists_remotes() {
         )
         .unwrap();
     assert!(matches!(completion.next, Execution::Done(_)));
-    assert_eq!(option_value(&test, &menu.id, "=p").as_deref(), Some("origin"));
+    assert_eq!(
+        option_value(&test, &menu.id, "=p").as_deref(),
+        Some("origin")
+    );
 
     assert!(test
         .session()
@@ -1198,7 +1240,10 @@ fn cancelling_a_text_document_prompt_leaves_the_option_unset() {
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(!test.session.prompt_active());
     assert_eq!(option_value(&test, &menu.id, "=A"), None);
-    assert!(matches!(completion.next, magit_lsp::session::Execution::Done(_)));
+    assert!(matches!(
+        completion.next,
+        magit_lsp::session::Execution::Done(_)
+    ));
 }
 
 #[test]
@@ -1235,9 +1280,9 @@ fn answering_a_confirm_document_prompt_yes_applies_and_no_cancels() {
         };
         assert_eq!(done.commit.is_some(), applies, "{answer}: {done:?}");
         assert_eq!(
-            done.effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::Message { text, .. } if text == "Committing…")),
+            done.effects.iter().any(
+                |effect| matches!(effect, Effect::Message { text, .. } if text == "Committing…")
+            ),
             applies,
             "{answer}: {:?}",
             done.effects
@@ -1281,7 +1326,10 @@ fn editing_a_non_field_line_repairs_and_keeps_the_prompt_open() {
             STALE_VIEW.to_string()
         )]
     );
-    let render = completion.result.render.expect("the repaired document re-renders");
+    let render = completion
+        .result
+        .render
+        .expect("the repaired document re-renders");
     assert_eq!(render.view_id, prompt_id);
     assert_eq!(render.version, version + 1);
     assert!(matches!(
@@ -1392,7 +1440,10 @@ fn a_field_edit_reconciles_to_the_typed_author_without_a_render() {
         .answer_document_prompt(&format!("prompt:{}:submit", request.prompt_id), &document)
         .unwrap();
 
-    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    assert_eq!(
+        option_value(&test, &menu.id, "=A").as_deref(),
+        Some("Alice")
+    );
     assert!(!test.session.prompt_active());
 }
 
@@ -1575,7 +1626,12 @@ fn cancelling_the_commit_message_log_leaves_the_option_unset() {
     test.press_ui("c");
     let log_id = test.view_id().to_string();
     assert_eq!(
-        test.session().views().get(&log_id).unwrap().descriptor().kind,
+        test.session()
+            .views()
+            .get(&log_id)
+            .unwrap()
+            .descriptor()
+            .kind,
         ViewKind::Log
     );
 

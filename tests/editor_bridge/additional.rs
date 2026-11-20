@@ -9,9 +9,7 @@ fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
     let (tmp, _) = staged_repo();
     let owner = "scoped-sequential-test";
     let registry = registry();
-    let scope = registry
-        .scope(tmp.path().to_str().unwrap(), owner)
-        .unwrap();
+    let scope = registry.scope(tmp.path().to_str().unwrap(), owner).unwrap();
     let (effects_tx, effects_rx) = mpsc::channel();
     let socket = magit_lsp::editor::start_listener(
         Arc::new(move |effects| effects_tx.send(effects).unwrap()),
@@ -36,7 +34,9 @@ fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
         let (run_id, uri, text) = effects
             .into_iter()
             .find_map(|effect| match effect {
-                Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
+                Effect::EditDocument {
+                    run_id, uri, text, ..
+                } => Some((run_id, uri, text)),
                 _ => None,
             })
             .expect("ordinary real-file edit announcement");
@@ -95,7 +95,9 @@ fn assert_real_scoped_squash_edits_and_cancel(
     effects_rx: &std::sync::mpsc::Receiver<Vec<magit_lsp::protocol::Effect>>,
 ) {
     use magit_lsp::editor::registry;
-    use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome};
+    use magit_lsp::instant_rebase::{
+        InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome,
+    };
     use magit_lsp::protocol::{DraftFinishReason, Effect};
     use std::sync::Arc;
 
@@ -104,48 +106,92 @@ fn assert_real_scoped_squash_edits_and_cancel(
     write(&dir.path().join("instant"), "instant\n");
     git(dir.path(), &["add", "instant"]);
     let repo = magit_lsp::git::GitRepo::open(dir.path()).unwrap();
-    let authority = InstantRebaseAuthority::prepare(&repo, &alpha, InstantAutosquashKind::Squash).unwrap();
+    let authority =
+        InstantRebaseAuthority::prepare(&repo, &alpha, InstantAutosquashKind::Squash).unwrap();
     let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
-    let scope = Arc::new(registry().scope(dir.path().to_str().unwrap(), owner).unwrap());
+    let scope = Arc::new(
+        registry()
+            .scope(dir.path().to_str().unwrap(), owner)
+            .unwrap(),
+    );
     let worker_scope = scope.clone();
     let repo_path = dir.path().to_string_lossy().into_owned();
-    let worker = thread::spawn(move || magit_lsp::editor::execute_operation_scoped(
-        &repo_path, "", socket, &operation, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), Some(&worker_scope),
-    ).unwrap());
+    let worker = thread::spawn(move || {
+        magit_lsp::editor::execute_operation_scoped(
+            &repo_path,
+            "",
+            socket,
+            &operation,
+            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            Some(&worker_scope),
+        )
+        .unwrap()
+    });
     let mut runs = Vec::new();
     for _ in 0..2 {
         let effects = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        let (run_id, uri, text) = effects.into_iter().find_map(|effect| match effect {
-            Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
-            _ => None,
-        }).expect("real squash message edit");
-        let message = if text.contains("alpha") { "Final alpha message\n" } else if text.contains("beta") {
+        let (run_id, uri, text) = effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::EditDocument {
+                    run_id, uri, text, ..
+                } => Some((run_id, uri, text)),
+                _ => None,
+            })
+            .expect("real squash message edit");
+        let message = if text.contains("alpha") {
+            "Final alpha message\n"
+        } else if text.contains("beta") {
             "Final beta message\n"
-        } else { panic!("unexpected squash message template: {text}") };
-        registry().apply(owner, &run_id, &uri, |draft, context| {
-            draft.did_open(context, 1, text.as_bytes())?;
-            draft.did_change(context, 2, message.as_bytes())?;
-            draft.finish(context, 2, DraftFinishReason::Confirm)?;
-            Ok(())
-        }).unwrap();
+        } else {
+            panic!("unexpected squash message template: {text}")
+        };
+        registry()
+            .apply(owner, &run_id, &uri, |draft, context| {
+                draft.did_open(context, 1, text.as_bytes())?;
+                draft.did_change(context, 2, message.as_bytes())?;
+                draft.finish(context, 2, DraftFinishReason::Confirm)?;
+                Ok(())
+            })
+            .unwrap();
         runs.push(run_id);
     }
     let marker = match worker.join().unwrap() {
         magit_lsp::git::RepositoryOperationOutcome::InstantRebase(
-            InstantRebaseOutcome::Completed { marker, warning: None },
+            InstantRebaseOutcome::Completed {
+                marker,
+                warning: None,
+            },
         ) => marker,
         outcome => panic!("unexpected squash outcome: {outcome:?}"),
     };
-    assert_ne!(runs[0], runs[1], "Git's two message editors receive fresh runs");
-    assert_eq!(git(dir.path(), &["log", "--format=%s", &format!("{base}..HEAD")]), "tail\nFinal beta message\nFinal alpha message\n");
+    assert_ne!(
+        runs[0], runs[1],
+        "Git's two message editors receive fresh runs"
+    );
+    assert_eq!(
+        git(
+            dir.path(),
+            &["log", "--format=%s", &format!("{base}..HEAD")]
+        ),
+        "tail\nFinal beta message\nFinal alpha message\n"
+    );
     let alpha_commit = git(dir.path(), &["cat-file", "commit", "HEAD~2"]);
     let beta_commit = git(dir.path(), &["cat-file", "commit", "HEAD~1"]);
-    assert_eq!(alpha_commit.split_once("\n\n").unwrap().1, "Final alpha message\n");
-    assert_eq!(beta_commit.split_once("\n\n").unwrap().1, "Final beta message\n");
+    assert_eq!(
+        alpha_commit.split_once("\n\n").unwrap().1,
+        "Final alpha message\n"
+    );
+    assert_eq!(
+        beta_commit.split_once("\n\n").unwrap().1,
+        "Final beta message\n"
+    );
     for path in ["alpha", "beta", "beta-extra", "tail", "instant"] {
         assert_eq!(read(&dir.path().join(path)), format!("{path}\n"));
     }
-    assert!(!git(dir.path(), &["rev-list", "--all"]).lines().any(|oid| oid == marker));
+    assert!(!git(dir.path(), &["rev-list", "--all"])
+        .lines()
+        .any(|oid| oid == marker));
     assert!(git(dir.path(), &["status", "--porcelain"]).is_empty());
     assert!(!dir.path().join(".git/rebase-merge").exists());
     drop(scope);
@@ -154,31 +200,62 @@ fn assert_real_scoped_squash_edits_and_cancel(
     write(&cancel_dir.path().join("instant"), "instant\n");
     git(cancel_dir.path(), &["add", "instant"]);
     let repo = magit_lsp::git::GitRepo::open(cancel_dir.path()).unwrap();
-    let authority = InstantRebaseAuthority::prepare(&repo, &cancel_target, InstantAutosquashKind::Squash).unwrap();
-    let original_head = git(cancel_dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let authority =
+        InstantRebaseAuthority::prepare(&repo, &cancel_target, InstantAutosquashKind::Squash)
+            .unwrap();
+    let original_head = git(cancel_dir.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_string();
     let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
-    let cancel_scope = Arc::new(registry().scope(cancel_dir.path().to_str().unwrap(), owner).unwrap());
+    let cancel_scope = Arc::new(
+        registry()
+            .scope(cancel_dir.path().to_str().unwrap(), owner)
+            .unwrap(),
+    );
     let worker_scope = cancel_scope.clone();
     let repo_path = cancel_dir.path().to_string_lossy().into_owned();
-    let worker = thread::spawn(move || magit_lsp::editor::execute_operation_scoped(
-        &repo_path, "", socket, &operation, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), Some(&worker_scope),
-    ).unwrap());
+    let worker = thread::spawn(move || {
+        magit_lsp::editor::execute_operation_scoped(
+            &repo_path,
+            "",
+            socket,
+            &operation,
+            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            Some(&worker_scope),
+        )
+        .unwrap()
+    });
     let effects = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let run = effects.into_iter().find_map(|effect| match effect {
-        Effect::EditDocument { run_id, .. } => Some(run_id),
-        _ => None,
-    }).expect("post-marker squash edit");
+    let run = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::EditDocument { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .expect("post-marker squash edit");
     cancel_scope.revoke();
     let marker = match worker.join().unwrap() {
         magit_lsp::git::RepositoryOperationOutcome::InstantRebase(
             InstantRebaseOutcome::RebaseStopped { marker, phase, .. },
-        ) => { assert_eq!(phase, "autosquash"); marker }
+        ) => {
+            assert_eq!(phase, "autosquash");
+            marker
+        }
         outcome => panic!("unexpected cancelled squash outcome: {outcome:?}"),
     };
     assert!(!registry().resolve(&run, magit_lsp::editor::Reply::Abort));
-    assert_eq!(git(cancel_dir.path(), &["rev-parse", "refs/heads/main"]).trim(), marker);
-    assert_eq!(git(cancel_dir.path(), &["rev-parse", &format!("{marker}^")]).trim(), original_head);
-    assert_ne!(git(cancel_dir.path(), &["rev-parse", "HEAD"]).trim(), marker);
+    assert_eq!(
+        git(cancel_dir.path(), &["rev-parse", "refs/heads/main"]).trim(),
+        marker
+    );
+    assert_eq!(
+        git(cancel_dir.path(), &["rev-parse", &format!("{marker}^")]).trim(),
+        original_head
+    );
+    assert_ne!(
+        git(cancel_dir.path(), &["rev-parse", "HEAD"]).trim(),
+        marker
+    );
     assert!(cancel_dir.path().join(".git/rebase-merge").exists());
     assert_eq!(read(&cancel_dir.path().join("instant")), "instant\n");
     assert!(!git(cancel_dir.path(), &["diff", "--cached", "--name-only"]).is_empty());
@@ -225,75 +302,131 @@ fn assert_scoped_helper_denials_and_cleanup(
     let scope = registry.scope(tmp.path().to_str().unwrap(), owner).unwrap();
     let mut first = launch(&message_path, scope.credential());
     let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let (run, uri, text) = edit.into_iter().find_map(|effect| match effect {
-        Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
-        _ => None,
-    }).unwrap();
+    let (run, uri, text) = edit
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::EditDocument {
+                run_id, uri, text, ..
+            } => Some((run_id, uri, text)),
+            _ => None,
+        })
+        .unwrap();
     let mut denied = launch(&message_path, scope.credential());
     let denied = wait(&mut denied);
     assert!(!denied.success(), "concurrent callback denied");
     assert!(effects_rx.try_recv().is_err(), "denial emits no delivery");
-    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 1);
-    registry.apply(owner, &run, &uri, |draft, context| {
-        draft.did_open(context, 1, text.as_bytes())?;
-        draft.did_change(context, 2, b"confirmed original\n")?;
-        draft.finish(context, 2, DraftFinishReason::Confirm)?;
-        Ok(())
-    }).unwrap();
-    assert!(wait(&mut first).success(), "original callback remains confirmable");
+    assert_eq!(
+        registry
+            .pending_for(owner, tmp.path().to_str().unwrap())
+            .len(),
+        1
+    );
+    registry
+        .apply(owner, &run, &uri, |draft, context| {
+            draft.did_open(context, 1, text.as_bytes())?;
+            draft.did_change(context, 2, b"confirmed original\n")?;
+            draft.finish(context, 2, DraftFinishReason::Confirm)?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        wait(&mut first).success(),
+        "original callback remains confirmable"
+    );
 
     write(&message_path, "invalid-path\n");
     let mut invalid = launch(&tmp.path().join("missing-editor-file"), scope.credential());
     assert!(!wait(&mut invalid).success());
-    assert!(effects_rx.try_recv().is_err(), "invalid path emits no delivery");
+    assert!(
+        effects_rx.try_recv().is_err(),
+        "invalid path emits no delivery"
+    );
 
     write(&message_path, "template\n");
     let mut active = launch(&message_path, scope.credential());
     let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let active_run = edit.into_iter().find_map(|effect| match effect {
-        Effect::EditDocument { run_id, .. } => Some(run_id),
-        _ => None,
-    }).unwrap();
+    let active_run = edit
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::EditDocument { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .unwrap();
     assert!(!registry.resolve(&run, magit_lsp::editor::Reply::Abort));
-    assert!(registry.apply(owner, &run, &uri, |draft, context| {
-        draft.finish(context, 1, DraftFinishReason::Confirm)
-    }).is_err());
-    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 1);
+    assert!(registry
+        .apply(owner, &run, &uri, |draft, context| {
+            draft.finish(context, 1, DraftFinishReason::Confirm)
+        })
+        .is_err());
+    assert_eq!(
+        registry
+            .pending_for(owner, tmp.path().to_str().unwrap())
+            .len(),
+        1
+    );
     let revoked_credential = scope.credential().to_string();
     drop(scope);
-    assert!(!wait(&mut active).success(), "scope revocation aborts helper");
-    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 0);
+    assert!(
+        !wait(&mut active).success(),
+        "scope revocation aborts helper"
+    );
+    assert_eq!(
+        registry
+            .pending_for(owner, tmp.path().to_str().unwrap())
+            .len(),
+        0
+    );
     assert!(!registry.resolve(&active_run, magit_lsp::editor::Reply::Abort));
 
     let mut late = launch(&message_path, &revoked_credential);
-    assert!(!wait(&mut late).success(), "late callback after revoke is denied");
-    assert!(effects_rx.try_recv().is_err(), "late denial emits no delivery");
+    assert!(
+        !wait(&mut late).success(),
+        "late callback after revoke is denied"
+    );
+    assert!(
+        effects_rx.try_recv().is_err(),
+        "late denial emits no delivery"
+    );
 
     let next = registry.scope(tmp.path().to_str().unwrap(), owner).unwrap();
     let mut disconnected = launch(&message_path, next.credential());
     let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let disconnected_run = edit.into_iter().find_map(|effect| match effect {
-        Effect::EditDocument { run_id, .. } => Some(run_id),
-        _ => None,
-    }).unwrap();
+    let disconnected_run = edit
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::EditDocument { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .unwrap();
     disconnected.kill().unwrap();
     let _ = wait(&mut disconnected);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !registry.pending_for(owner, tmp.path().to_str().unwrap()).is_empty() {
-        assert!(Instant::now() < deadline, "disconnected callback cleanup timed out");
+    while !registry
+        .pending_for(owner, tmp.path().to_str().unwrap())
+        .is_empty()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "disconnected callback cleanup timed out"
+        );
         thread::sleep(Duration::from_millis(10));
     }
     assert!(!registry.resolve(&disconnected_run, magit_lsp::editor::Reply::Abort));
 
     let mut recovered = launch(&message_path, next.credential());
     let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let recovered_run = edit.into_iter().find_map(|effect| match effect {
-        Effect::EditDocument { run_id, .. } => Some(run_id),
-        _ => None,
-    }).unwrap();
+    let recovered_run = edit
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::EditDocument { run_id, .. } => Some(run_id),
+            _ => None,
+        })
+        .unwrap();
     assert!(registry.resolve(&recovered_run, magit_lsp::editor::Reply::Abort));
     assert!(!wait(&mut recovered).success());
-    assert!(registry.pending_for(owner, tmp.path().to_str().unwrap()).is_empty());
+    assert!(registry
+        .pending_for(owner, tmp.path().to_str().unwrap())
+        .is_empty());
     assert!(effects_rx.try_recv().is_err(), "cleanup leaves no delivery");
     drop(next);
 }
@@ -718,9 +851,10 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     let deadline = Instant::now() + Duration::from_secs(5);
     while std::fs::read_to_string(format!("/proc/{child}/stat"))
         .ok()
-        .and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
-            !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
-        }))
+        .and_then(|stat| {
+            stat.rsplit_once(')')
+                .map(|(_, tail)| !matches!(tail.trim_start().chars().next(), Some('Z' | 'X')))
+        })
         .unwrap_or(false)
     {
         assert!(
@@ -748,15 +882,26 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let before = tmp.git(&["rev-parse", "HEAD"]);
     let cancel = magit_lsp::runner::CancelHandle::new();
     let run = magit_lsp::editor::registry()
-        .create(tmp.path().to_str().unwrap(), "early-test", magit_lsp::editor::draft::DraftKind::CommitMessage)
+        .create(
+            tmp.path().to_str().unwrap(),
+            "early-test",
+            magit_lsp::editor::draft::DraftKind::CommitMessage,
+        )
         .unwrap();
     let registry = magit_lsp::editor::registry();
     let pending = registry.pending_for("early-test", tmp.path().to_str().unwrap());
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].run_id, run);
-    assert_eq!(registry.run_for_uri("early-test", &pending[0].uri).unwrap(), run);
-    assert!(registry.pending_for("other-owner", tmp.path().to_str().unwrap()).is_empty());
-    assert!(registry.pending_for("early-test", "/different/repository").is_empty());
+    assert_eq!(
+        registry.run_for_uri("early-test", &pending[0].uri).unwrap(),
+        run
+    );
+    assert!(registry
+        .pending_for("other-owner", tmp.path().to_str().unwrap())
+        .is_empty());
+    assert!(registry
+        .pending_for("early-test", "/different/repository")
+        .is_empty());
     cancel.cancel();
     let error = magit_lsp::runner::with_cancel(Some(cancel), || {
         magit_lsp::editor::commit(
@@ -768,7 +913,9 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     })
     .expect_err("the pre-cancelled commit must fail");
     registry.remove(&run);
-    assert!(registry.pending_for("early-test", tmp.path().to_str().unwrap()).is_empty());
+    assert!(registry
+        .pending_for("early-test", tmp.path().to_str().unwrap())
+        .is_empty());
     assert_eq!(
         error.git.expect("a structured Git failure").subcommand,
         "commit"
@@ -1141,7 +1288,12 @@ fn socket_path_in_log(path: &Path) -> PathBuf {
 }
 
 /// Ask Git's question through the bridge and return the helper's output.
-pub(super) fn answer_askpass(server: &mut TestServer, socket: &Path, question: &str, answer: &str) -> Output {
+pub(super) fn answer_askpass(
+    server: &mut TestServer,
+    socket: &Path,
+    question: &str,
+    answer: &str,
+) -> Output {
     let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
         .arg("--askpass")
         .arg(question)

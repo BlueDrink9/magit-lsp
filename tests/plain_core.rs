@@ -20,9 +20,7 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
     };
     let state = std::sync::Arc::new(Mutex::new(caps));
     let source = state.clone();
-    let ui = CustomRender::negotiated(move || {
-        PromptSupport::Rich(source.lock().unwrap().clone())
-    });
+    let ui = CustomRender::negotiated(move || PromptSupport::Rich(source.lock().unwrap().clone()));
     let effects = || ViewEffectsParams {
         effects: vec![Effect::Clipboard {
             text: "copied".into(),
@@ -579,7 +577,11 @@ fn rich_command_requirement_uses_every_declared_effect() {
     declared.dedup();
     assert_eq!(
         declared,
-        [EffectKind::Clipboard, EffectKind::EditDocument, EffectKind::VisitFile]
+        [
+            EffectKind::Clipboard,
+            EffectKind::EditDocument,
+            EffectKind::VisitFile
+        ]
     );
     for effect in declared {
         let mut block = rich_block();
@@ -597,7 +599,12 @@ fn rich_command_requirement_uses_every_declared_effect() {
                 continue;
             };
             let expected = if *first == effect { Some(effect) } else { None };
-            assert_eq!(caps.command_requirement(command.id), expected, "{}", command.id);
+            assert_eq!(
+                caps.command_requirement(command.id),
+                expected,
+                "{}",
+                command.id
+            );
         }
     }
 }
@@ -664,8 +671,14 @@ fn plain_availability_matrix() {
         PlainAvailability::Available
     );
     for command in ["status.stage", "status.unstage", "status.discard"] {
-        assert_eq!(edits.plain_availability(cmd(command)), PlainAvailability::Available);
-        assert_eq!(full.plain_availability(cmd(command)), PlainAvailability::Available);
+        assert_eq!(
+            edits.plain_availability(cmd(command)),
+            PlainAvailability::Available
+        );
+        assert_eq!(
+            full.plain_availability(cmd(command)),
+            PlainAvailability::Available
+        );
     }
     assert_eq!(
         edits.plain_availability(cmd("common.visit")),
@@ -677,8 +690,16 @@ fn plain_availability_matrix() {
         full.plain_availability(cmd("common.visit")),
         PlainAvailability::Available
     );
-    for command in ["commit.create", "commit.amend", "commit.extend", "commit.reword"] {
-        assert_eq!(full.plain_availability(cmd(command)), PlainAvailability::Available);
+    for command in [
+        "commit.create",
+        "commit.amend",
+        "commit.extend",
+        "commit.reword",
+    ] {
+        assert_eq!(
+            full.plain_availability(cmd(command)),
+            PlainAvailability::Available
+        );
     }
     assert_eq!(
         reason(full.plain_availability(cmd("common.copy-value"))),
@@ -888,7 +909,11 @@ fn rich_protocol_version_minimum_is_validated_without_selecting_below_it() {
     matching["minimumVersion"] = json!(1);
     accepted(matching);
 
-    let rejected = |block: Value| negotiate(&initialize(Some(block))).expect_err("rejection").0;
+    let rejected = |block: Value| {
+        negotiate(&initialize(Some(block)))
+            .expect_err("rejection")
+            .0
+    };
 
     let mut unsupported = rich_block();
     unsupported["v"] = json!(2);

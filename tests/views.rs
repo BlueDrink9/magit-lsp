@@ -399,7 +399,9 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
                 .get(&test.view_id().to_string())
                 .expect("status view")
                 .version();
-            test.session.ack(&test.view_id().to_string(), version).unwrap();
+            test.session
+                .ack(&test.view_id().to_string(), version)
+                .unwrap();
         }
         let current_version = test
             .session

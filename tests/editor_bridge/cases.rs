@@ -1,5 +1,7 @@
+use super::additional::{
+    answer_askpass, assert_helper_kept_the_answer, assert_log_kept_the_answer,
+};
 use super::*;
-use super::additional::{answer_askpass, assert_helper_kept_the_answer, assert_log_kept_the_answer};
 
 #[test]
 fn head_operations_real_git_tree_message_date_and_saved_close() {
@@ -835,9 +837,11 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
         assert!(command_confirm(&mut server, 14, &edit, 9, "synchronized")["error"].is_object());
         let other_held = other_tmp.path().join(".git/held-sync-message");
         std::fs::rename(&other_target, &other_held).unwrap();
-        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
-            "textDocument":{"uri":other_edit["uri"]}
-        }}));
+        server.send(
+            json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+                "textDocument":{"uri":other_edit["uri"]}
+            }}),
+        );
         let other_recovery = loop {
             if let Some(effect) = edit_document(&server.recv()) {
                 if effect["runId"] == other_edit["runId"] {
@@ -893,7 +897,10 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
         wait_for_commit(&tmp, "aλ!?\nz😀!?");
         assert_eq!(read(&target), "aλ!?\r\nz😀!?\n");
         let other_confirmed = command_confirm(&mut server, 30, &other_edit, 5, "synchronized");
-        assert_eq!(other_confirmed["result"]["type"], "confirmed", "{other_confirmed}");
+        assert_eq!(
+            other_confirmed["result"]["type"], "confirmed",
+            "{other_confirmed}"
+        );
         wait_for_commit(&other_tmp, "other\nsuccess\nstale\nrejected");
         server.shutdown_and_exit();
         assert!(server.finish(Duration::from_secs(10)).success());
@@ -1095,13 +1102,15 @@ fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
     loop {
         let message = server.recv();
         if message["method"] == "view/effects"
-            && message["params"]["effects"].as_array().is_some_and(|effects| {
-                effects.iter().any(|effect| {
-                    effect["text"]
-                        .as_str()
-                        .is_some_and(|text| text.starts_with("Committed:"))
+            && message["params"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects.iter().any(|effect| {
+                        effect["text"]
+                            .as_str()
+                            .is_some_and(|text| text.starts_with("Committed:"))
+                    })
                 })
-            })
         {
             break;
         }

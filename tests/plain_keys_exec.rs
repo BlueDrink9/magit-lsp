@@ -1,13 +1,13 @@
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
+#[path = "common/fake_git.rs"]
+mod fake_git;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "common/stdio.rs"]
 mod stdio;
-#[path = "common/fake_git.rs"]
-mod fake_git;
 
 use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
@@ -28,7 +28,10 @@ fn open_with_env(
     env: &[(String, String)],
 ) -> (stdio::TestServer, FakeEditor, String) {
     let uri = format!("file://{}/.magit", repo.path().display());
-    let env: Vec<_> = env.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
+    let env: Vec<_> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
     let mut server = stdio::TestServer::spawn(&env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
@@ -37,8 +40,7 @@ fn open_with_env(
         "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
     });
     init["params"]["clientInfo"] = json!({"name":client_name,"version":"1"});
-    init["params"]["initializationOptions"] =
-        json!({"plain":{"keys":{"default":keys}}});
+    init["params"]["initializationOptions"] = json!({"plain":{"keys":{"default":keys}}});
     init["params"]["workspaceFolders"] =
         json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init);
@@ -87,17 +89,28 @@ fn settle(server: &mut stdio::TestServer, editor: &mut FakeEditor) -> Vec<String
         let mut edited = false;
         loop {
             let message = server.recv();
-            if message["id"] == 9001 { break; }
+            if message["id"] == 9001 {
+                break;
+            }
             match message["method"].as_str() {
                 Some("workspace/applyEdit") => {
                     edited = true;
-                    for frame in editor.dispatch(&message) { server.send(frame); }
+                    for frame in editor.dispatch(&message) {
+                        server.send(frame);
+                    }
                 }
-                Some("window/showMessage") => messages.push(message["params"]["message"].as_str().unwrap_or_default().to_owned()),
+                Some("window/showMessage") => messages.push(
+                    message["params"]["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
                 _ => {}
             }
         }
-        if !edited { return messages; }
+        if !edited {
+            return messages;
+        }
     }
     panic!("authoritative repairs did not converge");
 }
@@ -247,13 +260,17 @@ fn wait_for_action(
 ) -> (Value, i64) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        assert!(Instant::now() < deadline, "action {command} was not offered for {needle}");
+        assert!(
+            Instant::now() < deadline,
+            "action {command} was not offered for {needle}"
+        );
         if editor.text(uri).contains(needle) {
             let line = line_of(editor, uri, needle);
             let offered = offered_actions(server, editor, seen, uri, line, id);
             id += 1;
-            if let Some(found) =
-                offered.iter().find(|action| action["command"]["arguments"][0]["command"] == command)
+            if let Some(found) = offered
+                .iter()
+                .find(|action| action["command"]["arguments"][0]["command"] == command)
             {
                 return (found["command"]["arguments"][0].clone(), id);
             }
@@ -271,7 +288,8 @@ fn gated_plain_key_keeps_reader_live_and_drops_busy_input() {
         .modify("g.txt", "two\n")
         .build();
     let gate = fake_git::GatedGit::arm("add");
-    let (mut server, mut editor, uri) = open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
+    let (mut server, mut editor, uri) =
+        open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
     let line = line_of(&editor, &uri, "f.txt");
     replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
     gate.wait_entered();
@@ -283,19 +301,32 @@ fn gated_plain_key_keeps_reader_live_and_drops_busy_input() {
         server.send(json!({"jsonrpc":"2.0","id":8000,"method":"test/reader","params":{}}));
         loop {
             let message = pump(&mut server, &mut editor, &mut Vec::new());
-            if message["id"] == 8000 { break message; }
+            if message["id"] == 8000 {
+                break message;
+            }
         }
     }));
-    assert!(reader.is_ok(), "reader must answer while Plain Git is gated");
+    assert!(
+        reader.is_ok(),
+        "reader must answer while Plain Git is gated"
+    );
     assert!(!gate.is_released());
     gate.release();
     server.recv_timeout = Duration::from_secs(10);
     apply(&mut server, &mut editor);
-    assert_eq!(fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]), "f.txt\n", "busy input must not stage g.txt later");
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "busy input must not stage g.txt later"
+    );
     let other = line_of(&editor, &uri, "g.txt");
     replace(&mut server, &mut editor, &uri, other, 0, 0, "s");
     apply(&mut server, &mut editor);
-    assert_eq!(fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]), "f.txt\ng.txt\n", "completion must allow a fresh key");
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "f.txt\ng.txt\n",
+        "completion must allow a fresh key"
+    );
 }
 
 #[test]
@@ -306,7 +337,8 @@ fn plain_key_waits_for_an_earlier_same_repository_mutation() {
         .modify("g.txt", "two\n")
         .build();
     let gate = fake_git::GatedGit::arm("add");
-    let (mut server, mut editor, uri) = open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
+    let (mut server, mut editor, uri) =
+        open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
     let offered = actions(&mut server, &uri, 8100);
     let args = plain_args(&offered, "open.commit");
     server.send(json!({"jsonrpc":"2.0","id":8101,"method":"view/invoke","params":{"viewId":args["target"]["viewId"],"command":"status.stage-all"}}));
@@ -318,20 +350,43 @@ fn plain_key_waits_for_an_earlier_same_repository_mutation() {
     loop {
         let message = pump(&mut server, &mut editor, &mut seen);
         assert_ne!(message["id"], 8101, "earlier mutation must still be held");
-        if message["id"] == 8102 { break; }
+        if message["id"] == 8102 {
+            break;
+        }
     }
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "", "later key must not overtake the held mutation");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "",
+        "later key must not overtake the held mutation"
+    );
     gate.release();
-    while !seen.iter().any(|m| m["id"] == 8101) || !seen.iter().any(|m| m["method"] == "window/showMessage" && m["params"]["message"] == "changed since displayed; refreshed") {
+    while !seen.iter().any(|m| m["id"] == 8101)
+        || !seen.iter().any(|m| {
+            m["method"] == "window/showMessage"
+                && m["params"]["message"] == "changed since displayed; refreshed"
+        })
+    {
         pump(&mut server, &mut editor, &mut seen);
     }
     settle(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\ng.txt\n");
-    assert!(!server.stderr_text().contains("args=[\"add\", \"--\", \"g.txt\"]"), "stale queued key must be refused at admission, not replayed");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\ng.txt\n"
+    );
+    assert!(
+        !server
+            .stderr_text()
+            .contains("args=[\"add\", \"--\", \"g.txt\"]"),
+        "stale queued key must be refused at admission, not replayed"
+    );
     let line = line_of(&editor, &uri, "g.txt");
     replace(&mut server, &mut editor, &uri, line, 0, 0, "u");
     apply(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\n", "fresh key works after stale admission repair");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "fresh key works after stale admission repair"
+    );
 }
 
 #[test]
@@ -347,14 +402,27 @@ fn plain_key_git_error_repairs_and_allows_retry() {
     let line = line_of(&editor, &uri, "f.txt");
     replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
     let messages = apply(&mut server, &mut editor);
-    assert!(messages.iter().any(|m| m.contains("Another Git process")), "readable Git failure: {messages:?}");
-    assert_eq!(std::fs::read(repo.path().join(".git/index")).unwrap(), index);
-    assert_eq!(std::fs::read_to_string(repo.path().join("f.txt")).unwrap(), "two\n");
+    assert!(
+        messages.iter().any(|m| m.contains("Another Git process")),
+        "readable Git failure: {messages:?}"
+    );
+    assert_eq!(
+        std::fs::read(repo.path().join(".git/index")).unwrap(),
+        index
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("f.txt")).unwrap(),
+        "two\n"
+    );
     assert_eq!(editor.text(&uri), before, "failure repairs typed input");
     std::fs::remove_file(repo.path().join(".git/index.lock")).unwrap();
     replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
     apply(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\n", "Git failure must clear busy state");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "Git failure must clear busy state"
+    );
 }
 
 #[test]
@@ -383,7 +451,11 @@ fn refusing_a_plain_key_repair_does_not_leave_the_document_busy() {
     settle(&mut server, &mut editor);
     replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
     apply(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\n", "refused repair must release the idle Executing classifier");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "refused repair must release the idle Executing classifier"
+    );
 }
 
 #[test]
@@ -394,7 +466,8 @@ fn closing_and_reopening_during_plain_key_does_not_repair_the_new_incarnation() 
         .modify("g.txt", "two\n")
         .build();
     let gate = fake_git::GatedGit::arm("add");
-    let (mut server, mut editor, uri) = open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
+    let (mut server, mut editor, uri) =
+        open_with_env(&repo, "Key Exec Client", true, &gate.child_env());
     let line = line_of(&editor, &uri, "f.txt");
     replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
     gate.wait_entered();
@@ -407,24 +480,40 @@ fn closing_and_reopening_during_plain_key_does_not_repair_the_new_incarnation() 
     server.send(json!({"jsonrpc":"2.0","id":8200,"method":"test/reader","params":{}}));
     server.recv_timeout = Duration::from_secs(3);
     let barrier = server.response_with_id(8200);
-    assert!(barrier["error"].is_object(), "close/reopen must reach the reader while Git is held");
+    assert!(
+        barrier["error"].is_object(),
+        "close/reopen must reach the reader while Git is held"
+    );
     assert_eq!(editor.text(&uri), "replacement incarnation");
     assert!(!gate.is_released());
     gate.release();
     server.recv_timeout = Duration::from_secs(10);
     let (initial, _) = next_apply(&mut server);
-    assert_eq!(initial["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], 1, "only the new incarnation's initial version may be repaired");
+    assert_eq!(
+        initial["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], 1,
+        "only the new incarnation's initial version may be repaired"
+    );
     // Answer the old request only once the replacement controller has its
     // own edit in flight; the old callback must not reset that controller.
     server.send(json!({"jsonrpc":"2.0","id":old_repair["id"],"result":{"applied":false}}));
-    for frame in editor.dispatch(&initial) { server.send(frame); }
+    for frame in editor.dispatch(&initial) {
+        server.send(frame);
+    }
     settle(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\n", "busy key never survived close");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "busy key never survived close"
+    );
     assert!(editor.text(&uri).contains("Staged changes (1)"));
     let other = line_of(&editor, &uri, "g.txt");
     replace(&mut server, &mut editor, &uri, other, 0, 0, "s");
     apply(&mut server, &mut editor);
-    assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "f.txt\ng.txt\n", "new incarnation remains usable after old completion and reply");
+    assert_eq!(
+        repo.git(&["diff", "--cached", "--name-only"]),
+        "f.txt\ng.txt\n",
+        "new incarnation remains usable after old completion and reply"
+    );
 }
 
 #[test]
@@ -441,7 +530,8 @@ fn eligible_key_stages_exactly_and_repairs_authoritative_text() {
     assert_eq!(
         fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
         "f.txt\n",
-        "the key staged exactly the edited file: {}", server.stderr_text()
+        "the key staged exactly the edited file: {}",
+        server.stderr_text()
     );
     assert_eq!(
         fixtures::git(repo.path(), &["diff", "--name-only"]),
@@ -459,8 +549,15 @@ fn eligible_key_stages_exactly_and_repairs_authoritative_text() {
     assert_eq!(editor.text(&uri), "Head: main\n\nStaged changes (1)\n  M f.txt\n    @@ -1,1 +1,1 @@\n    -one\n    +two\n\nUnstaged changes (0)\n\nUntracked files (0)\nKeys: on (default)");
     let repaired_version = editor.documents[&uri].version;
     settle(&mut server, &mut editor);
-    assert_eq!(editor.documents[&uri].version, repaired_version, "repair echo never triggers another edit");
-    assert_eq!(fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]), "f.txt\n", "repair echo never repeats staging");
+    assert_eq!(
+        editor.documents[&uri].version, repaired_version,
+        "repair echo never triggers another edit"
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "repair echo never repeats staging"
+    );
 }
 
 #[test]
@@ -479,14 +576,22 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
         apply(&mut server, &mut editor)
     };
     assert!(
-        messages.iter().any(|message| message.contains("destructive")),
+        messages
+            .iter()
+            .any(|message| message.contains("destructive")),
         "the destructive key points to the code action: {messages:?}"
     );
-    assert_eq!(fixtures::git(repo.path(), &["status", "--porcelain"]), before);
+    assert_eq!(
+        fixtures::git(repo.path(), &["status", "--porcelain"]),
+        before
+    );
     assert_eq!(editor.text(&uri), authoritative);
     replace(&mut server, &mut editor, &uri, line, 0, 0, "ss");
     apply(&mut server, &mut editor);
-    assert_eq!(fixtures::git(repo.path(), &["status", "--porcelain"]), before);
+    assert_eq!(
+        fixtures::git(repo.path(), &["status", "--porcelain"]),
+        before
+    );
     assert_eq!(editor.text(&uri), authoritative);
     // The unchanged space shared by the whole document must not shrink this
     // two-character replacement to the stage key.
@@ -514,10 +619,19 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
     );
     replace(&mut server, &mut editor, &uri, line, 0, 0, "R");
     let messages = apply(&mut server, &mut editor);
-    assert!(messages.iter().any(|message| message.contains("planned")), "planned key refused: {messages:?}");
-    assert_eq!(fixtures::git(repo.path(), &["status", "--porcelain"]), before);
+    assert!(
+        messages.iter().any(|message| message.contains("planned")),
+        "planned key refused: {messages:?}"
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["status", "--porcelain"]),
+        before
+    );
     assert_eq!(editor.text(&uri), authoritative);
-    assert!(!editor.text(&uri).starts_with('x'), "destructive edit repaired");
+    assert!(
+        !editor.text(&uri).starts_with('x'),
+        "destructive edit repaired"
+    );
     assert!(!editor.text(&uri).starts_with("ss"), "paste repaired");
 
     let (off_repo, _) = fixtures::RepoFixture::new()
@@ -527,7 +641,15 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
     let (mut off_server, mut off_editor, off_uri) = open(&off_repo, "Keys Off Client", false);
     let off_line = line_of(&off_editor, &off_uri, "f.txt");
     let off_text = off_editor.text(&off_uri).to_owned();
-    replace(&mut off_server, &mut off_editor, &off_uri, off_line, 0, 0, "s");
+    replace(
+        &mut off_server,
+        &mut off_editor,
+        &off_uri,
+        off_line,
+        0,
+        0,
+        "s",
+    );
     apply(&mut off_server, &mut off_editor);
     assert_eq!(off_editor.text(&off_uri), off_text);
     assert_eq!(
@@ -605,10 +727,16 @@ fn chord_and_menu_steps_keep_server_state() {
     let line = line_of(&editor, &uri, "f.txt");
     let before = fixtures::git(repo.path(), &["status", "--porcelain"]);
     replace(&mut server, &mut editor, &uri, line, 0, 0, "g");
-    assert!(apply(&mut server, &mut editor).is_empty(), "safe chord prefix accepted");
+    assert!(
+        apply(&mut server, &mut editor).is_empty(),
+        "safe chord prefix accepted"
+    );
     assert!(!editor.text(&uri).starts_with('g'), "chord prefix repaired");
     replace(&mut server, &mut editor, &uri, line, 0, 0, "r");
-    assert!(apply(&mut server, &mut editor).is_empty(), "pending chord completed rather than refusing an unbound r");
+    assert!(
+        apply(&mut server, &mut editor).is_empty(),
+        "pending chord completed rather than refusing an unbound r"
+    );
     assert_eq!(
         fixtures::git(repo.path(), &["status", "--porcelain"]),
         before,
@@ -633,7 +761,10 @@ fn chord_and_menu_steps_keep_server_state() {
         "menu progression kept the menu view"
     );
     assert_ne!(editor.text(&uri), menu, "-a toggled the commit menu switch");
-    assert!(editor.text(&uri).contains("git commit --all"), "the authoritative menu reflects --all");
+    assert!(
+        editor.text(&uri).contains("git commit --all"),
+        "the authoritative menu reflects --all"
+    );
     assert_eq!(
         fixtures::git(repo.path(), &["status", "--porcelain"]),
         before,
@@ -653,7 +784,13 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
 
     // Stage f.txt so commit creation has something to commit.
     let (stage, id) = wait_for_action(
-        &mut server, &mut editor, &mut seen, &uri, "f.txt", "status.stage", 20,
+        &mut server,
+        &mut editor,
+        &mut seen,
+        &uri,
+        "f.txt",
+        "status.stage",
+        20,
     );
     let staged = execute_action(&mut server, &mut editor, &mut seen, stage, id);
     assert!(staged["error"].is_null(), "{staged}");
@@ -662,7 +799,13 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
 
     // Open the commit menu and start a commit draft that owns the repository.
     let (open_commit, next) = wait_for_action(
-        &mut server, &mut editor, &mut seen, &uri, "f.txt", "open.commit", id,
+        &mut server,
+        &mut editor,
+        &mut seen,
+        &uri,
+        "f.txt",
+        "open.commit",
+        id,
     );
     id = next;
     let opened = execute_action(&mut server, &mut editor, &mut seen, open_commit, id);
@@ -675,7 +818,10 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
     while !seen.iter().any(|message| {
         message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
     }) {
-        assert!(Instant::now() < deadline, "commit draft was not opened: {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "commit draft was not opened: {seen:#?}"
+        );
         pump(&mut server, &mut editor, &mut seen);
     }
     let template =
@@ -704,7 +850,10 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut refusal = None;
     while refusal.is_none() {
-        assert!(Instant::now() < deadline, "deferred key was not refused: {seen:#?}");
+        assert!(
+            Instant::now() < deadline,
+            "deferred key was not refused: {seen:#?}"
+        );
         let message = pump(&mut server, &mut editor, &mut seen);
         if message["method"] == "window/showMessage" {
             let text = message["params"]["message"].as_str().unwrap_or_default();
@@ -719,14 +868,26 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
         before,
         "the refused key was repaired to the authoritative status text"
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "the refused key never committed");
-    assert_eq!(repo.git(&["write-tree"]), index, "the refused key never touched the index");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "the refused key never committed"
+    );
+    assert_eq!(
+        repo.git(&["write-tree"]),
+        index,
+        "the refused key never touched the index"
+    );
     assert_eq!(
         repo.git(&["status", "--porcelain=v1"]),
         worktree,
         "the refused key never touched the worktree"
     );
-    assert_eq!(repo.git(&["diff", "--binary"]), diff, "the refused key left the diff unchanged");
+    assert_eq!(
+        repo.git(&["diff", "--binary"]),
+        diff,
+        "the refused key left the diff unchanged"
+    );
 
     // Abort the draft, releasing repository mutation authority.
     for _ in 0..2 {
@@ -738,8 +899,13 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
         else {
             break;
         };
-        let cancelled =
-            execute_action(&mut server, &mut editor, &mut seen, cancel["command"]["arguments"][0].clone(), id);
+        let cancelled = execute_action(
+            &mut server,
+            &mut editor,
+            &mut seen,
+            cancel["command"]["arguments"][0].clone(),
+            id,
+        );
         id += 1;
         assert!(cancelled["error"].is_null(), "{cancelled}");
     }
@@ -774,5 +940,9 @@ fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
         !editor.text(&uri).lines().any(|line| line.starts_with('s')),
         "the typed key was removed by the authoritative repair"
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "staging after release never commits");
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head,
+        "staging after release never commits"
+    );
 }

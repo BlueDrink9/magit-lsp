@@ -168,7 +168,13 @@ pub fn build(def: &MenuDef) -> Menu {
                             roadmap_id: "R-5.3".to_string(),
                         };
                     }
-                    Item::Switch { key, status, .. } if key != "-g" && key != "-d" && key != "=M" && key != "=m" && key != "=p" => {
+                    Item::Switch { key, status, .. }
+                        if key != "-g"
+                            && key != "-d"
+                            && key != "=M"
+                            && key != "=m"
+                            && key != "=p" =>
+                    {
                         *status = MenuStatus::Planned {
                             roadmap_id: "R-5.3".to_string(),
                         };

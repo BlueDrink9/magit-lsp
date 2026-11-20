@@ -23,10 +23,10 @@
 //! become `hash-N` by first-seen position. Versions, order and payloads are not
 //! relaxed: an unexpected frame or a divergent expectation fails.
 
-#[path = "common/mod.rs"]
-mod fixtures;
 #[path = "../scripts/example_recordings.rs"]
 mod example_recordings;
+#[path = "common/mod.rs"]
+mod fixtures;
 
 use fixtures::schema::{read_schema, schema_errors};
 use serde_json::{Map, Value};
@@ -156,9 +156,7 @@ struct Line {
 /// Parse and shape-check one JSONL line.
 fn parse_line(text: &str) -> Result<Line, String> {
     let value: Value = serde_json::from_str(text).map_err(|error| format!("not JSON: {error}"))?;
-    let object = value
-        .as_object()
-        .ok_or("line is not a JSON object")?;
+    let object = value.as_object().ok_or("line is not a JSON object")?;
     for key in object.keys() {
         if !matches!(key.as_str(), "dir" | "message" | "note" | "source") {
             return Err(format!("unknown key {key:?}"));
@@ -233,9 +231,12 @@ fn validate_message(
         let id = message.get("id").ok_or("response frame needs an id")?;
         let key = id_key(id)?;
         let request_dir = line.dir.peer();
-        let request = pending
-            .remove(&(request_dir, key.clone()))
-            .ok_or_else(|| format!("response id {key} has no preceding {} request", request_dir.as_str()))?;
+        let request = pending.remove(&(request_dir, key.clone())).ok_or_else(|| {
+            format!(
+                "response id {key} has no preceding {} request",
+                request_dir.as_str()
+            )
+        })?;
         let has_result = message.contains_key("result");
         let has_error = message.contains_key("error");
         if has_result == has_error {
@@ -312,11 +313,7 @@ fn validate_message(
 }
 
 /// Validate every line of one example file, including id correlation.
-fn validate_exchange(
-    path: &Path,
-    text: &str,
-    catalog: &Catalog,
-) -> Result<usize, String> {
+fn validate_exchange(path: &Path, text: &str, catalog: &Catalog) -> Result<usize, String> {
     let mut pending: HashMap<(Dir, String), Pending> = HashMap::new();
     let mut count = 0;
     for (index, raw) in text.lines().enumerate() {
@@ -356,9 +353,10 @@ fn committed_example_files_parse_and_validate_against_the_method_catalog() {
     );
     for (name, bytes) in files {
         let path = root.join(EXAMPLES_DIR).join(&name);
-        let text = String::from_utf8(bytes).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let count = validate_exchange(&path, &text, &catalog)
-            .unwrap_or_else(|error| panic!("{error}"));
+        let text =
+            String::from_utf8(bytes).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let count =
+            validate_exchange(&path, &text, &catalog).unwrap_or_else(|error| panic!("{error}"));
         assert!(count > 0, "{} has no lines", path.display());
     }
 }
@@ -369,14 +367,41 @@ fn numbered_large_recording_fragments_load_as_the_original_logical_recording() {
     let examples = example_recordings::recordings(&root.join(EXAMPLES_DIR)).expect("examples");
     let dir = root.join(EXAMPLES_DIR);
     for (logical, fragments) in [
-        ("commit-edit-confirm.jsonl", ["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"]),
-        ("commit-edit-abort.jsonl", ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"]),
+        (
+            "commit-edit-confirm.jsonl",
+            [
+                "commit-edit-confirm-01.jsonl",
+                "commit-edit-confirm-02.jsonl",
+            ],
+        ),
+        (
+            "commit-edit-abort.jsonl",
+            ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"],
+        ),
     ] {
-        let matches: Vec<_> = examples.iter().filter(|(name, _)| name == logical).collect();
-        assert_eq!(matches.len(), 1, "fragments expose one original logical name");
-        let expected = fragments.iter().map(|name| fs::read(dir.join(name)).unwrap()).flatten().collect::<Vec<_>>();
-        assert_eq!(matches[0].1.as_slice(), expected.as_slice(), "ordered fragments form the logical bytes");
-        assert!(matches[0].1.len() > 100_000, "validation sees the whole recording");
+        let matches: Vec<_> = examples
+            .iter()
+            .filter(|(name, _)| name == logical)
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "fragments expose one original logical name"
+        );
+        let expected = fragments
+            .iter()
+            .map(|name| fs::read(dir.join(name)).unwrap())
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches[0].1.as_slice(),
+            expected.as_slice(),
+            "ordered fragments form the logical bytes"
+        );
+        assert!(
+            matches[0].1.len() > 100_000,
+            "validation sees the whole recording"
+        );
     }
 }
 
@@ -384,7 +409,8 @@ fn numbered_large_recording_fragments_load_as_the_original_logical_recording() {
 fn plain_open_example_records_initialize_and_a_plain_document_open() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = root.join(EXAMPLES_DIR).join("plain-open.jsonl");
-    let text = fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let lines: Vec<Line> = text
         .lines()
         .map(|raw| parse_line(raw).unwrap_or_else(|error| panic!("{error}")))
@@ -397,8 +423,7 @@ fn plain_open_example_records_initialize_and_a_plain_document_open() {
     assert_eq!(lines[0].source, "recorded");
     assert!(lines.iter().any(|line| {
         line.dir == Dir::ClientToServer
-            && line.message.get("method").and_then(Value::as_str)
-                == Some("textDocument/didOpen")
+            && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didOpen")
     }));
     assert!(lines.iter().any(|line| {
         line.dir == Dir::ServerToClient
@@ -406,8 +431,7 @@ fn plain_open_example_records_initialize_and_a_plain_document_open() {
     }));
     assert!(lines.iter().any(|line| {
         line.dir == Dir::ClientToServer
-            && line.message.get("method").and_then(Value::as_str)
-                == Some("textDocument/didChange")
+            && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
     }));
     assert!(lines.iter().all(|line| line.source == "recorded"));
 }
@@ -416,8 +440,11 @@ fn plain_open_example_records_initialize_and_a_plain_document_open() {
 fn example_lines(name: &str) -> Vec<Line> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = root.join(EXAMPLES_DIR);
-    let text = example_recordings::recordings(&path).unwrap().into_iter()
-        .find(|(logical, _)| logical == name).unwrap_or_else(|| panic!("missing example {name}"));
+    let text = example_recordings::recordings(&path)
+        .unwrap()
+        .into_iter()
+        .find(|(logical, _)| logical == name)
+        .unwrap_or_else(|| panic!("missing example {name}"));
     let text = String::from_utf8(text.1).expect("example is UTF-8");
     text.lines()
         .map(|raw| parse_line(raw).unwrap_or_else(|error| panic!("{error}")))
@@ -493,7 +520,9 @@ fn plain_document_prompt_example_records_the_prompt_document_exchange() {
         .as_array()
         .unwrap_or_else(|| panic!("executeCommand result has no effects: {:?}", opened.message));
     assert!(
-        effects.iter().any(|effect| effect["descriptor"]["kind"] == "prompt"),
+        effects
+            .iter()
+            .any(|effect| effect["descriptor"]["kind"] == "prompt"),
         "the command must report the pushed prompt view: {effects:?}"
     );
 
@@ -538,8 +567,7 @@ fn assert_commit_template_delivered(lines: &[Line]) {
         .iter()
         .find(|line| {
             line.dir == Dir::ServerToClient
-                && line.message.get("method").and_then(Value::as_str)
-                    == Some("workspace/applyEdit")
+                && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
                 && line.message["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"]
                     == draft_uri
         })
@@ -554,8 +582,7 @@ fn assert_commit_template_delivered(lines: &[Line]) {
     assert!(
         lines.iter().any(|line| {
             line.dir == Dir::ServerToClient
-                && line.message.get("method").and_then(Value::as_str)
-                    == Some("window/showDocument")
+                && line.message.get("method").and_then(Value::as_str) == Some("window/showDocument")
                 && line.message["params"]["uri"] == draft_uri
         }),
         "the draft buffer is shown"
@@ -568,11 +595,15 @@ fn offered_draft_action(lines: &[Line], command: &str) -> Value {
         .iter()
         .filter(|line| line.dir == Dir::ServerToClient)
         .find_map(|line| {
-            line.message.get("result")?.as_array()?.iter().find_map(|action| {
-                let arguments = action.get("command")?.get("arguments")?.get(0)?;
-                (arguments.get("command")? == command && arguments.get("runId")?.is_string())
-                    .then(|| arguments.clone())
-            })
+            line.message
+                .get("result")?
+                .as_array()?
+                .iter()
+                .find_map(|action| {
+                    let arguments = action.get("command")?.get("arguments")?.get(0)?;
+                    (arguments.get("command")? == command && arguments.get("runId")?.is_string())
+                        .then(|| arguments.clone())
+                })
         })
         .unwrap_or_else(|| panic!("{command} is offered for the draft"))
 }
@@ -682,9 +713,8 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let lines = example_lines("rich-lifecycle.jsonl");
     assert!(lines.iter().all(|line| line.source == "recorded"));
 
-    let method = |line: &Line, name: &str| {
-        line.message.get("method").and_then(Value::as_str) == Some(name)
-    };
+    let method =
+        |line: &Line, name: &str| line.message.get("method").and_then(Value::as_str) == Some(name);
     let phase = |line: &Line, kind: &str| {
         method(line, "$/progress") && line.message["params"]["value"]["kind"] == kind
     };
@@ -737,11 +767,12 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let begin = index(&|line| line.dir == Dir::ServerToClient && phase(line, "begin"));
     let end = index(&|line| line.dir == Dir::ServerToClient && phase(line, "end"));
     let key_id = lines[key].message["id"].clone();
-    let key_response = index(&|line| {
-        line.dir == Dir::ServerToClient && line.message.get("id") == Some(&key_id)
-    });
+    let key_response =
+        index(&|line| line.dir == Dir::ServerToClient && line.message.get("id") == Some(&key_id));
     let next_render = index(&|line| {
-        line.dir == Dir::ServerToClient && method(line, "view/render") && line.message["params"]["version"] == 2
+        line.dir == Dir::ServerToClient
+            && method(line, "view/render")
+            && line.message["params"]["version"] == 2
     });
 
     // The recorded ordering, as observed from the real server: create, begin and
@@ -766,11 +797,11 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     assert_eq!(token(create), token(begin));
     assert_eq!(token(begin), token(end));
     assert_eq!(lines[begin].message["params"]["value"]["title"], "Git");
-    assert_eq!(lines[begin].message["params"]["value"]["message"], "view/key");
     assert_eq!(
-        lines[begin].message["params"]["value"]["cancellable"],
-        true
+        lines[begin].message["params"]["value"]["message"],
+        "view/key"
     );
+    assert_eq!(lines[begin].message["params"]["value"]["cancellable"], true);
 
     assert_eq!(
         lines[next_render].message["params"]["viewId"], view_id,
@@ -880,7 +911,7 @@ const RECORDED_BINARY: &str = "/magit-lsp/target/debug/magit-lsp";
 /// prompt examples modify a one-line `f.txt`; the commit examples stage the
 /// standard change before running the Commit menu item.
 fn replay_fixture(name: &str) -> fixtures::RepoFixture {
-    use fixtures::{TEN_LINES, RepoFixture};
+    use fixtures::{RepoFixture, TEN_LINES};
     match name {
         "plain-open" | "rich-lifecycle" => RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
@@ -947,7 +978,10 @@ fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Val
     }
     let text = serde_json::to_string(&value).expect("serialise client frame");
     let text = text
-        .replace(&format!("file://{RECORDED_ROOT}"), &format!("file://{root}"))
+        .replace(
+            &format!("file://{RECORDED_ROOT}"),
+            &format!("file://{root}"),
+        )
         .replace(RECORDED_ROOT, root);
     serde_json::from_str(&text).expect("parse expanded client frame")
 }
@@ -1033,19 +1067,32 @@ fn edited_document_uris(message: &Map<String, Value>) -> Vec<String> {
 /// The version, range and new text of the sole edit in an `workspace/applyEdit`
 /// frame, when it has exactly one document change with exactly one edit.
 fn sole_text_edit(message: &Value) -> Option<(u64, Value, String)> {
-    let [change] = message.get("params")?.get("edit")?.get("documentChanges")?.as_array()?.as_slice() else {
+    let [change] = message
+        .get("params")?
+        .get("edit")?
+        .get("documentChanges")?
+        .as_array()?
+        .as_slice()
+    else {
         return None;
     };
     let [edit] = change.get("edits")?.as_array()?.as_slice() else {
         return None;
     };
     let version = change.get("textDocument")?.get("version")?.as_u64()?;
-    Some((version, edit.get("range")?.clone(), edit.get("newText")?.as_str()?.to_owned()))
+    Some((
+        version,
+        edit.get("range")?.clone(),
+        edit.get("newText")?.as_str()?.to_owned(),
+    ))
 }
 
 /// The UTF-16 position of an LSP `range` endpoint as a byte offset.
 fn position_offset(text: &str, position: &Value) -> Result<usize, String> {
-    let line = position.get("line").and_then(Value::as_u64).ok_or("edit position has no line")? as usize;
+    let line = position
+        .get("line")
+        .and_then(Value::as_u64)
+        .ok_or("edit position has no line")? as usize;
     let character = position
         .get("character")
         .and_then(Value::as_u64)
@@ -1235,15 +1282,25 @@ fn canonical_frame(
     hashes.normalize_frame(&mut value);
     let text = serde_json::to_string(&value).expect("serialise observed frame");
     let text = text
-        .replace(&format!("file://{root}"), &format!("file://{RECORDED_ROOT}"))
+        .replace(
+            &format!("file://{root}"),
+            &format!("file://{RECORDED_ROOT}"),
+        )
         .replace(root, RECORDED_ROOT)
         .replace(binary, RECORDED_BINARY);
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
 /// Return first differing JSON path and its values.
-fn first_difference<'a>(expected: &'a Value, observed: &'a Value) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
-    fn walk<'a>(expected: Option<&'a Value>, observed: Option<&'a Value>, path: &str) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
+fn first_difference<'a>(
+    expected: &'a Value,
+    observed: &'a Value,
+) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
+    fn walk<'a>(
+        expected: Option<&'a Value>,
+        observed: Option<&'a Value>,
+        path: &str,
+    ) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
         match (expected, observed) {
             (Some(Value::Object(a)), Some(Value::Object(b))) => {
                 for key in a.keys().chain(b.keys()) {
@@ -1263,7 +1320,15 @@ fn first_difference<'a>(expected: &'a Value, observed: &'a Value) -> Option<(Str
                 }
                 None
             }
-            _ => Some((if path.is_empty() { "$".to_owned() } else { path.to_owned() }, expected, observed)),
+            _ => Some((
+                if path.is_empty() {
+                    "$".to_owned()
+                } else {
+                    path.to_owned()
+                },
+                expected,
+                observed,
+            )),
         }
     }
     walk(Some(expected), Some(observed), "$")
@@ -1273,9 +1338,13 @@ const JSON_EXCERPT_LIMIT: usize = 240;
 
 /// Serialize a differing JSON value as a bounded excerpt.
 fn json_excerpt(value: Option<&Value>) -> String {
-    let Some(value) = value else { return "<missing>".to_owned() };
+    let Some(value) = value else {
+        return "<missing>".to_owned();
+    };
     let text = serde_json::to_string(value).expect("serialise JSON value");
-    let total = value.as_str().map_or_else(|| text.chars().count(), |value| value.chars().count());
+    let total = value
+        .as_str()
+        .map_or_else(|| text.chars().count(), |value| value.chars().count());
     if text.chars().count() <= JSON_EXCERPT_LIMIT {
         return format!("{text:?} ({total} chars total)");
     }
@@ -1305,7 +1374,9 @@ fn frame_identity(message: &Map<String, Value>) -> String {
 /// re-parsed as a recorded line, so an unexpected key or source is refused
 /// rather than written, and a changed exchange identity is an error.
 fn captured_line(line: &Line, observed: &Value) -> Result<String, String> {
-    let observed_object = observed.as_object().ok_or("captured frame is not an object")?;
+    let observed_object = observed
+        .as_object()
+        .ok_or("captured frame is not an object")?;
     let recorded_identity = frame_identity(&line.message);
     let observed_identity = frame_identity(observed_object);
     if recorded_identity != observed_identity {
@@ -1316,7 +1387,8 @@ fn captured_line(line: &Line, observed: &Value) -> Result<String, String> {
     let mut value: Value = serde_json::from_str(&line.raw).map_err(|error| error.to_string())?;
     value["message"] = observed.clone();
     let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
-    parse_line(&text).map_err(|error| format!("captured line is not a recorded exchange: {error}"))?;
+    parse_line(&text)
+        .map_err(|error| format!("captured line is not a recorded exchange: {error}"))?;
     Ok(text)
 }
 
@@ -1338,7 +1410,11 @@ fn captured_line(line: &Line, observed: &Value) -> Result<String, String> {
 /// Set `MAGIT_LSP_REGENERATE_EXAMPLES` (via `make update-examples`) to capture
 /// the server's current answers instead: see [`replay_example_mode`].
 fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
-    replay_example_mode(name, lines, std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some())
+    replay_example_mode(
+        name,
+        lines,
+        std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some(),
+    )
 }
 
 /// Replay one recorded example, optionally capturing instead of comparing.
@@ -1357,7 +1433,11 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
 /// text yields exactly the recorded echo), the echo is re-derived from the edit
 /// the current server actually sent. Authored or divergent client changes are
 /// left untouched, and a proven echo that cannot be re-derived is an error.
-fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<Vec<String>, String> {
+fn replay_example_mode(
+    name: &str,
+    lines: &[Line],
+    regenerate: bool,
+) -> Result<Vec<String>, String> {
     let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
@@ -1412,8 +1492,8 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                 }
                 if regenerate {
                     if let Some(update) = recorded_document_update(&line.message) {
-                        let opened =
-                            line.message.get("method").and_then(Value::as_str) == Some("textDocument/didOpen");
+                        let opened = line.message.get("method").and_then(Value::as_str)
+                            == Some("textDocument/didOpen");
                         let probe = expand_client_frame(&message, &root, run_id.as_deref());
                         let current_uri = probe["params"]["textDocument"]["uri"]
                             .as_str()
@@ -1423,7 +1503,8 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                             current_documents.insert(current_uri, update.text.clone());
                             pending_edits.remove(&update.uri);
                         } else {
-                            let current_text = current_documents.get(&current_uri).map(String::as_str);
+                            let current_text =
+                                current_documents.get(&current_uri).map(String::as_str);
                             let refreshed = refreshed_echo(
                                 &update.uri,
                                 update.version,
@@ -1434,7 +1515,8 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                             )
                             .map_err(|error| format!("{where_}: {error}"))?;
                             if let Some(refreshed) = &refreshed {
-                                message["params"]["contentChanges"][0]["text"] = Value::String(refreshed.clone());
+                                message["params"]["contentChanges"][0]["text"] =
+                                    Value::String(refreshed.clone());
                                 regenerated[index] = captured_line(line, &message)
                                     .map_err(|error| format!("{where_}: {error}"))?;
                             }
@@ -1454,15 +1536,16 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                 server.send(expand_client_frame(&message, &root, run_id.as_deref()));
             }
             Dir::ServerToClient => {
-                let mut actual = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv()))
-                    .map_err(|panic| {
-                        let detail = panic
-                            .downcast_ref::<String>()
-                            .map(String::as_str)
-                            .or_else(|| panic.downcast_ref::<&str>().copied())
-                            .unwrap_or("server receive panicked");
-                        format!("{where_}: {detail}")
-                    })?;
+                let mut actual =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv()))
+                        .map_err(|panic| {
+                            let detail = panic
+                                .downcast_ref::<String>()
+                                .map(String::as_str)
+                                .or_else(|| panic.downcast_ref::<&str>().copied())
+                                .unwrap_or("server receive panicked");
+                            format!("{where_}: {detail}")
+                        })?;
                 while ignore_keymaps
                     && actual.get("method").and_then(Value::as_str) == Some("view/keymap")
                 {
@@ -1483,8 +1566,9 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                 );
                 if observed != expected {
                     if !regenerate {
-                        let (path, expected_value, observed_value) = first_difference(&expected, &observed)
-                            .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
+                        let (path, expected_value, observed_value) =
+                            first_difference(&expected, &observed)
+                                .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
                         return Err(format!(
                             "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
                             json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
@@ -1494,10 +1578,13 @@ fn replay_example_mode(name: &str, lines: &[Line], regenerate: bool) -> Result<V
                     // of blessing the stale recording, but only for the same
                     // exchange: a different method or request/response id is a
                     // replay failure, not a capture.
-                    regenerated[index] =
-                        captured_line(line, &observed).map_err(|error| format!("{where_}: {error}"))?;
+                    regenerated[index] = captured_line(line, &observed)
+                        .map_err(|error| format!("{where_}: {error}"))?;
                 }
-                if regenerate && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit") {
+                if regenerate
+                    && line.message.get("method").and_then(Value::as_str)
+                        == Some("workspace/applyEdit")
+                {
                     let recorded = Value::Object(line.message.clone());
                     let pending = match (sole_text_edit(&recorded), sole_text_edit(&actual)) {
                         (
@@ -1550,7 +1637,10 @@ const MAINTAINED_RECORDINGS: [&str; 6] = [
 fn regeneration_artifacts(name: &str) -> Result<Vec<&'static str>, String> {
     let artifacts: &[&str] = match name {
         "commit-edit-abort.jsonl" => &["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"],
-        "commit-edit-confirm.jsonl" => &["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"],
+        "commit-edit-confirm.jsonl" => &[
+            "commit-edit-confirm-01.jsonl",
+            "commit-edit-confirm-02.jsonl",
+        ],
         "plain-open.jsonl" => &["plain-open.jsonl"],
         "rich-lifecycle.jsonl" => &["rich-lifecycle.jsonl"],
         "plain-code-action.jsonl" => &["plain-code-action.jsonl"],
@@ -1561,7 +1651,10 @@ fn regeneration_artifacts(name: &str) -> Result<Vec<&'static str>, String> {
 }
 
 /// Split regenerated lines across the exact artifacts that recorded them.
-fn regenerated_fragments(name: &str, lines: &[String]) -> Result<Vec<(std::path::PathBuf, String)>, String> {
+fn regenerated_fragments(
+    name: &str,
+    lines: &[String],
+) -> Result<Vec<(std::path::PathBuf, String)>, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLES_DIR);
     let artifacts = regeneration_artifacts(name)?;
     let mut fragments = Vec::new();
@@ -1571,13 +1664,25 @@ fn regenerated_fragments(name: &str, lines: &[String]) -> Result<Vec<(std::path:
         let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
         // Fragmented recordings keep their recorded line boundaries; a
         // monolithic recording owns every remaining line.
-        let end = if artifacts.len() == 1 { lines.len() } else { offset + original.lines().count() };
-        let content = lines.get(offset..end).ok_or("missing fragment lines")?.join("\n") + "\n";
-        if content.len() >= 100_000 { return Err(format!("fragment too large: {} bytes", content.len())); }
+        let end = if artifacts.len() == 1 {
+            lines.len()
+        } else {
+            offset + original.lines().count()
+        };
+        let content = lines
+            .get(offset..end)
+            .ok_or("missing fragment lines")?
+            .join("\n")
+            + "\n";
+        if content.len() >= 100_000 {
+            return Err(format!("fragment too large: {} bytes", content.len()));
+        }
         fragments.push((path, content));
         offset = end;
     }
-    if offset != lines.len() { return Err("unrecorded fragment lines".into()); }
+    if offset != lines.len() {
+        return Err("unrecorded fragment lines".into());
+    }
     Ok(fragments)
 }
 
@@ -1585,12 +1690,21 @@ fn regenerated_fragments(name: &str, lines: &[String]) -> Result<Vec<(std::path:
 #[test]
 fn capture_preserves_fragments_and_rejects_overflow() {
     for name in ["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"] {
-        let mut lines: Vec<String> = example_lines(name).into_iter().map(|line| line.raw).collect();
+        let mut lines: Vec<String> = example_lines(name)
+            .into_iter()
+            .map(|line| line.raw)
+            .collect();
         for (path, content) in regenerated_fragments(name, &lines).unwrap() {
-            assert_eq!(content, fs::read_to_string(path).unwrap(), "unchanged source bytes and fragment boundaries");
+            assert_eq!(
+                content,
+                fs::read_to_string(path).unwrap(),
+                "unchanged source bytes and fragment boundaries"
+            );
         }
         lines[0] = "x".repeat(100_000);
-        assert!(regenerated_fragments(name, &lines).unwrap_err().contains("fragment too large"));
+        assert!(regenerated_fragments(name, &lines)
+            .unwrap_err()
+            .contains("fragment too large"));
     }
     assert!(regenerated_fragments("unrelated.jsonl", &[]).is_err());
 }
@@ -1599,20 +1713,57 @@ fn capture_preserves_fragments_and_rejects_overflow() {
 #[test]
 fn regeneration_keeps_fragment_mapping_and_rejects_unrelated_names() {
     for name in MAINTAINED_RECORDINGS {
-        let lines: Vec<String> = example_lines(name).into_iter().map(|line| line.raw).collect();
-        let fragments = regenerated_fragments(name, &lines).unwrap_or_else(|error| panic!("{name}: {error}"));
-        let artifacts = fragments.iter().map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>();
-        assert_eq!(artifacts, regeneration_artifacts(name).unwrap(), "{name} maps to its own artifacts");
-        assert_eq!(fragments.iter().map(|(_, content)| content.lines().count()).sum::<usize>(), lines.len(), "{name} covers every recorded line exactly once");
+        let lines: Vec<String> = example_lines(name)
+            .into_iter()
+            .map(|line| line.raw)
+            .collect();
+        let fragments =
+            regenerated_fragments(name, &lines).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let artifacts = fragments
+            .iter()
+            .map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            artifacts,
+            regeneration_artifacts(name).unwrap(),
+            "{name} maps to its own artifacts"
+        );
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|(_, content)| content.lines().count())
+                .sum::<usize>(),
+            lines.len(),
+            "{name} covers every recorded line exactly once"
+        );
         for (path, content) in fragments {
-            assert_eq!(content, fs::read_to_string(&path).unwrap(), "{name} keeps {} byte-identical", path.display());
+            assert_eq!(
+                content,
+                fs::read_to_string(&path).unwrap(),
+                "{name} keeps {} byte-identical",
+                path.display()
+            );
         }
     }
-    assert_eq!(regeneration_artifacts("commit-edit-abort.jsonl").unwrap(), ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"]);
-    assert_eq!(regeneration_artifacts("plain-open.jsonl").unwrap(), ["plain-open.jsonl"]);
-    for unrelated in ["example.jsonl", "plain-open-03.jsonl", "commit-edit-abort-01.jsonl"] {
-        let error = regenerated_fragments(unrelated, &[]).expect_err("unrelated recording must be refused");
-        assert!(error.contains("refusing to regenerate unrelated recording"), "{unrelated}: {error}");
+    assert_eq!(
+        regeneration_artifacts("commit-edit-abort.jsonl").unwrap(),
+        ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"]
+    );
+    assert_eq!(
+        regeneration_artifacts("plain-open.jsonl").unwrap(),
+        ["plain-open.jsonl"]
+    );
+    for unrelated in [
+        "example.jsonl",
+        "plain-open-03.jsonl",
+        "commit-edit-abort-01.jsonl",
+    ] {
+        let error =
+            regenerated_fragments(unrelated, &[]).expect_err("unrelated recording must be refused");
+        assert!(
+            error.contains("refusing to regenerate unrelated recording"),
+            "{unrelated}: {error}"
+        );
     }
 }
 
@@ -1624,7 +1775,9 @@ fn plain_examples_replay_against_the_real_binary() {
         let lines = example_lines(name);
         let captured = replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
         if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
-            fragments.extend(regenerated_fragments(name, &captured).unwrap_or_else(|error| panic!("{error}")));
+            fragments.extend(
+                regenerated_fragments(name, &captured).unwrap_or_else(|error| panic!("{error}")),
+            );
         }
     }
     // Validate every exchange and fragment before writing any recording.
@@ -1638,10 +1791,23 @@ fn plain_examples_replay_against_the_real_binary() {
 fn commit_edit_action_order_is_strict() {
     for name in ["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"] {
         let mut lines = example_lines(name);
-        let response = lines.iter_mut().find(|line| line.dir == Dir::ServerToClient && line.message.get("result").is_some_and(Value::is_array)).unwrap();
-        response.message["result"].as_array_mut().unwrap().swap(0, 1);
-        let error = replay_example(name, &lines).expect_err("reordered actions must fail normal replay");
-        assert!(error.contains("recorded s2c frame mismatch at $.result[0]"), "{error}");
+        let response = lines
+            .iter_mut()
+            .find(|line| {
+                line.dir == Dir::ServerToClient
+                    && line.message.get("result").is_some_and(Value::is_array)
+            })
+            .unwrap();
+        response.message["result"]
+            .as_array_mut()
+            .unwrap()
+            .swap(0, 1);
+        let error =
+            replay_example(name, &lines).expect_err("reordered actions must fail normal replay");
+        assert!(
+            error.contains("recorded s2c frame mismatch at $.result[0]"),
+            "{error}"
+        );
     }
 }
 
@@ -1694,8 +1860,15 @@ fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
     assert!(error.contains("recorded s2c frame mismatch"), "{error}");
     let captured = replay_example_mode("plain-code-action.jsonl", &stale, true)
         .expect("regeneration captures the current frames");
-    assert_eq!(captured.len(), stale.len(), "regeneration keeps every recorded line");
-    let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    assert_eq!(
+        captured.len(),
+        stale.len(),
+        "regeneration keeps every recorded line"
+    );
+    let mut reparsed: Vec<Line> = captured
+        .iter()
+        .map(|raw| parse_line(raw).expect("captured lines parse"))
+        .collect();
     replay_example_mode("plain-code-action.jsonl", &reparsed, false)
         .expect("captured frames replay strictly against the same server");
     assert_ne!(
@@ -1722,7 +1895,10 @@ fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
     let current = example_lines("commit-edit-abort.jsonl");
     let index = current
         .iter()
-        .position(|line| line.dir == Dir::ServerToClient && line.message.get("result").is_some_and(Value::is_array))
+        .position(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("result").is_some_and(Value::is_array)
+        })
         .expect("the recorded code-action response");
     replay_example_mode("commit-edit-abort.jsonl", &current, false)
         .expect("the committed recording replays strictly before it is perturbed");
@@ -1730,24 +1906,31 @@ fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
         .iter()
         .map(|line| parse_line(&line.raw).expect("recorded lines reparse"))
         .collect();
-    stale[index].message["result"][0]["title"] = Value::String("Stale: not the current registry".to_owned());
+    stale[index].message["result"][0]["title"] =
+        Value::String("Stale: not the current registry".to_owned());
     let error = replay_example_mode("commit-edit-abort.jsonl", &stale, false)
         .expect_err("strict replay must reject the stale recording");
     assert!(error.contains("recorded s2c frame mismatch"), "{error}");
     let captured = replay_example_mode("commit-edit-abort.jsonl", &stale, true)
         .expect("regeneration captures the current code actions");
-    let mut reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    let mut reparsed: Vec<Line> = captured
+        .iter()
+        .map(|raw| parse_line(raw).expect("captured lines parse"))
+        .collect();
     replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
         .expect("captured frames replay strictly against the same server");
     assert_ne!(
-        reparsed[index].message["result"][0]["title"],
-        stale[index].message["result"][0]["title"],
+        reparsed[index].message["result"][0]["title"], stale[index].message["result"][0]["title"],
         "regeneration replaced the stale action with the current registry entry"
     );
-    reparsed[index].message["result"][0]["title"] = Value::String("Drifted: not the current registry".to_owned());
+    reparsed[index].message["result"][0]["title"] =
+        Value::String("Drifted: not the current registry".to_owned());
     let error = replay_example_mode("commit-edit-abort.jsonl", &reparsed, false)
         .expect_err("strict replay must reject the changed action");
-    assert!(error.contains("recorded s2c frame mismatch at $.result[0].title"), "{error}");
+    assert!(
+        error.contains("recorded s2c frame mismatch at $.result[0].title"),
+        "{error}"
+    );
 }
 
 /// Regeneration refuses a captured frame that changes the recorded exchange.
@@ -1765,7 +1948,10 @@ fn regeneration_refuses_a_changed_exchange_identity() {
     let mut observed = Value::Object(request.message.clone());
     observed["params"] = serde_json::json!({"drifted": true});
     let captured = captured_line(request, &observed).expect("a payload change is captured");
-    assert_eq!(parse_line(&captured).expect("the captured line parses").dir, Dir::ServerToClient);
+    assert_eq!(
+        parse_line(&captured).expect("the captured line parses").dir,
+        Dir::ServerToClient
+    );
     let method = observed["method"].clone();
     observed["method"] = Value::String("workspace/notApplyEdit".to_owned());
     let error = captured_line(request, &observed).expect_err("a renamed method is refused");
@@ -1794,14 +1980,16 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
         .iter()
         .position(|line| {
             line.dir == Dir::ClientToServer
-                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didOpen")
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didOpen")
         })
         .expect("the recorded document open");
     let echo = current
         .iter()
         .position(|line| {
             line.dir == Dir::ClientToServer
-                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
         })
         .expect("the recorded client echo");
     // Build a coherent stale recording: every server render and every client
@@ -1816,13 +2004,17 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
     for line in stale.iter_mut() {
         match line.message.get("method").and_then(Value::as_str) {
             Some("workspace/applyEdit") => {
-                if let Some(changes) = line.message["params"]["edit"]["documentChanges"].as_array_mut() {
+                if let Some(changes) =
+                    line.message["params"]["edit"]["documentChanges"].as_array_mut()
+                {
                     for change in changes {
                         if let Some(edits) = change["edits"].as_array_mut() {
                             for edit in edits {
                                 if let Some(text) = edit["newText"].as_str() {
                                     if text.contains("Head: main") {
-                                        edit["newText"] = Value::String(text.replace("Head: main", "Head: stale"));
+                                        edit["newText"] = Value::String(
+                                            text.replace("Head: main", "Head: stale"),
+                                        );
                                         replaced += 1;
                                     }
                                 }
@@ -1836,7 +2028,8 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
                     .as_str()
                     .is_some_and(|uri| uri.ends_with("/.magit"));
                 if is_status {
-                    if let Some(text) = line.message["params"]["contentChanges"][0]["text"].as_str() {
+                    if let Some(text) = line.message["params"]["contentChanges"][0]["text"].as_str()
+                    {
                         line.message["params"]["contentChanges"][0]["text"] =
                             Value::String(text.replace("Head: main", "Head: stale"));
                         replaced += 1;
@@ -1846,16 +2039,21 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
             _ => {}
         }
     }
-    assert!(replaced >= 3, "the stale recording keeps its renders and echoes coherent");
+    assert!(
+        replaced >= 3,
+        "the stale recording keeps its renders and echoes coherent"
+    );
     let opened = stale[open].message["params"]["textDocument"]["text"]
         .as_str()
         .expect("the recorded opened text")
         .to_owned();
-    let stale_text = stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"]
+    let stale_text = stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]
+        ["newText"]
         .as_str()
         .expect("the recorded render text")
         .to_owned();
-    let stale_range = stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["range"].clone();
+    let stale_range =
+        stale[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["range"].clone();
     let stale_echo = stale[echo].message["params"]["contentChanges"][0]["text"]
         .as_str()
         .expect("the recorded echo text")
@@ -1868,25 +2066,44 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
 
     let error = replay_example_mode(name, &stale, false)
         .expect_err("strict replay must reject the coherent stale echo");
-    assert!(error.contains("recorded s2c frame mismatch") && error.contains("Head: stale"), "{error}");
+    assert!(
+        error.contains("recorded s2c frame mismatch") && error.contains("Head: stale"),
+        "{error}"
+    );
 
     let captured = replay_example_mode(name, &stale, true)
         .expect("regeneration refreshes the bound echo and captures the rest");
-    let reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
+    let reparsed: Vec<Line> = captured
+        .iter()
+        .map(|raw| parse_line(raw).expect("captured lines parse"))
+        .collect();
     replay_example_mode(name, &reparsed, false)
         .expect("the refreshed echo and the captured frames replay strictly");
 
-    let observed_text = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"]
+    let observed_text = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"]
+        [0]["newText"]
         .as_str()
         .expect("the captured render text");
-    let observed_range = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"][0]["range"].clone();
-    let expected_echo = apply_text_edit(&opened, &observed_range, observed_text).expect("the observed edit applies");
+    let observed_range = reparsed[render].message["params"]["edit"]["documentChanges"][0]["edits"]
+        [0]["range"]
+        .clone();
+    let expected_echo = apply_text_edit(&opened, &observed_range, observed_text)
+        .expect("the observed edit applies");
     let observed_echo = reparsed[echo].message["params"]["contentChanges"][0]["text"]
         .as_str()
         .expect("the refreshed echo text");
-    assert_ne!(observed_echo, stale_echo, "regeneration replaced the stale echo");
-    assert_eq!(observed_echo, expected_echo, "the echo is the observed server edit applied to the opened text");
-    assert!(observed_echo.contains("Keys: off (built-in)"), "the echo carries the current render");
+    assert_ne!(
+        observed_echo, stale_echo,
+        "regeneration replaced the stale echo"
+    );
+    assert_eq!(
+        observed_echo, expected_echo,
+        "the echo is the observed server edit applied to the opened text"
+    );
+    assert!(
+        observed_echo.contains("Keys: off (built-in)"),
+        "the echo carries the current render"
+    );
 }
 
 /// Regeneration never rewrites authored client edits: a commit message the
@@ -1896,20 +2113,33 @@ fn regeneration_echo_leaves_authored_client_edits_unchanged() {
     let name = "commit-edit-confirm.jsonl";
     let captured = replay_example_mode(name, &example_lines(name), true)
         .expect("regeneration captures the commit example");
-    let reparsed: Vec<Line> = captured.iter().map(|raw| parse_line(raw).expect("captured lines parse")).collect();
-    replay_example_mode(name, &reparsed, false).expect("the captured commit example replays strictly");
+    let reparsed: Vec<Line> = captured
+        .iter()
+        .map(|raw| parse_line(raw).expect("captured lines parse"))
+        .collect();
+    replay_example_mode(name, &reparsed, false)
+        .expect("the captured commit example replays strictly");
     let authored = reparsed
         .iter()
         .find_map(|line| {
             let is_authored = line.dir == Dir::ClientToServer
-                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
                 && line.message["params"]["textDocument"]["uri"]
                     .as_str()
                     .is_some_and(|uri| uri.ends_with(".git/COMMIT_EDITMSG"));
-            is_authored.then(|| line.message["params"]["contentChanges"][0]["text"].as_str().unwrap().to_owned())
+            is_authored.then(|| {
+                line.message["params"]["contentChanges"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
         })
         .expect("the authored commit-message change");
-    assert_eq!(authored, "Recorded commit body\n", "an authored change is never rewritten");
+    assert_eq!(
+        authored, "Recorded commit body\n",
+        "an authored change is never rewritten"
+    );
 }
 
 /// Regeneration refuses to rewrite a divergent echo, and refuses a captured
@@ -1922,7 +2152,8 @@ fn regeneration_echo_refuses_divergent_edits_and_identity_changes() {
         .iter()
         .position(|line| {
             line.dir == Dir::ClientToServer
-                && line.message.get("method").and_then(Value::as_str) == Some("textDocument/didChange")
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
         })
         .expect("the recorded client echo");
     // A didChange that does not equal the recorded edit applied to the recorded
@@ -1938,7 +2169,10 @@ fn regeneration_echo_refuses_divergent_edits_and_identity_changes() {
     divergent[echo].message["params"]["contentChanges"][0]["text"] = Value::String(divergent_text);
     let error = replay_example_mode(name, &divergent, true)
         .expect_err("a divergent echo must not be rewritten or accepted");
-    assert!(error.contains("identity changed"), "the server's correction is refused: {error}");
+    assert!(
+        error.contains("identity changed"),
+        "the server's correction is refused: {error}"
+    );
 
     // Regeneration must still refuse a recorded server exchange whose observed
     // identity differs, even when the payload could be captured.
@@ -1971,7 +2205,8 @@ fn a_divergent_rich_expectation_fails_the_replay() {
                 && line.message["params"]["version"] == 1
         })
         .expect("the recorded initial rich render");
-    render.message["params"]["text"][0] = Value::String("Head: not the recorded rich render".to_owned());
+    render.message["params"]["text"][0] =
+        Value::String("Head: not the recorded rich render".to_owned());
     let error = replay_example("rich-lifecycle.jsonl", &lines)
         .expect_err("a divergent rich frame must fail the replay");
     assert!(
@@ -2023,7 +2258,11 @@ fn mismatch_message_reports_differing_values_and_path() {
     let expected = serde_json::json!({"result":[{"command":"a"},{"command":"b"}]});
     let observed = serde_json::json!({"result":[{"command":"a"},{"command":"c"}]});
     let (path, expected_value, observed_value) = first_difference(&expected, &observed).unwrap();
-    let message = format!("at {path} expected: {} observed: {}", json_excerpt(expected_value), json_excerpt(observed_value));
+    let message = format!(
+        "at {path} expected: {} observed: {}",
+        json_excerpt(expected_value),
+        json_excerpt(observed_value)
+    );
     assert!(message.contains("$.result[1].command"));
     assert!(message.contains(r#"expected: "\"b\"""#));
     assert!(message.contains(r#"observed: "\"c\"""#));
@@ -2033,7 +2272,10 @@ fn mismatch_message_reports_differing_values_and_path() {
 fn json_excerpt_bounds_long_values() {
     let value = Value::String("x".repeat(500));
     let excerpt = json_excerpt(Some(&value));
-    assert_eq!(excerpt.split("...").next().unwrap().matches('x').count(), 239);
+    assert_eq!(
+        excerpt.split("...").next().unwrap().matches('x').count(),
+        239
+    );
     assert!(excerpt.contains("500 chars total"));
     assert!(!excerpt.contains(&"x".repeat(500)));
 }

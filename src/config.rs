@@ -248,14 +248,43 @@ pub struct EffectivePlainKeys {
 }
 
 /// Resolve key-policy settings without consulting repository state.
-pub fn resolve_plain_keys(settings: &PlainSettings, client_name: Option<&str>, document: Option<bool>, quirk_allowed: bool) -> EffectivePlainKeys {
-    if !quirk_allowed { return EffectivePlainKeys { enabled: false, source: PlainKeysSource::Quirk }; }
-    if let Some(enabled) = document { return EffectivePlainKeys { enabled, source: PlainKeysSource::Document }; }
-    if let Some(enabled) = client_name.and_then(|name| settings.keys_clients.get(name)).copied() {
-        return EffectivePlainKeys { enabled, source: PlainKeysSource::ExactClient };
+pub fn resolve_plain_keys(
+    settings: &PlainSettings,
+    client_name: Option<&str>,
+    document: Option<bool>,
+    quirk_allowed: bool,
+) -> EffectivePlainKeys {
+    if !quirk_allowed {
+        return EffectivePlainKeys {
+            enabled: false,
+            source: PlainKeysSource::Quirk,
+        };
     }
-    if settings.keys_default { return EffectivePlainKeys { enabled: true, source: PlainKeysSource::UserDefault }; }
-    EffectivePlainKeys { enabled: false, source: PlainKeysSource::BuiltIn }
+    if let Some(enabled) = document {
+        return EffectivePlainKeys {
+            enabled,
+            source: PlainKeysSource::Document,
+        };
+    }
+    if let Some(enabled) = client_name
+        .and_then(|name| settings.keys_clients.get(name))
+        .copied()
+    {
+        return EffectivePlainKeys {
+            enabled,
+            source: PlainKeysSource::ExactClient,
+        };
+    }
+    if settings.keys_default {
+        return EffectivePlainKeys {
+            enabled: true,
+            source: PlainKeysSource::UserDefault,
+        };
+    }
+    EffectivePlainKeys {
+        enabled: false,
+        source: PlainKeysSource::BuiltIn,
+    }
 }
 
 /// Pick preference limits, global or per client name.
@@ -572,8 +601,12 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     if let Some(max) = layered.plain_max_section_lines {
         config.plain.max_section_lines = max;
     }
-    if let Some(timeout) = layered.plain_keys_pair_timeout_ms { config.plain.keys_pair_timeout_ms = timeout; }
-    if let Some(enabled) = layered.plain_keys_default { config.plain.keys_default = enabled; }
+    if let Some(timeout) = layered.plain_keys_pair_timeout_ms {
+        config.plain.keys_pair_timeout_ms = timeout;
+    }
+    if let Some(enabled) = layered.plain_keys_default {
+        config.plain.keys_default = enabled;
+    }
     config.plain.keys_clients.extend(layered.plain_keys_clients);
     if let Some(max_items) = layered.pick_max_items {
         config.pick.max_items = Some(max_items);
@@ -851,18 +884,49 @@ fn apply_document(
                             for (key, value) in keys.iter() {
                                 match key {
                                     "pair_timeout_ms" => {
-                                        let timeout = integer(value, "plain.keys.pair_timeout_ms", file, item_line(source, value))?;
-                                        if timeout == 0 { return Err(ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file_line(file, item_line(source, value))); }
+                                        let timeout = integer(
+                                            value,
+                                            "plain.keys.pair_timeout_ms",
+                                            file,
+                                            item_line(source, value),
+                                        )?;
+                                        if timeout == 0 {
+                                            return Err(ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file_line(file, item_line(source, value)));
+                                        }
                                         layered.plain_keys_pair_timeout_ms = Some(timeout as u64);
                                     }
-                                    "default" => layered.plain_keys_default = Some(value.as_bool().ok_or_else(|| ConfigError::new("`plain.keys.default` must be a boolean").at_file_line(file, item_line(source, value)))?),
+                                    "default" => {
+                                        layered.plain_keys_default =
+                                            Some(value.as_bool().ok_or_else(|| {
+                                                ConfigError::new(
+                                                    "`plain.keys.default` must be a boolean",
+                                                )
+                                                .at_file_line(file, item_line(source, value))
+                                            })?)
+                                    }
                                     "clients" => {
-                                        for (client, enabled) in settings_table(value, "plain.keys.clients", file, item_line(source, value))?.iter() {
+                                        for (client, enabled) in settings_table(
+                                            value,
+                                            "plain.keys.clients",
+                                            file,
+                                            item_line(source, value),
+                                        )?
+                                        .iter()
+                                        {
                                             let client_value = enabled.as_bool().ok_or_else(|| ConfigError::new(format!("`plain.keys.clients.{client}` must be a boolean")).at_file_line(file, item_line(source, enabled)))?;
-                                            layered.plain_keys_clients.insert(client.to_string(), client_value);
+                                            layered
+                                                .plain_keys_clients
+                                                .insert(client.to_string(), client_value);
                                         }
                                     }
-                                    _ => return Err(unknown_key(file, item_line(source, value), "plain.keys", key)),
+                                    _ => {
+                                        return Err(unknown_key(
+                                            file,
+                                            item_line(source, value),
+                                            "plain.keys",
+                                            key,
+                                        ))
+                                    }
                                 }
                             }
                         }
@@ -878,10 +942,8 @@ fn apply_document(
                         "max_items" => {
                             let max = integer(value, "pick.max_items", file, line)?;
                             layered.pick_max_items = Some(usize::try_from(max).map_err(|_| {
-                                ConfigError::new(
-                                    "`pick.max_items` must be a non-negative integer",
-                                )
-                                .at_file_line(file, line)
+                                ConfigError::new("`pick.max_items` must be a non-negative integer")
+                                    .at_file_line(file, line)
                             })?);
                         }
                         "clients" => {
@@ -1143,13 +1205,49 @@ fn apply_initialization(config: &mut Config, value: &serde_json::Value) -> Resul
         };
         for (name, value) in plain {
             if name == "keys" {
-                let keys=value.as_object().ok_or_else(||ConfigError::new("`plain.keys` must be an object").at_file(&label))?;
-                for (key,v) in keys {
+                let keys = value.as_object().ok_or_else(|| {
+                    ConfigError::new("`plain.keys` must be an object").at_file(&label)
+                })?;
+                for (key, v) in keys {
                     match key.as_str() {
-                        "pair_timeout_ms" => { let timeout=v.as_u64().filter(|n|*n>0).ok_or_else(||ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file(&label))?; config.plain.keys_pair_timeout_ms=timeout; }
-                        "default" => config.plain.keys_default=v.as_bool().ok_or_else(||ConfigError::new("`plain.keys.default` must be a boolean").at_file(&label))?,
-                        "clients" => { let clients=v.as_object().ok_or_else(||ConfigError::new("`plain.keys.clients` must be an object").at_file(&label))?; for (client,enabled) in clients { config.plain.keys_clients.insert(client.clone(), enabled.as_bool().ok_or_else(||ConfigError::new(format!("`plain.keys.clients.{client}` must be a boolean")).at_file(&label))?); } }
-                        _ => return Err(ConfigError::new(format!("unknown setting `plain.keys.{key}`")).at_file(&label)),
+                        "pair_timeout_ms" => {
+                            let timeout = v.as_u64().filter(|n| *n > 0).ok_or_else(|| {
+                                ConfigError::new(
+                                    "`plain.keys.pair_timeout_ms` must be a positive integer",
+                                )
+                                .at_file(&label)
+                            })?;
+                            config.plain.keys_pair_timeout_ms = timeout;
+                        }
+                        "default" => {
+                            config.plain.keys_default = v.as_bool().ok_or_else(|| {
+                                ConfigError::new("`plain.keys.default` must be a boolean")
+                                    .at_file(&label)
+                            })?
+                        }
+                        "clients" => {
+                            let clients = v.as_object().ok_or_else(|| {
+                                ConfigError::new("`plain.keys.clients` must be an object")
+                                    .at_file(&label)
+                            })?;
+                            for (client, enabled) in clients {
+                                config.plain.keys_clients.insert(
+                                    client.clone(),
+                                    enabled.as_bool().ok_or_else(|| {
+                                        ConfigError::new(format!(
+                                            "`plain.keys.clients.{client}` must be a boolean"
+                                        ))
+                                        .at_file(&label)
+                                    })?,
+                                );
+                            }
+                        }
+                        _ => {
+                            return Err(ConfigError::new(format!(
+                                "unknown setting `plain.keys.{key}`"
+                            ))
+                            .at_file(&label))
+                        }
                     }
                 }
                 continue;

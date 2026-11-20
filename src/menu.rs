@@ -425,10 +425,15 @@ impl<'a> Builder<'a> {
         let line = self.tree.lines.len();
         let id = format!("menu:{}/title", self.menu.id);
         self.tree.lines.push(format!(" {}", self.menu.title));
-        self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Header));
         self.tree
-            .nodes
-            .push(Node::new(&id, NodeKind::Header, self.menu.title.clone(), line));
+            .line_nodes
+            .push(LineNode::new(&id, NodeKind::Header));
+        self.tree.nodes.push(Node::new(
+            &id,
+            NodeKind::Header,
+            self.menu.title.clone(),
+            line,
+        ));
         self.token(line, 1, self.menu.title.len(), "magit.menu.title");
     }
 
@@ -452,7 +457,8 @@ impl<'a> Builder<'a> {
             self.token(line, 1, group.title.len(), "magit.menu.group");
 
             let index = self.tree.nodes.len();
-            let mut group_node = Node::new(&group_id, NodeKind::Section, group.title.clone(), start);
+            let mut group_node =
+                Node::new(&group_id, NodeKind::Section, group.title.clone(), start);
             self.tree.nodes.push(group_node.clone());
 
             let mut children = Vec::new();
@@ -594,7 +600,9 @@ impl<'a> Builder<'a> {
         let text = self.menu.preview();
         let id = format!("menu:{}/preview", self.menu.id);
         self.tree.lines.push(format!(" {text}"));
-        self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Message));
+        self.tree
+            .line_nodes
+            .push(LineNode::new(&id, NodeKind::Message));
         self.tree
             .nodes
             .push(Node::new(&id, NodeKind::Message, text.clone(), line));

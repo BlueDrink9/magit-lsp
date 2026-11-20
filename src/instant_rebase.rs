@@ -14,9 +14,16 @@ pub enum InstantRebaseOutcome {
     /// Git failed to create the marker commit.
     MarkerFailed(String),
     /// Marker exists, but autosquash launch or completion failed.
-    RebaseStopped { marker: String, phase: String, error: String },
+    RebaseStopped {
+        marker: String,
+        phase: String,
+        error: String,
+    },
     /// Autosquash completed; Git's commit machinery may report a warning.
-    Completed { marker: String, warning: Option<String> },
+    Completed {
+        marker: String,
+        warning: Option<String>,
+    },
 }
 
 /// Autosquash operation selected before repository execution begins.
@@ -42,20 +49,31 @@ pub struct InstantRebaseAuthority {
 
 impl InstantRebaseAuthority {
     /// Execute a captured autosquash, retaining every mutation after execution starts.
-    pub fn execute(&self, repo: &GitRepo, executable: &Path, editor_env: &[(&str, &str)]) -> InstantRebaseOutcome {
+    pub fn execute(
+        &self,
+        repo: &GitRepo,
+        executable: &Path,
+        editor_env: &[(&str, &str)],
+    ) -> InstantRebaseOutcome {
         let cancel = runner::current_cancel();
         let stopped = |marker: String| InstantRebaseOutcome::RebaseStopped {
             marker,
             phase: "cancelled".into(),
             error: "operation cancelled".into(),
         };
-        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+        if cancel
+            .as_ref()
+            .is_some_and(runner::CancelHandle::was_requested)
+        {
             return stopped(String::new());
         }
         if let Err(error) = self.validate(repo) {
             return InstantRebaseOutcome::Refused(error.to_string());
         }
-        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+        if cancel
+            .as_ref()
+            .is_some_and(runner::CancelHandle::was_requested)
+        {
             return stopped(String::new());
         }
         let target = self.target.clone();
@@ -71,17 +89,43 @@ impl InstantRebaseAuthority {
         };
         let marker = match repo.head_identity() {
             Ok((head, _)) => head,
-            Err(error) => return InstantRebaseOutcome::RebaseStopped { marker: String::new(), phase: "marker verification".into(), error: error.to_string() },
+            Err(error) => {
+                return InstantRebaseOutcome::RebaseStopped {
+                    marker: String::new(),
+                    phase: "marker verification".into(),
+                    error: error.to_string(),
+                }
+            }
         };
         if let Err(error) = repo.verify_autosquash_marker(&marker, &self.head, &marker_message) {
-            return InstantRebaseOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
+            return InstantRebaseOutcome::RebaseStopped {
+                marker,
+                phase: "marker verification".into(),
+                error: error.to_string(),
+            };
         }
-        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+        if cancel
+            .as_ref()
+            .is_some_and(runner::CancelHandle::was_requested)
+        {
             return stopped(marker);
         }
-        match repo.launch_interactive_rebase_with_env(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable, editor_env) {
-            Ok(()) => InstantRebaseOutcome::Completed { marker, warning: commit.warning },
-            Err(error) => InstantRebaseOutcome::RebaseStopped { marker, phase: "autosquash".into(), error: error.to_string() },
+        match repo.launch_interactive_rebase_with_env(
+            &self.base,
+            None,
+            SequenceEditorPolicy::PreserveAutosquash,
+            executable,
+            editor_env,
+        ) {
+            Ok(()) => InstantRebaseOutcome::Completed {
+                marker,
+                warning: commit.warning,
+            },
+            Err(error) => InstantRebaseOutcome::RebaseStopped {
+                marker,
+                phase: "autosquash".into(),
+                error: error.to_string(),
+            },
         }
     }
 
@@ -90,13 +134,16 @@ impl InstantRebaseAuthority {
         let repository = repo.repository_identity()?;
         let (head, head_reference) = repo.head_identity()?;
         let target = repo.resolve_commit(target)?;
-        let base = repo.resolve_commit(&format!("{target}^"))
+        let base = repo
+            .resolve_commit(&format!("{target}^"))
             .map_err(|_| Error::new("instant autosquash target must have a parent"))?;
         let state = repo.instant_rebase_preconditions()?;
         repo.linear_replay_membership(&target, &head)?;
         let membership = repo.linear_replay_membership(&base, &head)?;
         if membership.first() != Some(&target) {
-            return Err(Error::new("selected target is not in the captured linear history"));
+            return Err(Error::new(
+                "selected target is not in the captured linear history",
+            ));
         }
         Ok(Self {
             kind,
@@ -114,21 +161,31 @@ impl InstantRebaseAuthority {
     /// Revalidate every captured authority input without mutating the repository.
     pub fn validate(&self, repo: &GitRepo) -> Result<()> {
         if repo.repository_identity()? != self.repository {
-            return Err(Error::new("repository identity changed since instant autosquash preparation"));
+            return Err(Error::new(
+                "repository identity changed since instant autosquash preparation",
+            ));
         }
         let (head, reference) = repo.head_identity()?;
         if head != self.head {
-            return Err(Error::new("HEAD changed since instant autosquash preparation"));
+            return Err(Error::new(
+                "HEAD changed since instant autosquash preparation",
+            ));
         }
         if reference != self.head_reference {
-            return Err(Error::new("HEAD attachment changed since instant autosquash preparation"));
+            return Err(Error::new(
+                "HEAD attachment changed since instant autosquash preparation",
+            ));
         }
         let state = repo.instant_rebase_preconditions()?;
         if state.index != self.index || state.staged_patch != self.staged_patch {
-            return Err(Error::new("index changed since instant autosquash preparation"));
+            return Err(Error::new(
+                "index changed since instant autosquash preparation",
+            ));
         }
         if repo.linear_replay_membership(&self.base, &self.head)? != self.membership {
-            return Err(Error::new("instant autosquash history changed since preparation"));
+            return Err(Error::new(
+                "instant autosquash history changed since preparation",
+            ));
         }
         Ok(())
     }
@@ -137,15 +194,22 @@ impl InstantRebaseAuthority {
     pub fn discard(self) {}
 
     /// Selected operation kind.
-    pub fn kind(&self) -> InstantAutosquashKind { self.kind }
+    pub fn kind(&self) -> InstantAutosquashKind {
+        self.kind
+    }
 
     /// Full object ID of the selected target.
-    pub fn target(&self) -> &str { &self.target }
+    pub fn target(&self) -> &str {
+        &self.target
+    }
 
     /// Full object ID of the target's parent, used as the exclusive replay base.
-    pub fn base(&self) -> &str { &self.base }
+    pub fn base(&self) -> &str {
+        &self.base
+    }
 
     /// Inclusive full-OID replay membership from target through captured HEAD.
-    pub fn membership(&self) -> &[String] { &self.membership }
-
+    pub fn membership(&self) -> &[String] {
+        &self.membership
+    }
 }

@@ -1,9 +1,9 @@
 //! Scripted LSP editor model used to exercise Plain-client quirks.
 
+use crate::editor_model::EditorModel;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
-use crate::editor_model::EditorModel;
 
 static NEXT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
 
@@ -13,7 +13,11 @@ pub fn allocate_request_id() -> i64 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Model { UndeclaredDocumentChanges, SilentStaleApply, DecomposedChanges }
+pub enum Model {
+    UndeclaredDocumentChanges,
+    SilentStaleApply,
+    DecomposedChanges,
+}
 
 /// Client compatibility behavior toggled by a conformance test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,16 +64,24 @@ impl FakeEditor {
     /// Build a fake editor from resolved registry models while retaining its legacy profile.
     pub fn from_resolution(profile: Profile, resolution: &magit_lsp::quirks::Resolution) -> Self {
         let mut editor = Self::new(profile);
-        for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
+        for quirk in magit_lsp::quirks::REGISTRY
+            .iter()
+            .filter(|q| resolution.enabled.contains(q.id))
+        {
             if let Some(name) = quirk.model {
-                let behavior = crate::editor_model::registry_behavior(name).unwrap_or_else(|| panic!("unhandled fake-editor model: {name}"));
+                let behavior = crate::editor_model::registry_behavior(name)
+                    .unwrap_or_else(|| panic!("unhandled fake-editor model: {name}"));
                 editor.models.push(behavior);
             }
         }
         editor
     }
     /// Create fake editor from composed declarations and registry-derived behaviors.
-    pub fn from_model(profile: Profile, model: &EditorModel, resolution: &magit_lsp::quirks::Resolution) -> Self {
+    pub fn from_model(
+        profile: Profile,
+        model: &EditorModel,
+        resolution: &magit_lsp::quirks::Resolution,
+    ) -> Self {
         let mut editor = Self::from_resolution(profile, resolution);
         for behavior in model.behaviors() {
             editor.push_behavior(behavior);
@@ -77,10 +89,13 @@ impl FakeEditor {
         editor
     }
     fn push_behavior(&mut self, behavior: &str) {
-        let model = crate::editor_model::registry_behavior(behavior).unwrap_or_else(|| panic!("unhandled editor behavior module: {behavior}"));
+        let model = crate::editor_model::registry_behavior(behavior)
+            .unwrap_or_else(|| panic!("unhandled editor behavior module: {behavior}"));
         self.models.push(model);
     }
-    fn modeled(&self, model: Model) -> bool { self.models.contains(&model) }
+    fn modeled(&self, model: Model) -> bool {
+        self.models.contains(&model)
+    }
     /// Open a document and return its didOpen notification.
     pub fn open(&mut self, uri: &str, text: &str) -> Value {
         self.documents.insert(
@@ -94,7 +109,8 @@ impl FakeEditor {
     }
     /// Replace document text; debounce profile queues the notification until flush.
     pub fn edit(&mut self, uri: &str, text: &str) -> Value {
-        let decomposes = matches!(self.profile, Profile::DecomposedChanges) || self.modeled(Model::DecomposedChanges);
+        let decomposes = matches!(self.profile, Profile::DecomposedChanges)
+            || self.modeled(Model::DecomposedChanges);
         let d = self.documents.get_mut(uri).expect("open document");
         let old = d.text.clone();
         d.version += 1;
@@ -113,9 +129,16 @@ impl FakeEditor {
     /// Replay one recorded didChange verbatim while advancing the modeled document version.
     pub fn replay_did_change(&mut self, message: Value) {
         assert_eq!(message["method"], "textDocument/didChange");
-        let uri = message["params"]["textDocument"]["uri"].as_str().expect("trace URI");
-        let version = message["params"]["textDocument"]["version"].as_i64().expect("trace version");
-        self.documents.get_mut(uri).expect("open trace document").version = version;
+        let uri = message["params"]["textDocument"]["uri"]
+            .as_str()
+            .expect("trace URI");
+        let version = message["params"]["textDocument"]["version"]
+            .as_i64()
+            .expect("trace version");
+        self.documents
+            .get_mut(uri)
+            .expect("open trace document")
+            .version = version;
         self.outbound.push(message);
     }
     /// Release deferred didChange notifications.
@@ -208,7 +231,13 @@ impl FakeEditor {
                 return rejected("missing edits");
             };
             // anchor: Neovim 0.12.6 workspace/applyEdit behavior; T005 contract in TASKS_PART_SEVEN.md and retained rapid-repair evidence in tests/fixtures/lsp_traces/README.md.
-            if !check_version && index == 0 && !version.is_null() && version.as_i64() != Some(doc.version) { continue; }
+            if !check_version
+                && index == 0
+                && !version.is_null()
+                && version.as_i64() != Some(doc.version)
+            {
+                continue;
+            }
             let Some(result) = apply_edits(&doc.text, edits, self.encoding) else {
                 return rejected("invalid or overlapping edits");
             };
@@ -260,7 +289,9 @@ impl FakeEditor {
             for uri in uris {
                 let doc = &self.documents[&uri];
                 if doc.version != before[&uri].version {
-                    let changes = if matches!(self.profile, Profile::DecomposedChanges) || self.modeled(Model::DecomposedChanges) {
+                    let changes = if matches!(self.profile, Profile::DecomposedChanges)
+                        || self.modeled(Model::DecomposedChanges)
+                    {
                         decomposed(&before[&uri].text, &doc.text, self.encoding)
                     } else {
                         vec![json!({"text":doc.text})]

@@ -149,13 +149,23 @@ mod coverage_tests {
     #[test]
     fn todo_user_commands_require_profile_bindings() {
         let commands = [
-            "rebase.todo-submit", "rebase.todo-pick", "rebase.todo-reword",
-            "rebase.todo-edit", "rebase.todo-squash", "rebase.todo-fixup",
-            "rebase.todo-drop", "rebase.todo-up", "rebase.todo-down",
+            "rebase.todo-submit",
+            "rebase.todo-pick",
+            "rebase.todo-reword",
+            "rebase.todo-edit",
+            "rebase.todo-squash",
+            "rebase.todo-fixup",
+            "rebase.todo-drop",
+            "rebase.todo-up",
+            "rebase.todo-down",
         ];
         for command in commands {
             let mut keys = config::profile_keys(Profile::Standard).unwrap();
-            keys.scopes.get_mut("rebase-todo").unwrap().commands.remove(command);
+            keys.scopes
+                .get_mut("rebase-todo")
+                .unwrap()
+                .commands
+                .remove(command);
             let error = check_coverage_keys(Profile::Standard, &keys).unwrap_err();
             assert!(error.to_string().contains(command), "{command}: {error}");
         }

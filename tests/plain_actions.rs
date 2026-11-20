@@ -1,7 +1,7 @@
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "common/stdio.rs"]
@@ -139,7 +139,11 @@ fn plain_discard_opens_a_document_confirm_and_cancel_changes_nothing() {
             .any(|message| message["method"] == "view/prompt"),
         "Plain discard must not request a native prompt"
     );
-    assert_eq!(repo_state(&repo), before, "opening the prompt must not touch Git");
+    assert_eq!(
+        repo_state(&repo),
+        before,
+        "opening the prompt must not touch Git"
+    );
 
     let no = exact_row(&prompt_text, "No");
     let answer = offered_prompt_answer(&mut server, &uri, no, 93);
@@ -166,7 +170,11 @@ fn plain_discard_opens_a_document_confirm_and_cancel_changes_nothing() {
         prompt_text.contains("Discard changes to f.txt?"),
         "discard confirm missing after cancel: {prompt_text}"
     );
-    assert_eq!(repo_state(&repo), before, "opening the prompt must not touch Git");
+    assert_eq!(
+        repo_state(&repo),
+        before,
+        "opening the prompt must not touch Git"
+    );
 
     let yes = exact_row(&prompt_text, "Yes");
     let answer = offered_prompt_answer(&mut server, &uri, yes, 97);
@@ -238,8 +246,11 @@ fn code_actions_work_without_execute_command_declaration() {
         .unwrap() as u32;
     server.send(json!({"jsonrpc":"2.0","id":94,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
     let response = server.response_with_id(94);
-    assert!(response["result"].as_array().unwrap().iter().any(|action|
-        action["command"]["arguments"][0]["command"] == "status.stage"));
+    assert!(response["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action["command"]["arguments"][0]["command"] == "status.stage"));
     let stage = offered_stage(&mut server, &editor, &uri, 95);
     let before_editor = editor.text(&uri).to_owned();
     assert!(execute_offered(&mut server, &mut editor, stage, 95)["error"].is_null());
@@ -259,10 +270,17 @@ fn code_actions_are_unsupported_without_declaration() {
         .build();
     let caps = json!({"workspace":{"applyEdit":true}});
     let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
-    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .unwrap() as u32;
     server.send(json!({"jsonrpc":"2.0","id":96,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
-    assert!(!server.response_with_id(96)["result"].as_array().unwrap().iter().any(|action|
-        action["command"]["arguments"][0]["command"] == "status.stage"));
+    assert!(!server.response_with_id(96)["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|action| action["command"]["arguments"][0]["command"] == "status.stage"));
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
@@ -1025,7 +1043,10 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
     let response = server.response_with_id(request_id);
     let execute = editor.execute_command("magit.command", json!([]));
     let execute_id = execute["id"].as_i64().expect("execute request ID");
-    assert_ne!(request_id, execute_id, "client request IDs must be distinct");
+    assert_ne!(
+        request_id, execute_id,
+        "client request IDs must be distinct"
+    );
     server.send(execute);
     assert!(server.response_with_id(execute_id)["error"].is_object());
     let actions = response["result"].as_array().expect("action array");
@@ -1475,8 +1496,14 @@ fn plain_menu_option_row_opens_a_document_prompt() {
         prompt_text.contains("Override the author (--author=)"),
         "prompt title missing: {prompt_text}"
     );
-    assert!(prompt_text.contains("Submit"), "submit row missing: {prompt_text}");
-    assert!(prompt_text.contains("Cancel"), "cancel row missing: {prompt_text}");
+    assert!(
+        prompt_text.contains("Submit"),
+        "submit row missing: {prompt_text}"
+    );
+    assert!(
+        prompt_text.contains("Cancel"),
+        "cancel row missing: {prompt_text}"
+    );
     assert!(
         !server
             .sent
@@ -1557,14 +1584,17 @@ fn repaired_plain_prompt_offers_actions_for_the_repaired_generation() {
     server.send(damaged_change);
     let repair = next_apply(&mut server);
     assert_eq!(
-        repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
-        damaged_version,
+        repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], damaged_version,
         "repair must target the damaged notification's document version: {repair}"
     );
     for frame in editor.dispatch(&repair) {
         server.send(frame);
     }
-    assert_eq!(editor.text(&uri), accepted, "protected prompt text was not repaired");
+    assert_eq!(
+        editor.text(&uri),
+        accepted,
+        "protected prompt text was not repaired"
+    );
 
     let answer = offered_prompt_answer(&mut server, &uri, cancel, 26);
     assert_eq!(
@@ -1598,12 +1628,7 @@ fn exact_row(text: &str, label: &str) -> u32 {
 }
 
 /// The only offered `prompt.answer` argument on `row`.
-fn offered_prompt_answer(
-    server: &mut stdio::TestServer,
-    uri: &str,
-    row: u32,
-    id: i64,
-) -> Value {
+fn offered_prompt_answer(server: &mut stdio::TestServer, uri: &str, row: u32, id: i64) -> Value {
     let args = offered_for_range(
         server,
         uri,
@@ -1670,7 +1695,8 @@ fn plain_text_prompt_submit_row_answers_with_the_typed_value() {
     assert!(
         closed
             .lines()
-            .any(|line| line.contains("Override the author") && line.contains("Typed Author <typed@example.com>")),
+            .any(|line| line.contains("Override the author")
+                && line.contains("Typed Author <typed@example.com>")),
         "menu does not reflect the author: {closed}"
     );
     assert!(
@@ -1711,7 +1737,8 @@ fn plain_upstream_pick_uses_a_choice_document_and_submits_the_value() {
     let option_row = menu_text
         .lines()
         .position(|line| line.contains("Set the upstream branch"))
-        .unwrap_or_else(|| panic!("missing upstream row: {menu_text} / opened: {opened}")) as u32;
+        .unwrap_or_else(|| panic!("missing upstream row: {menu_text} / opened: {opened}"))
+        as u32;
     let option = offered_for_range(
         &mut server,
         &uri,
@@ -1866,9 +1893,7 @@ fn plain_confirm_prompt_cancel_row_closes_without_touching_git() {
     let menu_text = editor.text(&uri).to_owned();
     let create = menu_text
         .lines()
-        .position(|line| {
-            line.trim_start().starts_with("c  ") && line.contains("Commit")
-        })
+        .position(|line| line.trim_start().starts_with("c  ") && line.contains("Commit"))
         .expect("create action row") as u32;
     let action = offered_for_range(
         &mut server,

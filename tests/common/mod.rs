@@ -295,21 +295,37 @@ pub fn log_variants_fixture() -> (RepoFixture, GitRepo) {
         .args(["merge", "--no-ff", "side", "-m", "merge history"])
         .env("GIT_AUTHOR_DATE", "2000-01-02T00:00:00+0000")
         .env("GIT_COMMITTER_DATE", "2000-01-02T00:00:00+0000")
-        .current_dir(fixture.path()).output().unwrap();
-    assert!(merge.status.success(), "{}", String::from_utf8_lossy(&merge.stderr));
+        .current_dir(fixture.path())
+        .output()
+        .unwrap();
+    assert!(
+        merge.status.success(),
+        "{}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
     fixture.git(&["branch", "-d", "side"]);
-    for (branch, subject) in [("independent", "local only"), ("remote-tip", "remote only"), ("tag-tip", "tag only")] {
+    for (branch, subject) in [
+        ("independent", "local only"),
+        ("remote-tip", "remote only"),
+        ("tag-tip", "tag only"),
+    ] {
         fixture.git(&["checkout", "-b", branch, "main~2"]);
         write(&fixture.path().join("extra.txt"), subject);
         fixture.git(&["add", "."]);
         fixture.git(&["commit", "-m", subject]);
         match branch {
-            "remote-tip" => { fixture.git(&["update-ref", "refs/remotes/origin/remote", "HEAD"]); }
-            "tag-tip" => { fixture.git(&["tag", "tag-only"]); }
+            "remote-tip" => {
+                fixture.git(&["update-ref", "refs/remotes/origin/remote", "HEAD"]);
+            }
+            "tag-tip" => {
+                fixture.git(&["tag", "tag-only"]);
+            }
             _ => {}
         }
         fixture.git(&["checkout", "main"]);
-        if branch != "independent" { fixture.git(&["branch", "-D", branch]); }
+        if branch != "independent" {
+            fixture.git(&["branch", "-D", branch]);
+        }
     }
     (fixture, repo)
 }

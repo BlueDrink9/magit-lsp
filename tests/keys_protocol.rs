@@ -306,8 +306,12 @@ fn dispatch_text_mode_targets_nearest_document_through_stacked_menus() {
             .build();
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
         test.ack();
-        let (document, initial) =
-            test.open_view("nearest", ViewKind::Status, Placement::Main, STATUS_VIEWPORT);
+        let (document, initial) = test.open_view(
+            "nearest",
+            ViewKind::Status,
+            Placement::Main,
+            STATUS_VIEWPORT,
+        );
         test.ack();
         let text = test.text();
         if stacked {
@@ -366,7 +370,13 @@ fn dispatch_without_document_refuses_without_mutating_menu() {
     let menu = test.menu("dispatch");
     let discovery = test.keymap_notice();
     let result = test.press("ctrl+t");
-    assert_eq!(result.effects, vec![Effect::message(MessageLevel::Info, "Not available in this view")]);
+    assert_eq!(
+        result.effects,
+        vec![Effect::message(
+            MessageLevel::Info,
+            "Not available in this view"
+        )]
+    );
     assert!(result.render.is_none());
     assert_eq!(test.view_ids(), views);
     assert_eq!(test.text(), text);
@@ -384,7 +394,10 @@ fn menu_help_and_cancel_remain_view_local() {
     let (commit, _) = test.open_via_command("open.commit");
     test.ack();
     let help = test.press("?");
-    assert!(help.effects.iter().any(|effect| matches!(effect, Effect::PushView { .. })));
+    assert!(help
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PushView { .. })));
     assert_eq!(test.menu(test.view_id()).unwrap().id, "dispatch");
     assert!(!test.view_ids().contains(&commit.id));
     assert_eq!(test.view_ids().len(), 2);

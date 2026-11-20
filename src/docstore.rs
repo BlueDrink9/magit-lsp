@@ -38,7 +38,12 @@ pub struct Document {
 
 impl Document {
     /// Validate and apply one versioned change set to this document snapshot.
-    pub fn change(&mut self, version: i32, changes: &[Change], encoding: Encoding) -> Result<(), ()> {
+    pub fn change(
+        &mut self,
+        version: i32,
+        changes: &[Change],
+        encoding: Encoding,
+    ) -> Result<(), ()> {
         if version <= self.observed_version {
             self.repair = true;
             self.observed_version = self.observed_version.max(version);
@@ -61,7 +66,9 @@ impl Document {
                     (Some(start), Some(end)) => {
                         let a = offset(&text, start, encoding).ok_or(())?;
                         let b = offset(&text, end, encoding).ok_or(())?;
-                        if a > b { return Err(()); }
+                        if a > b {
+                            return Err(());
+                        }
                         text.replace_range(a..b, &change.text);
                     }
                     _ => return Err(()),
@@ -145,7 +152,10 @@ impl DocStore {
         changes: &[Change],
         encoding: Encoding,
     ) -> Result<(), ()> {
-        self.documents.get_mut(uri).ok_or(())?.change(version, changes, encoding)
+        self.documents
+            .get_mut(uri)
+            .ok_or(())?
+            .change(version, changes, encoding)
     }
 }
 

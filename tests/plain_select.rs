@@ -1,10 +1,10 @@
 //! Plain presentation of the commit-selection log.
 
 mod common;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
 
 use common::stdio;
 use common::{RepoFixture, TestSession, WIDE_VIEWPORT};
@@ -139,10 +139,12 @@ fn open_log_select_with_args(
     args: Value,
     id: i64,
 ) -> String {
-    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{
+    server.send(
+        json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{
         "textDocument":{"uri":uri},
         "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
-        "context":{"diagnostics":[]}}}));
+        "context":{"diagnostics":[]}}}),
+    );
     let status_actions = server.response_with_id(id)["result"]
         .as_array()
         .unwrap()
@@ -152,8 +154,10 @@ fn open_log_select_with_args(
         .find_map(|action| action["command"]["arguments"][0]["target"]["viewId"].as_str())
         .map(str::to_owned)
         .expect("a view target exposing the status view id");
-    server.send(json!({"jsonrpc":"2.0","id":id + 1,"method":"view/invoke","params":{
-        "viewId":status_view,"command":"log.select-and-copy","args":args}}));
+    server.send(
+        json!({"jsonrpc":"2.0","id":id + 1,"method":"view/invoke","params":{
+        "viewId":status_view,"command":"log.select-and-copy","args":args}}),
+    );
     let invoked = loop {
         let message = server.recv();
         if message["method"] == "workspace/applyEdit" {
@@ -192,9 +196,11 @@ fn open_free_text_log_select(
 
 /// Send a full-text `didChange` for `uri`.
 fn send_full_text_change(server: &mut stdio::TestServer, uri: &str, version: i64, text: String) {
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+    server.send(
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":version},
-        "contentChanges":[{"text":text}]}}));
+        "contentChanges":[{"text":text}]}}),
+    );
 }
 
 #[test]
@@ -223,7 +229,10 @@ fn plain_commit_menu_option_renders_the_log_select_document() {
     assert!(!option.is_null(), "menu.run-option =C not offered");
 
     let staged = execute_offered(&mut server, &mut editor, option, 13);
-    assert!(staged["error"].is_null(), "menu.run-option failed: {staged}");
+    assert!(
+        staged["error"].is_null(),
+        "menu.run-option failed: {staged}"
+    );
 
     let text = editor.text(&uri).to_owned();
     assert!(
@@ -271,18 +280,25 @@ fn plain_log_select_offers_commit_code_actions() {
     let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
 
     // A Plain client learns the status view id from the offered actions.
-    server.send(json!({"jsonrpc":"2.0","id":19,"method":"textDocument/codeAction","params":{
+    server.send(
+        json!({"jsonrpc":"2.0","id":19,"method":"textDocument/codeAction","params":{
         "textDocument":{"uri":uri},
         "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
-        "context":{"diagnostics":[]}}}));
-    let status_actions = server.response_with_id(19)["result"].as_array().unwrap().clone();
+        "context":{"diagnostics":[]}}}),
+    );
+    let status_actions = server.response_with_id(19)["result"]
+        .as_array()
+        .unwrap()
+        .clone();
     let status_view = status_actions
         .iter()
         .find_map(|action| action["command"]["arguments"][0]["target"]["viewId"].as_str())
         .map(str::to_owned)
         .expect("a view target exposing the status view id");
-    server.send(json!({"jsonrpc":"2.0","id":20,"method":"view/invoke","params":{
-        "viewId":status_view,"command":"log.select-and-copy","args":{"multi":true}}}));
+    server.send(
+        json!({"jsonrpc":"2.0","id":20,"method":"view/invoke","params":{
+        "viewId":status_view,"command":"log.select-and-copy","args":{"multi":true}}}),
+    );
     let invoked = loop {
         let message = server.recv();
         if message["method"] == "workspace/applyEdit" {
@@ -310,9 +326,14 @@ fn plain_log_select_offers_commit_code_actions() {
     let text = editor.text(&uri).to_owned();
     let row = row_containing(&text, "second");
     let range = json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}});
-    server.send(json!({"jsonrpc":"2.0","id":21,"method":"textDocument/codeAction","params":{
-        "textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}}));
-    let actions = server.response_with_id(21)["result"].as_array().unwrap().clone();
+    server.send(
+        json!({"jsonrpc":"2.0","id":21,"method":"textDocument/codeAction","params":{
+        "textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}}),
+    );
+    let actions = server.response_with_id(21)["result"]
+        .as_array()
+        .unwrap()
+        .clone();
     let args_for = |command: &str| -> Value {
         actions
             .iter()
@@ -362,11 +383,8 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
         .commit("initial", [("f.txt", "one\n")])
         .commit("second", [("f.txt", "two\n")])
         .build();
-    let (mut test, _) = TestSession::open_status_at(
-        &tmp,
-        magit_lsp::config::Profile::Standard,
-        WIDE_VIEWPORT,
-    );
+    let (mut test, _) =
+        TestSession::open_status_at(&tmp, magit_lsp::config::Profile::Standard, WIDE_VIEWPORT);
     test.ack();
     test.invoke("open.commit");
     let menu_view = test.view_id().to_string();
@@ -376,7 +394,10 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
     // confirm a structured commit node and return to the menu.
     test.press("=C");
     let log_view = test.view_id().to_string();
-    assert_ne!(log_view, menu_view, "the commit option opens the log select");
+    assert_ne!(
+        log_view, menu_view,
+        "the commit option opens the log select"
+    );
     test.ack();
     let line = test
         .tree_of(&log_view)
@@ -386,7 +407,10 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
         .expect("a structured commit node")
         .start_line;
     test.invoke_at("common.confirm", Cursor { line, column: 0 });
-    match test.menu(&menu_view).and_then(|menu| menu.item("=C").cloned()) {
+    match test
+        .menu(&menu_view)
+        .and_then(|menu| menu.item("=C").cloned())
+    {
         Some(magit_lsp::menu::Item::Option { value: Some(_), .. }) => {}
         other => panic!("commit option was not set: {other:?}"),
     }
@@ -401,7 +425,10 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
         magit_lsp::session::Execution::Done(result) => result,
         _ => panic!("an already-set option must not prompt or pick again"),
     };
-    match test.menu(&menu_view).and_then(|menu| menu.item("=C").cloned()) {
+    match test
+        .menu(&menu_view)
+        .and_then(|menu| menu.item("=C").cloned())
+    {
         Some(magit_lsp::menu::Item::Option { value: None, .. }) => {}
         other => panic!("commit option was not cleared: {other:?}"),
     }
@@ -452,7 +479,10 @@ fn plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit() {
     assert!(!option.is_null(), "menu.run-option =C not offered");
 
     let staged = execute_offered(&mut server, &mut editor, option, 53);
-    assert!(staged["error"].is_null(), "menu.run-option failed: {staged}");
+    assert!(
+        staged["error"].is_null(),
+        "menu.run-option failed: {staged}"
+    );
     let log_view = staged["result"]["effects"]
         .as_array()
         .unwrap()
@@ -482,8 +512,9 @@ fn plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit() {
     );
     let effects = confirmed["result"]["effects"].as_array().unwrap();
     assert!(
-        effects.iter().any(|effect| effect["type"] == "popView"
-            && effect["viewId"] == json!(log_view)),
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "popView" && effect["viewId"] == json!(log_view)),
         "confirm must pop the log select: {confirmed}"
     );
 
@@ -526,7 +557,10 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
     let reuse = row_containing(&menu_text, "Reuse commit message");
     let option = offered_menu_option(&mut server, &uri, reuse, "=C", 62);
     let staged = execute_offered(&mut server, &mut editor, option, 63);
-    assert!(staged["error"].is_null(), "menu.run-option failed: {staged}");
+    assert!(
+        staged["error"].is_null(),
+        "menu.run-option failed: {staged}"
+    );
     let log_view = staged["result"]["effects"]
         .as_array()
         .unwrap()
@@ -544,9 +578,14 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
     let cancel_range =
         json!({"start":{"line":cancel_row,"character":0},"end":{"line":cancel_row,"character":0}});
     let cancel = loop {
-        server.send(json!({"jsonrpc":"2.0","id":64,"method":"textDocument/codeAction","params":{
-            "textDocument":{"uri":uri},"range":cancel_range,"context":{"diagnostics":[]}}}));
-        let actions = server.response_with_id(64)["result"].as_array().unwrap().clone();
+        server.send(
+            json!({"jsonrpc":"2.0","id":64,"method":"textDocument/codeAction","params":{
+            "textDocument":{"uri":uri},"range":cancel_range,"context":{"diagnostics":[]}}}),
+        );
+        let actions = server.response_with_id(64)["result"]
+            .as_array()
+            .unwrap()
+            .clone();
         break actions
             .iter()
             .find(|action| action["command"]["arguments"][0]["command"] == "common.cancel")
@@ -564,8 +603,9 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
         "cancel must not copy: {cancelled}"
     );
     assert!(
-        effects.iter().any(|effect| effect["type"] == "popView"
-            && effect["viewId"] == json!(log_view)),
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "popView" && effect["viewId"] == json!(log_view)),
         "cancel must pop the log select: {cancelled}"
     );
 
@@ -619,17 +659,29 @@ fn plain_log_select_revision_field_drives_confirm() {
 
     let text = editor.text(&uri).to_owned();
     let field = row_containing(&text, "Select commit(s) to copy") + 1;
-    let field_range = json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
+    let field_range =
+        json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
     let offered = offered_for_range(&mut server, &uri, field_range.clone(), "common.confirm", 30);
-    assert!(!offered.is_null(), "confirm not offered on the revision field");
+    assert!(
+        !offered.is_null(),
+        "confirm not offered on the revision field"
+    );
     assert_eq!(
         offered["target"]["nodeId"], "log:field:rev",
         "the revision must be a structured field node: {offered}"
     );
 
-    send_full_text_change(&mut server, &uri, 100, replace_row(&text, field as usize, "HEAD~1"));
+    send_full_text_change(
+        &mut server,
+        &uri,
+        100,
+        replace_row(&text, field as usize, "HEAD~1"),
+    );
     let offered = offered_for_range(&mut server, &uri, field_range, "common.confirm", 31);
-    assert!(!offered.is_null(), "confirm not offered after the field edit");
+    assert!(
+        !offered.is_null(),
+        "confirm not offered after the field edit"
+    );
     assert_eq!(offered["target"]["nodeId"], "log:field:rev");
 
     let confirmed = execute_offered(&mut server, &mut editor, offered, 32);
@@ -728,8 +780,7 @@ fn plain_log_select_tampered_target_is_refused_without_changes() {
 
     let text = editor.text(&uri).to_owned();
     let commit = row_containing(&text, "second");
-    let range =
-        json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}});
+    let range = json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}});
     let offered = offered_for_range(&mut server, &uri, range.clone(), "common.confirm", 80);
     assert!(!offered.is_null(), "confirm not offered on the commit row");
 
@@ -816,9 +867,13 @@ fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
         replace_row(&text, field as usize, "no-such-revision"),
     );
 
-    let field_range = json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
+    let field_range =
+        json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
     let offered = offered_for_range(&mut server, &uri, field_range, "common.confirm", 40);
-    assert!(!offered.is_null(), "confirm not offered on the revision field");
+    assert!(
+        !offered.is_null(),
+        "confirm not offered on the revision field"
+    );
     let rejected = execute_offered(&mut server, &mut editor, offered, 41);
     assert!(rejected["error"].is_null(), "confirm failed: {rejected}");
     assert!(
@@ -830,7 +885,9 @@ fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
         "an invalid revision must not copy: {rejected}"
     );
     assert!(
-        rejected.to_string().contains("No valid commits were selected"),
+        rejected
+            .to_string()
+            .contains("No valid commits were selected"),
         "an invalid revision must report a readable message: {rejected}"
     );
 
@@ -905,8 +962,9 @@ fn plain_log_select_fixup_target_survives_a_cancelled_second_run() {
         .to_owned();
     assert_eq!(chosen, head, "the fixup target must be the chosen commit");
     assert!(
-        effects.iter().any(|effect| effect["type"] == "popView"
-            && effect["viewId"] == json!(first_view)),
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "popView" && effect["viewId"] == json!(first_view)),
         "confirm must pop the first run: {confirmed}"
     );
     assert_eq!(
@@ -949,8 +1007,9 @@ fn plain_log_select_fixup_target_survives_a_cancelled_second_run() {
         "the cancelled second run must not copy: {cancelled}"
     );
     assert!(
-        effects.iter().any(|effect| effect["type"] == "popView"
-            && effect["viewId"] == json!(second_view)),
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "popView" && effect["viewId"] == json!(second_view)),
         "cancel must pop the second run: {cancelled}"
     );
     assert_eq!(

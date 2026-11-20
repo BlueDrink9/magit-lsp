@@ -1,33 +1,33 @@
 //! Directional schema generation and committed-artifact drift checks.
 
-#[path = "../scripts/generate_schema.rs"]
-mod generate_schema;
-#[path = "common/mod.rs"]
-mod fixtures;
 #[path = "../scripts/example_recordings.rs"]
 mod example_recordings;
+#[path = "common/mod.rs"]
+mod fixtures;
+#[path = "../scripts/generate_schema.rs"]
+mod generate_schema;
 
 use fixtures::schema::{read_schema, schema_errors};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-use magit_lsp::keymap::{Binding, EditorMode};
-use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
-use magit_lsp::presentation::{negotiate, PlainCapabilities, Presentation};
-use magit_lsp::quirks;
 use generate_schema::schema_luals;
 use generate_schema::schema_typescript;
 use generate_schema::{Direction, MethodKind, Payload};
+use magit_lsp::keymap::{Binding, EditorMode};
+use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
+use magit_lsp::presentation::{negotiate, PlainCapabilities, Presentation};
 use magit_lsp::presentation::{OPTIONAL_EFFECTS, OPTIONAL_PROMPT_KINDS};
 use magit_lsp::protocol::{
     EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewCloseRequest, ViewEffectsParams,
     ViewInvokeParams, ViewInvokeRequest, ViewInvokeResponse, ViewKeyParams, ViewKeyRequest,
     ViewKeymapParams, ViewOpenParams, ViewOpenRequest, ViewPickParams, ViewPickRespondParams,
     ViewPickRespondRequest, ViewPromptParams, ViewPromptRespondParams, ViewPromptRespondRequest,
-    ViewRenderedParams, ViewRender, ViewResizeParams, ViewResyncParams, ViewResyncRequest,
+    ViewRender, ViewRenderedParams, ViewResizeParams, ViewResyncParams, ViewResyncRequest,
     ViewSetModeParams, ViewSetModeRequest, VIEW_EFFECTS, VIEW_KEYMAP, VIEW_PICK, VIEW_PROMPT,
     VIEW_RENDER, VIEW_RENDERED, VIEW_RESIZE,
 };
+use magit_lsp::quirks;
 use magit_lsp::view::{Placement, Scope, ViewDescriptor, ViewKind, ViewMode, Viewport};
 
 fn property_names(value: &Value) -> Vec<String> {
@@ -62,8 +62,7 @@ fn drift_check_reports_every_changed_artifact() {
 
     let path = dir.path().join("docs/schema/edit-confirmation.json");
     let text = std::fs::read_to_string(&path).expect("read artifact");
-    std::fs::write(&path, text.replace("\"confirmed\"", "\"legacy\""))
-        .expect("tamper artifact");
+    std::fs::write(&path, text.replace("\"confirmed\"", "\"legacy\"")).expect("tamper artifact");
 
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("drift check"),
@@ -275,7 +274,9 @@ fn menu_schema_describes_serialized_switch_option_and_action() {
             .iter()
             .find(|variant| variant["properties"]["kind"]["const"] == kind)
             .unwrap_or_else(|| panic!("no schema variant for kind {kind}: {item_schema}"));
-        let properties = variant["properties"].as_object().expect("variant properties");
+        let properties = variant["properties"]
+            .as_object()
+            .expect("variant properties");
         for key in item.as_object().expect("serialized item").keys() {
             assert!(
                 properties.contains_key(key) || root_properties.contains_key(key),
@@ -377,7 +378,17 @@ fn view_render_schema_describes_the_render_payload() {
     assert_eq!(schema["title"], "ViewRender");
     assert_eq!(
         property_names(&schema),
-        ["baseVersion", "cursor", "edits", "menu", "mode", "pending", "text", "version", "viewId"]
+        [
+            "baseVersion",
+            "cursor",
+            "edits",
+            "menu",
+            "mode",
+            "pending",
+            "text",
+            "version",
+            "viewId"
+        ]
     );
     assert_eq!(
         schema["required"],
@@ -413,7 +424,10 @@ fn view_render_schema_describes_the_render_payload() {
     let object = wire.as_object().expect("render object");
     let properties = schema["properties"].as_object().expect("render properties");
     for key in object.keys() {
-        assert!(properties.contains_key(key), "schema lacks render key {key}");
+        assert!(
+            properties.contains_key(key),
+            "schema lacks render key {key}"
+        );
     }
     for required in schema["required"].as_array().expect("render required") {
         let name = required.as_str().expect("required name");
@@ -438,7 +452,10 @@ fn assert_unconstrained_json(schema: &Value) {
 #[test]
 fn prompt_unions_stay_any_of() {
     let respond = read_schema("view-prompt-respond-params.json");
-    assert_eq!(respond["properties"]["value"]["anyOf"][0]["$ref"], "#/$defs/PromptValue");
+    assert_eq!(
+        respond["properties"]["value"]["anyOf"][0]["$ref"],
+        "#/$defs/PromptValue"
+    );
     assert_eq!(respond["properties"]["value"]["anyOf"][1]["type"], "null");
     let prompt_value = &respond["$defs"]["PromptValue"];
     assert!(
@@ -448,7 +465,11 @@ fn prompt_unions_stay_any_of() {
     let variants = prompt_value["anyOf"]
         .as_array()
         .expect("untagged PromptValue anyOf variants");
-    assert_eq!(variants.len(), 4, "PromptValue keeps every variant: {variants:?}");
+    assert_eq!(
+        variants.len(),
+        4,
+        "PromptValue keeps every variant: {variants:?}"
+    );
     assert_eq!(variants[0]["type"], "boolean");
     assert_eq!(variants[1]["type"], "string");
     assert_eq!(variants[2]["$ref"], "#/$defs/PromptChoiceAnswer");
@@ -512,7 +533,9 @@ fn every_custom_view_payload_has_a_directional_artifact() {
     let expected: Vec<(&str, Value)> = vec![
         (
             "view-open-params.json",
-            generate_schema::directional_schema::<ViewOpenParams>(generate_schema::Direction::Input),
+            generate_schema::directional_schema::<ViewOpenParams>(
+                generate_schema::Direction::Input,
+            ),
         ),
         (
             "view-descriptor.json",
@@ -592,7 +615,9 @@ fn every_custom_view_payload_has_a_directional_artifact() {
         ),
         (
             "view-pick-params.json",
-            generate_schema::directional_schema::<ViewPickParams>(generate_schema::Direction::Output),
+            generate_schema::directional_schema::<ViewPickParams>(
+                generate_schema::Direction::Output,
+            ),
         ),
         (
             "view-pick-respond-params.json",
@@ -764,7 +789,12 @@ fn catalog_covers_every_custom_notification_with_its_direction() {
     let methods = generate_schema::methods();
     let artifacts = artifact_names();
     let notifications: [(&str, Direction, &str, &str); 7] = [
-        (VIEW_RENDER, Direction::Output, "ViewRender", "view-render.json"),
+        (
+            VIEW_RENDER,
+            Direction::Output,
+            "ViewRender",
+            "view-render.json",
+        ),
         (
             VIEW_EFFECTS,
             Direction::Output,
@@ -818,7 +848,10 @@ fn catalog_covers_every_custom_notification_with_its_direction() {
         assert_eq!(entry.direction, direction, "{name} initiating direction");
         assert_eq!(entry.params.rust_type(), params_type, "{name} params type");
         assert_eq!(entry.params.file(), Some(params_file), "{name} params");
-        assert!(entry.result.is_none(), "{name} notifications have no result");
+        assert!(
+            entry.result.is_none(),
+            "{name} notifications have no result"
+        );
         assert!(
             artifacts.iter().any(|file| file == params_file),
             "{name} params must reference an artifact"
@@ -862,7 +895,11 @@ fn catalog_is_committed_and_participates_in_drift_detection() {
 }
 
 fn names(list: &[&str]) -> Value {
-    Value::Array(list.iter().map(|name| Value::String((*name).into())).collect())
+    Value::Array(
+        list.iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+    )
 }
 
 #[test]
@@ -887,7 +924,9 @@ fn shared_capability_lists_match_the_typed_constants() {
     assert_eq!(committed, generate_schema::shared_lists());
 
     assert!(
-        artifact_names().iter().any(|file| file == "shared-lists.json"),
+        artifact_names()
+            .iter()
+            .any(|file| file == "shared-lists.json"),
         "the shared lists participate in the generated artifact set"
     );
 }
@@ -948,9 +987,8 @@ fn shared_client_lists_are_generated_from_the_typed_constants() {
         "the JavaScript module carries the typed optional effects"
     );
     assert!(
-        javascript.contains(
-            "\"confirm\",\n  \"text\",\n  \"choice\",\n  \"multiChoice\",\n  \"secret\""
-        ),
+        javascript
+            .contains("\"confirm\",\n  \"text\",\n  \"choice\",\n  \"multiChoice\",\n  \"secret\""),
         "the JavaScript module carries the typed optional prompt kinds"
     );
 }
@@ -1071,7 +1109,8 @@ fn typescript_declarations_preserve_directional_contracts() {
     let prompt = namespace_block(&text, "ViewPromptRespondParams");
     assert!(prompt.contains("    value?: PromptValue | null;\n"));
     assert!(
-        prompt.contains("  export type PromptValue = boolean\n  | string\n  | PromptChoiceAnswer\n"),
+        prompt
+            .contains("  export type PromptValue = boolean\n  | string\n  | PromptChoiceAnswer\n"),
         "untagged unions stay unions: {prompt}"
     );
 
@@ -1081,7 +1120,10 @@ fn typescript_declarations_preserve_directional_contracts() {
         "custom view kinds stay arbitrary strings: {open}"
     );
     assert!(open.contains("    args?: unknown;\n"), "unconstrained JSON");
-    assert!(!open.contains("    args?: any;"), "unconstrained JSON is not any");
+    assert!(
+        !open.contains("    args?: any;"),
+        "unconstrained JSON is not any"
+    );
 
     let invoke = namespace_block(&text, "ViewInvokeParams");
     assert!(invoke.contains("    args?: unknown;\n"));
@@ -1255,10 +1297,7 @@ fn typescript_declarations_fail_on_unsupported_combinator_siblings() {
     for (schema, reason) in schemas {
         let error = schema_typescript::render_root(&schema, "Synthetic")
             .expect_err("unsupported sibling must fail loudly");
-        assert!(
-            error.contains(reason),
-            "error must name {reason}: {error}"
-        );
+        assert!(error.contains(reason), "error must name {reason}: {error}");
     }
 }
 
@@ -1382,17 +1421,13 @@ fn luals_annotations_preserve_directional_contracts() {
     let plain_action = lua_declaration(&text, "---@class PlainActionParams.Root");
     assert!(plain_action.contains("---@field command string"));
     assert!(plain_action.contains("---@field viewGeneration integer"));
-    assert!(plain_action.contains(
-        "---@field target PlainActionParams.PlainActionTarget"
-    ));
+    assert!(plain_action.contains("---@field target PlainActionParams.PlainActionTarget"));
     let selection_variant = lua_declaration(
         &text,
         "---@class PlainActionParams.PlainActionTarget.Variant1",
     );
     assert!(
-        selection_variant.contains(
-            "---@field selection? PlainActionParams.SelectionIntent|nil"
-        ),
+        selection_variant.contains("---@field selection? PlainActionParams.SelectionIntent|nil"),
         "optional nullable local ref: {selection_variant}"
     );
     for (variant, tag) in [
@@ -1433,10 +1468,7 @@ fn luals_annotations_preserve_directional_contracts() {
 
     let prompt = lua_declaration(&text, "---@class ViewPromptRespondParams.Root");
     assert!(prompt.contains("---@field value? ViewPromptRespondParams.PromptValue|nil"));
-    let prompt_value = lua_declaration(
-        &text,
-        "---@alias ViewPromptRespondParams.PromptValue ",
-    );
+    let prompt_value = lua_declaration(&text, "---@alias ViewPromptRespondParams.PromptValue ");
     assert!(
         prompt_value.contains(concat!(
             "---@alias ViewPromptRespondParams.PromptValue boolean\n",
@@ -1450,7 +1482,10 @@ fn luals_annotations_preserve_directional_contracts() {
         &text,
         "---@class ViewPromptRespondParams.PromptValue.Variant4",
     );
-    assert!(multi_answer.contains("---@field ids string[]"), "multi-choice answer: {multi_answer}");
+    assert!(
+        multi_answer.contains("---@field ids string[]"),
+        "multi-choice answer: {multi_answer}"
+    );
     assert!(
         !prompt_value.contains("&"),
         "anyOf must not become an intersection: {prompt_value}"
@@ -1531,14 +1566,13 @@ fn luals_annotations_preserve_combinator_siblings() {
     let rendered =
         schema_luals::render_root(&schema, "Synthetic").expect("render combinator with siblings");
     assert!(
-        rendered.contains("---@alias Synthetic.Root Synthetic.Root.Variant1\n---| Synthetic.Root.Variant2"),
+        rendered.contains(
+            "---@alias Synthetic.Root Synthetic.Root.Variant1\n---| Synthetic.Root.Variant2"
+        ),
         "oneOf stays a union: {rendered}"
     );
     for (variant, tag) in [("Variant1", "switch"), ("Variant2", "option")] {
-        let block = lua_declaration(
-            &rendered,
-            &format!("---@class Synthetic.Root.{variant}"),
-        );
+        let block = lua_declaration(&rendered, &format!("---@class Synthetic.Root.{variant}"));
         assert!(
             block.contains(&format!("---@field kind \"{tag}\"")),
             "variant tag survives: {block}"
@@ -1625,10 +1659,7 @@ fn luals_annotations_fail_on_unsupported_constructs() {
     for (schema, reason) in schemas {
         let error = schema_luals::render_root(&schema, "Synthetic")
             .expect_err("unsupported construct must fail loudly");
-        assert!(
-            error.contains(reason),
-            "error must name {reason}: {error}"
-        );
+        assert!(error.contains(reason), "error must name {reason}: {error}");
     }
 }
 
@@ -1666,8 +1697,7 @@ fn standalone_worked_exchanges_include_provenance_and_examples() {
         .expect("render worked exchanges");
     assert_eq!(
         block,
-        generate_schema::schema_markdown::worked_exchanges_block()
-            .expect("render again"),
+        generate_schema::schema_markdown::worked_exchanges_block().expect("render again"),
         "worked exchanges must render deterministically"
     );
     for name in [
@@ -1680,35 +1710,70 @@ fn standalone_worked_exchanges_include_provenance_and_examples() {
     ] {
         let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts()
             .expect("render split artifacts");
-        assert!(artifacts.iter().any(|(_, part)| part.contains(&format!("##### `{name}`"))),
-            "worked exchanges must include {name}");
+        assert!(
+            artifacts
+                .iter()
+                .any(|(_, part)| part.contains(&format!("##### `{name}`"))),
+            "worked exchanges must include {name}"
+        );
     }
     let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts().unwrap();
     assert_eq!(artifacts.len(), 4);
     assert!(artifacts.iter().all(|(_, text)| text.len() < 100_000));
     let source = example_recordings::recordings(std::path::Path::new("docs/examples"))
         .expect("load grouped source recordings");
-    let messages: Vec<_> = artifacts.iter().skip(1).flat_map(|(_, part)| {
-        part.split("```jsonl\n").skip(1).filter_map(|block| block.split_once("```\n").map(|(body, _)| body))
-            .flat_map(str::lines).map(str::to_owned).collect::<Vec<_>>()
-    }).collect();
-    let expected: Vec<_> = source.iter().flat_map(|(_, bytes)| std::str::from_utf8(bytes).unwrap().lines()
-        .filter(|line| !line.trim().is_empty()).map(|line| {
-            let frame: serde_json::Value = serde_json::from_str(line).unwrap();
-            serde_json::to_string(frame.get("message").unwrap()).unwrap()
-        }).collect::<Vec<_>>()).collect();
-    assert_eq!(messages, expected, "split parts preserve source message stream and order");
+    let messages: Vec<_> = artifacts
+        .iter()
+        .skip(1)
+        .flat_map(|(_, part)| {
+            part.split("```jsonl\n")
+                .skip(1)
+                .filter_map(|block| block.split_once("```\n").map(|(body, _)| body))
+                .flat_map(str::lines)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let expected: Vec<_> = source
+        .iter()
+        .flat_map(|(_, bytes)| {
+            std::str::from_utf8(bytes)
+                .unwrap()
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| {
+                    let frame: serde_json::Value = serde_json::from_str(line).unwrap();
+                    serde_json::to_string(frame.get("message").unwrap()).unwrap()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(
+        messages, expected,
+        "split parts preserve source message stream and order"
+    );
 }
 
 #[test]
 fn worked_exchange_limits_include_writer_newline() {
     let full = generate_schema::schema_markdown::worked_exchanges_block().unwrap();
-    let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, 100_000)
-        .expect("bounded split");
-    let largest = artifacts.iter().skip(1).map(|(_, text)| text.len() + 1).max().unwrap();
-    assert!(artifacts.iter().skip(1).all(|(_, text)| text.len() + 1 < 100_000));
-    assert!(generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, largest)
-        .is_err(), "limit equal to emitted bytes must reject");
+    let artifacts =
+        generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, 100_000)
+            .expect("bounded split");
+    let largest = artifacts
+        .iter()
+        .skip(1)
+        .map(|(_, text)| text.len() + 1)
+        .max()
+        .unwrap();
+    assert!(artifacts
+        .iter()
+        .skip(1)
+        .all(|(_, text)| text.len() + 1 < 100_000));
+    assert!(
+        generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, largest).is_err(),
+        "limit equal to emitted bytes must reject"
+    );
 }
 
 #[test]
@@ -1719,14 +1784,20 @@ fn worked_exchange_unexpected_numeric_parts_are_stale_and_removed() {
     std::fs::write(schema.join("worked-exchanges-99.md"), "obsolete\n").unwrap();
     std::fs::write(schema.join("worked-exchanges-98.md"), "obsolete\n").unwrap();
     std::fs::write(schema.join("worked-exchanges-notes.md"), "authored\n").unwrap();
-    assert_eq!(generate_schema::stale_files(dir.path()).unwrap(), vec![
-        PathBuf::from("docs/schema/worked-exchanges-98.md"),
-        PathBuf::from("docs/schema/worked-exchanges-99.md"),
-    ]);
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).unwrap(),
+        vec![
+            PathBuf::from("docs/schema/worked-exchanges-98.md"),
+            PathBuf::from("docs/schema/worked-exchanges-99.md"),
+        ]
+    );
     generate_schema::write_all(dir.path()).unwrap();
     assert!(!schema.join("worked-exchanges-99.md").exists());
     assert!(!schema.join("worked-exchanges-98.md").exists());
-    assert_eq!(std::fs::read_to_string(schema.join("worked-exchanges-notes.md")).unwrap(), "authored\n");
+    assert_eq!(
+        std::fs::read_to_string(schema.join("worked-exchanges-notes.md")).unwrap(),
+        "authored\n"
+    );
     assert!(generate_schema::stale_files(dir.path()).unwrap().is_empty());
 }
 
@@ -1738,10 +1809,16 @@ fn worked_exchanges_render_identically_for_grouped_fragments() {
     std::fs::write(monolithic.path().join("confirm.jsonl"), recording)
         .expect("write monolithic recording");
     let split = recording.iter().position(|byte| *byte == b'\n').unwrap() + 1;
-    std::fs::write(fragmented.path().join("confirm-01.jsonl"), &recording[..split])
-        .expect("write first fragment");
-    std::fs::write(fragmented.path().join("confirm-02.jsonl"), &recording[split..])
-        .expect("write second fragment");
+    std::fs::write(
+        fragmented.path().join("confirm-01.jsonl"),
+        &recording[..split],
+    )
+    .expect("write first fragment");
+    std::fs::write(
+        fragmented.path().join("confirm-02.jsonl"),
+        &recording[split..],
+    )
+    .expect("write second fragment");
 
     assert_eq!(
         generate_schema::schema_markdown::worked_exchanges_block_from(monolithic.path())
@@ -1760,7 +1837,8 @@ fn recordings_reject_mixed_monolithic_and_fragments() {
     std::fs::write(dir.path().join("confirm-01.jsonl"), b"fragment\n")
         .expect("write first fragment");
 
-    let error = example_recordings::recordings(dir.path()).expect_err("mixed representation rejected");
+    let error =
+        example_recordings::recordings(dir.path()).expect_err("mixed representation rejected");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     assert!(error.to_string().contains("confirm.jsonl"));
 }
@@ -1773,13 +1851,21 @@ fn standalone_worked_exchanges_detect_tamper_and_missing_file() {
         .expect("clean check")
         .is_empty());
 
-    let doc = generate_schema::schema_markdown::worked_exchanges_artifacts().unwrap()[1].0.clone();
+    let doc = generate_schema::schema_markdown::worked_exchanges_artifacts().unwrap()[1]
+        .0
+        .clone();
     let path = dir.path().join(&doc);
     let text = std::fs::read_to_string(&path).expect("read client spec");
     let provenance = "temporary paths are normalized to `/repo`";
-    assert!(text.contains(provenance), "worked exchanges carry provenance");
-    std::fs::write(&path, text.replace(provenance, "temporary paths are not normalized"))
-        .expect("tamper worked exchanges");
+    assert!(
+        text.contains(provenance),
+        "worked exchanges carry provenance"
+    );
+    std::fs::write(
+        &path,
+        text.replace(provenance, "temporary paths are not normalized"),
+    )
+    .expect("tamper worked exchanges");
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from(&doc)],
@@ -1846,8 +1932,9 @@ fn plain_classification_follows_negotiate_and_recorded_traces() {
         "an absent experimental.magit selects Plain with nothing declared"
     );
 
-    let Presentation::Plain(neovim) = negotiate(&trace_params("initialize-plain-neovim-0.12.6.json"))
-        .expect("recorded plain Neovim trace negotiates Plain")
+    let Presentation::Plain(neovim) =
+        negotiate(&trace_params("initialize-plain-neovim-0.12.6.json"))
+            .expect("recorded plain Neovim trace negotiates Plain")
     else {
         panic!("plain Neovim trace must not negotiate rich");
     };
@@ -1908,7 +1995,9 @@ fn plain_classification_follows_negotiate_and_recorded_traces() {
         Some("neovim-accepts-undeclared-documentChanges"),
         "the quirk names the recorded fake-editor behavior"
     );
-    let override_ = quirk.capability.expect("quirk carries a capability override");
+    let override_ = quirk
+        .capability
+        .expect("quirk carries a capability override");
     assert_eq!(override_.capability, quirks::Capability::DocumentChanges);
     assert!(override_.enabled);
 }
@@ -1929,8 +2018,11 @@ fn standalone_capability_levels_detect_tamper_and_missing_file() {
         text.contains(expected),
         "capability table must carry the generated applyEdit row"
     );
-    std::fs::write(&path, text.replace(expected, "| `apply_edit` | edit | L9 |"))
-        .expect("tamper capability levels");
+    std::fs::write(
+        &path,
+        text.replace(expected, "| `apply_edit` | edit | L9 |"),
+    )
+    .expect("tamper capability levels");
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from(doc)],
@@ -2004,8 +2096,8 @@ fn trace_params(name: &str) -> Value {
 
 /// Load one current client declaration entry by client name.
 fn current_client_magit(name: &str) -> Value {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/current-client-capabilities.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/current-client-capabilities.json");
     let entries: Vec<Value> =
         serde_json::from_str(&std::fs::read_to_string(path).expect("read current capabilities"))
             .expect("parse current capabilities");
@@ -2033,8 +2125,11 @@ fn luals_annotation_drift_is_reported() {
 
     generate_schema::write_all(dir.path()).expect("rewrite schemas");
     let text = std::fs::read_to_string(&path).expect("read annotations");
-    std::fs::write(&path, text.replace("---@class Menu.Root", "---@class LegacyMenu.Root"))
-        .expect("tamper annotations");
+    std::fs::write(
+        &path,
+        text.replace("---@class Menu.Root", "---@class LegacyMenu.Root"),
+    )
+    .expect("tamper annotations");
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from(schema_luals::ANNOTATION_PATH)],
@@ -2066,14 +2161,16 @@ fn recorded_magit_declarations() -> Vec<(String, Value)> {
     let traces = root.join("tests/fixtures/lsp_traces");
     for entry in std::fs::read_dir(&traces).expect("read trace fixtures") {
         let path = entry.expect("trace entry").path();
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         if !(name.starts_with("initialize-") && name.ends_with(".json")) {
             continue;
         }
-        let trace: Value = serde_json::from_str(
-            &std::fs::read_to_string(&path).expect("read initialize trace"),
-        )
-        .expect("initialize trace is JSON");
+        let trace: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read initialize trace"))
+                .expect("initialize trace is JSON");
         if let Some(declaration) = trace.pointer("/capabilities/experimental/magit") {
             declarations.push((name.to_string(), declaration.clone()));
         }

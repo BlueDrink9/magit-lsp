@@ -87,7 +87,8 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
     let _ = tokio::task::spawn_blocking(move || {
         let _guard = guard;
         bootstrap_plain_view(&shared, uri, incarnation, format, caps, encoding, repo);
-    }).await;
+    })
+    .await;
 }
 
 /// Open and publish a Plain view while holding the repository execution lock.
@@ -100,7 +101,9 @@ fn bootstrap_plain_view(
     encoding: Encoding,
     repo: String,
 ) {
-    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) {
+    if shared.closing.load(Ordering::SeqCst)
+        || !plain_incarnation_is_current(shared, &uri, incarnation)
+    {
         return;
     }
     let handle = repository_session(shared, &repo);
@@ -212,15 +215,30 @@ fn bootstrap_plain_view(
     }
 }
 
-pub(super) fn plain_keys_effective(shared: &Shared, repo: &str, document: Option<bool>) -> crate::config::EffectivePlainKeys {
+pub(super) fn plain_keys_effective(
+    shared: &Shared,
+    repo: &str,
+    document: Option<bool>,
+) -> crate::config::EffectivePlainKeys {
     let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
     crate::config::resolve_plain_keys(
-        &shared.config.for_repository(std::path::Path::new(repo)).config().plain,
-        client.client_name.as_deref(), document, client.plain_keys_allowed,
+        &shared
+            .config
+            .for_repository(std::path::Path::new(repo))
+            .config()
+            .plain,
+        client.client_name.as_deref(),
+        document,
+        client.plain_keys_allowed,
     )
 }
 
-pub(super) fn append_plain_keys_header(shared: &Shared, repo: &str, document: Option<bool>, tree: &mut crate::tree::Tree) {
+pub(super) fn append_plain_keys_header(
+    shared: &Shared,
+    repo: &str,
+    document: Option<bool>,
+    tree: &mut crate::tree::Tree,
+) {
     let effective = plain_keys_effective(shared, repo, document);
     let source = match effective.source {
         crate::config::PlainKeysSource::BuiltIn => "built-in",
@@ -246,7 +264,11 @@ fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
         return handle;
     }
     let draft_owner = matches!(
-        shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+        shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation,
         Some(Presentation::Plain(_))
     )
     .then(|| shared.draft_owner.as_ref().clone());
@@ -280,9 +302,8 @@ pub(super) fn refresh_pending_views(shared: &Shared, repo: &str) -> Result<Vec<V
 
 pub(super) fn report_pending_refresh_error(shared: &Shared, error: Error) {
     tracing::warn!(%error, "failed to refresh pending commit draft rows");
-    let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
-        vec![Effect::message(MessageLevel::Error, error.to_string())]
-    });
+    let effects = errors::effects_for_result(Err(error))
+        .unwrap_or_else(|error| vec![Effect::message(MessageLevel::Error, error.to_string())]);
     for message in effect_notifications(&shared.client, effects) {
         let _ = shared.sender.send(message);
     }
@@ -306,17 +327,29 @@ pub(super) fn plain_change(
     // The policy header is a structured node. If the client edits that row,
     // restore the retained authoritative tree without interpreting document text.
     let header_repair = {
-        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         documents.get_mut(uri).and_then(|entry| {
             let (tree, view_id, generation, scope, menu) = entry.controller.latest_action_meta()?;
             let node = tree.node("plain-keys-policy")?;
             if snapshot.text.lines().nth(node.start_line) == Some(node.label.as_str()) {
                 return None;
             }
-            let (tree, view_id, generation, scope, menu) =
-                (tree.clone(), view_id.to_owned(), generation, scope.to_owned(), menu.cloned());
-            entry.controller.observe(snapshot.version, snapshot.text.clone());
-            entry.controller.render_actions(tree, view_id, generation, scope, menu)
+            let (tree, view_id, generation, scope, menu) = (
+                tree.clone(),
+                view_id.to_owned(),
+                generation,
+                scope.to_owned(),
+                menu.cloned(),
+            );
+            entry
+                .controller
+                .observe(snapshot.version, snapshot.text.clone());
+            entry
+                .controller
+                .render_actions(tree, view_id, generation, scope, menu)
                 .map(|edit| (entry.incarnation, edit))
         })
     };
@@ -371,7 +404,9 @@ pub(super) fn plain_change(
                         .get_mut(uri)
                         .filter(|entry| entry.incarnation == incarnation)
                         .and_then(|entry| {
-                            entry.controller.observe(snapshot.version, snapshot.text.clone());
+                            entry
+                                .controller
+                                .observe(snapshot.version, snapshot.text.clone());
                             entry.controller.render_actions(
                                 tree,
                                 view_id,
@@ -398,7 +433,9 @@ pub(super) fn plain_change(
                         .get_mut(uri)
                         .filter(|entry| entry.incarnation == incarnation)
                     {
-                        entry.controller.adopt(snapshot.version, snapshot.text.clone());
+                        entry
+                            .controller
+                            .adopt(snapshot.version, snapshot.text.clone());
                         entry
                             .controller
                             .retain_actions(tree, &view_id, generation, &scope, None);
@@ -481,18 +518,29 @@ pub(super) enum PlainKeyDispatch {
         params: crate::protocol::ViewKeyParams,
     },
     /// Discard a stale edit and render the session's current state.
-    Refresh { uri: String, repo: String, incarnation: u64 },
+    Refresh {
+        uri: String,
+        repo: String,
+        incarnation: u64,
+    },
 }
 
 impl PlainKeyDispatch {
     /// Repository whose execution lock and mutation turn own this dispatch.
     pub(super) fn repo(&self) -> &str {
-        match self { Self::Key { repo, .. } | Self::Refresh { repo, .. } => repo }
+        match self {
+            Self::Key { repo, .. } | Self::Refresh { repo, .. } => repo,
+        }
     }
 
     fn identity(&self) -> (&str, u64) {
         match self {
-            Self::Key { uri, incarnation, .. } | Self::Refresh { uri, incarnation, .. } => (uri, *incarnation),
+            Self::Key {
+                uri, incarnation, ..
+            }
+            | Self::Refresh {
+                uri, incarnation, ..
+            } => (uri, *incarnation),
         }
     }
 }
@@ -520,9 +568,18 @@ fn plain_key_step(
         };
         // Recognize only the exact version/hash produced by the outstanding
         // repair, before treating its mutated pre-text as fresh key input.
-        if entry.key_state.repair_echo.is_some_and(|(_, version, hash)| version == change.post_version && hash == crate::presentation::plain::hash_text(&change.post_text)) {
+        if entry
+            .key_state
+            .repair_echo
+            .is_some_and(|(_, version, hash)| {
+                version == change.post_version
+                    && hash == crate::presentation::plain::hash_text(&change.post_text)
+            })
+        {
             entry.key_state.repair_echo = None;
-            if !entry.key_executing { entry.key_state.classifier = State::Ready; }
+            if !entry.key_executing {
+                entry.key_state.classifier = State::Ready;
+            }
             return PlainKeyStep::Continue;
         }
         if !plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled {
@@ -568,12 +625,13 @@ fn plain_key_step(
         timeout,
     );
     let selection = match &prior {
-        State::PendingDeletion { edit, .. } => edit.pre_range.map(|((start, _), (end, col))| {
-            crate::protocol::Selection {
-                start_line: start as usize,
-                end_line: keys::inclusive_lines(start, end, col).1 as usize,
-            }
-        }),
+        State::PendingDeletion { edit, .. } => {
+            edit.pre_range
+                .map(|((start, _), (end, col))| crate::protocol::Selection {
+                    start_line: start as usize,
+                    end_line: keys::inclusive_lines(start, end, col).1 as usize,
+                })
+        }
         _ => None,
     };
     {
@@ -585,9 +643,12 @@ fn plain_key_step(
             entry.key_state = state.clone();
             match &decision {
                 keys::Decision::Wait => {
-                    entry.controller.observe(snapshot.version, snapshot.text.clone());
+                    entry
+                        .controller
+                        .observe(snapshot.version, snapshot.text.clone());
                 }
-                keys::Decision::Dispatch(_) | keys::Decision::Repair | keys::Decision::DropBusy => {}
+                keys::Decision::Dispatch(_) | keys::Decision::Repair | keys::Decision::DropBusy => {
+                }
             }
         }
     }
@@ -636,7 +697,11 @@ fn plain_key_step(
             entry.key_executing = true;
             entry.key_state.classifier = State::Executing;
         }
-        return PlainKeyStep::Dispatch(PlainKeyDispatch::Refresh { uri: uri.to_owned(), repo, incarnation });
+        return PlainKeyStep::Dispatch(PlainKeyDispatch::Refresh {
+            uri: uri.to_owned(),
+            repo,
+            incarnation,
+        });
     }
     let edit = keys::derive_edit(
         &change.pre.text,
@@ -659,41 +724,73 @@ fn plain_key_step(
         },
         selection,
     };
-    if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri) {
+    if let Some(entry) = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(uri)
+    {
         entry.key_executing = true;
         entry.key_state.classifier = State::Executing;
         entry.key_state.repair_due = false;
     }
-    PlainKeyStep::Dispatch(PlainKeyDispatch::Key { uri: uri.to_owned(), repo, incarnation, params })
+    PlainKeyStep::Dispatch(PlainKeyDispatch::Key {
+        uri: uri.to_owned(),
+        repo,
+        incarnation,
+        params,
+    })
 }
 
 /// Run a tracked Plain handler in repository order, off the transport reader.
-pub(super) async fn handle_plain_key(shared: Shared, dispatch: PlainKeyDispatch, turn: MutationTurn) {
+pub(super) async fn handle_plain_key(
+    shared: Shared,
+    dispatch: PlainKeyDispatch,
+    turn: MutationTurn,
+) {
     turn.wait().await;
     let lock = repository_lock(&shared.repo_locks, dispatch.repo()).await;
     let _guard = lock.lock().await;
-    let (token, cancel) = shared.begin_progress(&shared.sender, "view/key", None, Some(dispatch.repo()));
+    let (token, cancel) =
+        shared.begin_progress(&shared.sender, "view/key", None, Some(dispatch.repo()));
     let worker_shared = shared.clone();
     let worker_dispatch = dispatch.clone();
     let result = tokio::task::spawn_blocking(move || {
-        runner::with_cancel(Some(cancel), || execute_plain_key(&worker_shared, worker_dispatch))
-    }).await;
+        runner::with_cancel(Some(cancel), || {
+            execute_plain_key(&worker_shared, worker_dispatch)
+        })
+    })
+    .await;
     let error = match result {
         Ok(Ok(())) => None,
         Ok(Err(error)) => Some(error.to_string()),
         Err(error) => Some(format!("Plain key worker failed: {error}")),
     };
     if let Some(error) = error {
-        let _ = shared.sender.send(show_message(1, format!("Cannot execute Plain key: {error}")));
+        let _ = shared.sender.send(show_message(
+            1,
+            format!("Cannot execute Plain key: {error}"),
+        ));
     }
     let (uri, incarnation) = dispatch.identity();
     repair_plain_authoritative(&shared, uri, incarnation);
     {
-        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri).filter(|entry| entry.incarnation == incarnation) {
+        let _lifecycle = shared
+            .plain_lifecycle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(uri)
+            .filter(|entry| entry.incarnation == incarnation)
+        {
             entry.key_executing = false;
             entry.key_state.repair_due = false;
-            if entry.key_state.repair_echo.is_none() { entry.key_state.classifier = crate::presentation::keys::State::Ready; }
+            if entry.key_state.repair_echo.is_none() {
+                entry.key_state.classifier = crate::presentation::keys::State::Ready;
+            }
         }
     }
     shared.end_progress(&shared.sender, &token);
@@ -703,9 +800,17 @@ pub(super) async fn handle_plain_key(shared: Shared, dispatch: PlainKeyDispatch,
 /// Execute one admitted Plain key with no lifecycle guard held during Git/render delivery.
 fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> {
     let (uri, incarnation) = dispatch.identity();
-    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, uri, incarnation) { return Ok(()); }
+    if shared.closing.load(Ordering::SeqCst)
+        || !plain_incarnation_is_current(shared, uri, incarnation)
+    {
+        return Ok(());
+    }
     match dispatch {
-        PlainKeyDispatch::Refresh { uri, repo, incarnation } => {
+        PlainKeyDispatch::Refresh {
+            uri,
+            repo,
+            incarnation,
+        } => {
             let view_id = shared
                 .plain_documents
                 .lock()
@@ -735,19 +840,53 @@ fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> 
             incarnation,
             params,
         } => {
-            let handle = shared.session(&repo).ok_or_else(|| Error::new("Plain key session closed"))?;
+            let handle = shared
+                .session(&repo)
+                .ok_or_else(|| Error::new("Plain key session closed"))?;
             // Session ownership serializes admission with execution; lifecycle
             // ownership is needed only to validate the live URI, never for Git.
             let step = {
                 let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                let lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-                let eligible = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).is_some_and(|entry| {
-                    entry.incarnation == incarnation && entry.repo == repo && entry.view_id == params.view_id
-                        && plain_keys_effective(shared, &repo, entry.keys_override).enabled
-                        && entry.controller.latest_action_meta().is_some_and(|(_, view_id, _, scope, _)| view_id == params.view_id && !matches!(scope, "prompt" | "log.select" | "commit-message"))
-                });
-                if !eligible || !plain_incarnation_is_current(shared, &uri, incarnation) || shared.closing.load(Ordering::SeqCst) { return Ok(()); }
-                let current = shared.published.lock().unwrap_or_else(|p| p.into_inner()).values().find_map(|views| views.current_snapshot(&params.view_id).map(|(_, version, _, _)| version));
+                let lifecycle = shared
+                    .plain_lifecycle
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                let eligible = shared
+                    .plain_documents
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(&uri)
+                    .is_some_and(|entry| {
+                        entry.incarnation == incarnation
+                            && entry.repo == repo
+                            && entry.view_id == params.view_id
+                            && plain_keys_effective(shared, &repo, entry.keys_override).enabled
+                            && entry.controller.latest_action_meta().is_some_and(
+                                |(_, view_id, _, scope, _)| {
+                                    view_id == params.view_id
+                                        && !matches!(
+                                            scope,
+                                            "prompt" | "log.select" | "commit-message"
+                                        )
+                                },
+                            )
+                    });
+                if !eligible
+                    || !plain_incarnation_is_current(shared, &uri, incarnation)
+                    || shared.closing.load(Ordering::SeqCst)
+                {
+                    return Ok(());
+                }
+                let current = shared
+                    .published
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .find_map(|views| {
+                        views
+                            .current_snapshot(&params.view_id)
+                            .map(|(_, version, _, _)| version)
+                    });
                 if current != Some(params.version) {
                     let _ = shared.sender.send(show_message(2, PLAIN_KEY_STALE.into()));
                     return Ok(());
@@ -756,23 +895,36 @@ fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> 
                 use crate::presentation::keys::KeyPreflight;
                 match session.preflight_key(&params)? {
                     KeyPreflight::Pending | KeyPreflight::Allowed { .. } => {}
-                    KeyPreflight::Unbound => { let _ = shared.sender.send(show_message(2, "key is not bound in the active profile".into())); return Ok(()); }
-                    KeyPreflight::Refused { message, .. } => { let _ = shared.sender.send(show_message(2, message)); return Ok(()); }
+                    KeyPreflight::Unbound => {
+                        let _ = shared.sender.send(show_message(
+                            2,
+                            "key is not bound in the active profile".into(),
+                        ));
+                        return Ok(());
+                    }
+                    KeyPreflight::Refused { message, .. } => {
+                        let _ = shared.sender.send(show_message(2, message));
+                        return Ok(());
+                    }
                 }
-            // Admission must match `key_view`: cancellation cleanup and a
-            // detached worker's mutation authority both refuse before any
-            // command starts, leaving the typed text to the authoritative repair.
-            if let Some(message) = super::view_execution::key_admission_refusal(shared, &repo, || {
-                session.resolved_key_command(&params)
-            })? {
-                let _ = shared.sender.send(show_message(2, message.into()));
-                return Ok(());
-            }
+                // Admission must match `key_view`: cancellation cleanup and a
+                // detached worker's mutation authority both refuse before any
+                // command starts, leaving the typed text to the authoritative repair.
+                if let Some(message) =
+                    super::view_execution::key_admission_refusal(shared, &repo, || {
+                        session.resolved_key_command(&params)
+                    })?
+                {
+                    let _ = shared.sender.send(show_message(2, message.into()));
+                    return Ok(());
+                }
                 drop(lifecycle);
                 session.start_key(&params)?
             };
             let outcome = super::view_execution::drive_execution(shared, &repo, step)?;
-            if !plain_incarnation_is_current(shared, &uri, incarnation) { return Ok(()); }
+            if !plain_incarnation_is_current(shared, &uri, incarnation) {
+                return Ok(());
+            }
             let dispatched = super::view_execution::dispatched_outcome(shared, &repo, outcome)?;
             for notification in dispatched.notifications {
                 let _ = shared.sender.send(notification);
@@ -784,13 +936,15 @@ fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> 
 
 /// Repair one Plain document to its newest retained authoritative render.
 fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
-    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-    if !plain_incarnation_is_current(shared, uri, incarnation) { return; }
+    let _lifecycle = shared
+        .plain_lifecycle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if !plain_incarnation_is_current(shared, uri, incarnation) {
+        return;
+    }
     let (text, version) = {
-        let documents = shared
-            .documents
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(document) = documents.get(uri).filter(|document| !document.repair) else {
             return;
         };
@@ -800,19 +954,30 @@ fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
         .plain_documents
         .lock()
         .unwrap_or_else(|p| p.into_inner());
-    let Some(entry) = documents.get_mut(uri).filter(|entry| entry.incarnation == incarnation) else {
+    let Some(entry) = documents
+        .get_mut(uri)
+        .filter(|entry| entry.incarnation == incarnation)
+    else {
         return;
     };
     if entry.key_state.repair_echo.is_some() {
         return;
     }
-    let Some((tree, view_id, generation, scope, menu)) = entry.controller.latest_action_meta() else {
+    let Some((tree, view_id, generation, scope, menu)) = entry.controller.latest_action_meta()
+    else {
         return;
     };
-    let (tree, view_id, generation, scope, menu) =
-        (tree.clone(), view_id.to_owned(), generation, scope.to_owned(), menu.cloned());
+    let (tree, view_id, generation, scope, menu) = (
+        tree.clone(),
+        view_id.to_owned(),
+        generation,
+        scope.to_owned(),
+        menu.cloned(),
+    );
     entry.controller.observe(version, text);
-    let edit = entry.controller.render_actions(tree, view_id, generation, scope, menu);
+    let edit = entry
+        .controller
+        .render_actions(tree, view_id, generation, scope, menu);
     if let Some(edit) = edit {
         let incarnation = entry.incarnation;
         drop(documents);
@@ -825,7 +990,11 @@ fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
 /// A field edit is adopted without a revert; a non-field edit is repaired by
 /// re-rendering the prompt view. Adopted edits, ended prompts and errors fall
 /// through to ordinary document synchronization.
-pub(super) fn reconcile_rich_prompt(shared: &Shared, uri: &str, sender: &mpsc::UnboundedSender<Message>) {
+pub(super) fn reconcile_rich_prompt(
+    shared: &Shared,
+    uri: &str,
+    sender: &mpsc::UnboundedSender<Message>,
+) {
     let rich = matches!(
         shared
             .client
@@ -916,20 +1085,38 @@ pub(super) fn deliver_plain_close_outcome(shared: &Shared, close: Option<(String
         let guard = lock.lock_owned().await;
         let _ = tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            let outcome = shared.session(&repo).and_then(|session| session.lock().unwrap_or_else(|p| p.into_inner()).close(&view_id).ok());
+            let outcome = shared.session(&repo).and_then(|session| {
+                session
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .close(&view_id)
+                    .ok()
+            });
             if let Some(outcome) = outcome {
                 // A replacement document owns its own focus/render lifecycle.
                 // Closing the old logical view must not redirect that document.
-                let replacement = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).values().any(|entry| entry.repo == repo);
+                let replacement = shared
+                    .plain_documents
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .any(|entry| entry.repo == repo);
                 if !replacement {
                     match dispatched_outcome(&shared, &repo, outcome) {
-                        Ok(dispatched) => for notification in dispatched.notifications { let _ = shared.sender.send(notification); },
-                        Err(error) => tracing::warn!(%error, "failed to deliver a Plain view close outcome"),
+                        Ok(dispatched) => {
+                            for notification in dispatched.notifications {
+                                let _ = shared.sender.send(notification);
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "failed to deliver a Plain view close outcome")
+                        }
                     }
                 }
             }
             shared.stop_watcher_if_idle(&repo);
-        }).await;
+        })
+        .await;
     });
 }
 
@@ -1091,13 +1278,7 @@ fn send_plain_edit_document(
             .unwrap_or_else(|p| p.into_inner())
             .get(&uri)
             .map(|document| {
-                whole_document_edit(
-                    &uri,
-                    document.version,
-                    &document.text,
-                    &text,
-                    encoding,
-                )
+                whole_document_edit(&uri, document.version, &document.text, &text, encoding)
             })
     } else {
         None
@@ -1202,7 +1383,13 @@ pub(super) fn route_plain_render(
     view_id: &str,
     snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>,
 ) -> bool {
-    if shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.is_none() {
+    if shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .is_none()
+    {
         return false;
     }
     let _plain = shared
@@ -1228,8 +1415,15 @@ pub(super) fn route_plain_render(
         };
         snapshot.and_then(|(mut tree, generation, scope, menu)| {
             if entry.key_state.classifier == crate::presentation::keys::State::Executing {
-                if let Some(document) = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri) {
-                    entry.controller.observe(document.version, document.text.clone());
+                if let Some(document) = shared
+                    .documents
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(uri)
+                {
+                    entry
+                        .controller
+                        .observe(document.version, document.text.clone());
                 }
             }
             if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
@@ -1255,23 +1449,57 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
         return;
     }
     let echo = (|| {
-        let mut document = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri)?.clone();
+        let mut document = shared
+            .documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&uri)?
+            .clone();
         let version = document.version.checked_add(1)?;
-        let changes = edit.edit.get("documentChanges").and_then(Value::as_array).and_then(|changes| changes.first());
+        let changes = edit
+            .edit
+            .get("documentChanges")
+            .and_then(Value::as_array)
+            .and_then(|changes| changes.first());
         let edits = if let Some(change) = changes {
-            if change.pointer("/textDocument/version")?.as_i64()? != i64::from(document.version) { return None; }
+            if change.pointer("/textDocument/version")?.as_i64()? != i64::from(document.version) {
+                return None;
+            }
             change.get("edits")?
         } else {
             edit.edit.get("changes")?.get(&uri)?
         };
         let mut edits: Vec<lsp_types::TextEdit> = serde_json::from_value(edits.clone()).ok()?;
-        edits.sort_by_key(|edit| std::cmp::Reverse((edit.range.start.line, edit.range.start.character)));
-        let changes: Vec<_> = edits.into_iter().map(|edit| crate::docstore::Change { start: Some((edit.range.start.line, edit.range.start.character)), end: Some((edit.range.end.line, edit.range.end.character)), text: edit.new_text }).collect();
-        let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding;
+        edits.sort_by_key(|edit| {
+            std::cmp::Reverse((edit.range.start.line, edit.range.start.character))
+        });
+        let changes: Vec<_> = edits
+            .into_iter()
+            .map(|edit| crate::docstore::Change {
+                start: Some((edit.range.start.line, edit.range.start.character)),
+                end: Some((edit.range.end.line, edit.range.end.character)),
+                text: edit.new_text,
+            })
+            .collect();
+        let encoding = shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .encoding;
         document.change(version, &changes, encoding).ok()?;
-        Some((edit.id, version, crate::presentation::plain::hash_text(&document.text)))
+        Some((
+            edit.id,
+            version,
+            crate::presentation::plain::hash_text(&document.text),
+        ))
     })();
-    if let Some(entry) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&uri).filter(|entry| entry.incarnation == incarnation) {
+    if let Some(entry) = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(&uri)
+        .filter(|entry| entry.incarnation == incarnation)
+    {
         entry.key_state.repair_echo = echo;
     }
     let Ok((pending, receiver)) = shared.register_outbound(

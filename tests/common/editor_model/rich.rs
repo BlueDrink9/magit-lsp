@@ -21,11 +21,15 @@ pub struct ViewState {
 
 /// Client response intent after applying a render.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Intent { Ack(u64), Resync }
+pub enum Intent {
+    Ack(u64),
+    Resync,
+}
 
 /// Per-view fake editor for rich render behavior.
 #[derive(Default)]
-pub struct RichEditor { /// Render state keyed by server view identifier.
+pub struct RichEditor {
+    /// Render state keyed by server view identifier.
     pub views: BTreeMap<String, ViewState>,
 }
 
@@ -33,17 +37,32 @@ impl RichEditor {
     /// Apply render text and metadata, returning acknowledgement or resync intent.
     pub fn apply(&mut self, render: ViewRender) -> Intent {
         let state = self.views.entry(render.view_id).or_default();
-        if render.text.is_none() && render.edits.is_some() && render.base_version != Some(state.version) { return Intent::Resync; }
-        if let Some(text) = render.text { state.lines = text; }
-        else if let Some(mut edits) = render.edits {
+        if render.text.is_none()
+            && render.edits.is_some()
+            && render.base_version != Some(state.version)
+        {
+            return Intent::Resync;
+        }
+        if let Some(text) = render.text {
+            state.lines = text;
+        } else if let Some(mut edits) = render.edits {
             edits.sort_by_key(|edit| std::cmp::Reverse(edit.start_line));
-            for LineEdit { start_line, end_line, lines } in edits { state.lines.splice(start_line..end_line, lines); }
+            for LineEdit {
+                start_line,
+                end_line,
+                lines,
+            } in edits
+            {
+                state.lines.splice(start_line..end_line, lines);
+            }
         }
         state.version = render.version;
         state.cursor = render.cursor;
         state.mode = render.mode;
         state.pending = render.pending;
-        state.menu = render.menu.map(|menu| serde_json::to_value(menu).expect("menu serializes"));
+        state.menu = render
+            .menu
+            .map(|menu| serde_json::to_value(menu).expect("menu serializes"));
         Intent::Ack(state.version)
     }
 }

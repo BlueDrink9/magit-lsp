@@ -28,10 +28,18 @@ fn paused_repo() -> (TempDir, GitRepo) {
     git(dir.path(), &["commit", "-am", "three"]);
     write(&dir.path().join("file"), "four\n");
     git(dir.path(), &["commit", "-am", "four"]);
-    let output = std::process::Command::new("git").args(["rebase", "-i", "HEAD~3"]).current_dir(dir.path())
-        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'").output().unwrap();
+    let output = std::process::Command::new("git")
+        .args(["rebase", "-i", "HEAD~3"])
+        .current_dir(dir.path())
+        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+        .output()
+        .unwrap();
     let repo = GitRepo::open(dir.path()).unwrap();
-    assert!(repo.rebase_state().unwrap().is_some(), "edit rebase must pause: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        repo.rebase_state().unwrap().is_some(),
+        "edit rebase must pause: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     (dir, repo)
 }
 
@@ -39,7 +47,10 @@ fn paused_repo() -> (TempDir, GitRepo) {
 fn parses_supported_actions_and_abbreviated_identity() {
     let (dir, repo, oid) = repo();
     let prefix = &oid[..8];
-    let mut ids = vec![oid.clone(), git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned()];
+    let mut ids = vec![
+        oid.clone(),
+        git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned(),
+    ];
     for index in 0..4 {
         write(&dir.path().join("file"), &format!("{index}\n"));
         git(dir.path(), &["commit", "-am", &format!("extra-{index}")]);
@@ -47,7 +58,21 @@ fn parses_supported_actions_and_abbreviated_identity() {
     }
     let source = format!("# comment\n\np   {prefix}\ttwo\nreword {} one\ne {} two\ns {} three\nfixup {} four\ndrop {} five\n", ids[1], ids[2], ids[3], ids[4], ids[5]);
     let parsed = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
-    assert_eq!(parsed.entries.iter().map(|entry| entry.action).collect::<Vec<_>>(), vec![TodoAction::Pick, TodoAction::Reword, TodoAction::Edit, TodoAction::Squash, TodoAction::Fixup, TodoAction::Drop]);
+    assert_eq!(
+        parsed
+            .entries
+            .iter()
+            .map(|entry| entry.action)
+            .collect::<Vec<_>>(),
+        vec![
+            TodoAction::Pick,
+            TodoAction::Reword,
+            TodoAction::Edit,
+            TodoAction::Squash,
+            TodoAction::Fixup,
+            TodoAction::Drop
+        ]
+    );
     assert_eq!(parsed.entries[0].oid, oid);
     assert_eq!(parsed.source(), source.as_bytes());
 }
@@ -63,7 +88,11 @@ fn subject_starting_with_dash_is_not_treated_as_an_option() {
 fn save_reorders_changes_action_and_writes_omissions_as_drop() {
     let (dir, repo) = paused_repo();
     let mut todo = RebaseTodo::load(&repo).unwrap();
-    let identities = todo.entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let identities = todo
+        .entries
+        .iter()
+        .map(|entry| entry.oid.clone())
+        .collect::<Vec<_>>();
     assert_eq!(identities.len(), 2);
     let first = todo.entries[0].clone();
     let second = todo.entries[1].clone();
@@ -72,10 +101,21 @@ fn save_reorders_changes_action_and_writes_omissions_as_drop() {
     todo.entries.pop();
     todo.save(&repo).unwrap();
     let saved = std::fs::read_to_string(repo.rebase_todo_path().unwrap()).unwrap();
-    assert_eq!(saved, format!("reword {} {}\ndrop {} {}\n", second.oid, second.subject, first.oid, first.subject));
+    assert_eq!(
+        saved,
+        format!(
+            "reword {} {}\ndrop {} {}\n",
+            second.oid, second.subject, first.oid, first.subject
+        )
+    );
     let mut identities = identities;
     identities.sort();
-    let mut written = RebaseTodo::parse(&repo, saved.as_bytes()).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+    let mut written = RebaseTodo::parse(&repo, saved.as_bytes())
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|entry| entry.oid)
+        .collect::<Vec<_>>();
     written.sort();
     assert_eq!(written, identities);
     git(dir.path(), &["rebase", "--abort"]);
@@ -100,15 +140,23 @@ fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert!(!lock_path.exists());
-    todo.entries[0].oid = RebaseTodo::parse(&repo, &source).unwrap().entries[0].oid.clone();
+    todo.entries[0].oid = RebaseTodo::parse(&repo, &source).unwrap().entries[0]
+        .oid
+        .clone();
     todo.entries[0].subject.push_str("\nexec touch injected");
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    todo.entries[0].subject = RebaseTodo::parse(&repo, &source).unwrap().entries[0].subject.clone();
+    todo.entries[0].subject = RebaseTodo::parse(&repo, &source).unwrap().entries[0]
+        .subject
+        .clone();
     todo.entries[0].action = TodoAction::Reword;
     let foreign_lock = b"foreign lock bytes\n";
     std::fs::write(&lock_path, foreign_lock).unwrap();
-    assert!(todo.save(&repo).unwrap_err().to_string().contains("locked by another process"));
+    assert!(todo
+        .save(&repo)
+        .unwrap_err()
+        .to_string()
+        .contains("locked by another process"));
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert_eq!(std::fs::read(&lock_path).unwrap(), foreign_lock);
     std::fs::remove_file(&lock_path).unwrap();
@@ -124,20 +172,43 @@ fn old_todo_model_cannot_save_into_identical_restarted_rebase() {
     let old = RebaseTodo::load(&repo).unwrap();
     let path = repo.rebase_todo_path().unwrap();
     let source = std::fs::read(&path).unwrap();
-    let metadata = ["orig-head", "onto", "head-name"].map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap());
+    let metadata = ["orig-head", "onto", "head-name"]
+        .map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap());
     git(dir.path(), &["rebase", "--abort"]);
-    let output = std::process::Command::new("git").args(["rebase", "-i", "HEAD~3"]).current_dir(dir.path())
-        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'").output().unwrap();
-    assert!(output.status.success(), "restart paused rebase: {}", String::from_utf8_lossy(&output.stderr));
+    let output = std::process::Command::new("git")
+        .args(["rebase", "-i", "HEAD~3"])
+        .current_dir(dir.path())
+        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "restart paused rebase: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let restarted = std::fs::read(&path).unwrap();
     assert_eq!(restarted, source);
-    assert_eq!(["orig-head", "onto", "head-name"].map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap()), metadata);
+    assert_eq!(
+        ["orig-head", "onto", "head-name"]
+            .map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap()),
+        metadata
+    );
     assert!(old.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), source);
     let mut current = RebaseTodo::load(&repo).unwrap();
     current.entries[0].action = TodoAction::Reword;
     current.save(&repo).unwrap();
-    assert_eq!(std::fs::read(&path).unwrap(), format!("reword {} {}\npick {} {}\n", current.entries[0].oid, current.entries[0].subject, current.entries[1].oid, current.entries[1].subject).as_bytes());
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        format!(
+            "reword {} {}\npick {} {}\n",
+            current.entries[0].oid,
+            current.entries[0].subject,
+            current.entries[1].oid,
+            current.entries[1].subject
+        )
+        .as_bytes()
+    );
     git(dir.path(), &["rebase", "--abort"]);
 }
 
@@ -146,7 +217,11 @@ fn todo_view_edits_and_reorders_by_captured_identity() {
     let (dir, repo) = paused_repo();
     let mut view = RebaseTodoView::load(repo).unwrap();
     let initial = view.render();
-    let ids = initial.nodes.iter().map(|node| node.commit.clone().unwrap()).collect::<Vec<_>>();
+    let ids = initial
+        .nodes
+        .iter()
+        .map(|node| node.commit.clone().unwrap())
+        .collect::<Vec<_>>();
     assert_eq!(ids.len(), 2);
     let second = ids[1].clone();
     view.set_action(&second, TodoAction::Reword).unwrap();
@@ -172,14 +247,26 @@ fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
     let todo_before = std::fs::read(&todo_path).unwrap();
     let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
     let index_before = git(dir.path(), &["write-tree"]);
-    let expected = RebaseTodo::load(&repo).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+    let expected = RebaseTodo::load(&repo)
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|entry| entry.oid)
+        .collect::<Vec<_>>();
 
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
-    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::RebaseTodo);
+    assert_eq!(
+        *test.session.views().get(test.view_id()).unwrap().kind(),
+        magit_lsp::view::ViewKind::RebaseTodo
+    );
     let tree = test.tree();
-    let rows = tree.nodes.iter().filter_map(|node| node.commit.clone()).collect::<Vec<_>>();
+    let rows = tree
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.clone())
+        .collect::<Vec<_>>();
     assert_eq!(rows, expected);
     assert!(rows.iter().all(|oid| oid.len() == 40));
 
@@ -198,7 +285,9 @@ fn failed_todo_factory_keeps_caller_and_reports_readable_message() {
     test.open_status_view(STATUS_VIEWPORT);
     std::fs::remove_dir_all(dir.path().join(".git/rebase-merge")).unwrap();
     let result = test.invoke("rebase.edit-todo");
-    assert!(message_texts(&result.effects).iter().any(|message| !message.trim().is_empty()));
+    assert!(message_texts(&result.effects)
+        .iter()
+        .any(|message| !message.trim().is_empty()));
     assert_eq!(test.view_id(), "v1");
     assert!(test.session.views().get("v2").is_none());
 }
@@ -206,7 +295,12 @@ fn failed_todo_factory_keeps_caller_and_reports_readable_message() {
 #[test]
 fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
     let (dir, repo) = paused_repo();
-    let expected = RebaseTodo::load(&repo).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+    let expected = RebaseTodo::load(&repo)
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|entry| entry.oid)
+        .collect::<Vec<_>>();
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
@@ -215,16 +309,51 @@ fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
     test.press("r");
     assert_eq!(test.tree().nodes[0].status.as_deref(), Some("reword"));
     test.press("J");
-    let rows = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>();
+    let rows = test
+        .tree()
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.as_deref())
+        .collect::<Vec<_>>();
     assert_eq!(rows, vec![expected[1].as_str(), expected[0].as_str()]);
-    assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&expected[0])).unwrap().status.as_deref(), Some("reword"));
+    assert_eq!(
+        test.tree()
+            .nodes
+            .iter()
+            .find(|node| node.commit.as_deref() == Some(&expected[0]))
+            .unwrap()
+            .status
+            .as_deref(),
+        Some("reword")
+    );
     test.press("J");
-    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), expected.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(
+        test.tree()
+            .nodes
+            .iter()
+            .filter_map(|node| node.commit.as_deref())
+            .collect::<Vec<_>>(),
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
     test.set_cursor(magit_lsp::protocol::Cursor { line: 1, column: 0 });
     test.press("K");
-    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), vec![expected[1].as_str(), expected[0].as_str()]);
+    assert_eq!(
+        test.tree()
+            .nodes
+            .iter()
+            .filter_map(|node| node.commit.as_deref())
+            .collect::<Vec<_>>(),
+        vec![expected[1].as_str(), expected[0].as_str()]
+    );
     test.press("K");
-    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), expected.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(
+        test.tree()
+            .nodes
+            .iter()
+            .filter_map(|node| node.commit.as_deref())
+            .collect::<Vec<_>>(),
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
     test.press("Escape");
     git(dir.path(), &["rebase", "--abort"]);
 }
@@ -234,13 +363,22 @@ fn todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository
     let (dir, repo) = paused_repo();
     let path = repo.rebase_todo_path().unwrap();
     let entries = RebaseTodo::load(&repo).unwrap().entries;
-    let identities = entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let identities = entries
+        .iter()
+        .map(|entry| entry.oid.clone())
+        .collect::<Vec<_>>();
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let index = git(dir.path(), &["write-tree"]);
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
-    let order = |test: &TestSession| test.tree().nodes.iter().filter_map(|node| node.commit.clone()).collect::<Vec<_>>();
+    let order = |test: &TestSession| {
+        test.tree()
+            .nodes
+            .iter()
+            .filter_map(|node| node.commit.clone())
+            .collect::<Vec<_>>()
+    };
 
     test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
     test.press("K");
@@ -250,10 +388,19 @@ fn todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository
     assert_eq!(order(&test), identities);
     test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
     test.press("J");
-    assert_eq!(order(&test), vec![identities[1].clone(), identities[0].clone()]);
+    assert_eq!(
+        order(&test),
+        vec![identities[1].clone(), identities[0].clone()]
+    );
     test.press("ctrl+s");
     assert_eq!(test.view_id(), "v1");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("pick {} {}\npick {} {}\n", entries[1].oid, entries[1].subject, entries[0].oid, entries[0].subject));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        format!(
+            "pick {} {}\npick {} {}\n",
+            entries[1].oid, entries[1].subject, entries[0].oid, entries[0].subject
+        )
+    );
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
     assert_eq!(git(dir.path(), &["write-tree"]), index);
     let refresh = test.invoke("common.refresh");
@@ -290,13 +437,37 @@ fn todo_action_keys_change_captured_full_oid_row() {
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
     let tree = test.tree();
-    let node = tree.nodes.iter().find(|node| node.commit.as_deref() == Some(&selected)).unwrap();
-    let line = tree.line_nodes.iter().position(|line| line.node == node.id).unwrap();
+    let node = tree
+        .nodes
+        .iter()
+        .find(|node| node.commit.as_deref() == Some(&selected))
+        .unwrap();
+    let line = tree
+        .line_nodes
+        .iter()
+        .position(|line| line.node == node.id)
+        .unwrap();
     test.set_cursor(magit_lsp::protocol::Cursor { line, column: 0 });
 
-    for (key, action) in [("p", "pick"), ("r", "reword"), ("e", "edit"), ("s", "squash"), ("f", "fixup"), ("d", "drop")] {
+    for (key, action) in [
+        ("p", "pick"),
+        ("r", "reword"),
+        ("e", "edit"),
+        ("s", "squash"),
+        ("f", "fixup"),
+        ("d", "drop"),
+    ] {
         test.press(key);
-        assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&selected)).unwrap().status.as_deref(), Some(action));
+        assert_eq!(
+            test.tree()
+                .nodes
+                .iter()
+                .find(|node| node.commit.as_deref() == Some(&selected))
+                .unwrap()
+                .status
+                .as_deref(),
+            Some(action)
+        );
     }
 
     test.press("Escape");
@@ -309,25 +480,59 @@ fn todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable() {
     let path = repo.rebase_todo_path().unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let entries = RebaseTodo::load(&repo).unwrap().entries;
-    let identities = entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let identities = entries
+        .iter()
+        .map(|entry| entry.oid.clone())
+        .collect::<Vec<_>>();
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
     let tree = test.tree();
-    let node = tree.nodes.iter().find(|node| node.commit.as_deref() == Some(&identities[0])).unwrap();
-    let line = tree.line_nodes.iter().position(|line| line.node == node.id).unwrap();
+    let node = tree
+        .nodes
+        .iter()
+        .find(|node| node.commit.as_deref() == Some(&identities[0]))
+        .unwrap();
+    let line = tree
+        .line_nodes
+        .iter()
+        .position(|line| line.node == node.id)
+        .unwrap();
     test.set_cursor(magit_lsp::protocol::Cursor { line, column: 0 });
 
     for key in ["s", "f"] {
         let result = test.press(key);
-        assert!(message_texts(&result.effects).iter().any(|message| message.contains("first todo action cannot squash or fixup")));
+        assert!(message_texts(&result.effects)
+            .iter()
+            .any(|message| message.contains("first todo action cannot squash or fixup")));
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
-        assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_ref()).collect::<Vec<_>>(), identities.iter().collect::<Vec<_>>());
-        assert!(test.tree().nodes.iter().filter(|node| node.commit.is_some()).all(|node| node.status.as_deref() == Some("pick")));
+        assert_eq!(
+            test.tree()
+                .nodes
+                .iter()
+                .filter_map(|node| node.commit.as_ref())
+                .collect::<Vec<_>>(),
+            identities.iter().collect::<Vec<_>>()
+        );
+        assert!(test
+            .tree()
+            .nodes
+            .iter()
+            .filter(|node| node.commit.is_some())
+            .all(|node| node.status.as_deref() == Some("pick")));
     }
 
     test.press("r");
-    assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&identities[0])).unwrap().status.as_deref(), Some("reword"));
+    assert_eq!(
+        test.tree()
+            .nodes
+            .iter()
+            .find(|node| node.commit.as_deref() == Some(&identities[0]))
+            .unwrap()
+            .status
+            .as_deref(),
+        Some("reword")
+    );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     test.press("Escape");
     git(dir.path(), &["rebase", "--abort"]);
@@ -345,13 +550,40 @@ fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     test.press("r T");
     let first_cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
     let second_cursor = magit_lsp::protocol::Cursor { line: 1, column: 0 };
-    let second_oid = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).nth(1).unwrap().to_owned();
-    let first_oid = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).next().unwrap().to_owned();
-    let changed = test.invoke_at_args("rebase.todo-set-action", Some(first_cursor), serde_json::json!({"action":"reword"}));
+    let second_oid = test
+        .tree()
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.as_deref())
+        .nth(1)
+        .unwrap()
+        .to_owned();
+    let first_oid = test
+        .tree()
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.as_deref())
+        .next()
+        .unwrap()
+        .to_owned();
+    let changed = test.invoke_at_args(
+        "rebase.todo-set-action",
+        Some(first_cursor),
+        serde_json::json!({"action":"reword"}),
+    );
     assert!(message_texts(&changed.effects).is_empty());
-    let moved = test.invoke_at_args("rebase.todo-move-before", Some(second_cursor), serde_json::json!({"before":first_oid}));
+    let moved = test.invoke_at_args(
+        "rebase.todo-move-before",
+        Some(second_cursor),
+        serde_json::json!({"before":first_oid}),
+    );
     assert!(message_texts(&moved.effects).is_empty());
-    let ordered = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>();
+    let ordered = test
+        .tree()
+        .nodes
+        .iter()
+        .filter_map(|node| node.commit.as_deref())
+        .collect::<Vec<_>>();
     assert_eq!(ordered, vec![second_oid.as_str(), first_oid.as_str()]);
     test.press("ctrl+s");
     assert_eq!(test.view_id(), "v1");
@@ -373,19 +605,33 @@ fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     let todo_view_id = test.view_id().to_owned();
     let cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
     let invalid_bytes = std::fs::read(&path).unwrap();
-    let invalid = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"unsupported"}));
-    assert!(message_texts(&invalid.effects).iter().any(|message| message.contains("Invalid rebase todo action")));
+    let invalid = test.invoke_at_args(
+        "rebase.todo-set-action",
+        Some(cursor),
+        serde_json::json!({"action":"unsupported"}),
+    );
+    assert!(message_texts(&invalid.effects)
+        .iter()
+        .any(|message| message.contains("Invalid rebase todo action")));
     assert_eq!(std::fs::read(&path).unwrap(), invalid_bytes);
-    let valid = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"reword"}));
+    let valid = test.invoke_at_args(
+        "rebase.todo-set-action",
+        Some(cursor),
+        serde_json::json!({"action":"reword"}),
+    );
     assert!(message_texts(&valid.effects).is_empty());
     assert_eq!(test.view_id(), todo_view_id);
     std::fs::write(&path, b"external stale edit\n").unwrap();
     let stale = test.invoke("rebase.todo-submit");
-    assert!(message_texts(&stale.effects).iter().any(|message| message.contains("changed")));
+    assert!(message_texts(&stale.effects)
+        .iter()
+        .any(|message| message.contains("changed")));
     assert_eq!(test.view_id(), todo_view_id);
     assert_eq!(std::fs::read(&path).unwrap(), b"external stale edit\n");
     let usable = test.invoke("rebase.todo-set-action");
-    assert!(message_texts(&usable.effects).iter().any(|message| !message.trim().is_empty()));
+    assert!(message_texts(&usable.effects)
+        .iter()
+        .any(|message| !message.trim().is_empty()));
     assert_eq!(test.view_id(), todo_view_id);
     test.press("Escape");
     assert_eq!(test.view_id(), "v1");
@@ -406,7 +652,11 @@ fn dispatched_todo_cancel_after_edits_preserves_repository_and_restores_caller()
     test.open_status_view(STATUS_VIEWPORT);
     test.press("r T");
     let cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
-    let edit = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"reword"}));
+    let edit = test.invoke_at_args(
+        "rebase.todo-set-action",
+        Some(cursor),
+        serde_json::json!({"action":"reword"}),
+    );
     assert!(message_texts(&edit.effects).is_empty());
     test.press("Escape");
     assert_eq!(test.view_id(), "v1");
@@ -426,7 +676,10 @@ fn idle_rebase_todo_opener_reports_error_and_keeps_caller_usable() {
     test.open_status_view(STATUS_VIEWPORT);
     let result = test.press("r T");
     let messages = message_texts(&result.effects);
-    assert!(!messages.is_empty(), "idle opener must emit a readable message");
+    assert!(
+        !messages.is_empty(),
+        "idle opener must emit a readable message"
+    );
     assert!(messages.iter().any(|text| !text.trim().is_empty()));
     assert_eq!(test.view_id(), "v1");
     assert_eq!(test.view_ids(), vec!["v1"]);
@@ -466,13 +719,22 @@ fn rejects_bad_commands_objects_duplicates_and_leading_fold_without_mutation() {
     let index_before = git(dir.path(), &["write-tree"]);
     let one = git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned();
     for invalid in [
-        format!("exec echo bad {oid}\n"), format!("pick {oid}\n"),
-        format!("pick {} missing\n", "deadbeef"), format!("pick {oid} one\npick {oid} duplicate\n"),
-        format!("squash {oid} first\n"), format!("fixup {oid} first\n"),
+        format!("exec echo bad {oid}\n"),
+        format!("pick {oid}\n"),
+        format!("pick {} missing\n", "deadbeef"),
+        format!("pick {oid} one\npick {oid} duplicate\n"),
+        format!("squash {oid} first\n"),
+        format!("fixup {oid} first\n"),
         format!("pick {one} first\nupdate-ref refs/heads/x\n"),
-        format!("pick {} tree\n", git(dir.path(), &["rev-parse", "HEAD:file"]).trim()),
+        format!(
+            "pick {} tree\n",
+            git(dir.path(), &["rev-parse", "HEAD:file"]).trim()
+        ),
     ] {
-        assert!(RebaseTodo::parse(&repo, invalid.as_bytes()).is_err(), "accepted {invalid:?}");
+        assert!(
+            RebaseTodo::parse(&repo, invalid.as_bytes()).is_err(),
+            "accepted {invalid:?}"
+        );
         assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
         assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
         assert_eq!(git(dir.path(), &["write-tree"]), index_before);
@@ -485,7 +747,9 @@ fn mixed_valid_and_invalid_rows_report_the_failing_row_without_mutation() {
     let file_before = std::fs::read(dir.path().join("file")).unwrap();
     let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
     let index_before = git(dir.path(), &["write-tree"]);
-    let tree = git(dir.path(), &["rev-parse", "HEAD:file"]).trim().to_owned();
+    let tree = git(dir.path(), &["rev-parse", "HEAD:file"])
+        .trim()
+        .to_owned();
 
     for (invalid, expected) in [
         ("zzzz".to_owned(), "hexadecimal"),
@@ -493,9 +757,17 @@ fn mixed_valid_and_invalid_rows_report_the_failing_row_without_mutation() {
         (tree, "not a commit"),
     ] {
         let source = format!("pick {oid} valid\npick {invalid} invalid\n");
-        let message = RebaseTodo::parse(&repo, source.as_bytes()).unwrap_err().to_string();
-        assert!(message.contains("line 2"), "wrong row for {invalid}: {message}");
-        assert!(message.contains(expected), "unreadable error for {invalid}: {message}");
+        let message = RebaseTodo::parse(&repo, source.as_bytes())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("line 2"),
+            "wrong row for {invalid}: {message}"
+        );
+        assert!(
+            message.contains(expected),
+            "unreadable error for {invalid}: {message}"
+        );
         assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
         assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
         assert_eq!(git(dir.path(), &["write-tree"]), index_before);
@@ -514,19 +786,32 @@ fn rejects_ambiguous_abbreviation() {
         let data = format!("fixture-{index}");
         let path = dir.path().join(format!("fixture-{index}"));
         write(&path, &data);
-        let oid = git(dir.path(), &["hash-object", "-w", path.to_str().unwrap()]).trim().to_owned();
+        let oid = git(dir.path(), &["hash-object", "-w", path.to_str().unwrap()])
+            .trim()
+            .to_owned();
         let prefix = oid[..4].to_owned();
         let count = prefixes.entry(prefix.clone()).or_default();
         *count += 1;
-        if *count > 1 { ambiguous = Some(prefix); break; }
+        if *count > 1 {
+            ambiguous = Some(prefix);
+            break;
+        }
     }
     let prefix = ambiguous.expect("bounded fixture must produce 4-hex collision");
-    let matching = git(dir.path(), &["rev-parse", &format!("--disambiguate={prefix}")]);
+    let matching = git(
+        dir.path(),
+        &["rev-parse", &format!("--disambiguate={prefix}")],
+    );
     assert!(matching.lines().count() > 1, "Git must prove ambiguity");
     let source = format!("pick {oid} valid\npick {prefix} ambiguous\n");
-    let message = RebaseTodo::parse(&repo, source.as_bytes()).unwrap_err().to_string();
+    let message = RebaseTodo::parse(&repo, source.as_bytes())
+        .unwrap_err()
+        .to_string();
     assert!(message.contains("line 2"), "wrong row: {message}");
-    assert!(message.to_ascii_lowercase().contains("ambiguous"), "unreadable error: {message}");
+    assert!(
+        message.to_ascii_lowercase().contains("ambiguous"),
+        "unreadable error: {message}"
+    );
     assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
     assert_eq!(git(dir.path(), &["write-tree"]), index_before);

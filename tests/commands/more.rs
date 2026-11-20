@@ -1,5 +1,5 @@
-use super::*;
 use super::additional::{change_identity_file, file_identity_matrix};
+use super::*;
 
 #[test]
 fn complete_file_stage_identity_fresh_and_stale_matrix() {
@@ -535,7 +535,8 @@ fn branch_create_tracks_local_branch_startpoint_without_switching() {
         "a local-branch startpoint must become the new branch's upstream"
     );
     assert_eq!(
-        tmp.git(&["config", "--get", "branch.feature.remote"]).trim(),
+        tmp.git(&["config", "--get", "branch.feature.remote"])
+            .trim(),
         ".",
         "a local-branch startpoint tracks a local branch"
     );
@@ -688,10 +689,13 @@ fn branch_create_refuses_option_like_answers() {
         panic!("an option-like branch name must be refused");
     };
     assert!(
-        refused_name
-            .effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Warn, .. })),
+        refused_name.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Message {
+                level: MessageLevel::Warn,
+                ..
+            }
+        )),
         "{:?}",
         refused_name.effects
     );
@@ -805,9 +809,9 @@ fn tag_create_refuses_selected_menu_arguments() {
     };
     let messages = message_texts(&result.effects);
     assert!(
-        messages.iter().any(|text| text.contains("tag.create")
-            && text.contains("-s")
-            && text.contains("=u")),
+        messages
+            .iter()
+            .any(|text| text.contains("tag.create") && text.contains("-s") && text.contains("=u")),
         "{messages:?}"
     );
     assert!(!test.session.has_pending_prompt());
@@ -932,20 +936,14 @@ fn branch_rename_prompts_twice_and_moves_the_ref() {
     };
     let Execution::Prompt(second) = test
         .session
-        .resume_prompt(
-            &first.prompt_id,
-            Some(PromptValue::Text("main".into())),
-        )
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
         .unwrap()
     else {
         panic!("expected rename target prompt");
     };
     let Execution::Done(result) = test
         .session
-        .resume_prompt(
-            &second.prompt_id,
-            Some(PromptValue::Text("renamed".into())),
-        )
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("renamed".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -958,16 +956,12 @@ fn branch_rename_prompts_twice_and_moves_the_ref() {
         result.effects
     );
     let branches = tmp.git(&["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+    assert!(!branches.lines().any(|line| line == "main"), "{branches}");
+    assert!(branches.lines().any(|line| line == "renamed"), "{branches}");
     assert!(
-        !branches.lines().any(|line| line == "main"),
-        "{branches}"
-    );
-    assert!(
-        branches.lines().any(|line| line == "renamed"),
-        "{branches}"
-    );
-    assert!(
-        tmp.git(&["symbolic-ref", "HEAD"]).trim().ends_with("renamed"),
+        tmp.git(&["symbolic-ref", "HEAD"])
+            .trim()
+            .ends_with("renamed"),
         "rename must move the checked-out ref"
     );
     assert!(!test.session.has_pending_prompt());
@@ -999,10 +993,7 @@ fn branch_delete_removes_a_side_branch_without_switching() {
     };
     let Execution::Done(result) = test
         .session
-        .resume_prompt(
-            &prompt.prompt_id,
-            Some(PromptValue::Text("feature".into())),
-        )
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("feature".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -1051,10 +1042,7 @@ fn branch_delete_of_current_branch_surfaces_gits_refusal() {
     };
     let Execution::Done(result) = test
         .session
-        .resume_prompt(
-            &prompt.prompt_id,
-            Some(PromptValue::Text("main".into())),
-        )
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("main".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -1100,10 +1088,7 @@ fn branch_description_prompts_twice_and_writes_config() {
     };
     let Execution::Prompt(second) = test
         .session
-        .resume_prompt(
-            &first.prompt_id,
-            Some(PromptValue::Text("main".into())),
-        )
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
         .unwrap()
     else {
         panic!("expected description prompt");
@@ -1151,20 +1136,14 @@ fn branch_description_prompts_twice_and_writes_config() {
         };
         let Execution::Prompt(second) = test
             .session
-            .resume_prompt(
-                &first.prompt_id,
-                Some(PromptValue::Text("main".into())),
-            )
+            .resume_prompt(&first.prompt_id, Some(PromptValue::Text("main".into())))
             .unwrap()
         else {
             panic!("expected description prompt");
         };
         let Execution::Done(result) = test
             .session
-            .resume_prompt(
-                &second.prompt_id,
-                Some(PromptValue::Text(answer.into())),
-            )
+            .resume_prompt(&second.prompt_id, Some(PromptValue::Text(answer.into())))
             .unwrap()
         else {
             panic!("expected completion");
@@ -1220,10 +1199,7 @@ fn branch_description_targets_a_side_branch() {
     };
     let Execution::Prompt(second) = test
         .session
-        .resume_prompt(
-            &first.prompt_id,
-            Some(PromptValue::Text("feature".into())),
-        )
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("feature".into())))
         .unwrap()
     else {
         panic!("expected description prompt");
@@ -1967,7 +1943,11 @@ fn branch_reset_answers_cannot_select_a_delete_operation() {
             "answer {answer}: must not report a reset: {:?}",
             result.effects
         );
-        assert_eq!(snapshot(&tmp), before, "answer {answer} must change nothing");
+        assert_eq!(
+            snapshot(&tmp),
+            before,
+            "answer {answer} must change nothing"
+        );
         assert_eq!(
             tmp.git(&["rev-parse", "feature"]),
             feature_before,
@@ -2112,7 +2092,9 @@ fn option_like_tag_and_remote_answers_cannot_select_other_operations() {
                 let Execution::Prompt(confirmation) = execution else {
                     panic!("expected removal confirmation");
                 };
-                test.session.resume_prompt(&confirmation.prompt_id, Some(PromptValue::Bool(true))).unwrap()
+                test.session
+                    .resume_prompt(&confirmation.prompt_id, Some(PromptValue::Bool(true)))
+                    .unwrap()
             } else {
                 execution
             };
@@ -2378,10 +2360,7 @@ fn reset_hard_on_a_dirty_tree_declines_then_discards_when_confirmed() {
     };
     let Execution::Done(declined) = test
         .session
-        .resume_prompt(
-            &confirm.prompt_id,
-            Some(PromptValue::Text("no".into())),
-        )
+        .resume_prompt(&confirm.prompt_id, Some(PromptValue::Text("no".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -2407,10 +2386,7 @@ fn reset_hard_on_a_dirty_tree_declines_then_discards_when_confirmed() {
     };
     let Execution::Done(confirmed) = test
         .session
-        .resume_prompt(
-            &confirm.prompt_id,
-            Some(PromptValue::Text("yes".into())),
-        )
+        .resume_prompt(&confirm.prompt_id, Some(PromptValue::Text("yes".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -2505,10 +2481,7 @@ fn reset_hard_confirmation_refuses_edits_and_a_same_oid_branch_switch() {
         let after_change = snapshot(&tmp);
         let Execution::Done(refused) = test
             .session
-            .resume_prompt(
-                &confirm.prompt_id,
-                Some(PromptValue::Text("yes".into())),
-            )
+            .resume_prompt(&confirm.prompt_id, Some(PromptValue::Text("yes".into())))
             .unwrap()
         else {
             panic!("expected completion ({case})");
@@ -2560,10 +2533,7 @@ fn reset_hard_confirmation_resets_the_captured_commit_when_the_target_ref_moves(
     assert_eq!(tmp.git(&["rev-parse", "target"]).trim(), second);
     let Execution::Done(confirmed) = test
         .session
-        .resume_prompt(
-            &confirm.prompt_id,
-            Some(PromptValue::Text("yes".into())),
-        )
+        .resume_prompt(&confirm.prompt_id, Some(PromptValue::Text("yes".into())))
         .unwrap()
     else {
         panic!("expected completion");
@@ -2813,7 +2783,10 @@ fn branch_spinoff_checks_out_a_tracking_branch_and_moves_the_source_to_the_merge
         common_oid, source_oid,
         "the source must commit above the merge base"
     );
-    assert_ne!(source_oid, upstream_oid, "the source and upstream must diverge");
+    assert_ne!(
+        source_oid, upstream_oid,
+        "the source and upstream must diverge"
+    );
     assert_eq!(
         tmp.git(&["merge-base", "foobar", "main"]).trim(),
         common_oid,
@@ -2830,7 +2803,10 @@ fn branch_spinoff_checks_out_a_tracking_branch_and_moves_the_source_to_the_merge
         "{:?}",
         result.effects
     );
-    assert_eq!(tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "spun");
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "spun"
+    );
     assert_eq!(
         tmp.git(&["rev-parse", "spun"]).trim(),
         source_oid,
@@ -2865,7 +2841,10 @@ fn branch_spinout_stays_on_the_source_and_leaves_the_spun_commit_in_the_worktree
     let tmp = spin_fixture();
     let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
     let source_oid = tmp.git(&["rev-parse", "foobar"]).trim().to_owned();
-    assert_ne!(main_oid, source_oid, "the fixture must commit above its upstream");
+    assert_ne!(
+        main_oid, source_oid,
+        "the fixture must commit above its upstream"
+    );
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let Execution::Done(result) = spin_invoke(&mut test, "branch.spinout", "spun") else {

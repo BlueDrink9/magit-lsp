@@ -17,8 +17,8 @@ use crate::presentation::prompt::{self, PromptAction, PromptDelivery, PromptDocu
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptItem, PromptKind, Selection,
-    ViewInvokeParams, ViewKeyParams, ViewKeymapParams, ViewPickParams, ViewPromptParams, ViewRender,
-    ViewSetModeParams,
+    ViewInvokeParams, ViewKeyParams, ViewKeymapParams, ViewPickParams, ViewPromptParams,
+    ViewRender, ViewSetModeParams,
 };
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
@@ -53,21 +53,42 @@ fn unsupported_menu_item(status: MenuStatus, label: &str) -> Option<InvokeResult
 }
 
 /// Preflight one resolved command without running it or touching session state.
-fn preflight_command(id: &str, key: &str, menu: bool, profile_bound: bool) -> crate::presentation::keys::KeyPreflight {
+fn preflight_command(
+    id: &str,
+    key: &str,
+    menu: bool,
+    profile_bound: bool,
+) -> crate::presentation::keys::KeyPreflight {
     use crate::presentation::keys::KeyPreflight;
     let Some(command) = commands::registry().get(id) else {
-        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "key command is unavailable".into() };
+        return KeyPreflight::Refused {
+            id: Some(id.to_owned()),
+            message: "key command is unavailable".into(),
+        };
     };
     if !matches!(command.status, commands::CommandStatus::Implemented) {
-        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "command is planned and cannot run from a key".into() };
+        return KeyPreflight::Refused {
+            id: Some(id.to_owned()),
+            message: "command is planned and cannot run from a key".into(),
+        };
     }
     if command.destructive {
-        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "destructive command; use the code action".into() };
+        return KeyPreflight::Refused {
+            id: Some(id.to_owned()),
+            message: "destructive command; use the code action".into(),
+        };
     }
     if !menu && !profile_bound {
-        return KeyPreflight::Refused { id: Some(id.to_owned()), message: "command is not bound in the active profile".into() };
+        return KeyPreflight::Refused {
+            id: Some(id.to_owned()),
+            message: "command is not bound in the active profile".into(),
+        };
     }
-    KeyPreflight::Allowed { command: Some(id.to_owned()), key: key.to_owned(), menu }
+    KeyPreflight::Allowed {
+        command: Some(id.to_owned()),
+        key: key.to_owned(),
+        menu,
+    }
 }
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
@@ -936,8 +957,15 @@ impl Session {
         }
         let kind = view.kind();
         let placement = self.placement(placement);
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.draft_owner.clone(),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -1227,7 +1255,10 @@ impl Session {
     ///
     /// Mirrors [`Session::key`] resolution (profile keymap or active menu) but
     /// runs no command and changes no pending chord or menu state.
-    pub fn preflight_key(&self, params: &ViewKeyParams) -> Result<crate::presentation::keys::KeyPreflight> {
+    pub fn preflight_key(
+        &self,
+        params: &ViewKeyParams,
+    ) -> Result<crate::presentation::keys::KeyPreflight> {
         let view = self
             .views
             .get(&params.view_id)
@@ -1235,7 +1266,9 @@ impl Session {
         let cursor_moved = view.key_cursor.is_some() && view.key_cursor != Some(params.cursor);
         if view.is_menu() {
             let mut pending = view.menu_pending.clone();
-            if cursor_moved { pending.clear(); }
+            if cursor_moved {
+                pending.clear();
+            }
             let menu = view.menu();
             let keys: Vec<String> = menu
                 .as_ref()
@@ -1244,34 +1277,77 @@ impl Session {
                 .flat_map(|group| &group.items)
                 .map(|item| item.key().to_string())
                 .collect();
-            return Ok(match keyhandler::resolve_menu(&mut pending, &params.key, &keys) {
-                MenuResolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
-                MenuResolution::Complete(key) => match menu.as_ref().and_then(|menu| menu.item(&key)) {
-                    Some(item) if matches!(item.status(), MenuStatus::Implemented) => match item {
-                        crate::menu::Item::Action { command, .. } => preflight_command(command, &key, true, false),
-                        crate::menu::Item::Switch { .. } | crate::menu::Item::Option { .. } => crate::presentation::keys::KeyPreflight::Allowed { command: None, key, menu: true },
-                    },
-                    Some(crate::menu::Item::Action { command, .. }) => crate::presentation::keys::KeyPreflight::Refused { id: Some(command.clone()), message: "command is planned and cannot run from a key".into() },
-                    Some(_) => crate::presentation::keys::KeyPreflight::Refused { id: None, message: "menu item is planned and cannot run from a key".into() },
-                    None => crate::presentation::keys::KeyPreflight::Unbound,
+            return Ok(
+                match keyhandler::resolve_menu(&mut pending, &params.key, &keys) {
+                    MenuResolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
+                    MenuResolution::Complete(key) => {
+                        match menu.as_ref().and_then(|menu| menu.item(&key)) {
+                            Some(item) if matches!(item.status(), MenuStatus::Implemented) => {
+                                match item {
+                                    crate::menu::Item::Action { command, .. } => {
+                                        preflight_command(command, &key, true, false)
+                                    }
+                                    crate::menu::Item::Switch { .. }
+                                    | crate::menu::Item::Option { .. } => {
+                                        crate::presentation::keys::KeyPreflight::Allowed {
+                                            command: None,
+                                            key,
+                                            menu: true,
+                                        }
+                                    }
+                                }
+                            }
+                            Some(crate::menu::Item::Action { command, .. }) => {
+                                crate::presentation::keys::KeyPreflight::Refused {
+                                    id: Some(command.clone()),
+                                    message: "command is planned and cannot run from a key".into(),
+                                }
+                            }
+                            Some(_) => crate::presentation::keys::KeyPreflight::Refused {
+                                id: None,
+                                message: "menu item is planned and cannot run from a key".into(),
+                            },
+                            None => crate::presentation::keys::KeyPreflight::Unbound,
+                        }
+                    }
+                    _ => crate::presentation::keys::KeyPreflight::Unbound,
                 },
-                _ => crate::presentation::keys::KeyPreflight::Unbound,
-            });
+            );
         }
-        let keymap = self.keymap_for(view.descriptor().scope.as_str()).cloned().map(|keymap| {
-            keymap.with_basic_modifiers(
-                self.rich_capabilities
-                    .as_ref()
-                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
-            )
-        });
+        let keymap = self
+            .keymap_for(view.descriptor().scope.as_str())
+            .cloned()
+            .map(|keymap| {
+                keymap.with_basic_modifiers(
+                    self.rich_capabilities
+                        .as_ref()
+                        .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
+                )
+            });
         let mut pending = view.pending.clone();
-        if cursor_moved { pending.clear(); }
-        Ok(match keyhandler::resolve(keymap.as_ref(), &mut pending, &params.key, params.editor_mode, view.descriptor().capture)? {
-            Resolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
-            Resolution::Run { command, .. } => preflight_command(&command, &params.key, false, true),
-            Resolution::PassThrough { .. } | Resolution::Swallow { .. } => crate::presentation::keys::KeyPreflight::Refused { id: None, message: "key is not bound in the active profile".into() },
-        })
+        if cursor_moved {
+            pending.clear();
+        }
+        Ok(
+            match keyhandler::resolve(
+                keymap.as_ref(),
+                &mut pending,
+                &params.key,
+                params.editor_mode,
+                view.descriptor().capture,
+            )? {
+                Resolution::Pending => crate::presentation::keys::KeyPreflight::Pending,
+                Resolution::Run { command, .. } => {
+                    preflight_command(&command, &params.key, false, true)
+                }
+                Resolution::PassThrough { .. } | Resolution::Swallow { .. } => {
+                    crate::presentation::keys::KeyPreflight::Refused {
+                        id: None,
+                        message: "key is not bound in the active profile".into(),
+                    }
+                }
+            },
+        )
     }
 
     /// Resolve a key without changing pending chords, returning its command when complete.
@@ -1300,37 +1376,46 @@ impl Session {
                 return Ok(None);
             };
             return Ok(menu.and_then(|menu| {
-                menu.groups.iter().flat_map(|group| &group.items).find_map(|item| {
-                    match item {
-                        crate::menu::Item::Action { key: item_key, command, .. }
-                            if item_key == &key => Some(command.clone()),
+                menu.groups
+                    .iter()
+                    .flat_map(|group| &group.items)
+                    .find_map(|item| match item {
+                        crate::menu::Item::Action {
+                            key: item_key,
+                            command,
+                            ..
+                        } if item_key == &key => Some(command.clone()),
                         _ => None,
-                    }
-                })
+                    })
             }));
         }
 
-        let keymap = self.keymap_for(view.descriptor().scope.as_str()).cloned().map(|keymap| {
-            keymap.with_basic_modifiers(
-                self.rich_capabilities
-                    .as_ref()
-                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
-            )
-        });
+        let keymap = self
+            .keymap_for(view.descriptor().scope.as_str())
+            .cloned()
+            .map(|keymap| {
+                keymap.with_basic_modifiers(
+                    self.rich_capabilities
+                        .as_ref()
+                        .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
+                )
+            });
         let mut pending = view.pending.clone();
         if cursor_moved {
             pending.clear();
         }
-        Ok(match keyhandler::resolve(
-            keymap.as_ref(),
-            &mut pending,
-            &params.key,
-            params.editor_mode,
-            view.descriptor().capture,
-        )? {
-            Resolution::Run { command, .. } => Some(command),
-            _ => None,
-        })
+        Ok(
+            match keyhandler::resolve(
+                keymap.as_ref(),
+                &mut pending,
+                &params.key,
+                params.editor_mode,
+                view.descriptor().capture,
+            )? {
+                Resolution::Run { command, .. } => Some(command),
+                _ => None,
+            },
+        )
     }
 
     fn begin_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
@@ -1540,7 +1625,9 @@ impl Session {
 
     /// The staged prompt request awaiting delivery, if any.
     pub fn pending_prompt_request(&self) -> Option<ViewPromptParams> {
-        self.pending_prompt.as_ref().map(|pending| pending.request.clone())
+        self.pending_prompt
+            .as_ref()
+            .map(|pending| pending.request.clone())
     }
 
     fn drive(&mut self, mut step: Execution, ui: &dyn PromptUi) -> Result<InvokeResult> {
@@ -1629,10 +1716,7 @@ impl Session {
     /// were edited is repaired by re-rendering the prompt view; otherwise the
     /// edited field values are adopted and the authoritative tree is returned
     /// with no render.
-    pub fn reconcile_prompt_document(
-        &mut self,
-        document: &str,
-    ) -> Result<Option<PromptReconcile>> {
+    pub fn reconcile_prompt_document(&mut self, document: &str) -> Result<Option<PromptReconcile>> {
         if !self.prompt_active() {
             return Ok(None);
         }
@@ -1814,8 +1898,7 @@ impl Session {
         if prompt != prompt_id {
             return Ok(None);
         }
-        if !matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
-            && !row.starts_with("item:")
+        if !matches!(row, "yes" | "no" | "submit" | "cancel" | "done") && !row.starts_with("item:")
         {
             return Ok(None);
         }
@@ -1876,9 +1959,7 @@ impl Session {
             if reconciled.repaired {
                 (true, None)
             } else {
-                let action = document_state
-                    .answer(row_id)
-                    .map_err(Error::new)?;
+                let action = document_state.answer(row_id).map_err(Error::new)?;
                 let answer = match action {
                     PromptAction::Toggle(item_id) => {
                         document_state.toggle_item(&item_id).map_err(Error::new)?;
@@ -1932,7 +2013,9 @@ impl Session {
             .as_ref()
             .ok_or_else(|| Error::new("no prompt is active"))?;
         if pending.request.prompt_id != prompt_id {
-            return Err(Error::new(format!("prompt {prompt_id} is no longer active")));
+            return Err(Error::new(format!(
+                "prompt {prompt_id} is no longer active"
+            )));
         }
         let prompt_view = pending
             .prompt_view
@@ -2192,8 +2275,15 @@ impl Session {
             suffix += 1;
         }
 
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.draft_owner.clone(),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))
@@ -2296,7 +2386,10 @@ impl Session {
             return Ok(None);
         }
         Ok(Some(view.render_tree_with_delivery(
-            tree, None, None, RenderDelivery::Acknowledged,
+            tree,
+            None,
+            None,
+            RenderDelivery::Acknowledged,
         )?))
     }
 
@@ -2409,7 +2502,9 @@ fn create_view(
                 None,
             )?))
         }
-        ViewKind::RebaseTodo => Ok(Box::new(crate::rebase_todo_view::RebaseTodoView::load(GitRepo::open(repo_path)?)?)),
+        ViewKind::RebaseTodo => Ok(Box::new(crate::rebase_todo_view::RebaseTodoView::load(
+            GitRepo::open(repo_path)?,
+        )?)),
         ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
         ViewKind::Prompt => Err(Error::new("The `prompt` view is not client-openable.")),
         ViewKind::Menu(name) => {

@@ -34,10 +34,16 @@ fn generator_writes_and_checks_each_output() {
         let path = root.join(relative);
         let content = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, format!("{content}\ntampered\n")).unwrap();
-        assert!(!run(&root, true).status.success(), "accepted tampered {relative}");
+        assert!(
+            !run(&root, true).status.success(),
+            "accepted tampered {relative}"
+        );
         std::fs::write(&path, content).unwrap();
         std::fs::remove_file(&path).unwrap();
-        assert!(!run(&root, true).status.success(), "accepted missing {relative}");
+        assert!(
+            !run(&root, true).status.success(),
+            "accepted missing {relative}"
+        );
         assert!(run(&root, false).status.success());
     }
     let _ = std::fs::remove_dir_all(root);

@@ -152,7 +152,10 @@ impl Renderer {
                 fields.push_str(&format!(
                     "---@field {}{optional} {expression}{}\n",
                     field_name(property)?,
-                    field_comment(schema, &format!("---@field {}{optional} {expression}", field_name(property)?)),
+                    field_comment(
+                        schema,
+                        &format!("---@field {}{optional} {expression}", field_name(property)?)
+                    ),
                 ));
             }
         }
@@ -237,9 +240,9 @@ impl Renderer {
                                     }
                                     None => value.clone(),
                                 };
-                                let merged_map = merged.as_object().ok_or_else(|| {
-                                    format!("`{key}` variants must be objects")
-                                })?;
+                                let merged_map = merged
+                                    .as_object()
+                                    .ok_or_else(|| format!("`{key}` variants must be objects"))?;
                                 if is_object_schema(merged_map) {
                                     members.push(self.declare(&merged, &variant_name)?);
                                 } else {
@@ -733,7 +736,7 @@ fn doc_lines(map: &Map<String, Value>, note: Option<&str>) -> String {
             if line.is_empty() {
                 out.push_str("---\n");
             } else {
-            out.push_str(&wrap_doc_line("--- ", line));
+                out.push_str(&wrap_doc_line("--- ", line));
             }
         }
     }

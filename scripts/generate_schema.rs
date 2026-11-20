@@ -1,23 +1,24 @@
 //! Directional JSON Schema generation for Plain wire payloads.
 
+#[path = "example_recordings.rs"]
+pub mod example_recordings;
 #[path = "schema_luals.rs"]
 pub mod schema_luals;
 #[path = "schema_markdown.rs"]
 pub mod schema_markdown;
 #[path = "schema_typescript.rs"]
 pub mod schema_typescript;
-#[path = "example_recordings.rs"]
-pub mod example_recordings;
 
 use lsp_types::request::Request;
 use magit_lsp::presentation::{OPTIONAL_EFFECTS, OPTIONAL_PROMPT_KINDS};
 use magit_lsp::protocol::{
     ViewCloseParams, ViewCloseRequest, ViewEffectsParams, ViewInvokeParams, ViewInvokeRequest,
     ViewInvokeResponse, ViewKeyParams, ViewKeyRequest, ViewKeymapParams, ViewOpenParams,
-    ViewOpenRequest, ViewPickParams, ViewPickRespondParams, ViewPickRespondRequest, ViewPromptParams,
-    ViewPromptRespondParams, ViewPromptRespondRequest, ViewRender, ViewRenderedParams,
-    ViewResizeParams, ViewResyncParams, ViewResyncRequest, ViewSetModeParams, ViewSetModeRequest,
-    VIEW_EFFECTS, VIEW_KEYMAP, VIEW_PICK, VIEW_PROMPT, VIEW_RENDER, VIEW_RENDERED, VIEW_RESIZE,
+    ViewOpenRequest, ViewPickParams, ViewPickRespondParams, ViewPickRespondRequest,
+    ViewPromptParams, ViewPromptRespondParams, ViewPromptRespondRequest, ViewRender,
+    ViewRenderedParams, ViewResizeParams, ViewResyncParams, ViewResyncRequest, ViewSetModeParams,
+    ViewSetModeRequest, VIEW_EFFECTS, VIEW_KEYMAP, VIEW_PICK, VIEW_PROMPT, VIEW_RENDER,
+    VIEW_RENDERED, VIEW_RESIZE,
 };
 use magit_lsp::view::ViewDescriptor;
 use schemars::generate::SchemaSettings;
@@ -144,21 +145,27 @@ pub fn methods() -> Vec<MethodEntry> {
             direction: Direction::Input,
             kind: MethodKind::Request,
             params: schema_payload::<ViewInvokeParams>("view-invoke-params.json"),
-            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+            result: Some(schema_payload::<ViewInvokeResponse>(
+                "view-invoke-response.json",
+            )),
         },
         MethodEntry {
             method: <ViewKeyRequest as Request>::METHOD,
             direction: Direction::Input,
             kind: MethodKind::Request,
             params: schema_payload::<ViewKeyParams>("view-key-params.json"),
-            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+            result: Some(schema_payload::<ViewInvokeResponse>(
+                "view-invoke-response.json",
+            )),
         },
         MethodEntry {
             method: <ViewSetModeRequest as Request>::METHOD,
             direction: Direction::Input,
             kind: MethodKind::Request,
             params: schema_payload::<ViewSetModeParams>("view-set-mode-params.json"),
-            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+            result: Some(schema_payload::<ViewInvokeResponse>(
+                "view-invoke-response.json",
+            )),
         },
         MethodEntry {
             method: <ViewResyncRequest as Request>::METHOD,
@@ -312,9 +319,18 @@ fn lua_list(names: &[&str]) -> String {
 fn javascript_list(names: &[&str], indent: &str) -> String {
     let items: Vec<String> = names
         .iter()
-        .map(|name| format!("{indent}{}", serde_json::to_string(name).expect("name serializes")))
+        .map(|name| {
+            format!(
+                "{indent}{}",
+                serde_json::to_string(name).expect("name serializes")
+            )
+        })
         .collect();
-    format!("[\n{}\n{}]", items.join(",\n"), &indent[..indent.len().saturating_sub(2)])
+    format!(
+        "[\n{}\n{}]",
+        items.join(",\n"),
+        &indent[..indent.len().saturating_sub(2)]
+    )
 }
 
 /// Generate the client-loadable shared-list modules from the typed constants.
@@ -442,7 +458,9 @@ pub fn artifacts() -> Vec<Artifact> {
         },
         Artifact {
             file: "view-invoke-response.json",
-            schema: directional_schema::<magit_lsp::protocol::ViewInvokeResponse>(Direction::Output),
+            schema: directional_schema::<magit_lsp::protocol::ViewInvokeResponse>(
+                Direction::Output,
+            ),
         },
         Artifact {
             file: "view-key-params.json",
@@ -478,7 +496,9 @@ pub fn artifacts() -> Vec<Artifact> {
         },
         Artifact {
             file: "view-prompt-respond-params.json",
-            schema: directional_schema::<magit_lsp::protocol::ViewPromptRespondParams>(Direction::Input),
+            schema: directional_schema::<magit_lsp::protocol::ViewPromptRespondParams>(
+                Direction::Input,
+            ),
         },
         Artifact {
             file: "view-pick-params.json",
@@ -486,7 +506,9 @@ pub fn artifacts() -> Vec<Artifact> {
         },
         Artifact {
             file: "view-pick-respond-params.json",
-            schema: directional_schema::<magit_lsp::protocol::ViewPickRespondParams>(Direction::Input),
+            schema: directional_schema::<magit_lsp::protocol::ViewPickRespondParams>(
+                Direction::Input,
+            ),
         },
         Artifact {
             file: "methods.json",

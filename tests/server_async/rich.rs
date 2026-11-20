@@ -462,12 +462,14 @@ fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
     let mut key_response = None;
     let (prompt_view, uri, initial) = loop {
         let message = server.recv();
-        if message["method"] == json!("view/render")
-            && message["params"]["viewId"] != json!(menu)
-        {
+        if message["method"] == json!("view/render") && message["params"]["viewId"] != json!(menu) {
             assert!(message["params"]["text"].is_array(), "full prompt text");
             let view_id = message["params"]["viewId"].as_str().unwrap().to_owned();
-            break (view_id.clone(), format!("magit://prompt/{view_id}"), message);
+            break (
+                view_id.clone(),
+                format!("magit://prompt/{view_id}"),
+                message,
+            );
         }
         if message["id"] == json!(5) {
             key_response = Some(message);
@@ -483,7 +485,10 @@ fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
         "{key_response}"
     );
     let initial_version = initial["params"]["version"].as_u64().unwrap();
-    assert_eq!(initial["params"]["text"][0], json!("Override the author (--author=)"));
+    assert_eq!(
+        initial["params"]["text"][0],
+        json!("Override the author (--author=)")
+    );
     assert_eq!(initial["params"]["text"][2], json!(""));
     assert_eq!(initial["params"]["text"][3], json!("Submit"));
     assert_eq!(initial["params"]["text"][4], json!("Cancel"));
@@ -513,11 +518,13 @@ fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
         "a field edit must not be reverted or reported: {quiet:?}"
     );
     assert!(
-        !quiet.iter().any(|message| message["params"]["effects"]
-            .as_array()
-            .is_some_and(|effects| effects
-                .iter()
-                .any(|effect| effect["type"] == json!("editDocument")))),
+        !quiet.iter().any(
+            |message| message["params"]["effects"]
+                .as_array()
+                .is_some_and(|effects| effects
+                    .iter()
+                    .any(|effect| effect["type"] == json!("editDocument")))
+        ),
         "a field edit must not emit a document edit: {quiet:?}"
     );
 
@@ -558,9 +565,10 @@ fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
         "{refused}"
     );
 
-    assert!(!server.notifications.iter().any(|message| {
-        message["method"] == json!("view/prompt")
-    }));
+    assert!(!server
+        .notifications
+        .iter()
+        .any(|message| { message["method"] == json!("view/prompt") }));
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -635,9 +643,7 @@ fn rich_confirm_row_enter_answers_without_mutation() {
     );
     let (prompt, version, text) = loop {
         let message = server.recv();
-        if message["method"] == json!("view/render")
-            && message["params"]["viewId"] != json!(view)
-        {
+        if message["method"] == json!("view/render") && message["params"]["viewId"] != json!(view) {
             let prompt = message["params"]["viewId"].as_str().unwrap().to_owned();
             let version = message["params"]["version"].as_u64().unwrap();
             let text: Vec<String> =
@@ -725,11 +731,13 @@ fn rich_text_prompt_submit_row_answers_with_the_reconciled_field() {
             "cursor":{"line":0,"column":0}}}));
     let (prompt, uri, initial) = loop {
         let message = server.recv();
-        if message["method"] == json!("view/render")
-            && message["params"]["viewId"] != json!(menu)
-        {
+        if message["method"] == json!("view/render") && message["params"]["viewId"] != json!(menu) {
             let view_id = message["params"]["viewId"].as_str().unwrap().to_owned();
-            break (view_id.clone(), format!("magit://prompt/{view_id}"), message);
+            break (
+                view_id.clone(),
+                format!("magit://prompt/{view_id}"),
+                message,
+            );
         }
     };
     let version = initial["params"]["version"].as_u64().unwrap();

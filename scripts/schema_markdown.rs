@@ -187,7 +187,9 @@ pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
     }
     let mut out = String::new();
     out.push_str("#### Worked exchanges\n\n");
-    out.push_str("Recorded end-to-end exchanges from the example files, one subsection per file.\n");
+    out.push_str(
+        "Recorded end-to-end exchanges from the example files, one subsection per file.\n",
+    );
     for (name, bytes) in &files {
         let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
         let mut lines = Vec::new();
@@ -196,9 +198,8 @@ pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
                 continue;
             }
             lines.push(
-                serde_json::from_str::<Value>(line).map_err(|error| {
-                    format!("{}:{}: {error}", name, index + 1)
-                })?,
+                serde_json::from_str::<Value>(line)
+                    .map_err(|error| format!("{}:{}: {error}", name, index + 1))?,
             );
         }
         out.push('\n');
@@ -210,8 +211,7 @@ pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
                 .get("message")
                 .ok_or_else(|| format!("{}: frame lacks `message`", name))?;
             out.push_str(
-                &serde_json::to_string(message)
-                    .map_err(|error| format!("{}: {error}", name))?,
+                &serde_json::to_string(message).map_err(|error| format!("{}: {error}", name))?,
             );
             out.push('\n');
         }
@@ -227,29 +227,46 @@ pub fn worked_exchanges_artifacts() -> Result<Vec<(String, String)>, String> {
     worked_exchanges_artifacts_from(&full, EXCHANGES_LIMIT)
 }
 
-pub(crate) fn worked_exchanges_artifacts_from(full: &str, limit: usize) -> Result<Vec<(String, String)>, String> {
+pub(crate) fn worked_exchanges_artifacts_from(
+    full: &str,
+    limit: usize,
+) -> Result<Vec<(String, String)>, String> {
     let sections: Vec<_> = full.split("\n##### ").skip(1).collect();
     let mut parts = Vec::new();
     let mut current = String::from("# Worked exchanges\n\n");
     for section in sections {
         let section = format!("##### {section}");
-        let Some((prefix, body)) = section.split_once("```jsonl\n") else { return Err("worked exchange lacks jsonl fence".into()) };
-        let Some((messages, _)) = body.split_once("```\n") else { return Err("worked exchange has unterminated jsonl fence".into()) };
+        let Some((prefix, body)) = section.split_once("```jsonl\n") else {
+            return Err("worked exchange lacks jsonl fence".into());
+        };
+        let Some((messages, _)) = body.split_once("```\n") else {
+            return Err("worked exchange has unterminated jsonl fence".into());
+        };
         let mut exchange_part = format!("{prefix}```jsonl\n");
         for message in messages.lines() {
             let addition = format!("{message}\n");
             if current.len() + exchange_part.len() + addition.len() + 5 > limit {
-                if current.len() > "# Worked exchanges\n\n".len() && current.len() + exchange_part.len() + 5 > limit {
+                if current.len() > "# Worked exchanges\n\n".len()
+                    && current.len() + exchange_part.len() + 5 > limit
+                {
                     parts.push(current);
                     current = String::from("# Worked exchanges (continued)\n\n");
                 }
                 if current.len() + exchange_part.len() + addition.len() + 5 > limit {
-                    if exchange_part.ends_with("```jsonl\n") { return Err("one worked message exceeds the generated part size limit".into()); }
+                    if exchange_part.ends_with("```jsonl\n") {
+                        return Err(
+                            "one worked message exceeds the generated part size limit".into()
+                        );
+                    }
                     exchange_part.push_str("```\n");
                     current.push_str(&exchange_part);
                     parts.push(current);
                     current = String::from("# Worked exchanges (continued)\n\n");
-                    exchange_part = format!("##### {} (continued)\n\n{}```jsonl\n", prefix.trim_start_matches("##### ").trim(), "Frames continue from the preceding part.\n\n");
+                    exchange_part = format!(
+                        "##### {} (continued)\n\n{}```jsonl\n",
+                        prefix.trim_start_matches("##### ").trim(),
+                        "Frames continue from the preceding part.\n\n"
+                    );
                 }
             }
             exchange_part.push_str(&addition);
@@ -257,11 +274,20 @@ pub(crate) fn worked_exchanges_artifacts_from(full: &str, limit: usize) -> Resul
         exchange_part.push_str("```\n");
         current.push_str(&exchange_part);
     }
-    if !current.is_empty() { parts.push(current); }
-    let mut index = String::from("# Worked exchanges\n\nGenerated transcript parts, in source order:\n\n");
-    let paths: Vec<_> = (1..=parts.len()).map(|number| format!("docs/schema/worked-exchanges-{number:02}.md")).collect();
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    let mut index =
+        String::from("# Worked exchanges\n\nGenerated transcript parts, in source order:\n\n");
+    let paths: Vec<_> = (1..=parts.len())
+        .map(|number| format!("docs/schema/worked-exchanges-{number:02}.md"))
+        .collect();
     for (number, _) in paths.iter().enumerate() {
-        index.push_str(&format!("- [Part {:02}](worked-exchanges-{:02}.md)\n", number + 1, number + 1));
+        index.push_str(&format!(
+            "- [Part {:02}](worked-exchanges-{:02}.md)\n",
+            number + 1,
+            number + 1
+        ));
         parts[number] = format!("{}\n", parts[number]);
         if parts[number].len() + 1 >= limit {
             return Err("worked exchange part exceeds the generated part size limit".into());
@@ -274,9 +300,9 @@ pub(crate) fn worked_exchanges_artifacts_from(full: &str, limit: usize) -> Resul
 
 /// One-sentence provenance derived from a file's recorded `source` labels.
 fn provenance(lines: &[Value]) -> String {
-    let recorded = lines.iter().all(|line| {
-        line.get("source").and_then(Value::as_str) == Some("recorded")
-    });
+    let recorded = lines
+        .iter()
+        .all(|line| line.get("source").and_then(Value::as_str) == Some("recorded"));
     if recorded {
         "Frames recorded from a real `TestServer` run against a temporary repository; temporary paths are normalized to `/repo`.".to_string()
     } else {
@@ -286,16 +312,25 @@ fn provenance(lines: &[Value]) -> String {
 
 /// Write all standalone generated references beneath `root`.
 pub fn write(root: &Path) -> io::Result<()> {
-    let mut files = vec![(DOC_PATH.to_string(), block().map_err(invalid_data)?),
-        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block())];
+    let mut files = vec![
+        (DOC_PATH.to_string(), block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block()),
+    ];
     files.extend(worked_exchanges_artifacts().map_err(invalid_data)?);
-    let expected: BTreeSet<_> = files.iter().filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned)).collect();
+    let expected: BTreeSet<_> = files
+        .iter()
+        .filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned))
+        .collect();
     for path in numbered_exchange_paths(root)? {
-        if !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned()) { fs::remove_file(path)?; }
+        if !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned()) {
+            fs::remove_file(path)?;
+        }
     }
     for (relative, text) in files {
         let path = root.join(relative);
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(path, format!("{text}\n"))?;
     }
     Ok(())
@@ -303,8 +338,10 @@ pub fn write(root: &Path) -> io::Result<()> {
 
 /// Return standalone references that differ from generated content.
 pub fn stale_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut generated = vec![(DOC_PATH.to_string(), block().map_err(invalid_data)?),
-        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block())];
+    let mut generated = vec![
+        (DOC_PATH.to_string(), block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block()),
+    ];
     generated.extend(worked_exchanges_artifacts().map_err(invalid_data)?);
     let mut stale = Vec::new();
     for (relative, text) in generated {
@@ -313,34 +350,56 @@ pub fn stale_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
             stale.push(PathBuf::from(relative));
         }
     }
-    let expected: BTreeSet<_> = worked_exchanges_artifacts().map_err(invalid_data)?.iter()
-        .filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned)).collect();
-    stale.extend(numbered_exchange_paths(root)?.into_iter().filter(|path| {
-        !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned())
-    }).map(|path| path.strip_prefix(root).unwrap().to_path_buf()));
+    let expected: BTreeSet<_> = worked_exchanges_artifacts()
+        .map_err(invalid_data)?
+        .iter()
+        .filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned))
+        .collect();
+    stale.extend(
+        numbered_exchange_paths(root)?
+            .into_iter()
+            .filter(|path| {
+                !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned())
+            })
+            .map(|path| path.strip_prefix(root).unwrap().to_path_buf()),
+    );
     stale.sort();
     Ok(stale)
 }
 
 fn numbered_exchange(path: &str) -> Option<&str> {
     let name = Path::new(path).file_name()?.to_str()?;
-    let number = name.strip_prefix("worked-exchanges-")?.strip_suffix(".md")?;
+    let number = name
+        .strip_prefix("worked-exchanges-")?
+        .strip_suffix(".md")?;
     (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then_some(name)
 }
 
 fn numbered_exchange_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
     let dir = root.join("docs/schema");
     let mut paths = Vec::new();
-    if !dir.exists() { return Ok(paths); }
+    if !dir.exists() {
+        return Ok(paths);
+    }
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.is_file() && path.file_name().and_then(|name| name.to_str()).and_then(numbered_exchange).is_some() { paths.push(path); }
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(numbered_exchange)
+                .is_some()
+        {
+            paths.push(path);
+        }
     }
     paths.sort();
     Ok(paths)
 }
 
-fn invalid_data(message: String) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
+fn invalid_data(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
 
 /// Render one payload reference as it appears in the method table.
 fn payload_label(payload: &Payload) -> String {
@@ -414,7 +473,10 @@ fn variant_label(map: &Map<String, Value>, index: usize) -> String {
 }
 
 /// Render one object schema's fields as a Markdown table.
-fn field_table(map: &Map<String, Value>, defs: Option<&Map<String, Value>>) -> Result<String, String> {
+fn field_table(
+    map: &Map<String, Value>,
+    defs: Option<&Map<String, Value>>,
+) -> Result<String, String> {
     let required = required_set(map);
     let mut out = String::from("| Field | Type | Required | Notes |\n|---|---|---|---|\n");
     let properties = map.get("properties").and_then(Value::as_object);
@@ -551,7 +613,8 @@ fn type_notes(
                     Some(Value::Bool(true)) => {
                         notes.push("Additional properties are unconstrained JSON".to_string())
                     }
-                    Some(_) => notes.push("Additional property values follow the declared schema".to_string()),
+                    Some(_) => notes
+                        .push("Additional property values follow the declared schema".to_string()),
                     None => {}
                 }
             }
