@@ -479,7 +479,7 @@ impl Shared {
                             .unwrap_or_else(|p| p.into_inner())
                             .get(&repo_for_handler)
                             .and_then(|views| views.current_snapshot(&render.view_id));
-                        if !route_plain_render(&shared, &render.view_id, snapshot) {
+                        if !route_plain_render(&shared, &render.view_id, snapshot, render.cursor) {
                             let _ = shared.sender.send(custom_ui(&shared.client).render(render));
                         }
                     }

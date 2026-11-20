@@ -554,7 +554,7 @@ pub(super) fn dispatched_outcome(
             .unwrap_or_else(|p| p.into_inner())
             .values()
             .find_map(|views| views.current_snapshot(&view_id));
-        route_plain_render(shared, &view_id, snapshot);
+        route_plain_render(shared, &view_id, snapshot, None);
     }
     if let Some(render) = outcome.render {
         notifications.extend(deliver_render(shared, render));

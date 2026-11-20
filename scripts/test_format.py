@@ -421,7 +421,7 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual("dirty\n", self.read("src/main.rs"))
 
     def test_ordinary_hook_formats_index_only(self) -> None:
-        """The default hook fixes staged blobs and leaves working files alone."""
+        """The default hook fixes staged blobs and preserves divergent working files."""
         self.install_hook()
         path = "lua/magit-lsp/ok.lua"
         self.write(path, "bad\n")
@@ -431,6 +431,30 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("ok\n", self.git("show", f":{path}"))
         self.assertEqual("worktree\n", self.read(path))
+
+    def test_hook_leaves_matching_working_copy_unchanged(self) -> None:
+        """A staged-only change formats the index and never rewrites the working file."""
+        self.install_hook()
+        path = "lua/magit-lsp/ok.lua"
+        self.write(path, "bad\n")
+        self.git("add", path)
+        result = self.run_hook()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ok\n", self.git("show", f":{path}"))
+        self.assertEqual(b"bad\n", (self.repo / path).read_bytes())
+        self.assertEqual(f" M {path}\n", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
+
+    def test_hook_preserves_partially_staged_working_edits(self) -> None:
+        """Unstaged additions to a staged file survive while the index formats."""
+        self.install_hook()
+        path = "lua/magit-lsp/ok.lua"
+        self.write(path, "bad\n")
+        self.git("add", path)
+        self.write(path, "bad\nunstaged\n")
+        result = self.run_hook()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ok\n", self.git("show", f":{path}"))
+        self.assertEqual("bad\nunstaged\n", self.read(path))
 
     def test_hook_sweep_requires_all_tracked_formatted(self) -> None:
         """The opt-in sweep guard fails a partial format-only commit."""

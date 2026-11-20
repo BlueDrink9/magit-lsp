@@ -130,8 +130,9 @@ is no `cargo run` fallback. Profiles are `vim` (Neovim default) and `standard`.
 A general LSP client needs no plugin: this `init.lua` starts the external server
 for repository `.magit` documents and commit drafts and keeps the session in
 Plain presentation. It declares no `capabilities.experimental.magit` block and
-disables `window.showDocument`, so the server advertises only standard methods
-and Plain actions; see [client implementation
+relies on Neovim's built-in `window.showDocument` support, so the server
+advertises only standard methods and Plain actions and can reveal prompt
+documents and commit drafts with no custom handler; see [client implementation
 levels](CLIENT_SPEC.md#client-implementation-levels). The test harness loads this
 exact block, so it is the tested reference setup.
 
@@ -146,7 +147,6 @@ local function attach_magit(buf)
     return
   end
   local capabilities = vim.lsp.protocol.make_client_capabilities()
-  capabilities.window.showDocument = { support = false }
   vim.lsp.start({
     name = 'magit-lsp',
     cmd = { server },
@@ -171,10 +171,10 @@ Start Neovim in the repository root (the snippet passes `vim.fn.getcwd()` as
 rendered into that buffer; the `.magit` file on disk is presentation only and is
 not written by the server. To act, put the cursor on a rendered row and run
 `:lua vim.lsp.buf.code_action()`. Commit prompts open the real
-`.git/COMMIT_EDITMSG` draft: edit it with ordinary Neovim input and choose the
-offered **Confirm commit** or **Abort commit** code action. The optional
-`$MAGIT_LSP_BIN` override in the snippet matches the plugin's server-discovery
-rule; without it the server is read from `~/.local/bin`.
+`.git/COMMIT_EDITMSG` draft automatically; edit it with ordinary Neovim input
+and choose the offered **Confirm commit** or **Abort commit** code action.
+The optional `$MAGIT_LSP_BIN` override in the snippet matches the plugin's
+server-discovery rule; without it the server is read from `~/.local/bin`.
 
 `make plain-neovim` boots this exact block in an isolated Neovim configuration
 with a temporary repository and asserts the rendered status text and Git state.

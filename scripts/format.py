@@ -303,6 +303,9 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         raise RuntimeError("Git index changed concurrently; retry the commit")
     updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
     git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
+    # Working-tree sources are never written here: a hook cannot compare-and-swap
+    # against a concurrent editor save, so synchronization stays deferred.
+    print("format: formatted staged content; working-tree files are left unchanged", file=sys.stderr)
     return 0
 
 

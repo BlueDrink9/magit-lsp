@@ -98,6 +98,7 @@ pub struct PlainDocument {
     action_snapshots: VecDeque<ActionSnapshot>,
     snapshot_limit: usize,
     in_flight: Option<InFlight>,
+    navigation: Option<([u8; 32], lsp_types::Range)>,
     /// A rejected target is not retried until the client or render advances.
     rejected: Option<([u8; 32], [u8; 32])>,
     next_id: u64,
@@ -124,6 +125,7 @@ impl PlainDocument {
             snapshots: VecDeque::new(),
             snapshot_limit: 6,
             in_flight: None,
+            navigation: None,
             rejected: None,
             next_id: 0,
             action_snapshots: VecDeque::new(),
@@ -147,6 +149,7 @@ impl PlainDocument {
 
     /// Record server-authoritative rendered text and start an edit if the client is ready.
     pub fn render(&mut self, text: impl Into<String>) -> Option<ApplyEdit> {
+        self.navigation = None;
         let snapshot = self.snapshot_for(text.into(), 0);
         if self
             .authoritative
@@ -157,6 +160,35 @@ impl PlainDocument {
         }
         self.authoritative = Some(snapshot);
         self.prepare()
+    }
+
+    /// Associate transition navigation with the current authoritative render.
+    pub fn navigate_after_edit(&mut self, selection: lsp_types::Range) {
+        self.navigation = self
+            .authoritative
+            .as_ref()
+            .map(|target| (target.hash, selection));
+    }
+
+    /// Consume navigation only for a successful, still-current edit response.
+    pub fn take_navigation(&mut self, id: u64, applied: bool) -> Option<lsp_types::Range> {
+        let flight = self.in_flight.as_ref()?;
+        if flight.request.id != id || flight.response.is_some() {
+            return None;
+        }
+        let (hash, _) = self.navigation.as_ref()?;
+        if *hash != flight.target.hash {
+            return None;
+        }
+        let (_, selection) = self.navigation.take()?;
+        (applied
+            && !flight.format_drift
+            && (!flight.diverged || flight.echoed)
+            && self
+                .authoritative
+                .as_ref()
+                .is_some_and(|target| target.hash == flight.target.hash))
+        .then_some(selection)
     }
 
     /// Retain the exact structured snapshot associated with an authoritative render.
@@ -192,6 +224,7 @@ impl PlainDocument {
     /// Any pending or rejected edit is discarded and the controller becomes
     /// ready, so a following `change` reports no divergence.
     pub fn adopt(&mut self, version: i32, text: String) {
+        self.navigation = None;
         let snapshot = self.snapshot_for(text, version);
         self.authoritative = Some(snapshot.clone());
         self.client = Some(snapshot);
@@ -257,6 +290,7 @@ impl PlainDocument {
 
     /// Attach/reopen with the exact observed editor snapshot; it does not become server-authoritative.
     pub fn open(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
+        self.navigation = None;
         self.in_flight = None;
         self.format_suspended = false;
         self.warning_pending = false;
@@ -356,6 +390,7 @@ impl PlainDocument {
 
     /// Detach and invalidate pending responses so no late result can resurrect it.
     pub fn close(&mut self) {
+        self.navigation = None;
         self.state = DocumentState::Detached;
         self.client = None;
         self.in_flight = None;
@@ -482,6 +517,103 @@ mod tests {
             symbols: vec![],
             links: vec![],
         }
+    }
+
+    #[test]
+    fn plain_navigation_is_correlated_and_invalidated_by_render_or_lifecycle() {
+        let mut document = PlainDocument::new(
+            "file:///test",
+            Encoding::Utf16,
+            false,
+            DocumentFormat::from_text(""),
+        );
+        document.open(1, "status");
+        let selection = lsp_types::Range::new(
+            lsp_types::Position::new(0, 0),
+            lsp_types::Position::new(2, 0),
+        );
+        let ordinary = document.render("menu").unwrap();
+        assert_eq!(
+            document.take_navigation(ordinary.id, true),
+            None,
+            "ordinary edits have no navigation"
+        );
+        document.observe(2, "menu");
+        document.response(ordinary.id, true);
+
+        let rejected = document.render("selection").unwrap();
+        document.navigate_after_edit(selection);
+        assert_eq!(
+            document.take_navigation(rejected.id + 1, true),
+            None,
+            "unrelated replies cannot consume navigation"
+        );
+        assert_eq!(
+            document.take_navigation(rejected.id, false),
+            None,
+            "rejected edits cannot navigate"
+        );
+        document.response(rejected.id, false);
+
+        let superseded = document.render("selection 2").unwrap();
+        document.navigate_after_edit(selection);
+        assert!(document.render("selection 2").is_none());
+        assert_eq!(
+            document.take_navigation(superseded.id, true),
+            None,
+            "even identical newer renders invalidate navigation"
+        );
+        document.navigate_after_edit(selection);
+        assert!(document.render("newer view").is_none());
+        assert_eq!(
+            document.take_navigation(superseded.id, true),
+            None,
+            "new renders invalidate old navigation"
+        );
+        document.observe(3, "selection 2");
+        let next = document.response(superseded.id, true).unwrap();
+        assert_eq!(
+            document.take_navigation(next.id, true),
+            None,
+            "ordinary queued edits cannot inherit navigation"
+        );
+        document.observe(4, "newer view");
+        document.response(next.id, true);
+
+        let previous = document.render("older target").unwrap();
+        assert!(document.render("queued selection").is_none());
+        document.navigate_after_edit(selection);
+        assert_eq!(document.take_navigation(previous.id, true), None);
+        document.observe(5, "older target");
+        let queued = document.response(previous.id, true).unwrap();
+        assert_eq!(
+            document.take_navigation(queued.id, true),
+            Some(selection),
+            "queued navigation follows its own successful edit"
+        );
+        assert_eq!(
+            document.take_navigation(queued.id, true),
+            None,
+            "navigation is one-shot"
+        );
+        document.observe(6, "queued selection");
+        document.response(queued.id, true);
+
+        let edited = document.render("selection 3").unwrap();
+        document.navigate_after_edit(selection);
+        document.observe(7, "user edit");
+        assert_eq!(
+            document.take_navigation(edited.id, true),
+            None,
+            "divergent user edits cannot navigate"
+        );
+        document.close();
+        document.open(8, "reopened");
+        assert_eq!(
+            document.take_navigation(edited.id, true),
+            None,
+            "late replies cannot navigate a reopened document"
+        );
     }
 
     #[test]
