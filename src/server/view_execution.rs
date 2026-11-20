@@ -34,11 +34,18 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         None => {
             // Repository discovery/initialisation must not own the registry.
             let draft_owner = matches!(
-                shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+                shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .presentation,
                 Some(Presentation::Plain(_))
             )
             .then(|| shared.draft_owner.as_ref().clone());
-            let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(&repo, draft_owner)));
+            let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(
+                &repo,
+                draft_owner,
+            )));
             shared
                 .sessions
                 .lock()
@@ -282,7 +289,11 @@ pub(super) fn repository_mutation_command(command: &str) -> bool {
 }
 
 /// Wait with no session ownership; reacquire only to validate and apply an answer.
-pub(super) fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<InvokeResult> {
+pub(super) fn drive_execution(
+    shared: &Shared,
+    repo: &str,
+    mut step: Execution,
+) -> Result<InvokeResult> {
     loop {
         match step {
             Execution::Done(result) => return Ok(result),
@@ -337,9 +348,7 @@ pub(super) fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) 
                         .prompt_id;
                     let value = match answer {
                         Some(answer) if !answer.cancelled => {
-                            let free = answer
-                                .free_text
-                                .filter(|text| !text.trim().is_empty());
+                            let free = answer.free_text.filter(|text| !text.trim().is_empty());
                             if let Some(custom) = free {
                                 Some(PromptValue::Choice(PromptChoiceAnswer::Custom { custom }))
                             } else if answer.selected.is_empty() {
@@ -369,9 +378,7 @@ pub(super) fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) 
                     };
                     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
                     let mut result = session.open_document_prompt(&request)?;
-                    if let (true, Some(pref), Some(declared)) =
-                        (over_limit, preference, declared)
-                    {
+                    if let (true, Some(pref), Some(declared)) = (over_limit, preference, declared) {
                         let hint = match client_name.as_deref() {
                             Some(name) => format!("Set pick.clients[\"{name}\"] to override."),
                             None => "Set pick.clients.<client> to override.".to_string(),
@@ -411,9 +418,7 @@ pub(super) fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) 
                             Execution::Prompt(_) => {
                                 return Err(Error::new("refused prompt did not finish"))
                             }
-                            Execution::Pick(_) => {
-                                return Err(Error::new("pick did not finish"))
-                            }
+                            Execution::Pick(_) => return Err(Error::new("pick did not finish")),
                         };
                         result.effects.insert(
                             0,
@@ -586,8 +591,17 @@ pub(super) fn dispatched_outcome(
         }
     }
 
-    if shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.is_some() {
-        notifications.extend(effect_notifications(&shared.client, outcome.effects.clone()));
+    if shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .is_some()
+    {
+        notifications.extend(effect_notifications(
+            &shared.client,
+            outcome.effects.clone(),
+        ));
     }
 
     Ok(Dispatched::with(
@@ -602,7 +616,11 @@ pub(super) fn dispatched_outcome(
 ///
 /// Only kinds with a registry scope get one; the server still owns the keys,
 /// so a client never hard-codes confirm/cancel.
-pub(super) fn edit_keymap(config: &ConfigService, edit_id: &str, kind: &str) -> Option<ViewKeymapParams> {
+pub(super) fn edit_keymap(
+    config: &ConfigService,
+    edit_id: &str,
+    kind: &str,
+) -> Option<ViewKeymapParams> {
     let scope = match kind {
         editor::COMMIT_MESSAGE_KIND | "merge-message" | "tag-message" => "commit-message",
         _ => return None,
@@ -659,7 +677,9 @@ struct RepositoryEdit {
 
 impl Drop for RepositoryEdit {
     fn drop(&mut self) {
-        if let Some(scope) = &self.scope { scope.revoke(); }
+        if let Some(scope) = &self.scope {
+            scope.revoke();
+        }
     }
 }
 
@@ -707,18 +727,40 @@ fn spawn_repository_operation(
     // until the editor (or the failure) has been answered.
     let (edit, edit_id, edit_scope) = match &operation {
         crate::git::RepositoryOperation::Commit(_) => {
-            let edit_id = match editor::registry().create(&repo, &shared.draft_owner, editor::draft::DraftKind::CommitMessage) {
+            let edit_id = match editor::registry().create(
+                &repo,
+                &shared.draft_owner,
+                editor::DraftKind::CommitMessage,
+            ) {
                 Ok(id) => id,
                 Err(error) => {
-                    let _ = sender.send(show_message(1, format!("Cannot open commit draft: {error}")));
+                    let _ = sender.send(show_message(
+                        1,
+                        format!("Cannot open commit draft: {error}"),
+                    ));
                     return;
                 }
             };
-            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
-                edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
-            );
-            let commit = CommitEdit { id: edit_id.clone(), configs: shared.edit_configs.clone() };
-            (RepositoryEdit { _commit: Some(commit), scope: None }, Some(edit_id), None)
+            shared
+                .edit_configs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(
+                    edit_id.clone(),
+                    shared.config.for_repository(std::path::Path::new(&repo)),
+                );
+            let commit = CommitEdit {
+                id: edit_id.clone(),
+                configs: shared.edit_configs.clone(),
+            };
+            (
+                RepositoryEdit {
+                    _commit: Some(commit),
+                    scope: None,
+                },
+                Some(edit_id),
+                None,
+            )
         }
         crate::git::RepositoryOperation::InstantRebase(_) => {
             let config = shared.config.for_repository(std::path::Path::new(&repo));
@@ -728,23 +770,43 @@ fn spawn_repository_operation(
                 &repo,
                 &shared.draft_owner,
                 Arc::new(move |run_id| {
-                    admit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(run_id.to_string(), config.clone());
+                    admit_configs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(run_id.to_string(), config.clone());
                 }),
                 Arc::new(move |run_id| {
-                    release_configs.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
+                    release_configs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .remove(run_id);
                 }),
             ) {
                 Ok(scope) => Arc::new(scope),
                 Err(error) => {
-                    let _ = sender.send(show_message(1, format!("Cannot open instant autosquash draft scope: {error}")));
+                    let _ = sender.send(show_message(
+                        1,
+                        format!("Cannot open instant autosquash draft scope: {error}"),
+                    ));
                     return;
                 }
             };
-            (RepositoryEdit { _commit: None, scope: Some(scope.clone()) }, None, Some(scope))
+            (
+                RepositoryEdit {
+                    _commit: None,
+                    scope: Some(scope.clone()),
+                },
+                None,
+                Some(scope),
+            )
         }
     };
     let (token, cancel) = shared.begin_progress_with_scope(
-        &sender, "commit", edit_id.clone(), Some(&repo), edit_scope.clone(),
+        &sender,
+        "commit",
+        edit_id.clone(),
+        Some(&repo),
+        edit_scope.clone(),
     );
     let progress = ProgressEnd {
         shared: shared.clone(),

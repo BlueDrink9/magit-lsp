@@ -39,6 +39,29 @@ pub const COMMIT_MESSAGE_KIND: &str = "commit-message";
 /// The helper kind Git uses for an interactive rebase todo file.
 pub const REBASE_TODO_KIND: &str = "rebase-todo";
 
+/// Helper document kind and its independent completion policy.
+///
+/// This shared identity compiles on every platform so callers and the
+/// unsupported-platform registry stubs agree on it even where the Unix-only
+/// draft implementation is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftKind {
+    /// Git commit message file, with saved-file close support.
+    CommitMessage,
+    /// Interactive rebase todo file, resolved only by explicit intent.
+    RebaseTodo,
+}
+
+impl DraftKind {
+    /// Wire name reported by the editor helper.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Self::CommitMessage => COMMIT_MESSAGE_KIND,
+            Self::RebaseTodo => REBASE_TODO_KIND,
+        }
+    }
+}
+
 /// The helper's hello: one JSON line naming the file Git wants edited.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,38 +150,83 @@ mod editor_history_tests {
         std::fs::write(&other, "other\n").unwrap();
 
         for (kind, target, wrong_kind, right_kind) in [
-            (draft::DraftKind::CommitMessage, commit.as_path(), REBASE_TODO_KIND, COMMIT_MESSAGE_KIND),
-            (draft::DraftKind::RebaseTodo, todo.as_path(), COMMIT_MESSAGE_KIND, REBASE_TODO_KIND),
+            (
+                DraftKind::CommitMessage,
+                commit.as_path(),
+                REBASE_TODO_KIND,
+                COMMIT_MESSAGE_KIND,
+            ),
+            (
+                DraftKind::RebaseTodo,
+                todo.as_path(),
+                COMMIT_MESSAGE_KIND,
+                REBASE_TODO_KIND,
+            ),
         ] {
             let mut draft = draft::Draft::for_kind(&repo, "owner", kind).unwrap();
             let repository = draft.repository().to_path_buf();
             let run = draft.run_id().to_string();
             let uri = draft.uri().to_string();
-            let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
+            let context = draft::DraftContext {
+                owner: "owner",
+                run_id: &run,
+                uri: &uri,
+                repository: &repository,
+            };
             let token = draft.helper_token().to_string();
-            assert!(draft.accept_helper(context, &token, wrong_kind, target).is_err());
-            assert!(draft.accept_helper(context, &token, right_kind, &other).is_err());
-            assert!(draft.accept_helper(context, &token, right_kind, target).is_ok());
-            if kind == draft::DraftKind::RebaseTodo {
-                draft.did_open(context, 1, b"pick deadbeef subject\n").unwrap();
-                assert!(draft.finish(context, 1, DraftFinishReason::NormalClose).is_err());
-                assert_eq!(std::fs::read_to_string(&todo).unwrap(), "pick deadbeef subject\n");
-                draft.did_change(context, 2, b"drop deadbeef subject\n").unwrap();
-                assert_eq!(draft.finish(context, 2, DraftFinishReason::Confirm).unwrap(), Reply::Ok);
-                assert_eq!(std::fs::read_to_string(&todo).unwrap(), "drop deadbeef subject\n");
+            assert!(draft
+                .accept_helper(context, &token, wrong_kind, target)
+                .is_err());
+            assert!(draft
+                .accept_helper(context, &token, right_kind, &other)
+                .is_err());
+            assert!(draft
+                .accept_helper(context, &token, right_kind, target)
+                .is_ok());
+            if kind == DraftKind::RebaseTodo {
+                draft
+                    .did_open(context, 1, b"pick deadbeef subject\n")
+                    .unwrap();
+                assert!(draft
+                    .finish(context, 1, DraftFinishReason::NormalClose)
+                    .is_err());
+                assert_eq!(
+                    std::fs::read_to_string(&todo).unwrap(),
+                    "pick deadbeef subject\n"
+                );
+                draft
+                    .did_change(context, 2, b"drop deadbeef subject\n")
+                    .unwrap();
+                assert_eq!(
+                    draft
+                        .finish(context, 2, DraftFinishReason::Confirm)
+                        .unwrap(),
+                    Reply::Ok
+                );
+                assert_eq!(
+                    std::fs::read_to_string(&todo).unwrap(),
+                    "drop deadbeef subject\n"
+                );
             }
         }
 
-        let mut draft = draft::Draft::for_kind(&repo, "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let mut draft = draft::Draft::for_kind(&repo, "owner", DraftKind::RebaseTodo).unwrap();
         let repository = draft.repository().to_path_buf();
         let run = draft.run_id().to_string();
         let uri = draft.uri().to_string();
-        let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
+        let context = draft::DraftContext {
+            owner: "owner",
+            run_id: &run,
+            uri: &uri,
+            repository: &repository,
+        };
         assert_eq!(draft.abort(context).unwrap(), Reply::Abort);
     }
 
     fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
-        let run = registry.create(repo.to_str().unwrap(), "owner", draft::DraftKind::CommitMessage).unwrap();
+        let run = registry
+            .create(repo.to_str().unwrap(), "owner", DraftKind::CommitMessage)
+            .unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
         registry
             .apply("owner", &run, &uri, |draft, context| {
@@ -191,54 +259,80 @@ mod editor_history_tests {
         let dir = repository();
         let repo = GitRepo::open(dir.path()).unwrap();
         let (commit_run, commit_uri) = opened(&registry, dir.path());
-        registry.apply("owner", &commit_run, &commit_uri, |draft, context| {
-            draft.did_change(context, 2, b"existing commit history\n")?;
-            draft.save(context, 2)?;
-            Ok(())
-        }).unwrap();
+        registry
+            .apply("owner", &commit_run, &commit_uri, |draft, context| {
+                draft.did_change(context, 2, b"existing commit history\n")?;
+                draft.save(context, 2)?;
+                Ok(())
+            })
+            .unwrap();
         assert!(registry.resolve(&commit_run, Reply::Abort));
         let existing_history = retained(&registry, dir.path());
         assert!(!existing_history.is_empty());
         let target = repo.rebase_todo_path().unwrap();
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "pick deadbeef subject\n").unwrap();
-        let run = registry.create(dir.path().to_str().unwrap(), "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let run = registry
+            .create(dir.path().to_str().unwrap(), "owner", DraftKind::RebaseTodo)
+            .unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
         let token = registry.lock()[&run].draft.helper_token().to_string();
-        assert!(registry.apply("owner", &run, &uri, |draft, context| {
-            assert!(draft.accept_helper(context, &token, COMMIT_MESSAGE_KIND, &target).is_err());
-            assert!(draft.accept_helper(context, &token, REBASE_TODO_KIND, &repo.commit_message_path()?).is_err());
-            draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
-            draft.did_open(context, 1, b"pick deadbeef subject\n")?;
-            draft.did_change(context, 2, b"drop deadbeef subject\n")?;
-            draft.save(context, 2)?;
-            Ok(())
-        }).is_ok());
+        assert!(registry
+            .apply("owner", &run, &uri, |draft, context| {
+                assert!(draft
+                    .accept_helper(context, &token, COMMIT_MESSAGE_KIND, &target)
+                    .is_err());
+                assert!(draft
+                    .accept_helper(
+                        context,
+                        &token,
+                        REBASE_TODO_KIND,
+                        &repo.commit_message_path()?
+                    )
+                    .is_err());
+                draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
+                draft.did_open(context, 1, b"pick deadbeef subject\n")?;
+                draft.did_change(context, 2, b"drop deadbeef subject\n")?;
+                draft.save(context, 2)?;
+                Ok(())
+            })
+            .is_ok());
         assert!(registry.resolve(&run, Reply::Abort));
         assert_eq!(retained(&registry, dir.path()), existing_history);
 
-        let confirm = registry.create(dir.path().to_str().unwrap(), "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let confirm = registry
+            .create(dir.path().to_str().unwrap(), "owner", DraftKind::RebaseTodo)
+            .unwrap();
         let confirm_uri = registry.lock()[&confirm].draft.uri().to_string();
-        registry.apply("owner", &confirm, &confirm_uri, |draft, context| {
-            let token = draft.helper_token().to_string();
-            draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
-            draft.did_open(context, 1, b"pick deadbeef subject\n")?;
-            draft.did_change(context, 2, b"drop deadbeef subject\n")?;
-            draft.save(context, 2)?;
-            Ok(())
-        }).unwrap();
+        registry
+            .apply("owner", &confirm, &confirm_uri, |draft, context| {
+                let token = draft.helper_token().to_string();
+                draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
+                draft.did_open(context, 1, b"pick deadbeef subject\n")?;
+                draft.did_change(context, 2, b"drop deadbeef subject\n")?;
+                draft.save(context, 2)?;
+                Ok(())
+            })
+            .unwrap();
         registry.lock()[&confirm].completion.send(true).unwrap();
-        registry.finish("owner", &DraftFinishParams {
-            run_id: confirm,
-            uri: confirm_uri,
-            version: 2,
-            reason: DraftFinishReason::Confirm,
-        }).unwrap();
+        registry
+            .finish(
+                "owner",
+                &DraftFinishParams {
+                    run_id: confirm,
+                    uri: confirm_uri,
+                    version: 2,
+                    reason: DraftFinishReason::Confirm,
+                },
+            )
+            .unwrap();
         assert_eq!(retained(&registry, dir.path()), existing_history);
     }
 
     fn joined(registry: &EditRegistry, repo: &Path) -> (String, String) {
-        let run = registry.create(repo.to_str().unwrap(), "owner", draft::DraftKind::CommitMessage).unwrap();
+        let run = registry
+            .create(repo.to_str().unwrap(), "owner", DraftKind::CommitMessage)
+            .unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
         registry
             .apply("owner", &run, &uri, |draft, context| {
@@ -372,7 +466,13 @@ mod editor_history_tests {
         let registry = EditRegistry::new();
         let repo = repository();
         let (run, _uri) = joined(&registry, repo.path());
-        let waiting = registry.lock().get_mut(&run).unwrap().waiting.take().unwrap();
+        let waiting = registry
+            .lock()
+            .get_mut(&run)
+            .unwrap()
+            .waiting
+            .take()
+            .unwrap();
 
         let superseded = registry.begin_delivery(&run);
         let current = registry.begin_delivery(&run);
@@ -443,7 +543,9 @@ struct EditScopeState {
 
 /// Admission credential for sequential fresh editor runs; revoke on operation exit.
 /// This reusable bearer credential admits helpers only and never confirms drafts.
-pub struct EditScope { token: String }
+pub struct EditScope {
+    token: String,
+}
 
 fn opaque_scope_id() -> Result<String> {
     let mut bytes = [0u8; 32];
@@ -452,7 +554,9 @@ fn opaque_scope_id() -> Result<String> {
 }
 
 impl Drop for EditScope {
-    fn drop(&mut self) { registry().revoke_scope(&self.token); }
+    fn drop(&mut self) {
+        registry().revoke_scope(&self.token);
+    }
 }
 
 struct ScopeInvocation {
@@ -462,23 +566,34 @@ struct ScopeInvocation {
 
 impl Drop for ScopeInvocation {
     fn drop(&mut self) {
-        let on_release = registry().scopes.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&self.token).map(|scope| {
-            scope.active = false;
-            scope.on_release.clone()
-        });
+        let on_release = registry()
+            .scopes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(&self.token)
+            .map(|scope| {
+                scope.active = false;
+                scope.on_release.clone()
+            });
         if let Some(run_id) = self.run_id.take() {
             registry().resolve(&run_id, Reply::Abort);
-            if let Some(on_release) = on_release { on_release(&run_id); }
+            if let Some(on_release) = on_release {
+                on_release(&run_id);
+            }
         }
     }
 }
 
 impl EditScope {
     /// Credential for inherited helper environment; admission only, never confirmation.
-    pub fn credential(&self) -> &str { &self.token }
+    pub fn credential(&self) -> &str {
+        &self.token
+    }
 
     /// Close admission and abort any active editor run immediately.
-    pub fn revoke(&self) { registry().revoke_scope(&self.token); }
+    pub fn revoke(&self) {
+        registry().revoke_scope(&self.token);
+    }
 }
 
 /// One registry-owned pending draft identity and exact issued URI.
@@ -525,10 +640,19 @@ impl EditRegistry {
     ) -> Result<EditScope> {
         let repo = GitRepo::open(repo_path)?;
         let token = opaque_scope_id()?;
-        self.scopes.lock().unwrap_or_else(|p| p.into_inner()).insert(token.clone(), EditScopeState {
-            owner: owner.to_string(), repo_path: repo.root().to_string_lossy().into_owned(), active: false,
-            on_admit, on_release,
-        });
+        self.scopes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                token.clone(),
+                EditScopeState {
+                    owner: owner.to_string(),
+                    repo_path: repo.root().to_string_lossy().into_owned(),
+                    active: false,
+                    on_admit,
+                    on_release,
+                },
+            );
         Ok(EditScope { token })
     }
 
@@ -545,19 +669,33 @@ impl EditRegistry {
     }
 
     fn revoke_scope(&self, token: &str) {
-        if let Some(scope) = self.scopes.lock().unwrap_or_else(|p| p.into_inner()).remove(token) {
-            if scope.active { self.abort_scope_runs(token); }
+        if let Some(scope) = self
+            .scopes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(token)
+        {
+            if scope.active {
+                self.abort_scope_runs(token);
+            }
         }
     }
 
     fn abort_scope_runs(&self, token: &str) {
-        let ids: Vec<String> = self.lock().iter().filter(|(_, e)| e.scope_token.as_deref() == Some(token)).map(|(id, _)| id.clone()).collect();
-        for id in ids { self.resolve(&id, Reply::Abort); }
+        let ids: Vec<String> = self
+            .lock()
+            .iter()
+            .filter(|(_, e)| e.scope_token.as_deref() == Some(token))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.resolve(&id, Reply::Abort);
+        }
     }
 
     /// Allocate a draft before Git, bound to a trusted connection and repository.
     #[cfg(unix)]
-    pub fn create(&self, repo_path: &str, owner: &str, kind: draft::DraftKind) -> Result<String> {
+    pub fn create(&self, repo_path: &str, owner: &str, kind: DraftKind) -> Result<String> {
         let repo = GitRepo::open(repo_path)?;
         let draft = draft::Draft::for_kind(&repo, owner, kind)?;
         let edit_id = draft.run_id().to_string();
@@ -581,7 +719,7 @@ impl EditRegistry {
 
     /// Managed drafts require the Unix helper/validated file-descriptor boundary.
     #[cfg(not(unix))]
-    pub fn create(&self, _repo_path: &str, _owner: &str, _kind: draft::DraftKind) -> Result<String> {
+    pub fn create(&self, _repo_path: &str, _owner: &str, _kind: DraftKind) -> Result<String> {
         Err(Error::new("managed commit drafts require Unix"))
     }
 
@@ -641,7 +779,8 @@ impl EditRegistry {
     /// Snapshot pending draft identities for one trusted owner and repository.
     #[cfg(unix)]
     pub fn pending_for(&self, owner: &str, repo_path: &str) -> Vec<PendingDraft> {
-        let mut pending: Vec<_> = self.lock()
+        let mut pending: Vec<_> = self
+            .lock()
             .iter()
             .filter(|(_, entry)| {
                 entry.owner == owner
@@ -721,7 +860,9 @@ impl EditRegistry {
     ) -> Result<Option<String>> {
         self.apply(owner, &p.run_id, &p.uri, |draft, context| {
             draft.finish(context, p.version, p.reason)?;
-            if draft.kind() != draft::DraftKind::CommitMessage { return Ok(None); }
+            if draft.kind() != DraftKind::CommitMessage {
+                return Ok(None);
+            }
             let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
             Ok(histories
                 .entry(context.repository.to_path_buf())
@@ -751,6 +892,8 @@ impl EditRegistry {
         self.forget_delivery(edit_id);
         match entry {
             Some(entry) => {
+                // Only a Unix draft carries validated saved-file text to retain.
+                #[cfg(unix)]
                 if reply == Reply::Abort {
                     self.retain_saved(&entry.draft);
                 }
@@ -854,7 +997,7 @@ impl EditRegistry {
 
     #[cfg(unix)]
     fn retain_saved(&self, draft: &draft::Draft) {
-        if draft.kind() != draft::DraftKind::CommitMessage {
+        if draft.kind() != DraftKind::CommitMessage {
             return;
         }
         if let (Some(saved), Some(initial)) = (draft.saved(), draft.initial()) {
@@ -943,7 +1086,10 @@ pub fn commit(
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let env = registered_editor_environment(edit_id, socket, operation, &repo)?;
     let args = operation.argv();
-    let env = env.iter().map(|(key, value)| (*key, value.as_str())).collect::<Vec<_>>();
+    let env = env
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect::<Vec<_>>();
     repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
 }
 
@@ -969,7 +1115,8 @@ pub fn execute_operation_scoped(
 ) -> Result<crate::git::RepositoryOperationOutcome> {
     match operation {
         crate::git::RepositoryOperation::Commit(operation) => {
-            commit(repo_path, edit_id, socket, operation).map(crate::git::RepositoryOperationOutcome::Commit)
+            commit(repo_path, edit_id, socket, operation)
+                .map(crate::git::RepositoryOperationOutcome::Commit)
         }
         crate::git::RepositoryOperation::InstantRebase(authority) => {
             let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
@@ -977,7 +1124,10 @@ pub fn execute_operation_scoped(
                 Some(scope) => scoped_editor_environment(scope, socket, executable),
                 None => Vec::new(),
             };
-            let env = env.iter().map(|(key, value)| (*key, value.as_str())).collect::<Vec<_>>();
+            let env = env
+                .iter()
+                .map(|(key, value)| (*key, value.as_str()))
+                .collect::<Vec<_>>();
             Ok(crate::git::RepositoryOperationOutcome::InstantRebase(
                 authority.execute(&repo, executable, &env),
             ))
@@ -985,8 +1135,15 @@ pub fn execute_operation_scoped(
     }
 }
 
-fn scoped_editor_environment(scope: &EditScope, socket: &Path, executable: &Path) -> Vec<(&'static str, String)> {
-    let editor = format!("{} --editor-helper", shell_quote(&executable.to_string_lossy()));
+fn scoped_editor_environment(
+    scope: &EditScope,
+    socket: &Path,
+    executable: &Path,
+) -> Vec<(&'static str, String)> {
+    let editor = format!(
+        "{} --editor-helper",
+        shell_quote(&executable.to_string_lossy())
+    );
     vec![
         ("GIT_EDITOR", editor.clone()),
         ("EDITOR", editor.clone()),
@@ -1290,28 +1447,50 @@ fn handle_edit(
     if let Some(scope_token) = hello.scope.take() {
         let (owner, repo_path, on_admit) = {
             let scopes = registry().scopes.lock().unwrap_or_else(|p| p.into_inner());
-            let Some(scope) = scopes.get(&scope_token) else { return write_reply(stream, false, None); };
-            if scope.active { return write_reply(stream, false, None); }
-            (scope.owner.clone(), scope.repo_path.clone(), scope.on_admit.clone())
+            let Some(scope) = scopes.get(&scope_token) else {
+                return write_reply(stream, false, None);
+            };
+            if scope.active {
+                return write_reply(stream, false, None);
+            }
+            (
+                scope.owner.clone(),
+                scope.repo_path.clone(),
+                scope.on_admit.clone(),
+            )
         };
         let repo = GitRepo::open(&repo_path)?;
-        let draft = draft::Draft::for_kind(&repo, owner.clone(), draft::DraftKind::CommitMessage)?;
+        let draft = draft::Draft::for_kind(&repo, owner.clone(), DraftKind::CommitMessage)?;
         hello.edit_id = draft.run_id().to_string();
         hello.token = draft.helper_token().to_string();
         let (replies, waiting) = std_mpsc::channel();
         let (completion, completed) = std_mpsc::channel();
         let mut scopes = registry().scopes.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(scope) = scopes.get_mut(&scope_token) else { return write_reply(stream, false, None); };
+        let Some(scope) = scopes.get_mut(&scope_token) else {
+            return write_reply(stream, false, None);
+        };
         if scope.active || scope.owner != owner || scope.repo_path != repo_path {
             return write_reply(stream, false, None);
         }
         scope.active = true;
-        registry().lock().insert(hello.edit_id.clone(), EditEntry {
-            repo_path, replies, waiting: Some(waiting), draft, owner, completed, completion,
-            scope_token: Some(scope_token.clone()),
-        });
+        registry().lock().insert(
+            hello.edit_id.clone(),
+            EditEntry {
+                repo_path,
+                replies,
+                waiting: Some(waiting),
+                draft,
+                owner,
+                completed,
+                completion,
+                scope_token: Some(scope_token.clone()),
+            },
+        );
         on_admit(&hello.edit_id);
-        admission = Some(ScopeInvocation { token: scope_token, run_id: Some(hello.edit_id.clone()) });
+        admission = Some(ScopeInvocation {
+            token: scope_token,
+            run_id: Some(hello.edit_id.clone()),
+        });
     }
     let (replies, completion) = {
         let mut entries = registry().lock();

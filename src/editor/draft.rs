@@ -6,7 +6,7 @@
 //! didOpen/didChange; explicit confirmation carries a version, not text. Errors never
 //! include message bodies/tokens.
 
-use super::{Reply, COMMIT_MESSAGE_KIND};
+use super::{DraftKind, Reply};
 use crate::git::GitRepo;
 use crate::protocol::DraftFinishReason;
 use crate::{Error, Result};
@@ -18,25 +18,6 @@ use std::path::{Path, PathBuf};
 
 /// Independent UTF-8 byte limit for the initial, live and saved snapshots.
 pub const MAX_DRAFT_BYTES: usize = 1024 * 1024;
-
-/// Helper document kind and its independent completion policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DraftKind {
-    /// Git commit message file, with saved-file close support.
-    CommitMessage,
-    /// Interactive rebase todo file, resolved only by explicit intent.
-    RebaseTodo,
-}
-
-impl DraftKind {
-    /// Wire name reported by the editor helper.
-    pub fn wire_name(self) -> &'static str {
-        match self {
-            Self::CommitMessage => COMMIT_MESSAGE_KIND,
-            Self::RebaseTodo => super::REBASE_TODO_KIND,
-        }
-    }
-}
 
 /// Trusted dispatch identity; the owner/repository must not come from client JSON.
 #[derive(Clone, Copy)]
@@ -102,7 +83,10 @@ impl Draft {
 
     /// Allocate a draft targeting the Git-owned file for this helper kind.
     pub fn for_kind(repo: &GitRepo, owner: impl Into<String>, kind: DraftKind) -> Result<Self> {
-        let expected = match kind { DraftKind::CommitMessage => repo.commit_message_path()?, DraftKind::RebaseTodo => repo.rebase_todo_path()? };
+        let expected = match kind {
+            DraftKind::CommitMessage => repo.commit_message_path()?,
+            DraftKind::RebaseTodo => repo.rebase_todo_path()?,
+        };
         let run_id = opaque_id()?;
         Ok(Self {
             owner: owner.into(),
@@ -153,9 +137,7 @@ impl Draft {
     ) -> Result<()> {
         self.validate(context)?;
         if token != self.helper_token || kind != self.kind.wire_name() {
-            return Err(Error::new(
-                "Draft helper credentials or kind do not match",
-            ));
+            return Err(Error::new("Draft helper credentials or kind do not match"));
         }
         if self.contents.is_some() {
             return Err(Error::new("Commit draft helper has already joined"));
@@ -387,7 +369,9 @@ impl Target {
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
             .open(expected.parent().unwrap())?;
-        let name = expected.file_name().ok_or_else(|| Error::new("Draft target has no filename"))?;
+        let name = expected
+            .file_name()
+            .ok_or_else(|| Error::new("Draft target has no filename"))?;
         let file = open_message(&directory, name, false)?;
         regular_unlinked(&file)?;
         Ok(Self {

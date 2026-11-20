@@ -2,9 +2,7 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
-use crate::presentation::plain::{
-    whole_document_edit, ApplyEdit, DocumentFormat, PlainDocument,
-};
+use crate::presentation::plain::{whole_document_edit, ApplyEdit, DocumentFormat, PlainDocument};
 use crate::presentation::{
     negotiate, CustomRender, PlainCapabilities, Presentation, PromptSupport, Ui,
 };
@@ -34,28 +32,28 @@ use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
 use tokio::task::JoinSet;
 
+mod drafts;
 mod plain;
 mod plain_actions;
-mod drafts;
 mod requests;
 mod ui;
 mod view_execution;
 
+#[cfg(test)]
+use view_execution::CommitEdit;
 use view_execution::{
     cancelling_response, close_view, deferred_operation_response, dispatched_outcome,
     drive_execution, edit_keymap, invoke_view, key_view, open_view, repository_mutation_command,
     set_mode_view, DeferredReservation,
 };
-#[cfg(test)]
-use view_execution::CommitEdit;
 
-use plain::{deliver_plain_effects, deliver_render, route_plain_render, schedule_plain_open};
 use plain::{
     close_plain, deliver_plain_close_outcome, handle_plain_key, plain_change,
     reconcile_rich_prompt, refresh_pending_views, report_pending_refresh_error,
 };
-use ui::{custom_ui, dynamic_delivery, refresh_view_keymaps, PickBridge, PromptBridge, ServerUi};
+use plain::{deliver_plain_effects, deliver_render, route_plain_render, schedule_plain_open};
 use requests::{handle_request, Dispatched};
+use ui::{custom_ui, dynamic_delivery, refresh_view_keymaps, PickBridge, PromptBridge, ServerUi};
 
 type SessionHandle = Arc<Mutex<Session>>;
 type RepoLocks = Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>;
@@ -415,10 +413,12 @@ impl Shared {
             .deferred_repositories
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        repositories.insert(repo.clone()).then(|| DeferredReservation {
-            repositories: self.deferred_repositories.clone(),
-            repo,
-        })
+        repositories
+            .insert(repo.clone())
+            .then(|| DeferredReservation {
+                repositories: self.deferred_repositories.clone(),
+                repo,
+            })
     }
 
     /// Whether a detached worker still owns mutation authority for `repo`.
@@ -592,7 +592,9 @@ impl Shared {
             if let Some(edit_id) = edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = edit_scope { scope.revoke(); }
+            if let Some(scope) = edit_scope {
+                scope.revoke();
+            }
         }
         let enabled = self
             .client
@@ -687,7 +689,9 @@ impl Shared {
             if let Some(edit_id) = run.edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = run.edit_scope { scope.revoke(); }
+            if let Some(scope) = run.edit_scope {
+                scope.revoke();
+            }
         }
         editor::registry().abort_all();
         self.prompts.close();
@@ -744,7 +748,9 @@ impl Shared {
             if let Some(edit_id) = &run.edit_id {
                 editor::registry().resolve(edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = &run.edit_scope { scope.revoke(); }
+            if let Some(scope) = &run.edit_scope {
+                scope.revoke();
+            }
         }
     }
 
@@ -907,8 +913,12 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     }
                     return;
                 }
-                let presentation = shared.client.lock().unwrap_or_else(|p| p.into_inner())
-                    .presentation.clone();
+                let presentation = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .presentation
+                    .clone();
                 if matches!(presentation, Some(Presentation::Plain(_))) {
                     deliver_plain_effects(&shared, effects);
                     return;
@@ -924,16 +934,19 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         }
                     }
                 }
-                let _ = shared.sender.send(custom_ui(&shared.client).effects(ViewEffectsParams {
-                    effects: effects.clone(),
-                }));
+                let _ = shared
+                    .sender
+                    .send(custom_ui(&shared.client).effects(ViewEffectsParams {
+                        effects: effects.clone(),
+                    }));
                 // A dynamic client gets the edit's keymap as a normal
                 // `view/keymap`, keyed by the edit id. Static clients use
                 // their own bindings and ignore it.
                 if !unsupported_edit && dynamic_delivery(&shared.client) {
                     for effect in &effects {
                         if let Effect::EditDocument { run_id, kind, .. } = effect {
-                            let config = shared.edit_configs
+                            let config = shared
+                                .edit_configs
                                 .lock()
                                 .unwrap_or_else(|p| p.into_inner())
                                 .get(run_id)
@@ -941,10 +954,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             if let Some(keymap) =
                                 config.and_then(|config| edit_keymap(&config, run_id, kind))
                             {
-                                let _ = shared.sender.send(Message::Notification(Notification::new(
-                                    VIEW_KEYMAP.to_string(),
-                                    keymap,
-                                )));
+                                let _ = shared.sender.send(Message::Notification(
+                                    Notification::new(VIEW_KEYMAP.to_string(), keymap),
+                                ));
                             }
                         }
                     }
@@ -1060,13 +1072,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // reader's ordered lane, never in unordered request tasks.
                 if request.method == "workspace/executeCommand" {
                     if let Some(reason) = plain_unsupported_execute_reason(&request) {
-                        let (response, notifications) = match plain_actions::plain_unsupported_message(reason) {
-                            Ok(dispatched) => (
-                                Response::new_ok(request.id, dispatched.result),
-                                dispatched.notifications,
-                            ),
-                            Err(error) => (error_response(request.id, error), Vec::new()),
-                        };
+                        let (response, notifications) =
+                            match plain_actions::plain_unsupported_message(reason) {
+                                Ok(dispatched) => (
+                                    Response::new_ok(request.id, dispatched.result),
+                                    dispatched.notifications,
+                                ),
+                                Err(error) => (error_response(request.id, error), Vec::new()),
+                            };
                         for message in notifications {
                             let _ = sender.send(message);
                         }
@@ -1074,14 +1087,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         continue;
                     }
                     if let Some(params) = plain_actions::plain_execute_params(&request) {
-                        let (response, notifications) = match plain_actions::execute_plain_action(&shared, params)
-                        {
-                            Ok(dispatched) => (
-                                Response::new_ok(request.id, dispatched.result),
-                                dispatched.notifications,
-                            ),
-                            Err(error) => (error_response(request.id, error), Vec::new()),
-                        };
+                        let (response, notifications) =
+                            match plain_actions::execute_plain_action(&shared, params) {
+                                Ok(dispatched) => (
+                                    Response::new_ok(request.id, dispatched.result),
+                                    dispatched.notifications,
+                                ),
+                                Err(error) => (error_response(request.id, error), Vec::new()),
+                            };
                         for message in notifications {
                             let _ = sender.send(message);
                         }
@@ -1251,7 +1264,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 drop(_plain);
                                 if let Some(dispatch) = dispatched {
                                     let turn = shared.reserve_mutation(dispatch.repo().to_owned());
-                                    handlers.spawn(handle_plain_key(shared.clone(), dispatch, turn));
+                                    handlers.spawn(handle_plain_key(
+                                        shared.clone(),
+                                        dispatch,
+                                        turn,
+                                    ));
                                 }
                                 reconcile_rich_prompt(&shared, uri, &sender);
                             }
@@ -2029,6 +2046,8 @@ mod commit_tests {
         assert!(shared.outbound.lock().unwrap().is_empty());
     }
 
+    /// Registry lifecycle for a managed draft needs the Unix draft boundary.
+    #[cfg(unix)]
     #[test]
     fn commit_edit_releases_registry_and_repository_config_together() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2049,7 +2068,11 @@ mod commit_tests {
         );
         let retained = Arc::downgrade(&config);
         let id = editor::registry()
-            .create(tmp.path().to_str().unwrap(), "test-connection", editor::draft::DraftKind::CommitMessage)
+            .create(
+                tmp.path().to_str().unwrap(),
+                "test-connection",
+                editor::DraftKind::CommitMessage,
+            )
             .unwrap();
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
         let edit = CommitEdit {
@@ -2149,10 +2172,7 @@ mod commit_tests {
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(repo.clone(), handle.clone());
             {
-                let mut view_repos = shared
-                    .view_repos
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                let mut view_repos = shared.view_repos.lock().unwrap_or_else(|p| p.into_inner());
                 for view_id in [&status, &log, &prompt] {
                     view_repos.insert(view_id.clone(), repo.clone());
                 }
@@ -2213,7 +2233,10 @@ mod commit_tests {
             if !close_origin {
                 let status_view = session.views().get(&status).unwrap();
                 assert!(status_view.version() > status_version);
-                assert!(!status_view.dirty(), "the resumed origin has no refresh left");
+                assert!(
+                    !status_view.dirty(),
+                    "the resumed origin has no refresh left"
+                );
             }
         }
     }
