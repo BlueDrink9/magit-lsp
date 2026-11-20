@@ -15,7 +15,31 @@ Client setup/discovery and on-demand Neovim examples are in
 [CLIENT_SPEC](CLIENT_SPEC.md). These docs and isolated local setup tests do not
 close R-REL-2/3, hosted/clean-machine or published-VSIX installation gates. The
 actual lazy.nvim-manager run (`make lazy-install-check`) is local Linux evidence
-only. The release workflow does not install Neovim, so its setup
+only. `nix develop -c make mason-install-check` additionally exercises pinned
+mason.nvim `v2.3.1` (`2a6940af80375532e5e9e7c1f2fc6319a1b7a69d`) through
+its actual registry/compiler/installer with the unchanged production package
+spec mechanically translated from YAML. Registry selection and the GitHub
+download URL template alone redirect registry/assets to a private loopback
+server. No extra registry/compiler dependency is fetched: Mason's compiler and
+vendored dependencies belong to that exact checkout; registry schema commit
+`215cb7beb49e781a126bd5ba3397106367ed5316` is research provenance only, not a
+runtime dependency or a claim of schema validation.
+
+The Mason check packages the current **debug** 0.2.0 binary with the production
+packaging script. It rejects corrupt bytes through actual tar unpack, retries
+the valid archive in the same install root, then verifies receipt/raw source,
+binlink, executable version and installed-server initialize/status render.
+`build/ui/mason-install/mason-install.json` records the exact dependency pin,
+production-manifest hash/parity, loopback requests, corrupt/valid results and
+cleanup (isolated HOME/XDG, removed staging/locks/temp root, reaped editors,
+no executing owned server and stopped HTTP thread). See the
+[Mason installation scope](CLIENT_INSTALL.md#mason-server-package-prepared-not-submitted).
+This does not submit the package, download a live release, test release-mode
+or baseline-glibc artifacts, verify Windows/macOS, or close hosted/clean-machine
+release gates. The production manifest/server and user configuration are not
+changed.
+
+The release workflow does not install Neovim, so its setup
 smoke may skip; inspect verbose unittest output rather than counting a skip as
 client evidence. README images are optional human-owned assets; harnesses emit
 text/structured evidence and do not capture screenshots. See the

@@ -149,6 +149,10 @@ helix-config-check: build
 lazy-install-check: build
 	$(call run,lazy-install-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_lazy_install.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/lazy-install")
 
+.PHONY: mason-install-check
+mason-install-check: build
+	$(call run,mason-install-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_mason_install.py)
+
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)
 

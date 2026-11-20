@@ -23,6 +23,44 @@ The examples below use this absolute server location; change it if installed
 elsewhere. Add `~/.local/bin` to PATH **before launching the editor** if using
 PATH discovery. GUI editors may not inherit a shell's PATH.
 
+## Mason server package (prepared, not submitted)
+
+[`clients/mason/package.yaml`](../clients/mason/package.yaml) is a prepared
+Mason registry submission for the **server**, not the Lua client. It is not in
+the hosted registry; `:MasonInstall magit-lsp` is not a published installation
+path. Install the client separately using a method below.
+
+For local Linux x86_64 GNU verification, run:
+
+```sh
+nix develop -c make mason-install-check
+```
+
+This fetches actual mason.nvim `v2.3.1` at
+`2a6940af80375532e5e9e7c1f2fc6319a1b7a69d` into disposable storage and uses its
+registry, compiler and installer (including vendored dependencies). It derives
+the private registry's JSON mechanically from the production YAML, rejecting
+unhandled content; no package fields are overridden. Only registry selection
+(`github:local/magit-registry@fixture`) and `github.download_url_template` are
+redirected to loopback HTTP. No runtime registry clone or YAML compiler tool
+is needed.
+
+The archive is produced by `scripts/package-release.sh` from the freshly built
+**debug** 0.2.0 server, not a hosted/release-mode binary. A corrupt archive must
+fail real tar unpack without a receipt or executable; replacing the served
+bytes with the valid archive must install successfully in the same Mason root.
+The check asserts receipt/source parity, binlink, `--version`, LSP initialize
+and rendered status using that installed executable. A test-only launcher
+records process identity before executing the installed binlink; it does not
+copy or extract the installed binary. HOME/XDG, manager, registry and install
+state are isolated and removed, owned editor/server processes are stopped,
+and structured evidence is retained in `build/ui/mason-install/`.
+
+This is local Linux/debug-fixture evidence only: no upstream registry
+submission, live release download, clean-machine installation, Windows/macOS
+verification or publication is claimed. Git/network access is needed to fetch
+the pinned manager; Neovim 0.11+, curl and tar/gzip must already be available.
+
 ## Neovim native packages
 
 Install only the client by placing the repository in a native `start` package:
