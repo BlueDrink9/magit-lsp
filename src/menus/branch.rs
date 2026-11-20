@@ -1,7 +1,6 @@
 //! The branch menu (Magit `magit-branch`).
 
 use super::*;
-use crate::menu::Reader;
 /// The branch transient with Magit's complete action and argument list.
 pub fn definition() -> MenuDef {
     MenuDef {
@@ -33,31 +32,6 @@ pub fn definition() -> MenuDef {
                         "Set the branch description",
                         "magit-branch.<branch>.description",
                         "",
-                    ),
-                    option(
-                        "=u",
-                        "--set-upstream-to=",
-                        "Set the upstream branch",
-                        Reader::Ref,
-                    ),
-                    option(
-                        "=r",
-                        "--rebase=",
-                        "Set whether to rebase onto upstream",
-                        Reader::Choice,
-                    ),
-                    option(
-                        "=p",
-                        "--set-push-remote=",
-                        "Set the push-remote",
-                        Reader::Remote,
-                    ),
-                    option("=R", "--pull-rebase=", "Set pull.rebase", Reader::Choice),
-                    option(
-                        "=P",
-                        "--push-default=",
-                        "Set remote.pushDefault",
-                        Reader::Remote,
                     ),
                     action(
                         "B",
@@ -161,7 +135,7 @@ pub fn definition() -> MenuDef {
                         "branch.configure",
                         "configure...",
                         "magit-branch-configure",
-                        "R-6.1",
+                        "",
                     ),
                     action("m", "branch.rename", "rename", "magit-branch-rename", ""),
                     action("x", "branch.reset", "reset", "magit-branch-reset", ""),

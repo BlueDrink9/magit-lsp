@@ -1174,6 +1174,507 @@ fn branch_description_prompts_twice_and_writes_config() {
 }
 
 #[test]
+fn branch_configuration_workflow_targets_selected_branch_and_repository() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "feature"]);
+    tmp.git(&["remote", "add", "origin", "https://example.invalid/repo"]);
+    let refs_before = tmp.git(&["for-each-ref"]);
+    let local_list = || tmp.git(&["config", "--local", "--list"]);
+    let has_key = |list: &str, key: &str| list.lines().any(|line| line.starts_with(key));
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let status = test.view_id().to_string();
+    let start = || ViewInvokeParams {
+        view_id: String::new(),
+        command: "branch.configure".into(),
+        version: None,
+        cursor: None,
+        selection: None,
+        args: None,
+    };
+    let invoke = |test: &mut TestSession| {
+        let mut request = start();
+        request.view_id = test.view_id().to_string();
+        request.version = Some(test.version());
+        test.session.start_invoke(&request).unwrap()
+    };
+    let configure_branch =
+        |test: &mut TestSession, setting: &str, branch: &str, value: &str, current: &str| {
+            let Execution::Prompt(setting_prompt) = invoke(test) else {
+                panic!("expected setting prompt");
+            };
+            let Execution::Prompt(branch_prompt) = test
+                .session
+                .resume_prompt(
+                    &setting_prompt.prompt_id,
+                    Some(PromptValue::Text(setting.into())),
+                )
+                .unwrap()
+            else {
+                panic!("expected branch prompt");
+            };
+            let Execution::Prompt(value_prompt) = test
+                .session
+                .resume_prompt(
+                    &branch_prompt.prompt_id,
+                    Some(PromptValue::Text(branch.into())),
+                )
+                .unwrap()
+            else {
+                panic!("expected value prompt");
+            };
+            assert!(
+                value_prompt.title.contains(&format!("current: {current}")),
+                "{}",
+                value_prompt.title
+            );
+            test.session
+                .resume_prompt(
+                    &value_prompt.prompt_id,
+                    Some(PromptValue::Text(value.into())),
+                )
+                .unwrap()
+        };
+    let configure_repository =
+        |test: &mut TestSession, setting: &str, value: &str, current: &str| {
+            let Execution::Prompt(first) = invoke(test) else {
+                panic!("expected setting prompt");
+            };
+            let Execution::Prompt(second) = test
+                .session
+                .resume_prompt(&first.prompt_id, Some(PromptValue::Text(setting.into())))
+                .unwrap()
+            else {
+                panic!("expected repository value prompt");
+            };
+            assert!(
+                second.title.contains(&format!("current: {current}")),
+                "{}",
+                second.title
+            );
+            test.session
+                .resume_prompt(&second.prompt_id, Some(PromptValue::Text(value.into())))
+                .unwrap()
+        };
+
+    let unchanged = local_list();
+    let Execution::Prompt(initial) = invoke(&mut test) else {
+        panic!("expected configuration prompt");
+    };
+    let detail = initial.detail.as_deref().unwrap_or_default();
+    assert!(
+        detail.contains("main: upstream=unset, rebase=unset, pushRemote=unset"),
+        "{detail}"
+    );
+    assert!(detail.contains("pull.rebase=unset"), "{detail}");
+    assert!(detail.contains("push.default=unset"), "{detail}");
+    let Execution::Done(cancelled) = test
+        .session
+        .resume_prompt(&initial.prompt_id, None)
+        .unwrap()
+    else {
+        panic!("cancellation must end the prompt");
+    };
+    assert!(
+        message_texts(&cancelled.effects).is_empty(),
+        "{:?}",
+        cancelled.effects
+    );
+    assert_eq!(local_list(), unchanged);
+
+    test.ui()
+        .reply_text(Some("rebase".into()))
+        .reply_text(Some("feature".into()))
+        .reply_text(Some("true".into()));
+    test.press_ui("b");
+    test.press_ui("C");
+    let requests = test.ui().requests();
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.title.starts_with("Configure setting")),
+        "{requests:?}"
+    );
+    let key_value_prompt = requests
+        .iter()
+        .find(|request| request.title.contains("rebase for feature"))
+        .expect("the key-driven value prompt");
+    assert!(
+        key_value_prompt.title.contains("current: unset"),
+        "{}",
+        key_value_prompt.title
+    );
+    assert_eq!(tmp.git(&["config", "branch.feature.rebase"]).trim(), "true");
+    assert_eq!(tmp.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    assert!(!has_key(&local_list(), "branch.main."));
+    test.focus(&status);
+
+    let _ = configure_branch(&mut test, "upstream", "feature", "main", "unset");
+    let _ = configure_branch(&mut test, "pushRemote", "feature", "origin", "unset");
+    assert_eq!(tmp.git(&["config", "branch.feature.remote"]).trim(), ".");
+    assert_eq!(
+        tmp.git(&["config", "branch.feature.merge"]).trim(),
+        "refs/heads/main"
+    );
+    assert_eq!(tmp.git(&["config", "branch.feature.rebase"]).trim(), "true");
+    assert_eq!(
+        tmp.git(&["config", "branch.feature.pushRemote"]).trim(),
+        "origin"
+    );
+    assert_eq!(tmp.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    let _ = configure_branch(&mut test, "upstream", "feature", "unset", "main");
+    let _ = configure_branch(&mut test, "rebase", "feature", "unset", "true");
+    let _ = configure_branch(&mut test, "pushRemote", "feature", "unset", "origin");
+    let cleared = local_list();
+    for key in [
+        "branch.feature.remote=",
+        "branch.feature.merge=",
+        "branch.feature.rebase=",
+        "branch.feature.pushRemote=",
+    ] {
+        assert!(!has_key(&cleared, key), "{key} must be cleared");
+    }
+    assert!(!has_key(&cleared, "branch.main."));
+    assert_eq!(tmp.git(&["symbolic-ref", "--short", "HEAD"]).trim(), "main");
+    assert_eq!(tmp.git(&["for-each-ref"]), refs_before);
+
+    let _ = configure_repository(&mut test, "pull.rebase", "true", "unset");
+    let _ = configure_repository(&mut test, "push.default", "current", "unset");
+    assert_eq!(
+        tmp.git(&["config", "--local", "pull.rebase"]).trim(),
+        "true"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--local", "push.default"]).trim(),
+        "current"
+    );
+    let Execution::Prompt(current_values) = invoke(&mut test) else {
+        panic!("expected configuration prompt");
+    };
+    let detail = current_values.detail.as_deref().unwrap_or_default();
+    assert!(detail.contains("pull.rebase=true"), "{detail}");
+    assert!(detail.contains("push.default=current"), "{detail}");
+    let _ = test
+        .session
+        .resume_prompt(&current_values.prompt_id, None)
+        .unwrap();
+    let _ = configure_repository(&mut test, "pull.rebase", "unset", "true");
+    let _ = configure_repository(&mut test, "push.default", "unset", "current");
+    let final_list = local_list();
+    assert!(!has_key(&final_list, "pull.rebase="));
+    assert!(!has_key(&final_list, "push.default="));
+
+    let before_invalid = local_list();
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Done(invalid_setting) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("bogus".into())))
+        .unwrap()
+    else {
+        panic!("an invalid setting must end the prompt");
+    };
+    assert!(
+        message_texts(&invalid_setting.effects)
+            .iter()
+            .any(|text| text.contains("Choose upstream")),
+        "{:?}",
+        invalid_setting.effects
+    );
+    assert_eq!(local_list(), before_invalid);
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("rebase".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt");
+    };
+    let Execution::Done(missing_branch) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("missing".into())))
+        .unwrap()
+    else {
+        panic!("a missing branch must end the prompt");
+    };
+    assert!(
+        message_texts(&missing_branch.effects)
+            .iter()
+            .any(|text| text.contains("Local branch does not exist: missing")),
+        "{:?}",
+        missing_branch.effects
+    );
+    assert_eq!(local_list(), before_invalid);
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("rebase".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt");
+    };
+    let Execution::Prompt(third) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("expected value prompt");
+    };
+    let Execution::Done(invalid_value) = test
+        .session
+        .resume_prompt(&third.prompt_id, Some(PromptValue::Text("maybe".into())))
+        .unwrap()
+    else {
+        panic!("an invalid value must end the prompt");
+    };
+    assert!(
+        message_texts(&invalid_value.effects)
+            .iter()
+            .any(|text| text.contains("Expected true, false, or unset")),
+        "{:?}",
+        invalid_value.effects
+    );
+    assert_eq!(local_list(), before_invalid);
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("upstream".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt");
+    };
+    let Execution::Done(cancelled_branch) =
+        test.session.resume_prompt(&second.prompt_id, None).unwrap()
+    else {
+        panic!("cancellation must end the branch prompt");
+    };
+    assert!(message_texts(&cancelled_branch.effects).is_empty());
+    assert_eq!(local_list(), before_invalid);
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("pull.rebase".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected repository value prompt");
+    };
+    let Execution::Done(cancelled_value) =
+        test.session.resume_prompt(&second.prompt_id, None).unwrap()
+    else {
+        panic!("cancellation must end the value prompt");
+    };
+    assert!(message_texts(&cancelled_value.effects).is_empty());
+    assert_eq!(local_list(), before_invalid);
+    assert_eq!(tmp.git(&["for-each-ref"]), refs_before);
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_configuration_handles_detached_and_unborn_contexts() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (detached_tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .detached()
+        .build();
+    let head = detached_tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&detached_tmp, Profile::Vim);
+    test.ack();
+    let start = || ViewInvokeParams {
+        view_id: String::new(),
+        command: "branch.configure".into(),
+        version: None,
+        cursor: None,
+        selection: None,
+        args: None,
+    };
+    let invoke = |test: &mut TestSession| {
+        let mut request = start();
+        request.view_id = test.view_id().to_string();
+        request.version = Some(test.version());
+        test.session.start_invoke(&request).unwrap()
+    };
+    let Execution::Prompt(initial) = invoke(&mut test) else {
+        panic!("expected configuration prompt on detached HEAD");
+    };
+    let detail = initial.detail.as_deref().unwrap_or_default();
+    assert!(
+        detail.contains("No current local branch (detached or unborn)"),
+        "{detail}"
+    );
+    assert!(detail.contains("Repository: pull.rebase=unset"), "{detail}");
+    let _ = test
+        .session
+        .resume_prompt(&initial.prompt_id, None)
+        .unwrap();
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("pull.rebase".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected repository value prompt");
+    };
+    let _ = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("true".into())))
+        .unwrap();
+    assert_eq!(
+        detached_tmp
+            .git(&["config", "--local", "pull.rebase"])
+            .trim(),
+        "true"
+    );
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("rebase".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt");
+    };
+    let Execution::Prompt(third) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("main".into())))
+        .unwrap()
+    else {
+        panic!("expected value prompt");
+    };
+    let _ = test
+        .session
+        .resume_prompt(&third.prompt_id, Some(PromptValue::Text("false".into())))
+        .unwrap();
+    assert_eq!(
+        detached_tmp.git(&["config", "branch.main.rebase"]).trim(),
+        "false"
+    );
+    assert_eq!(detached_tmp.git(&["rev-parse", "HEAD"]).trim(), head);
+    assert_eq!(
+        detached_tmp
+            .git(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .trim(),
+        "HEAD"
+    );
+
+    let (unborn_tmp, _) = RepoFixture::new().unborn().build();
+    let refs_before = unborn_tmp.git(&["for-each-ref"]);
+    let (mut test, _) = TestSession::open_status(&unborn_tmp, Profile::Vim);
+    test.ack();
+    let invoke = |test: &mut TestSession| {
+        let mut request = start();
+        request.view_id = test.view_id().to_string();
+        request.version = Some(test.version());
+        test.session.start_invoke(&request).unwrap()
+    };
+    let Execution::Prompt(initial) = invoke(&mut test) else {
+        panic!("expected configuration prompt on an unborn HEAD");
+    };
+    let detail = initial.detail.as_deref().unwrap_or_default();
+    assert!(
+        detail.contains("No current local branch (detached or unborn)"),
+        "{detail}"
+    );
+    let _ = test
+        .session
+        .resume_prompt(&initial.prompt_id, None)
+        .unwrap();
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(&first.prompt_id, Some(PromptValue::Text("rebase".into())))
+        .unwrap()
+    else {
+        panic!("expected branch prompt");
+    };
+    let Execution::Done(missing_branch) = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("main".into())))
+        .unwrap()
+    else {
+        panic!("an unborn branch target must end the prompt");
+    };
+    assert!(
+        message_texts(&missing_branch.effects)
+            .iter()
+            .any(|text| text.contains("Local branch does not exist: main")),
+        "{:?}",
+        missing_branch.effects
+    );
+    assert!(!unborn_tmp
+        .git(&["config", "--local", "--list"])
+        .lines()
+        .any(|line| line.starts_with("branch.main.")));
+
+    let Execution::Prompt(first) = invoke(&mut test) else {
+        panic!("expected setting prompt");
+    };
+    let Execution::Prompt(second) = test
+        .session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("pull.rebase".into())),
+        )
+        .unwrap()
+    else {
+        panic!("expected repository value prompt");
+    };
+    let _ = test
+        .session
+        .resume_prompt(&second.prompt_id, Some(PromptValue::Text("true".into())))
+        .unwrap();
+    assert_eq!(
+        unborn_tmp.git(&["config", "--local", "pull.rebase"]).trim(),
+        "true"
+    );
+    assert_eq!(unborn_tmp.git(&["for-each-ref"]), refs_before);
+    let Execution::Prompt(final_prompt) = invoke(&mut test) else {
+        panic!("expected configuration prompt");
+    };
+    assert!(final_prompt
+        .detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("pull.rebase=true"));
+    let _ = test
+        .session
+        .resume_prompt(&final_prompt.prompt_id, None)
+        .unwrap();
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
 fn branch_description_targets_a_side_branch() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;

@@ -414,6 +414,15 @@ pub enum PromptAction {
         /// The branch name answered at the first prompt.
         name: String,
     },
+    /// Choose a branch configuration field or repository-wide field.
+    BranchConfigureSetting,
+    /// Select the local branch for a branch-specific configuration field.
+    BranchConfigureBranch { setting: String },
+    /// Apply the selected configuration value, with `unset` clearing it.
+    BranchConfigureValue {
+        setting: String,
+        branch: Option<String>,
+    },
     /// Create a tag with the answered name.
     TagCreate,
     /// Create the named lightweight tag at the answered revision.
@@ -796,6 +805,172 @@ pub fn resume_prompt(
                 |repo| repo.set_branch_description(&name, &description),
                 format!("Set description for {name}"),
             )
+        }
+        PromptAction::BranchConfigureSetting => {
+            let PromptValue::Text(setting) = answer else {
+                return Err(crate::Error::new("Expected a branch configuration setting"));
+            };
+            let setting = setting.trim().to_ascii_lowercase();
+            if !matches!(
+                setting.as_str(),
+                "upstream" | "rebase" | "pushremote" | "pull.rebase" | "push.default"
+            ) {
+                ctx.info("Choose upstream, rebase, pushRemote, pull.rebase, or push.default");
+                return Ok(CommandOutcome::default());
+            }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            let current = repo
+                .current_branch()
+                .filter(|branch| repo.is_local_branch(branch));
+            if matches!(setting.as_str(), "upstream" | "rebase" | "pushremote") {
+                Ok(CommandOutcome {
+                    prompt: Some((
+                        branch_name_prompt(
+                            "Configure branch",
+                            current.as_deref().unwrap_or(""),
+                            "Local branch",
+                        ),
+                        PromptAction::BranchConfigureBranch { setting },
+                    )),
+                    ..Default::default()
+                })
+            } else {
+                let value = if setting == "pull.rebase" {
+                    repo.pull_rebase()?
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unset".into())
+                } else {
+                    repo.push_default()?
+                        .map(|v| format!("{v:?}").to_ascii_lowercase())
+                        .unwrap_or_else(|| "unset".into())
+                };
+                Ok(CommandOutcome {
+                    prompt: Some((
+                        branch_name_prompt(
+                            &format!("Configuration value (current: {value}; type unset to clear)"),
+                            &value,
+                            "Value or unset",
+                        ),
+                        PromptAction::BranchConfigureValue {
+                            setting,
+                            branch: None,
+                        },
+                    )),
+                    ..Default::default()
+                })
+            }
+        }
+        PromptAction::BranchConfigureBranch { setting } => {
+            let PromptValue::Text(branch) = answer else {
+                return Err(crate::Error::new("Expected a local branch"));
+            };
+            let branch = branch.trim().to_owned();
+            if branch.is_empty() {
+                ctx.info("A local branch is required");
+                return Ok(CommandOutcome::default());
+            }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if !repo.is_local_branch(&branch) {
+                ctx.info(format!("Local branch does not exist: {branch}"));
+                return Ok(CommandOutcome::default());
+            }
+            let current = match setting.as_str() {
+                "upstream" => repo.branch_upstream(&branch),
+                "rebase" => repo
+                    .branch_rebase(&branch)
+                    .map(|v| v.map(|v| v.to_string())),
+                _ => repo.branch_push_remote(&branch),
+            };
+            let current = match current {
+                Ok(value) => value.unwrap_or_default(),
+                Err(err) => {
+                    report_config_error(ctx, &err);
+                    return Ok(CommandOutcome::default());
+                }
+            };
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt(
+                        &format!(
+                            "{setting} for {branch} (current: {}) — type unset to clear",
+                            if current.is_empty() {
+                                "unset"
+                            } else {
+                                &current
+                            }
+                        ),
+                        &current,
+                        "Value or unset",
+                    ),
+                    PromptAction::BranchConfigureValue {
+                        setting,
+                        branch: Some(branch),
+                    },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchConfigureValue { setting, branch } => {
+            let PromptValue::Text(value) = answer else {
+                return Err(crate::Error::new("Expected a configuration value"));
+            };
+            let value = value.trim();
+            let clear = value.eq_ignore_ascii_case("unset");
+            if value.is_empty() {
+                ctx.info("Enter a configuration value or type unset to clear it");
+                return Ok(CommandOutcome::default());
+            }
+            let result = GitRepo::open(ctx.repo_path).and_then(|repo| {
+                match (setting.as_str(), branch.as_deref()) {
+                    ("upstream", Some(branch)) => repo.set_branch_upstream(
+                        branch,
+                        (!clear && !value.is_empty()).then_some(value),
+                    ),
+                    ("rebase", Some(branch)) => parse_config_bool(value, clear)
+                        .and_then(|v| repo.set_branch_rebase(branch, v)),
+                    ("pushremote", Some(branch)) => {
+                        if !clear && !repo.verify_remote(value) {
+                            return Err(crate::Error::new(format!(
+                                "Remote '{value}' does not exist"
+                            )));
+                        }
+                        repo.set_branch_push_remote(
+                            branch,
+                            (!clear && !value.is_empty()).then_some(value),
+                        )
+                    }
+                    ("pull.rebase", None) => {
+                        parse_config_bool(value, clear).and_then(|v| repo.set_pull_rebase(v))
+                    }
+                    ("push.default", None) => {
+                        let parsed = if clear {
+                            Ok(None)
+                        } else {
+                            match value {
+                                "nothing" => Ok(Some(crate::git::PushDefault::Nothing)),
+                                "current" => Ok(Some(crate::git::PushDefault::Current)),
+                                "upstream" => Ok(Some(crate::git::PushDefault::Upstream)),
+                                "simple" => Ok(Some(crate::git::PushDefault::Simple)),
+                                "matching" => Ok(Some(crate::git::PushDefault::Matching)),
+                                _ => Err(crate::Error::new("Invalid push.default value")),
+                            }
+                        };
+                        parsed.and_then(|v| repo.set_push_default(v))
+                    }
+                    _ => Err(crate::Error::new("Invalid branch configuration selection")),
+                }
+            });
+            match result {
+                Ok(()) => ctx.info(format!(
+                    "Configured {setting}{}",
+                    branch.map(|b| format!(" for {b}")).unwrap_or_default()
+                )),
+                Err(err) => report_config_error(ctx, &err),
+            }
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
         }
         PromptAction::TagCreate => {
             let PromptValue::Text(name) = answer else {
@@ -1299,6 +1474,7 @@ fn build() -> Registry {
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, destructive: true, effects: &[] },
         command! { id: "branch.reset", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
         command! { id: "branch.configure-description", scope: Scope::MenuAction, doc: "Set the branch description", status: CommandStatus::Implemented, run: branch_configure_description, effects: &[] },
+        command! { id: "branch.configure", scope: Scope::MenuAction, doc: "Configure branch and repository settings", status: CommandStatus::Implemented, run: branch_configure, effects: &[] },
         command! { id: "tag.create", scope: Scope::MenuAction, doc: "Create a lightweight tag at a revision", status: CommandStatus::Implemented, run: tag_create, effects: &[] },
         command! { id: "tag.delete", scope: Scope::MenuAction, doc: "Delete a tag", status: CommandStatus::Implemented, run: tag_delete, destructive: true, effects: &[] },
         command! { id: "remote.add", scope: Scope::MenuAction, doc: "Add a remote", status: CommandStatus::Implemented, run: remote_add, effects: &[] },
@@ -2513,6 +2689,58 @@ fn branch_configure_description(ctx: &mut CommandCtx<'_>) -> Result<CommandOutco
         )),
         ..Default::default()
     })
+}
+
+/// Prompt for a supported configuration key and show current values.
+fn branch_configure(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    let mut rows = Vec::new();
+    match repo
+        .current_branch()
+        .filter(|branch| repo.is_local_branch(branch))
+    {
+        Some(branch) => rows.push(format!("{branch}: upstream={}, rebase={}, pushRemote={}", repo.branch_upstream(&branch)?.unwrap_or_else(|| "unset".into()), repo.branch_rebase(&branch)?.map(|v| v.to_string()).unwrap_or_else(|| "unset".into()), repo.branch_push_remote(&branch)?.unwrap_or_else(|| "unset".into()))),
+        None => rows.push("No current local branch (detached or unborn); choose a branch setting and name a local branch explicitly".into()),
+    }
+    rows.push(format!(
+        "Repository: pull.rebase={}, push.default={}",
+        repo.pull_rebase()?
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unset".into()),
+        repo.push_default()?
+            .map(|v| format!("{v:?}").to_ascii_lowercase())
+            .unwrap_or_else(|| "unset".into())
+    ));
+    let mut prompt = branch_name_prompt(
+        "Configure setting: upstream, rebase, pushRemote, pull.rebase, push.default",
+        "",
+        "Setting name",
+    );
+    prompt.detail = Some(rows.join("\n"));
+    Ok(CommandOutcome {
+        prompt: Some((prompt, PromptAction::BranchConfigureSetting)),
+        ..Default::default()
+    })
+}
+
+/// Report a failed configuration read or write with its user-facing Git text.
+fn report_config_error(ctx: &mut CommandCtx<'_>, err: &crate::Error) {
+    match Effect::from_error(err) {
+        Some(effect) => ctx.effects.push(effect),
+        None => ctx.info(err.to_string()),
+    }
+}
+
+/// Parse a configuration boolean or clear it with `unset`.
+fn parse_config_bool(value: &str, clear: bool) -> Result<Option<bool>> {
+    if clear {
+        return Ok(None);
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Ok(Some(true)),
+        "false" | "no" | "off" | "0" => Ok(Some(false)),
+        _ => Err(crate::Error::new("Expected true, false, or unset")),
+    }
 }
 
 fn log_load_more(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

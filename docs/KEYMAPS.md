@@ -152,6 +152,7 @@ both profiles.
 | `m` | Rename a branch: prompt for the source, then the new name |
 | `k` | Delete a branch, leaving Git's refusal of the checked-out branch as a message |
 | `d` | Set a branch description: prompt for the branch, then for its text |
+| `C` | Configure branch settings: choose upstream, rebase, or pushRemote and an explicit local branch; or configure repository pull.rebase/push.default. Current values are shown; type `unset` to clear. Does not check out a branch |
 | `x` | Reset a branch to a revision: prompt for the branch, then the target revision; a non-current branch is force-moved, while the current branch is hard-reset, confirming when the working tree is dirty |
 | `s` | Spin off: create a branch at `HEAD` tracking the current branch, check it out, then move the source branch to its merge base with its upstream |
 | `S` | Spin out: create a branch at `HEAD` tracking the current branch and reset the current branch to the merge base, leaving the spun-off changes in the working tree |
@@ -162,7 +163,8 @@ unpushed commits the new branch is still created and the source is left
 untouched. A spin-out on a dirty tree checks out the new branch like a spin-off,
 so uncommitted state is never mixed with the moved-out changes.
 
-Branch checkout, the `b C` configure popup and worktree entries remain planned.
+Branch checkout and worktree entries remain planned. The `b C` configuration
+workflow operates on the selected local branch without checking it out.
 Resetting a non-current branch force-moves it without checking it out. Resetting
 the current branch hard-resets it, so uncommitted changes are discarded after
 confirmation.
