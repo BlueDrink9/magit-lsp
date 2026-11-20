@@ -32,6 +32,11 @@ with log.open("a", encoding="utf-8") as handle:
     handle.write(Path(sys.argv[0]).name + " " + " ".join(sys.argv[1:]) + "\\n")
 check = "--check" in sys.argv[1:]
 status = 0
+if "--config-path" in sys.argv:
+    config = Path(sys.argv[sys.argv.index("--config-path") + 1])
+    if not config.is_file():
+        print(f"missing config: {config}", file=sys.stderr)
+        status = 1
 for argument in sys.argv[1:]:
     if argument.startswith("-"):
         continue
@@ -230,6 +235,50 @@ class FormatSweepTest(unittest.TestCase):
         result = self.run_hook(MAGIT_FORMAT_SWEEP="rustfmt")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("ok\n", self.git("show", ":src/lib.rs"))
+
+    def stylua_arguments(self) -> list[list[str]]:
+        """Return parsed argument lists for every StyLua invocation."""
+        return [call.split(" ")[1:] for call in self.calls() if call.startswith("stylua ")]
+
+    def stylua_config_paths(self) -> list[str]:
+        """Return every --config-path value passed to the fake StyLua."""
+        values = []
+        for arguments in self.stylua_arguments():
+            if "--config-path" in arguments:
+                values.append(arguments[arguments.index("--config-path") + 1])
+        return values
+
+    def test_stylua_uses_workspace_snapshot_config(self) -> None:
+        """Check and write pass an explicit StyLua config rooted in their source tree."""
+        self.write(".stylua.toml", "column_width = 100\n")
+        self.git("add", ".stylua.toml")
+        self.git("commit", "-qm", "stylua config")
+        result = self.run_format("--all-tracked", "--formatter", "stylua")
+        self.assertEqual(0, result.returncode, result.stderr)
+        check_paths = self.stylua_config_paths()
+        self.assertEqual(1, len(check_paths), self.calls())
+        self.assertTrue(check_paths[0].endswith("/.stylua.toml"), check_paths)
+        self.assertNotEqual(self.repo.resolve(), Path(check_paths[0]).parent.resolve())
+        self.log.unlink()
+        result = self.run_format("--all-tracked", "--formatter", "stylua", "--write")
+        self.assertEqual(0, result.returncode, result.stderr)
+        write_paths = self.stylua_config_paths()
+        self.assertEqual(1, len(write_paths), self.calls())
+        self.assertEqual(self.repo.resolve(), Path(write_paths[0]).parent.resolve())
+
+    def test_working_tree_source_checks_unstaged_sources(self) -> None:
+        """The working-tree source validates unstaged edits and leaves the index untouched."""
+        path = "lua/magit-lsp/ok.lua"
+        self.write(path, "bad\n")
+        result = self.run_format("--all-tracked", "--formatter", "stylua")
+        self.assertEqual(0, result.returncode, result.stderr)
+        result = self.run_format("--all-tracked", "--source", "working-tree", "--formatter", "stylua")
+        self.assertEqual(1, result.returncode)
+        self.assertEqual("bad\n", self.read(path))
+        self.assertEqual("ok\n", self.git("show", f":{path}"))
+        self.write(path, "ok\n")
+        result = self.run_format("--all-tracked", "--source", "working-tree", "--formatter", "stylua")
+        self.assertEqual(0, result.returncode, result.stderr)
 
 
 if __name__ == "__main__":

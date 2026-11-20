@@ -18,6 +18,7 @@ LUA = {".lua"}
 WEB = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}
 RUST = {".rs"}
 FORMATTERS = ("rustfmt", "stylua", "prettier")
+STYLUA_CONFIGS = (".stylua.toml", "stylua.toml")
 SKIP_PARTS = {"node_modules", "target", "vendor", "fixtures", "generated"}
 
 
@@ -107,6 +108,15 @@ def formatter_for(path: str) -> str | None:
     return None
 
 
+def stylua_config(tree: Path) -> Path | None:
+    """Return the StyLua configuration file at the root of a source tree."""
+    for name in STYLUA_CONFIGS:
+        candidate = tree / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def invoke(command: list[str], cwd: Path, label: str) -> bool:
     """Run one formatter and print readable missing-tool or failure guidance."""
     try:
@@ -146,6 +156,10 @@ def format_paths(paths: list[str], tree: Path, write: bool, selected: list[str] 
                 okay = False
             else:
                 command = [tool]
+                if name.startswith("StyLua"):
+                    config = stylua_config(tree)
+                    if config is not None:
+                        command.extend(["--config-path", str(config)])
                 if name.startswith("Prettier") and write:
                     command.append("--write")
                 elif not write:
@@ -317,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true", help="write formatted working-tree files (working-tree or all-tracked mode)")
     parser.add_argument("--fix", action="store_true", help="safely fix staged content (hook mode only)")
     parser.add_argument("--sweep", choices=FORMATTERS, help="after --staged --fix, verify all tracked files for one formatter")
+    parser.add_argument("--source", choices=("index", "working-tree"), default="index", help="with --all-tracked, check the index snapshot or the working tree")
     args = parser.parse_args(argv)
     try:
         if args.write and not (args.working_tree or args.all_tracked):
@@ -329,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError("--all-tracked requires at least one explicit --formatter")
         if args.sweep and (not args.staged or not args.fix):
             raise RuntimeError("--sweep is only allowed with --staged --fix")
+        if args.source != "index" and not args.all_tracked:
+            raise RuntimeError("--source is only allowed with --all-tracked")
         global ROOT
         ROOT = Path(run_git("rev-parse", "--show-toplevel").decode().strip())
         if args.list:
@@ -346,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.write:
                 ensure_clean_worktree(paths)
                 return 0 if format_paths(paths, ROOT, True, args.formatter) else 1
+            if args.source == "working-tree":
+                return 0 if format_paths(paths, ROOT, False, args.formatter) else 1
             with tempfile.TemporaryDirectory(prefix="magit-format-") as temporary:
                 tree = Path(temporary)
                 snapshot(None, tree)

@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -65,6 +65,10 @@ format-all-list:
 format-all-check:
 	@case " $(FORMAT_CHOICES) " in *" $(FORMATTER) "*) ;; *) echo 'format-all-check: FORMATTER must be rustfmt, stylua or prettier' >&2; exit 2;; esac
 	$(call run,format-all-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --all-tracked --formatter $(FORMATTER))
+
+format-all-check-worktree:
+	@case " $(FORMAT_CHOICES) " in *" $(FORMATTER) "*) ;; *) echo 'format-all-check-worktree: FORMATTER must be rustfmt, stylua or prettier' >&2; exit 2;; esac
+	$(call run,format-all-check-worktree,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --all-tracked --source working-tree --formatter $(FORMATTER))
 
 format-all:
 	@case " $(FORMAT_CHOICES) " in *" $(FORMATTER) "*) ;; *) echo 'format-all: FORMATTER must be rustfmt, stylua or prettier' >&2; exit 2;; esac
