@@ -73,33 +73,54 @@ fn registered_command_status_is_explicit() {
     )));
 }
 
+fn assert_repository_unchanged(
+    fixture: &common::RepoFixture,
+    command: &str,
+    moment: &str,
+    before_head: &str,
+    before_index: &[u8],
+    before_worktree: &[u8],
+    before_refs: &str,
+) {
+    assert_eq!(common::git(fixture.path(), &["rev-parse", "HEAD"]), before_head,
+        "{command} changed HEAD {moment}");
+    assert_eq!(std::fs::read(fixture.path().join(".git/index")).unwrap(), before_index,
+        "{command} changed the index {moment}");
+    assert_eq!(std::fs::read(fixture.path().join("f.txt")).unwrap(), before_worktree,
+        "{command} changed the worktree {moment}");
+    assert_eq!(common::git(fixture.path(), &["for-each-ref", "--format=%(refname) %(objectname)"]), before_refs,
+        "{command} changed refs {moment}");
+}
+
 #[test]
-fn session_dispatch_sweep_checks_destructive_prompt_metadata_and_cancellation() {
+fn session_dispatch_sweep_cancels_destructive_first_prompt_without_mutation() {
     use common::session::TestSession;
     use common::RepoFixture;
     use magit_lsp::dispatch::offer_target;
     use magit_lsp::tree::NodeKind;
 
     let mut reached = Vec::new();
-    let mut destructive_confirmed = Vec::new();
+    let mut destructive_prompted = Vec::new();
     for command in registry().iter() {
         let fixture = RepoFixture::new()
             .commit("initial", [("f.txt", common::lines(40).to_string())])
             .modify("f.txt", common::two_hunk_changes())
             .build().0;
+        // Give the ref oracle real branch and tag targets for delete commands.
+        fixture.git(&["branch", "topic"]);
+        fixture.git(&["tag", "v1"]);
         let (mut test, render) = TestSession::open_status(&fixture, Profile::Vim);
         let ui = RecordingCancelUi::default();
         let before_head = common::git(fixture.path(), &["rev-parse", "HEAD"]);
         let before_index = std::fs::read(fixture.path().join(".git/index")).expect("index state");
         let before_worktree = std::fs::read(fixture.path().join("f.txt")).expect("worktree state");
+        let before_refs = common::git(fixture.path(), &["for-each-ref", "--format=%(refname) %(objectname)"]);
         let action_target = (command.id == "status.discard").then(|| {
             let node = test.tree().nodes.iter()
                 .find(|node| node.kind == NodeKind::File && node.section.as_deref() == Some("unstaged"))
                 .expect("fixture has an unstaged file");
             offer_target(test.tree(), command.id, &node.id).expect("structured discard target")
         });
-        let original_worktree = (command.id == "status.discard")
-            .then(|| std::fs::read(fixture.path().join("f.txt")).expect("fixture worktree"));
         let request = DispatchRequest {
             command: command.id.into(),
             target: DispatchTarget {
@@ -113,10 +134,16 @@ fn session_dispatch_sweep_checks_destructive_prompt_metadata_and_cancellation() 
             args: None,
         };
         let _ = test.session.dispatch(request, &ui);
-        if let Some(prompt) = test.session.pending_prompt_request() {
-            if command.id == "status.discard" {
-                assert_eq!(prompt.kind, magit_lsp::protocol::PromptKind::Confirm);
-                assert_eq!(prompt.destructive, Some(true));
+        let prompt = test.session.pending_prompt_request();
+        if command.destructive && matches!(command.status, CommandStatus::Implemented) {
+            assert!(prompt.is_some(), "{} did not prompt before mutation", command.id);
+            assert_repository_unchanged(&fixture, command.id, "before its first prompt",
+                &before_head, &before_index, &before_worktree, &before_refs);
+            destructive_prompted.push(command.id);
+        }
+        if let Some(prompt) = prompt {
+            if prompt.destructive == Some(true) {
+                assert!(command.destructive, "{} emitted destructive prompt metadata without a destructive flag", command.id);
             }
             let answer = match prompt.kind {
                 magit_lsp::protocol::PromptKind::Confirm => ui.confirm(&prompt).map(|v| v.map(magit_lsp::protocol::PromptValue::Bool)),
@@ -127,40 +154,25 @@ fn session_dispatch_sweep_checks_destructive_prompt_metadata_and_cancellation() 
             assert!(answer.is_none(), "recording UI must cancel");
             let _ = test.session.resume_prompt(&prompt.prompt_id, answer).expect("cancel prompt");
         }
-        if let Some(original) = original_worktree {
-            assert_eq!(std::fs::read(fixture.path().join("f.txt")).unwrap(), original,
-                "negative destructive answer changed the worktree");
+        if command.destructive && matches!(command.status, CommandStatus::Implemented) {
+            assert_repository_unchanged(&fixture, command.id, "after cancelling its first prompt",
+                &before_head, &before_index, &before_worktree, &before_refs);
         }
         reached.push(command.id);
-        for prompt in ui.0.borrow().iter() {
-            if prompt.kind == magit_lsp::protocol::PromptKind::Confirm
-                && prompt.destructive == Some(true)
-            {
-                assert!(command.destructive, "{} emitted destructive confirm without metadata", command.id);
-                destructive_confirmed.push(command.id);
-                assert_eq!(common::git(fixture.path(), &["rev-parse", "HEAD"]), before_head,
-                    "cancelled {} changed HEAD", command.id);
-                assert_eq!(std::fs::read(fixture.path().join(".git/index")).unwrap(), before_index,
-                    "cancelled {} changed the index", command.id);
-                assert_eq!(std::fs::read(fixture.path().join("f.txt")).unwrap(), before_worktree,
-                    "cancelled {} changed the worktree", command.id);
-            }
-        }
     }
     let missing: Vec<_> = registry().iter().map(|command| command.id)
         .filter(|id| !reached.contains(id)).collect();
     assert!(missing.is_empty(), "commands not dispatched: {missing:?}");
-    let not_confirmed_or_unreachable: Vec<_> = registry().iter()
-        .filter(|command| command.destructive && !destructive_confirmed.contains(&command.id)
-            && !matches!(command.status, CommandStatus::Planned { .. }))
+    let unprompted: Vec<_> = registry().iter()
+        .filter(|command| command.destructive && matches!(command.status, CommandStatus::Implemented)
+            && !destructive_prompted.contains(&command.id))
         .map(|command| command.id).collect();
-    assert!(not_confirmed_or_unreachable.is_empty(), "reachable destructive commands without a typed destructive confirm: {not_confirmed_or_unreachable:?}");
+    assert!(unprompted.is_empty(), "implemented destructive commands without a first prompt: {unprompted:?}");
     // The menu-generated destructive commands are explicitly Planned in the
     // production registry and dispatch rejects Planned commands before run.
-    // They cannot reach PromptUi until implemented; status.discard is covered
-    // above using its structured unstaged-file target.
-    for command in registry().iter().filter(|command| command.destructive && !destructive_confirmed.contains(&command.id)) {
+    // They cannot reach PromptUi until implemented.
+    for command in registry().iter().filter(|command| command.destructive && !destructive_prompted.contains(&command.id)) {
         assert!(matches!(command.status, CommandStatus::Planned { .. }),
-            "{} lacks a destructive confirm and is not marked planned", command.id);
+            "{} lacks a destructive first prompt and is not marked planned", command.id);
     }
 }
