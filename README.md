@@ -173,6 +173,21 @@ from the Command Palette. See the
   confirm and copy the selected commit ID, or `Escape`/`q` to cancel and return
   without copying. Selection supports the configured multi-selection controls.
 
+### Plain keys (experimental, opt-in)
+
+Plain keys are off by default and are an experimental opt-in for clients that
+cannot bind code actions to keys. With keys enabled for one document, typing an
+eligible key in the status view can stage a file: the server recovers the typed
+edit, runs the same command the code action would run and repairs the text, and
+the repair echo is not replayed. Destructive, pasted or multi-key, planned,
+stale and keys-off input is refused without changing Git; a chord such as `g r`
+and commit-menu switches such as `-a` continue against server state. This is a
+subset, not Phase 9 completion: hunk, visual, unstage and navigation cases and
+the wider property/native matrix (T034–T039) are still unverified. The policy,
+per-document `Keys: on/off` toggle and command limits are in
+[Plain command support](docs/plain-support.md); the tested behavior is in
+`tests/plain_keys_exec.rs` and `tests/ui/scenarios/plain-keys-recovered.scn`.
+
 ### Planned
 
 The generated [parity reference](docs/parity.md) is the authoritative
@@ -184,9 +199,7 @@ Planned work is not advertised above. In summary:
   (R-5.1–R-5.4; T049–T057 in [TASKS.md](TASKS.md#7-numbered-implementation-queue));
 - most branch, push, pull, fetch, merge, rebase, cherry-pick and stash actions —
   `docs/parity.md` marks each remaining row `Planned` with its roadmap item;
-- blame, submodule, worktree, bisect, patch and ignore workflows (R-8.x);
-- optional [Plain keys](docs/plain-support.md) for editors that cannot bind code
-  actions to single keys (Phase 9; T034–T039).
+- blame, submodule, worktree, bisect, patch and ignore workflows (R-8.x).
 
 Menus already show these as `Planned`, so a missing action is visible in the UI
 rather than implied to work.

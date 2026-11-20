@@ -52,6 +52,20 @@ is added only when the version is tagged. Nothing here is a publication claim.
   [release foundation](docs/RELEASING.md) and the README. README presentation
   work remains separate.
 
+### Plain keys (experimental, opt-in)
+
+- Plain keys stay off by default and are opt-in per document. A typed eligible
+  key in a plain status document is recovered as an edit; the server runs the
+  same command a code action would, changes exactly the intended file and
+  repairs the typed text. Destructive, pasted or multi-key, planned, stale and
+  keys-off input changes nothing, and the repair echo is not replayed. A chord
+  such as `g r` and commit-menu switches such as `-a` keep server state.
+- Limits: this is a tested subset, not Phase 9 completion. Hunk, visual,
+  unstage and navigation key cases and the wider property/native matrix
+  (T034–T039) remain unverified, and no broad plain-client support is claimed.
+  The policy, per-document toggle and limits are in
+  [Plain command support](docs/plain-support.md).
+
 ### Known limits and platform matrix
 
 | Area | 0.2.0 status |
