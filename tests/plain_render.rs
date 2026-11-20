@@ -915,6 +915,15 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
             .any(|frame| frame["method"] == "textDocument/didChange"));
         assert!(editor.text(&uri).contains("line3 CHANGED"));
         assert_eq!(std::fs::read(&path).unwrap(), disk_before);
+        // A normal client edit after the accepted open stays synchronized: the
+        // portable change path captures and reconciles it, repairing the
+        // presentation document instead of rejecting document synchronization.
+        server.send(editor.edit(&uri, "client edit\n"));
+        let repair = next_edit(&mut server);
+        for frame in editor.dispatch(&repair) {
+            server.send(frame);
+        }
+        assert!(editor.text(&uri).contains("line3 CHANGED"));
         server.shutdown_and_exit();
         let (status, messages) = server.finish_with_messages(Duration::from_secs(10));
         assert!(status.success(), "{messages:?}");

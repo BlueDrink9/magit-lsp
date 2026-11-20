@@ -95,7 +95,6 @@ pub(super) fn draft_request(shared: &Shared, request: &Request) -> Result<Value>
 /// Whether a synchronized document belongs to this Plain connection: a pending
 /// draft run or a server-owned presentation document. Rich clients keep their
 /// own documents, so only Plain applies this ownership check.
-#[cfg(unix)]
 fn draft_document_is_owned(shared: &Shared, uri: &str) -> bool {
     if editor::registry()
         .run_for_uri(&shared.draft_owner, uri)
@@ -117,7 +116,6 @@ fn draft_document_is_owned(shared: &Shared, uri: &str) -> bool {
 
 /// Whether the URI addresses a workspace repository's commit message file, which
 /// a Plain client may open before a draft run claims it.
-#[cfg(unix)]
 fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
     let Some(path) = file_uri_path(uri) else {
         return false;
@@ -149,8 +147,50 @@ pub(super) struct AcceptedChange {
     pub(super) post_text: String,
 }
 
-/// Apply synchronized text and forward accepted snapshots to any pending draft.
+/// Whether a pending draft run on this connection owns `uri`. Platforms
+/// without draft transport never have a pending run.
+fn has_pending_draft(shared: &Shared, uri: &str) -> bool {
+    editor::registry()
+        .run_for_uri(&shared.draft_owner, uri)
+        .is_ok()
+}
+
+/// Finish the pending draft run owning a synchronized close; it is known to
+/// exist because [`has_pending_draft`] was checked first.
 #[cfg(unix)]
+fn finish_pending_close(shared: &Shared, uri: &str) -> Result<()> {
+    let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
+    let close_confirms = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .close_confirms;
+    if close_confirms {
+        let result = editor::registry().finish(
+            &shared.draft_owner,
+            &DraftFinishParams {
+                run_id: run.clone(),
+                uri: uri.to_string(),
+                version: 0,
+                reason: DraftFinishReason::NormalClose,
+            },
+        );
+        if result.is_err() {
+            editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                draft.did_close(context)
+            })?;
+        }
+        result?;
+    } else {
+        editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+            draft.did_close(context)
+        })?;
+    }
+    Ok(())
+}
+
+/// Apply synchronized text on every platform and forward accepted snapshots to
+/// any pending draft where draft transport exists.
 pub(super) fn draft_notification(
     shared: &Shared,
     notification: &Notification,
@@ -171,6 +211,7 @@ pub(super) fn draft_notification(
                     "Commit draft URI is not pending on this connection",
                 ));
             }
+            #[cfg(unix)]
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     draft.did_open(context, doc.version, doc.text.as_bytes())
@@ -237,6 +278,7 @@ pub(super) fn draft_notification(
                 post_version: captured.post_version,
                 post_text: captured.post_text,
             };
+            #[cfg(unix)]
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     if draft.opened() {
@@ -262,10 +304,7 @@ pub(super) fn draft_notification(
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .close(uri);
-            if editor::registry()
-                .run_for_uri(&shared.draft_owner, uri)
-                .is_err()
-            {
+            if !has_pending_draft(shared, uri) {
                 return if owned {
                     // A close after an abort just detaches the document store.
                     Ok(None)
@@ -275,38 +314,9 @@ pub(super) fn draft_notification(
                     ))
                 };
             }
-            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            let close_confirms = shared
-                .client
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .close_confirms;
-            if close_confirms {
-                let result = editor::registry().finish(
-                    &shared.draft_owner,
-                    &DraftFinishParams {
-                        run_id: run.clone(),
-                        uri: uri.to_string(),
-                        version: 0,
-                        reason: DraftFinishReason::NormalClose,
-                    },
-                );
-                if result.is_err() {
-                    editor::registry().apply(
-                        &shared.draft_owner,
-                        &run,
-                        uri,
-                        |draft, context| draft.did_close(context),
-                    )?;
-                }
-                result?;
-                Ok(None)
-            } else {
-                editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
-                    draft.did_close(context)
-                })?;
-                Ok(None)
-            }
+            #[cfg(unix)]
+            finish_pending_close(shared, uri)?;
+            Ok(None)
         }
         "textDocument/didSave" => {
             let p: lsp_types::DidSaveTextDocumentParams = from_params(notification.params.clone())?;
@@ -327,14 +337,5 @@ pub(super) fn draft_notification(
 /// Reject managed drafts on platforms without the validated helper boundary.
 #[cfg(not(unix))]
 pub(super) fn draft_request(_shared: &Shared, _request: &Request) -> Result<Value> {
-    Err(Error::new("managed commit drafts require Unix"))
-}
-
-/// Reject managed draft sync on platforms without Unix support.
-#[cfg(not(unix))]
-pub(super) fn draft_notification(
-    _shared: &Shared,
-    _notification: &Notification,
-) -> Result<Option<AcceptedChange>> {
     Err(Error::new("managed commit drafts require Unix"))
 }
