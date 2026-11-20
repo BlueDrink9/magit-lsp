@@ -919,6 +919,18 @@
               "status": "implemented"
             },
             {
+              "command": "open.notes",
+              "keys": [
+                "N"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the Notes menu",
+              "status": "implemented"
+            },
+            {
               "command": "open.patch-apply",
               "keys": [
                 "w"
