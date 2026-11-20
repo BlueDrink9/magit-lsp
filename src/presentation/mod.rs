@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 mod custom;
+pub mod keys;
 pub mod plain;
 pub mod prompt;
 pub mod resolve;

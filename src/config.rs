@@ -215,6 +215,8 @@ pub struct ActionsSettings {
 pub struct PlainSettings {
     /// Maximum section size before Plain rendering should collapse it.
     pub max_section_lines: u32,
+    /// Maximum time in milliseconds to wait for a paired delete/insert key edit.
+    pub keys_pair_timeout_ms: u64,
 }
 
 /// Pick preference limits, global or per client name.
@@ -281,6 +283,7 @@ impl Default for Config {
             actions: ActionsSettings::default(),
             plain: PlainSettings {
                 max_section_lines: 400,
+                keys_pair_timeout_ms: 250,
             },
             pick: PickSettings::default(),
             presentation_files: vec![".magit".to_owned()],
@@ -481,6 +484,7 @@ struct Layered {
     log_margin: Option<u32>,
     actions_title_style: Option<TitleStyle>,
     plain_max_section_lines: Option<u32>,
+    plain_keys_pair_timeout_ms: Option<u64>,
     pick_max_items: Option<usize>,
     pick_clients: BTreeMap<String, usize>,
     presentation_files: Option<Vec<String>>,
@@ -523,6 +527,7 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     if let Some(max) = layered.plain_max_section_lines {
         config.plain.max_section_lines = max;
     }
+    if let Some(timeout) = layered.plain_keys_pair_timeout_ms { config.plain.keys_pair_timeout_ms = timeout; }
     if let Some(max_items) = layered.pick_max_items {
         config.pick.max_items = Some(max_items);
     }
@@ -793,6 +798,15 @@ fn apply_document(
                                 .at_file_line(file, line));
                             }
                             layered.plain_max_section_lines = Some(max);
+                        }
+                        "keys" => {
+                            let keys = settings_table(value, "plain.keys", file, line)?;
+                            for (key, value) in keys.iter() {
+                                if key != "pair_timeout_ms" { return Err(unknown_key(file, item_line(source, value), "plain.keys", key)); }
+                                let timeout = integer(value, "plain.keys.pair_timeout_ms", file, item_line(source, value))?;
+                                if timeout == 0 { return Err(ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file_line(file, item_line(source, value))); }
+                                layered.plain_keys_pair_timeout_ms = Some(timeout as u64);
+                            }
                         }
                         other => return Err(unknown_key(file, line, "plain", other)),
                     }
@@ -1070,6 +1084,14 @@ fn apply_initialization(config: &mut Config, value: &serde_json::Value) -> Resul
             return Err(ConfigError::new("`plain` must be an object").at_file(&label));
         };
         for (name, value) in plain {
+            if name == "keys" {
+                let keys=value.as_object().ok_or_else(||ConfigError::new("`plain.keys` must be an object").at_file(&label))?;
+                for (key,v) in keys { if key!="pair_timeout_ms" { return Err(ConfigError::new(format!("unknown setting `plain.keys.{key}`")).at_file(&label)); }
+                    let timeout=v.as_u64().filter(|n|*n>0).ok_or_else(||ConfigError::new("`plain.keys.pair_timeout_ms` must be a positive integer").at_file(&label))?;
+                    config.plain.keys_pair_timeout_ms=timeout;
+                }
+                continue;
+            }
             if name != "max_section_lines" {
                 return Err(
                     ConfigError::new(format!("unknown setting `plain.{name}`")).at_file(&label)

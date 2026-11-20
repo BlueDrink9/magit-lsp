@@ -532,6 +532,23 @@ fn invalid_plain_section_limits_are_rejected() {
 }
 
 #[test]
+fn plain_pair_timeout_defaults_layers_and_rejects_invalid_values() {
+    let d=load_config(&LoadOptions::default()).unwrap();
+    assert_eq!(d.plain.keys_pair_timeout_ms,250);
+    let initialized=load_config(&LoadOptions{initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),..Default::default()}).unwrap();
+    assert_eq!(initialized.plain.keys_pair_timeout_ms,300);
+    let dir=TempDir::new().unwrap(); let cfg=dir.path().join("config.toml");
+    write(&cfg,"[plain.keys]\npair_timeout_ms = 500\n");
+    let file_only=load_config(&LoadOptions{config_path:Some(cfg.clone()),..Default::default()}).unwrap();
+    assert_eq!(file_only.plain.keys_pair_timeout_ms,500);
+    let v=load_config(&LoadOptions{config_path:Some(cfg.clone()),initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":300}}})),..Default::default()}).unwrap();
+    assert_eq!(v.plain.keys_pair_timeout_ms,300);
+    for invalid in ["0","-1","1.5","\"4\""] { write(&cfg,&format!("[plain.keys]\npair_timeout_ms = {invalid}\n")); assert!(load(&cfg).unwrap_err().message.contains("plain.keys.pair_timeout_ms")); }
+    let bad=load_config(&LoadOptions{initialization:Some(serde_json::json!({"plain":{"keys":{"pair_timeout_ms":0}}})),..Default::default()}).unwrap_err();
+    assert!(bad.message.contains("plain.keys.pair_timeout_ms"));
+}
+
+#[test]
 fn per_repo_config_is_ignored_without_trust() {
     let dir = TempDir::new().unwrap();
     let repo = TempDir::new().unwrap();
