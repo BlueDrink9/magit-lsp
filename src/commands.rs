@@ -1472,6 +1472,7 @@ fn build() -> Registry {
             doc: "Extend HEAD without editing its message",
             status: CommandStatus::Implemented,
             run: commit_extend,
+            destructive: true,
             effects: &[EffectKind::EditDocument],
         },
         command! {
