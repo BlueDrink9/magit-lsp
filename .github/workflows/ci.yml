@@ -158,7 +158,8 @@ jobs:
   # Test on other operating systems, just rust tests. These lanes stay on each
   # runner's native toolchain: Nix has no native Windows support, and the lanes
   # exist to cover native OS behavior, so they are a deliberate exception to the
-  # locked Linux shell rather than a claim of Nix coverage.
+  # locked Linux shell rather than a claim of Nix coverage. Windows support is
+  # deferred, so only its lane is informational; the macOS lanes stay required.
   native-test:
     name: Rust (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -168,10 +169,16 @@ jobs:
         include:
           - os: windows-2025
             target: x86_64-pc-windows-msvc
+            informational: true
           - os: macos-26
             target: aarch64-apple-darwin
+            informational: false
           - os: macos-26-intel
             target: x86_64-apple-darwin
+            informational: false
+    # Only the Windows lane may fail without failing the workflow. No job
+    # declares `needs: native-test`, so its result gates nothing else either.
+    continue-on-error: ${{ matrix.informational }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

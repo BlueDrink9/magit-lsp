@@ -261,6 +261,18 @@ more reproduce the build side locally without publishing: `release-locked` and
 `release-artifact-check` above, plus the explicit installed-compiler
 `release-local` and `release-artifact-check-local`.
 
+In `.github/workflows/ci.yml`, the `native-test` matrix keeps the
+`windows-2025` (`x86_64-pc-windows-msvc`) lane explicitly informational: only
+that lane sets `informational: true`, and the job's
+`continue-on-error: ${{ matrix.informational }}` prevents a Windows failure from
+failing the workflow. Both macOS lanes set `informational: false` and stay
+required, and every Linux job remains required. No job declares
+`needs: native-test`, and `release.yml`/`publish.yml` do not consume CI, so the
+Windows lane gates neither releases nor other jobs. Branch protection and
+required-check lists are external repository settings: this repository cannot
+assert their contents, so an external required-check list must itself omit the
+Windows lane.
+
 For version X.Y.Z the two exact release assets are:
 
 * `magit-lsp-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`

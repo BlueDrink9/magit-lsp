@@ -24,6 +24,8 @@ FORMAT_PY = REPO / "scripts/format.py"
 HOOK = REPO / ".githooks/pre-commit"
 CI_WORKFLOW = REPO / ".github/workflows/ci.yml"
 NIX_DEVELOP = "nix develop --no-update-lock-file -c"
+NATIVE_JOB = "native-test"
+NATIVE_POLICY = "continue-on-error: ${{ matrix.informational }}"
 
 # Every Linux job must run its tool commands inside the flake's locked dev
 # shell, and it must not provision any of these tools itself.
@@ -111,6 +113,80 @@ def workflow_environment_violations(workflow: str) -> list[str]:
     native = jobs.get("native-test", "")
     if "nix develop" in native:
         violations.append("native-test: native lanes must not claim Nix coverage")
+    return violations
+
+
+def native_lane_entries(workflow: str) -> list[dict[str, str]]:
+    """Return the native-test matrix include entries as field dictionaries."""
+    body = workflow_jobs(workflow).get(NATIVE_JOB, "")
+    try:
+        start = body.index("include:")
+    except ValueError:
+        return []
+    section = body[start:]
+    steps = section.find("\n    steps:")
+    if steps != -1:
+        section = section[:steps]
+    lanes: list[dict[str, str]] = []
+    current = None
+    for line in section.splitlines():
+        stripped = line.strip()
+        entry = re.match(r"^- os:\s*(\S+)$", stripped)
+        if entry:
+            current = {"os": entry.group(1)}
+            lanes.append(current)
+            continue
+        field = re.match(r"^([a-z][a-z-]*):\s*(\S+)$", stripped)
+        if field and current is not None:
+            current[field.group(1)] = field.group(2)
+    return lanes
+
+
+def native_test_policy_violations(workflow: str) -> list[str]:
+    """Report native lanes that are not informational on Windows only.
+
+    Windows support is deferred, so its lane must not gate. macOS lanes remain
+    required, Linux jobs stay gating and nothing may depend on the native job.
+    """
+    jobs = workflow_jobs(workflow)
+    body = jobs.get(NATIVE_JOB)
+    if body is None:
+        return [f"{NATIVE_JOB}: job is missing"]
+    violations = []
+    lines = [line.strip() for line in body.splitlines()]
+    if NATIVE_POLICY not in lines:
+        violations.append(
+            f"{NATIVE_JOB}: must gate failures only with '{NATIVE_POLICY}'"
+        )
+    for line in lines:
+        if line.startswith("continue-on-error:") and line != NATIVE_POLICY:
+            violations.append(f"{NATIVE_JOB}: unexpected '{line}'")
+    lanes = native_lane_entries(workflow)
+    windows = [lane for lane in lanes if lane["os"].startswith("windows-")]
+    required = [lane for lane in lanes if not lane["os"].startswith("windows-")]
+    if not windows:
+        violations.append(f"{NATIVE_JOB}: Windows lane is missing")
+    for lane in windows:
+        if lane.get("informational") != "true":
+            violations.append(
+                f"{NATIVE_JOB}: {lane['os']} must set informational: true"
+            )
+    if not required:
+        violations.append(f"{NATIVE_JOB}: non-Windows lanes are missing")
+    for lane in required:
+        if lane.get("informational") != "false":
+            violations.append(
+                f"{NATIVE_JOB}: {lane['os']} must set informational: false"
+            )
+    for name, other in jobs.items():
+        if name == NATIVE_JOB:
+            continue
+        if re.search(rf"^\s*needs:.*\b{NATIVE_JOB}\b", other, re.M) or re.search(
+            rf"^\s*-\s*{NATIVE_JOB}\s*$", other, re.M
+        ):
+            violations.append(f"{name}: must not depend on {NATIVE_JOB}")
+        if re.search(r"^    continue-on-error:", other, re.M):
+            violations.append(f"{name}: must remain a gating job")
     return violations
 
 
@@ -421,7 +497,7 @@ class FormatSweepTest(unittest.TestCase):
 
 
 class CIWorkflowEnvironmentTest(unittest.TestCase):
-    """Guard the Linux CI jobs' locked flake-shell contract."""
+    """Guard the Linux flake-shell and native Windows informational contracts."""
 
     def workflow(self) -> str:
         """Return the tracked CI workflow source."""
@@ -434,6 +510,51 @@ class CIWorkflowEnvironmentTest(unittest.TestCase):
         lock = (REPO / "flake.lock").read_text()
         self.assertIn('"locked"', lock)
         self.assertIn('"narHash"', lock)
+
+    def test_windows_native_lane_is_informational(self) -> None:
+        """Only the Windows lane may fail without failing the workflow."""
+        violations = native_test_policy_violations(self.workflow())
+        self.assertEqual([], violations)
+
+    def test_missing_windows_informational_policy_is_rejected(self) -> None:
+        """A Windows lane without the informational flag is reported."""
+        workflow = self.workflow().replace("            informational: true\n", "")
+        violations = native_test_policy_violations(workflow)
+        self.assertTrue(any("windows-2025" in v for v in violations), violations)
+
+    def test_optional_macos_lane_is_rejected(self) -> None:
+        """A macOS lane made optional is reported."""
+        workflow = self.workflow().replace(
+            "            informational: false\n", "            informational: true\n", 1
+        )
+        violations = native_test_policy_violations(workflow)
+        self.assertTrue(any("informational: false" in v for v in violations), violations)
+
+    def test_optional_linux_job_is_rejected(self) -> None:
+        """A Linux job made non-gating is reported."""
+        workflow = self.workflow().replace(
+            "  test:\n    runs-on: ubuntu-24.04",
+            "  test:\n    continue-on-error: true\n    runs-on: ubuntu-24.04",
+        )
+        violations = native_test_policy_violations(workflow)
+        self.assertTrue(any("test: must remain a gating job" in v for v in violations), violations)
+
+    def test_native_test_dependency_is_rejected(self) -> None:
+        """A job depending on the native matrix is reported."""
+        workflow = self.workflow().replace(
+            "  test:\n    runs-on: ubuntu-24.04",
+            "  test:\n    needs: native-test\n    runs-on: ubuntu-24.04",
+        )
+        violations = native_test_policy_violations(workflow)
+        self.assertTrue(any("test: must not depend on native-test" in v for v in violations), violations)
+
+    def test_broad_native_continue_on_error_is_rejected(self) -> None:
+        """A blanket continue-on-error replaces the per-lane policy."""
+        workflow = self.workflow().replace(
+            NATIVE_POLICY, "continue-on-error: true"
+        )
+        violations = native_test_policy_violations(workflow)
+        self.assertTrue(any(NATIVE_POLICY in v for v in violations), violations)
 
     def test_missing_nix_coverage_is_rejected(self) -> None:
         """A coverage command outside the shell is reported."""
