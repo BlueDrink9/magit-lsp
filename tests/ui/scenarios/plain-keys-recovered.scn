@@ -1,0 +1,50 @@
+# Typed Plain stage key: refused while keys are off, executed after the toggle.
+fixture: two-hunk-siblings
+client: plain
+size: 80x24
+size-only: true
+profile: standard
+profile-only: true
+---
+expect project_modules == 0
+expect rich_notifications == 0
+goto "Keys: off (built-in)"
+expect screen contains "Keys: off (built-in)"
+wait
+snapshot: initial
+sh: git rev-parse HEAD > .git/before-head && git write-tree > .git/before-index && test -z "$(git diff --cached --name-only)" && cp f.txt .git/worktree-f && cp g.txt .git/worktree-g
+goto "g.txt"
+document: authoritative-status
+keys: 0
+keys: i
+keys: s
+keys: Escape
+wait
+wait state authoritative_match == true
+expect document "authoritative-status" unchanged
+expect screen not-contains "s  M g.txt"
+snapshot: off-refused-repaired
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/before-head)" && git write-tree > .git/off-index && cmp .git/before-index .git/off-index && test -z "$(git diff --cached --name-only)" && cmp .git/worktree-f f.txt && cmp .git/worktree-g g.txt
+goto "Keys: off (built-in)"
+expect screen contains "Keys: off (built-in)"
+keys: ":lua PlainUI.action('plain.keys.toggle')" Enter
+wait screen contains "Keys: on (document)"
+wait
+snapshot: keys-enabled
+goto "g.txt"
+keys: 0
+keys: i
+keys: s
+keys: Escape
+wait
+wait state authoritative_match == true
+goto "Staged changes (1)"
+expect screen contains "Staged changes (1)"
+expect screen not-contains "s  M g.txt"
+snapshot: staged-by-typed-key
+goto "Unstaged changes (1)"
+expect screen contains "Unstaged changes (1)"
+sh: git diff --cached --name-only > .git/staged-names && test "$(cat .git/staged-names)" = g.txt && git show :g.txt > .git/staged-g && cmp .git/staged-g g.txt && git diff --cached --name-only -- f.txt > .git/staged-f && test ! -s .git/staged-f && cmp .git/worktree-f f.txt && cmp .git/worktree-g g.txt && test "$(git rev-parse HEAD)" = "$(cat .git/before-head)"
+expect project_modules == 0
+expect rich_notifications == 0
+snapshot: restored

@@ -28,6 +28,13 @@ vim.lsp.handlers['workspace/applyEdit'] = function(...)
   local result = apply(...)
   log('applyEdit-after', result)
   if result and result.applied then applied = applied + 1 end
+  -- Retain the presentation text this server edit applied so scenarios can poll
+  -- for a repair without inferring convergence from document content.
+  if result and result.applied and buf and uri:match('/%.magit$')
+    and vim.api.nvim_buf_is_valid(buf) then
+    _G.plain_authoritative_text = table.concat(
+      vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+  end
   return result
 end
 for _, method in ipairs({ 'view/render', 'view/keymap', 'view/effects', 'view/prompt', 'view/pick' }) do
@@ -55,11 +62,15 @@ function PlainUI.snapshot()
     if name:match('magit%-lsp') then modules = modules + 1 end
   end
   local cursor = vim.api.nvim_win_get_cursor(0)
+  local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+  local authoritative = _G.plain_authoritative_text
   return {
     ready = applied > 0 and client ~= nil and client.initialized,
     idle = PlainUI.idle(),
     uri = vim.uri_from_bufnr(0),
-    text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'),
+    text = text,
+    -- The buffer equals the last applied server text, so no local edit remains.
+    authoritative_match = authoritative ~= nil and authoritative == text,
     modified = vim.bo.modified,
     mode = vim.api.nvim_get_mode().mode,
     changedtick = vim.api.nvim_buf_get_changedtick(0),
