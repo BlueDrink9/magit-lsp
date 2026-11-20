@@ -1127,6 +1127,14 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
     let rendered = editor.text(&uri).to_owned();
     let rendered_bytes = rendered.len();
     let rendered_lines = rendered.lines().count();
+    let policy_footer = rendered
+        .lines()
+        .find(|line| line.starts_with("Keys: "))
+        .expect("expanded fixture renders the Plain key policy footer");
+    assert_eq!(
+        policy_footer, "Keys: off (built-in)",
+        "fixture disables Plain keys so the toggle must offer the enable action"
+    );
     let file_row = rendered
         .lines()
         .position(|line| line.contains("file-000.txt"))
@@ -1156,9 +1164,10 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         let elapsed = started.elapsed();
         let actions = response["result"].as_array().expect("code actions");
         assert!(!actions.is_empty());
-        // File rows include the status-scope open.rebase view action; hunk
-        // rows offer the nine content/hunk actions applicable to that target.
-        let expected_offers = if row == file_row as u32 { 10 } else { 9 };
+        // Every row of a Plain document offers the key-policy toggle once; file
+        // rows add the status-scope open.rebase view action, hunk rows the nine
+        // content/hunk actions applicable to that target.
+        let expected_offers = if row == file_row as u32 { 11 } else { 10 };
         assert_eq!(actions.len(), expected_offers, "status offer contract");
         let identities: Vec<_> = actions
             .iter()
@@ -1174,8 +1183,30 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         sorted.sort();
         sorted.dedup();
         assert_eq!(identities.len(), sorted.len(), "duplicate command offers");
+        let toggles: Vec<_> = actions
+            .iter()
+            .filter(|action| action["command"]["arguments"][0]["command"] == "plain.keys.toggle")
+            .collect();
+        assert_eq!(toggles.len(), 1, "Plain key toggle offered exactly once");
+        assert_eq!(
+            toggles[0]["title"], "Keys: on",
+            "toggle enables Plain keys while the footer reports them off"
+        );
+        assert_eq!(
+            toggles[0]["command"]["arguments"][0]["target"]["kind"], "view",
+            "toggle targets the retained view"
+        );
         if row == file_row as u32 {
             assert!(identities.iter().any(|command| command == "open.rebase"));
+            let rebase_view = actions
+                .iter()
+                .find(|action| action["command"]["arguments"][0]["command"] == "open.rebase")
+                .map(|action| action["command"]["arguments"][0]["target"]["viewId"].clone())
+                .expect("open.rebase view target");
+            assert_eq!(
+                toggles[0]["command"]["arguments"][0]["target"]["viewId"], rebase_view,
+                "toggle targets the rendered status view"
+            );
         }
         assert!(
             actions
