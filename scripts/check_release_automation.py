@@ -38,6 +38,10 @@ UNTRACKED_PATHS = (
 RELEASE_FORBIDDEN_PATHS = ('.envrc', 'scripts/ci-local.sh')
 SECRETS = ('VSCE_PAT', 'OVSX_PAT', 'CARGO_REGISTRY_TOKEN')
 PUBLISH_COMMANDS = ('vsce publish', 'ovsx publish', 'cargo publish --locked')
+# The publish job resolves vsce/ovsx from the extension's locked dev
+# dependencies, so the frozen install must precede every publishing step.
+DEPENDENCY_INSTALL = 'make vscode-deps'
+PUBLISHING_STEPS = ('gh release create',) + PUBLISH_COMMANDS
 
 
 class CheckError(Exception):
@@ -57,6 +61,11 @@ def read_lines(path):
 
 def indent_of(line):
     return len(line) - len(line.lstrip(' '))
+
+
+def code_lines(lines):
+    """Return the lines that are neither blank nor comments."""
+    return [line for line in lines if line.strip() and not line.lstrip().startswith('#')]
 
 
 def block_after(lines, start, max_indent):
@@ -89,6 +98,7 @@ def cargo_versions():
 def check_workflow():
     lines = read_lines(WORKFLOW)
     text = '\n'.join(lines)
+    code = code_lines(lines)
 
     if not lines or lines[0].strip() != 'name: Publish release artifacts':
         fail('workflow: expected the publish workflow name on the first line')
@@ -157,6 +167,15 @@ def check_workflow():
     if text.count('contents: write') != 1:
         fail('workflow: `contents: write` must appear exactly once (publish job)')
 
+    # `actions: read` is only for the cross-run artifact download in validate;
+    # keep it least-privilege by refusing it anywhere else.
+    if '      actions: read' not in validate_permissions:
+        fail('workflow: validate job must grant `actions: read` for the cross-run download')
+    if '      actions: read' in publish_permissions:
+        fail('workflow: publish job must not grant `actions: read`')
+    if sum(line.count('actions: read') for line in code) != 1:
+        fail('workflow: `actions: read` must appear exactly once (validate job)')
+
     if '    needs: validate' not in publish:
         fail('workflow: publish job must declare `needs: validate`')
     if not any(re.match(r"^\s*if:\s*\$\{\{\s*inputs\.mode\s*==\s*'publish'\s*\}\}", line)
@@ -192,6 +211,17 @@ def check_workflow():
             fail(f'workflow: missing publish command {command!r}')
     if 'gh release create' not in publish_text:
         fail('workflow: publish job must create the GitHub Release')
+    if DEPENDENCY_INSTALL not in publish_text:
+        fail('workflow: publish job must install the frozen VSCode CLI dependencies '
+             f'with {DEPENDENCY_INSTALL!r} before publishing')
+    install_at = next(i for i, line in enumerate(publish)
+                      if DEPENDENCY_INSTALL in line and not line.lstrip().startswith('#'))
+    for step in PUBLISHING_STEPS:
+        step_at = next(i for i, line in enumerate(publish)
+                       if step in line and not line.lstrip().startswith('#'))
+        if install_at > step_at:
+            fail(f'workflow: {DEPENDENCY_INSTALL!r} must run before {step!r} '
+                 'in the publish job')
     if 'release-assets/dist/' not in publish_text:
         fail('workflow: release creation must upload the validated dist assets')
     if 'python3 scripts/check_release_automation.py --print-version' not in publish_text:
