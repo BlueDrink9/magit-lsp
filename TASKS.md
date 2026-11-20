@@ -833,6 +833,12 @@ Every ticket states **Target Files**, **Reference Files**, **Architectural Const
 
 ## Ad hoc
 
+- [x] **Gate — Refresh post-release protocol example recordings.**
+  - Verified at `47fcd65`: full `make test` reaches two `tests/examples.rs` failures because registry frames gained `branch.configure` and `open.notes` (`build/test-logs/rust.Wf3QMm`). Existing `make update-examples` (Makefile:113–115) regenerates maintained `docs/examples/*.jsonl` via strict real-binary capture, not authored expectations.
+  - check: regenerate with `make update-examples`, inspect only delivered command/manifest changes, commit generated artifacts separately, then `make test-rust FILTER="--test examples"` passes; evidence and queue tick separate from generated commit.
+  - Done: dc3a288
+  - Verified: `make test-rust FILTER="--test examples"` → ok: rust (warnings detected; check log: build/test-logs/rust.6GUuEq)
+
 - [x] **Gate — Robust bundled Lua adapter version check.**
   - Verified premise at `f2afa77`: full `make test` fails `tests/client_versions.rs:15` because the parser expects single quotes but `lua/magit-lsp/version.lua:2` uses double quotes. All adapter/package versions are `0.2.0`; these paths are unchanged since `bb4af51` (read-only scout comparison). Fix the test oracle without changing shipped versions or rewriting the Lua module.
   - test: accept either valid quote style around the expected version declaration, while mismatch/missing version remains a failing oracle; reuse the existing client_versions suite.
