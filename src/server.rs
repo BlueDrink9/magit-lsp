@@ -130,6 +130,8 @@ struct ClientCaps {
     encoding: Encoding,
     /// `clientInfo.name` reported at initialize; selects per-client settings.
     client_name: Option<String>,
+    /// Data-driven quirk-table ceiling for Plain key policy.
+    plain_keys_allowed: bool,
     /// Git repositories discovered from initialize workspace roots for Plain resolution.
     workspace_repositories: Vec<crate::presentation::resolve::Repository>,
     plain: Option<crate::presentation::PlainCapabilities>,
@@ -144,6 +146,7 @@ impl Default for ClientCaps {
             work_done_progress: false,
             encoding: Encoding::Utf16,
             client_name: None,
+            plain_keys_allowed: true,
             workspace_repositories: Vec::new(),
             plain: None,
         }
@@ -213,6 +216,8 @@ struct PlainEntry {
     repo: String,
     view_id: String,
     controller: PlainDocument,
+    /// Per-document Plain key policy override; absent means inherit settings.
+    keys_override: Option<bool>,
 }
 
 #[derive(Clone)]

@@ -1,5 +1,16 @@
 # Plain presentation command support
 
+## Plain key policy
+
+Plain keys are off by default. Policy resolves in order from the built-in default,
+`plain.keys.default`, an exact `clientInfo.name` section, and a per-document toggle;
+the data-driven client quirk limit takes precedence over all settings. The status
+header reports the effective state and its source; the `Keys: on/off` code
+action toggles only that document, and edits to the header are repaired. The
+per-document toggle survives view-stack changes and is discarded when that
+document closes. Prompt, log-selection and commit-message documents cannot be
+armed. There is no repository-level setting.
+
 This table is generated from command registry metadata (`Command::effects`, `Command::scope` and `Command::status`) and `PlainCapabilities::plain_availability`; it records declarations, not the result of executing each command. The `minimal`, `edits` and `full` columns evaluate three representative capability sets. Effect declarations are enforced when effects are delivered, so an available command still needs the listed capability before an optional effect reaches the client. Do not hand-edit this file; regenerate it with `make registry-docs-generate`.
 
 | Command | Scope | Status | Effects | Needs capability | minimal | edits | full | Reason |

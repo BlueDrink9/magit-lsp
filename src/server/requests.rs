@@ -221,6 +221,13 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .pointer("/clientInfo/name")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                client.plain_keys_allowed = resolution.enabled.iter().all(|id| {
+                    crate::quirks::REGISTRY
+                        .iter()
+                        .find(|quirk| quirk.id == *id)
+                        .and_then(|quirk| quirk.plain_keys_allowed)
+                        != Some(false)
+                });
                 client.encoding = params
                     .pointer("/capabilities/general/positionEncodings")
                     .and_then(Value::as_array)

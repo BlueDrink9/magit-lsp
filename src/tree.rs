@@ -270,6 +270,25 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// Append the structured Plain key-policy status row before serialization.
+    pub fn append_plain_key_policy(&mut self, enabled: bool, source: &str) {
+        let id = "plain-keys-policy".to_owned();
+        let label = format!("Keys: {} ({source})", if enabled { "on" } else { "off" });
+        if let Some(node) = self.nodes.iter_mut().find(|node| node.id == id) {
+            self.lines[node.start_line] = label.clone();
+            node.label = label;
+            return;
+        }
+        let line = self.lines.len();
+        self.lines.push(label.clone());
+        self.line_nodes.push(LineNode {
+            node: id.clone(), kind: NodeKind::Header, section: None, path: None,
+            hunk_id: None, status: None, marker: None, line_index: None,
+            new_line: None, text: None,
+        });
+        self.nodes.push(Node::new(id, NodeKind::Header, label, line));
+    }
+
     /// Append registry-derived pending draft rows with stable run identity and exact URI metadata.
     #[cfg(unix)]
     pub fn append_pending_drafts(&mut self, drafts: &[crate::editor::PendingDraft]) {

@@ -54,6 +54,8 @@ pub struct Quirk {
     pub workaround: Option<&'static str>,
     /// Named fake-editor behavior model, if any.
     pub model: Option<&'static str>,
+    /// Whether this quirk permits Plain key policy; false imposes a hard limit.
+    pub plain_keys_allowed: Option<bool>,
 }
 
 /// Validated per-client initialization identity and capabilities.
@@ -89,6 +91,7 @@ pub const REGISTRY: &[Quirk] = &[
         }),
         workaround: None,
         model: Some("neovim-accepts-undeclared-documentChanges"),
+        plain_keys_allowed: None,
     },
     Quirk {
         id: "apply-result-unreliable",
@@ -100,6 +103,7 @@ pub const REGISTRY: &[Quirk] = &[
         capability: None,
         workaround: Some("reconcile-apply-result"),
         model: Some("silent-stale-apply"),
+        plain_keys_allowed: None,
     },
     Quirk {
         id: "decomposed-changes",
@@ -111,6 +115,7 @@ pub const REGISTRY: &[Quirk] = &[
         capability: None,
         workaround: None,
         model: Some("decomposed-changes"),
+        plain_keys_allowed: None,
     },
     // Initialize omission alone is not evidence that Helix handles this request.
     Quirk {
@@ -122,6 +127,7 @@ pub const REGISTRY: &[Quirk] = &[
         }),
         workaround: None,
         model: None,
+        plain_keys_allowed: None,
     },
 ];
 

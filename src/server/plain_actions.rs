@@ -141,6 +141,22 @@ pub(super) fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeAction
         return Value::Array(vec![action]);
     }
     let mut actions = Vec::new();
+    if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
+        if let Some(policy) = tree.node("plain-keys-policy") {
+            let enabled = policy.label.starts_with("Keys: on ");
+            let title = if enabled { "Keys: off" } else { "Keys: on" };
+            let args = serde_json::json!({
+                "command": "plain.keys.toggle",
+                "documentUri": uri,
+                "target": { "kind": "view", "viewId": view_id },
+                "viewGeneration": generation,
+            });
+            actions.push(serde_json::json!({
+                "title": title,
+                "command": {"title": title, "command": "magit.command", "arguments": [args]}
+            }));
+        }
+    }
     if let Some(menu) = menu {
         for item in menu.groups.iter().flat_map(|group| &group.items) {
             let crate::menu::Item::Switch {
@@ -699,6 +715,9 @@ pub(super) fn execute_plain_action(
     shared: &Shared,
     params: crate::dispatch::PlainActionParams,
 ) -> Result<Dispatched> {
+    if params.command == "plain.keys.toggle" {
+        return toggle_plain_keys(shared, &params);
+    }
     let caps = shared
         .client
         .lock()
@@ -989,4 +1008,45 @@ pub(super) fn execute_plain_action(
         .start_dispatch(request)?;
     let outcome = drive_execution(shared, &repo, step)?;
     dispatched_outcome(shared, &repo, outcome)
+}
+
+/// Toggle key arming for one retained Plain document and repair its header.
+fn toggle_plain_keys(
+    shared: &Shared,
+    params: &crate::dispatch::PlainActionParams,
+) -> Result<Dispatched> {
+    let uri = params.document_uri.as_str();
+    let text = {
+        let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+        match documents.get(uri) {
+            Some(document) if !document.repair => document.text.clone(),
+            _ => return plain_stale_message(),
+        }
+    };
+    let edit = {
+        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get_mut(uri) else { return plain_stale_message(); };
+        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text) else {
+            return plain_stale_message();
+        };
+        if generation != params.view_generation
+            || view_id != entry.view_id
+            || scope == "prompt"
+            || scope == "log.select"
+            || scope == "commit-message"
+            || matches!(&params.target, crate::dispatch::PlainActionTarget::View(target) if target.view_id != view_id)
+        {
+            return plain_stale_message();
+        }
+        let mut tree = tree.clone();
+        let next = !super::plain::plain_keys_effective(shared, &entry.repo, entry.keys_override).enabled;
+        entry.keys_override = Some(next);
+        super::plain::append_plain_keys_header(shared, &entry.repo, entry.keys_override, &mut tree);
+        entry.controller.render_actions(tree, view_id.to_owned(), generation, scope.to_owned(), menu.cloned())
+            .map(|edit| (entry.incarnation, edit))
+    };
+    if let Some((incarnation, edit)) = edit {
+        super::plain::send_plain_edit(shared, uri.to_owned(), incarnation, edit);
+    }
+    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse { effects: vec![] })?))
 }

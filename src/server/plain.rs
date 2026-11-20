@@ -135,7 +135,10 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
         return;
     };
     let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes, format);
-    if let Some((tree, generation, scope, menu)) = published.current_snapshot(&descriptor.id) {
+    if let Some((mut tree, generation, scope, menu)) = published.current_snapshot(&descriptor.id) {
+        if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
+            append_plain_keys_header(shared, &repo, None, &mut tree);
+        }
         controller.render_actions(tree, descriptor.id.clone(), generation, scope, menu);
     } else {
         let _ = handle
@@ -164,6 +167,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
                     repo: repo.clone(),
                     view_id: descriptor.id.clone(),
                     controller,
+                    keys_override: None,
                 },
             );
         shared
@@ -182,6 +186,26 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
     if let Some(edit) = first {
         send_plain_edit(shared, uri, incarnation, edit);
     }
+}
+
+pub(super) fn plain_keys_effective(shared: &Shared, repo: &str, document: Option<bool>) -> crate::config::EffectivePlainKeys {
+    let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
+    crate::config::resolve_plain_keys(
+        &shared.config.for_repository(std::path::Path::new(repo)).config().plain,
+        client.client_name.as_deref(), document, client.plain_keys_allowed,
+    )
+}
+
+pub(super) fn append_plain_keys_header(shared: &Shared, repo: &str, document: Option<bool>, tree: &mut crate::tree::Tree) {
+    let effective = plain_keys_effective(shared, repo, document);
+    let source = match effective.source {
+        crate::config::PlainKeysSource::BuiltIn => "built-in",
+        crate::config::PlainKeysSource::UserDefault => "default",
+        crate::config::PlainKeysSource::ExactClient => "client",
+        crate::config::PlainKeysSource::Document => "document",
+        crate::config::PlainKeysSource::Quirk => "quirk",
+    };
+    tree.append_plain_key_policy(effective.enabled, source);
 }
 
 fn plain_incarnation_is_current(shared: &Shared, uri: &str, incarnation: u64) -> bool {
@@ -250,6 +274,28 @@ pub(super) fn plain_change(shared: &Shared, uri: &str) {
     let Some(snapshot) = snapshot else {
         return;
     };
+
+    // The policy header is a structured node. If the client edits that row,
+    // restore the retained authoritative tree without interpreting document text.
+    let header_repair = {
+        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        documents.get_mut(uri).and_then(|entry| {
+            let (tree, view_id, generation, scope, menu) = entry.controller.latest_action_meta()?;
+            let node = tree.node("plain-keys-policy")?;
+            if snapshot.text.lines().nth(node.start_line) == Some(node.label.as_str()) {
+                return None;
+            }
+            let (tree, view_id, generation, scope, menu) =
+                (tree.clone(), view_id.to_owned(), generation, scope.to_owned(), menu.cloned());
+            entry.controller.observe(snapshot.version, snapshot.text.clone());
+            entry.controller.render_actions(tree, view_id, generation, scope, menu)
+                .map(|edit| (entry.incarnation, edit))
+        })
+    };
+    if let Some((incarnation, edit)) = header_repair {
+        send_plain_edit(shared, uri.to_owned(), incarnation, edit);
+        return;
+    }
 
     // Route an edit of an open prompt or log-selection document through the
     // session instead of the ordinary presentation controller. Never hold this
@@ -782,7 +828,10 @@ pub(super) fn route_plain_render(
             // into permission to send the rich protocol.
             return true;
         };
-        snapshot.and_then(|(tree, generation, scope, menu)| {
+        snapshot.and_then(|(mut tree, generation, scope, menu)| {
+            if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
+                append_plain_keys_header(shared, &entry.repo, entry.keys_override, &mut tree);
+            }
             entry
                 .controller
                 .render_actions(tree, view_id.to_owned(), generation, scope, menu)
@@ -796,7 +845,7 @@ pub(super) fn route_plain_render(
 }
 
 /// Send one controller edit and reconcile its correlated standard-LSP reply.
-fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEdit) {
+pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEdit) {
     if shared.closing.load(Ordering::SeqCst)
         || !plain_incarnation_is_current(shared, &uri, incarnation)
     {
