@@ -1,6 +1,5 @@
 -- Test-only observations and standard code-action selection; no project adapter.
 local applied = 0
-_G.plain_viewport_regression_error = "pending"
 local apply = vim.lsp.handlers["workspace/applyEdit"]
 vim.lsp.handlers["workspace/applyEdit"] = function(...)
   local params = select(2, ...)
@@ -48,42 +47,10 @@ vim.lsp.handlers["workspace/applyEdit"] = function(...)
     file:close()
   end
   log("applyEdit-before")
-  -- A server prompt transition rewrites the document while it may be shown in a
-  -- window that is not current (a prompt float or another split). Record every
-  -- affected window's own view before applying and restore it afterwards, so
-  -- the repair is independent of edit shape, timing and the current window.
-  local views = {}
-  if buf and vim.api.nvim_buf_is_valid(buf) then
-    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-      if vim.api.nvim_win_is_valid(win) then
-        views[win] = vim.api.nvim_win_call(win, vim.fn.winsaveview)
-      end
-    end
-  end
   local result = apply(...)
   log("applyEdit-after", result)
   if result and result.applied then
     applied = applied + 1
-  end
-  if result and result.applied and buf and vim.api.nvim_buf_is_valid(buf) then
-    local last = vim.api.nvim_buf_line_count(buf)
-    for win, view in pairs(views) do
-      if vim.api.nvim_win_is_valid(win) then
-        local height = vim.api.nvim_win_get_height(win)
-        vim.api.nvim_win_call(win, function()
-          vim.fn.winrestview({
-            lnum = math.min(math.max(view.lnum, 1), last),
-            col = view.col,
-            coladd = view.coladd,
-            curswant = view.curswant,
-            topline = math.min(math.max(view.topline, 1), math.max(1, last - height + 1)),
-            topfill = 0,
-            leftcol = view.leftcol,
-            skipcol = view.skipcol,
-          })
-        end)
-      end
-    end
   end
   -- Retain the presentation text this server edit applied so scenarios can poll
   -- for a repair without inferring convergence from document content.
@@ -143,8 +110,6 @@ function PlainUI.snapshot()
     project_modules = modules,
     rich_notifications = vim.g.plain_smoke_rich_notifications,
     applied_edits = applied,
-    viewport_regression = _G.plain_viewport_regression == true,
-    viewport_regression_error = _G.plain_viewport_regression_error or "",
     messages = vim.split(vim.fn.execute("messages"), "\n"),
     stale_feedback = vim.fn
       .execute("messages")
@@ -176,103 +141,4 @@ end
 function PlainUI.replay_last()
   local client = assert(vim.lsp.get_client_by_id(vim.g.plain_smoke_client_id))
   client:exec_cmd(assert(PlainUI.last_command), { bufnr = vim.api.nvim_get_current_buf() })
-end
-
---- Deterministically regress per-window viewport restoration through the real
---- `workspace/applyEdit` handler: a `.magit` buffer shown in a window that is
---- not current shrinks from a later range, so its stored view must be clamped to
---- the surviving lines and window height. Sets `_G.plain_viewport_regression`
---- and returns whether the affected window's view was restored.
-function PlainUI.viewport_regression()
-  local origin = vim.api.nvim_get_current_win()
-  local origin_view = vim.fn.winsaveview()
-  local client = assert(vim.lsp.get_client_by_id(vim.g.plain_smoke_client_id or -1))
-  local directory = vim.fn.tempname()
-  vim.fn.mkdir(directory, "p")
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(buf, directory .. "/.magit")
-  local win
-  local completed, restored = xpcall(function()
-    assert(
-      vim.uri_to_bufnr(vim.uri_from_bufnr(buf)) == buf,
-      "scratch buffer is not addressable by URI"
-    )
-    local source = {}
-    for i = 1, 30 do
-      source[i] = "source row " .. i
-    end
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, source)
-    vim.cmd("belowright split")
-    win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(win, buf)
-    vim.api.nvim_win_call(win, function()
-      vim.fn.winrestview({ lnum = 25, col = 0, topline = 20, topfill = 0 })
-    end)
-    -- Leave the affected buffer in a non-current window and shrink only a later
-    -- range, the shape that the old current-window, offset-zero repair missed.
-    vim.api.nvim_set_current_win(origin)
-    local edits = {
-      {
-        range = {
-          start = { line = 20, character = 0 },
-          ["end"] = { line = 29, character = #source[30] },
-        },
-        newText = "",
-      },
-    }
-    local result = vim.lsp.handlers["workspace/applyEdit"](nil, {
-      edit = {
-        documentChanges = {
-          {
-            textDocument = {
-              uri = vim.uri_from_bufnr(buf),
-              version = vim.lsp.util.buf_versions[buf] or 0,
-            },
-            edits = edits,
-          },
-        },
-      },
-    }, { client_id = client.id, offset_encoding = client.offset_encoding })
-    local top = vim.api.nvim_win_call(win, function()
-      return vim.fn.line("w0")
-    end)
-    local cursor = vim.api.nvim_win_get_cursor(win)
-    local count = vim.api.nvim_buf_line_count(buf)
-    local height = vim.api.nvim_win_get_height(win)
-    return {
-      count = count,
-      top = top,
-      line = cursor[1],
-      expected_top = math.max(1, count - height + 1),
-      applied = result and result.applied,
-      failure = result and result.failureReason,
-    }
-  end, debug.traceback)
-  if win and vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_win_close(win, true)
-  end
-  if buf and vim.api.nvim_buf_is_valid(buf) then
-    vim.api.nvim_buf_delete(buf, { force = true })
-  end
-  vim.fn.delete(directory, "rf")
-  if vim.api.nvim_win_is_valid(origin) then
-    vim.api.nvim_set_current_win(origin)
-    vim.fn.winrestview(origin_view)
-  end
-  local ok = completed
-    and restored.count < 30
-    and restored.top == restored.expected_top
-    and restored.line == restored.count
-  _G.plain_viewport_regression = ok == true
-  _G.plain_viewport_regression_error = completed
-      and (ok and "" or ("count=%s top=%s expected=%s line=%s applied=%s failure=%s"):format(
-        restored.count,
-        restored.top,
-        restored.expected_top,
-        restored.line,
-        tostring(restored.applied),
-        tostring(restored.failure)
-      ))
-    or tostring(restored)
-  return _G.plain_viewport_regression
 end

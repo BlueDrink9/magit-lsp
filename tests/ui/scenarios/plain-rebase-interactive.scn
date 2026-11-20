@@ -34,6 +34,3 @@ sh: git log --format=%s --reverse "$(cat .git/initial-base)..HEAD" > .git/actual
 expect project_modules == 0
 expect rich_notifications == 0
 snapshot: submitted-status
-keys: ":lua PlainUI.viewport_regression()" Enter
-wait state viewport_regression_error == ''
-expect viewport_regression == true
