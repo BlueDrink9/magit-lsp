@@ -35,6 +35,7 @@
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          llvm = pkgs.rustPlatform.rust.rustc.llvmPackages.llvm;
 
           # Development tools, excluding test editors.
           dev = pkgs.mkShell {
@@ -61,10 +62,13 @@
               lua51Packages.luacheck
               # jscpd.packages.${system}.default
               actionlint # Check github action workflows
+              cargo-llvm-cov
             ];
 
             shellHook = ''
               export RUST_SRC_PATH="${pkgs.rustPlatform.rustLibSrc}"
+              export LLVM_COV="${llvm}/bin/llvm-cov"
+              export LLVM_PROFDATA="${llvm}/bin/llvm-profdata"
               echo "magit-lsp dev shell"
               export pnpm_config_pm_on_fail=ignore
             '';
