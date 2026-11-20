@@ -5148,6 +5148,165 @@ fn ignore_rule_invalid_inputs_never_write() {
 }
 
 #[test]
+fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
+    use magit_lsp::protocol::{Cursor, PromptChoiceAnswer, PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+
+    // Fixture-only private user excludes; never the real HOME/XDG/global files.
+    let private = tempfile::TempDir::new().expect("tempdir for private user excludes");
+    let user_ignore = private.path().join("user-ignore");
+    std::fs::write(&user_ignore, "# retained\n").unwrap();
+
+    let (tmp, _) = RepoFixture::new()
+        .commit(
+            "init",
+            [
+                ("base.txt", "base\n"),
+                ("dir/a*b.txt", "original\n"),
+                ("dir/axxb.txt", "decoy\n"),
+                ("other/other.txt", "other\n"),
+            ],
+        )
+        .modify("dir/a*b.txt", "changed\n")
+        .build();
+    let excludes_arg = user_ignore.to_string_lossy().into_owned();
+    tmp.git(&["config", "core.excludesFile", &excludes_arg]);
+
+    // Make the root .gitignore destination a directory holding a sentinel file.
+    // Opening a directory for append fails deterministically, with no dependence
+    // on chmod/permission semantics; the sentinel proves the directory is intact.
+    let root_ignore = tmp.path().join(".gitignore");
+    std::fs::create_dir(&root_ignore).unwrap();
+    let sentinel = root_ignore.join("sentinel");
+    let sentinel_bytes = b"sentinel-bytes\n".to_vec();
+    std::fs::write(&sentinel, &sentinel_bytes).unwrap();
+
+    std::fs::write(tmp.path().join("dir/.gitignore"), "# retained\n").unwrap();
+    std::fs::write(tmp.path().join(".git/info/exclude"), "# retained\n").unwrap();
+
+    // Snapshot AFTER fixture seeding: the root destination is a directory, so
+    // assert it via is_dir plus the sentinel file rather than reading a directory.
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["write-tree"]);
+    let status = tmp.git(&["status", "--porcelain=v2", "-z"]);
+    let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
+    let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
+    let user_before = std::fs::read(&user_ignore).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
+
+    let assert_unchanged = |stage: &str| {
+        assert!(
+            root_ignore.is_dir(),
+            "{stage}: root .gitignore must remain a directory"
+        );
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            sentinel_bytes,
+            "{stage}: sentinel bytes"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/.gitignore")).unwrap(),
+            subdir_before,
+            "{stage}: subdir .gitignore"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/info/exclude")).unwrap(),
+            repo_before,
+            "{stage}: repo exclude"
+        );
+        assert_eq!(
+            std::fs::read(&user_ignore).unwrap(),
+            user_before,
+            "{stage}: user excludes"
+        );
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{stage}: HEAD");
+        assert_eq!(tmp.git(&["write-tree"]), index, "{stage}: index");
+        assert_eq!(
+            tmp.git(&["status", "--porcelain=v2", "-z"]),
+            status,
+            "{stage}: status"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            selected_before,
+            "{stage}: selected file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("base.txt")).unwrap(),
+            base_before,
+            "{stage}: base file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            decoy_before,
+            "{stage}: decoy file"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("other/other.txt")).unwrap(),
+            other_before,
+            "{stage}: other file"
+        );
+    };
+
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    let started = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "ignore.topdir".into(),
+            version: Some(test.version()),
+            cursor: Some(Cursor { line, column: 0 }),
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let Execution::Prompt(kind) = started else {
+        panic!("expected ignore-rule-kind prompt, got {started:?}");
+    };
+    let done = test
+        .session
+        .resume_prompt(
+            &kind.prompt_id,
+            Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                id: "literal".into(),
+            })),
+        )
+        .unwrap();
+    let Execution::Done(result) = done else {
+        panic!("literal ignore write must finish without another prompt, got {done:?}");
+    };
+
+    let messages = message_texts(&result.effects);
+    // A readable, nonempty user-facing error: not empty and not raw JSON or a
+    // Rust debug rendering of an error/result value.
+    let readable = messages.iter().copied().find(|text| {
+        let trimmed = text.trim();
+        !trimmed.is_empty()
+            && !trimmed.starts_with('{')
+            && !trimmed.contains("\"summary\"")
+            && !trimmed.starts_with("Error(")
+            && !trimmed.starts_with("Ok(")
+            && !trimmed.starts_with("Err(")
+    });
+    assert!(
+        readable.is_some(),
+        "expected a readable nonempty failure message, got {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|text| text.contains("Added ignore rule")),
+        "a failed write must not claim success, got {messages:?}"
+    );
+    assert_unchanged("after failed root ignore write");
+}
+
+#[test]
 fn ignore_root_stale_origin_is_refused_without_redirecting() {
     use magit_lsp::errors::STALE_VIEW;
     let (tmp, _) = RepoFixture::new()
