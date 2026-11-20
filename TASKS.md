@@ -652,6 +652,7 @@ Post-release; scopes for phases 10–13 remain mandatory in [specifications](./T
   - Verified (Part 1/4, A1/A2) — `make test-rust FILTER="--test git_backend"` → exit 0 (46 tests); `branch_and_repository_configuration_round_trips_locally` covers set/read/clear, selected-vs-other branch, HEAD/worktree preservation and repository-local storage.
   - Verified (Part 1/4, A3) — same command exit 0; `branch_configuration_rejects_invalid_targets_and_handles_head_states` covers missing branch/ref/remote, invalid stored values, detached HEAD and unborn branch behavior without unintended setting writes.
   - Part 1/4 commit contains the documented Git-boundary configuration APIs and backend state tests; parent T043 remains unchecked pending Parts 2–4.
+  - Part 1/4 Done: `b2eeb1f`; formatting diagnosis: hook follow-up `9abbf79` was empty while the two files remained compacted in the worktree. Targeted patches restored both exactly to `HEAD`; `make format-check` → exit 0 and neither source file is dirty. Parent T043 remains unchecked pending Parts 2–4.
 - [ ] **T044 — notes-ignore.**
 - [ ] **T045 — theming-docs.**
 - [ ] **T046 — forking-docs.**
