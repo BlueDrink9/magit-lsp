@@ -8,6 +8,7 @@ import argparse
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -228,6 +229,31 @@ def ensure_clean_worktree(paths: list[str]) -> None:
             raise RuntimeError(f"tracked formatter input is not a regular file: {path}")
 
 
+def sync_working_copy(path: str, staged: bytes, formatted: bytes) -> None:
+    """Overwrite a working file only while its bytes still match the staged blob.
+
+    The comparison and the write share one descriptor so a concurrent edit or
+    path replacement is skipped rather than silently overwritten. Symlinks are
+    never followed and existing file modes are left untouched.
+    """
+    target = ROOT / path
+    try:
+        descriptor = os.open(target, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            return
+        with os.fdopen(descriptor, "r+b") as handle:
+            if handle.read() != staged:
+                return
+            handle.seek(0)
+            handle.write(formatted)
+            handle.truncate()
+    except OSError:
+        return
+
+
 def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_env_vars: dict[str, str], gitdir: Path) -> int:
     """Format staged blobs in isolation, then atomically publish eligible replacements."""
     effective_index = Path(os.environ.get("GIT_INDEX_FILE", str(index_path))).resolve()
@@ -275,6 +301,9 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         raise RuntimeError("Git index changed concurrently; retry the commit")
     updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
     git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
+    for path in changed:
+        staged = git_bytes(["cat-file", "blob", original[path][1]], env=index_env_vars)
+        sync_working_copy(path, staged, (snapshot_root / path).read_bytes())
     return 0
 
 
