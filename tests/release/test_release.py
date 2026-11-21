@@ -13,7 +13,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = re.search(r'^version = "([^"]+)"', (ROOT / 'Cargo.toml').read_text(), re.M)[1]
-STEM = f'magit-lsp-v{VERSION}-x86_64-unknown-linux-gnu'
+TARGET = 'x86_64-unknown-linux-gnu'
+DARWIN_TARGET = 'aarch64-apple-darwin'
+MEMBER_NAMES = ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md')
+STEM = f'magit-lsp-v{VERSION}-{TARGET}'
 ASSET = STEM + '.tar.gz'
 
 
@@ -194,25 +197,119 @@ except OSError:
         self.rejected()
         self.assertFalse((self.directory / 'outside').exists())
 
-    def package(self, binary, version=VERSION):
+    def write_provenance(self, binary, version=VERSION, target=TARGET, digest=None):
+        path = self.directory / 'provenance.json'
+        path.write_text(json.dumps({
+            'version': version.removeprefix('v'),
+            'target': target,
+            'executable_sha256': digest or hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+        }))
+        return path
+
+    def package(self, binary, version=VERSION, target=TARGET, provenance=None, output=None):
+        if provenance is None:
+            provenance = self.write_provenance(binary, version=version, target=target)
         return subprocess.run(['sh', str(ROOT / 'scripts/package-release.sh'), version,
-                               str(binary), str(self.assets)], cwd=ROOT, text=True, capture_output=True)
+                               str(binary), str(output or self.assets), target, str(provenance)],
+                              cwd=ROOT, text=True, capture_output=True)
 
     def test_package_install_contract(self):
         result = self.package(self.binary)
         self.assertEqual(result.returncode, 0, result.stderr)
+        archive = (self.assets / ASSET).read_bytes()
+        sidecar = (self.assets / (ASSET + '.sha256')).read_text()
+        self.assertEqual(sidecar, f'{hashlib.sha256(archive).hexdigest()}  {ASSET}\n')
         with tarfile.open(self.assets / ASSET) as package:
-            self.assertEqual(set(package.getnames()),
-                             {f'{STEM}/{name}' for name in ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md')})
+            members = package.getmembers()
+            self.assertEqual([member.name for member in members],
+                             [f'{STEM}/{name}' for name in MEMBER_NAMES])
+            for member in members:
+                self.assertTrue(member.isfile(), member.name)
+                self.assertEqual((member.uid, member.gid, member.uname, member.gname),
+                                 (0, 0, '', ''), member.name)
+                self.assertEqual(member.mtime, 0, member.name)
+                self.assertEqual(member.mode,
+                                 0o755 if member.name.endswith('/magit-lsp') else 0o644, member.name)
             self.assertEqual(package.extractfile(f'{STEM}/LICENSE').read(), (ROOT / 'LICENCES/GPL-3.0').read_bytes())
             self.assertEqual(package.extractfile(f'{STEM}/LICENSE-APACHE').read(), (ROOT / 'LICENCES/Apache-2.0').read_bytes())
         result = self.install('--version', VERSION)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+        # Identical content in a differently named path with a different mtime
+        # must produce the same archive and sidecar bytes.
+        copy = self.directory / 'another tree' / 'different-name'
+        copy.parent.mkdir()
+        copy.write_bytes(self.binary.read_bytes())
+        copy.chmod(0o644)
+        os.utime(self.binary, (1, 1))
+        os.utime(copy, (2000000000, 2000000000))
+        other = self.directory / 'other output'
+        result = self.package(copy, output=other)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((other / ASSET).read_bytes(), archive)
+        self.assertEqual((other / (ASSET + '.sha256')).read_text(), sidecar)
+
+        # Changed executable content changes the archive and its sidecar.
+        changed = self.directory / 'changed-binary'
+        changed.write_bytes(self.binary.read_bytes() + b'\n# changed\n')
+        changed.chmod(0o644)
+        result = self.package(changed)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        changed_archive = (self.assets / ASSET).read_bytes()
+        self.assertNotEqual(changed_archive, archive)
+        self.assertEqual((self.assets / (ASSET + '.sha256')).read_text(),
+                         f'{hashlib.sha256(changed_archive).hexdigest()}  {ASSET}\n')
+
+        # Packaging never executes the input binary, even a non-executable one.
+        marker = self.directory / 'binary-was-executed'
+        sentinel = self.directory / 'sentinel'
+        sentinel.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 1\n')
+        sentinel.chmod(0o644)
+        result = self.package(sentinel)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists())
+
+        # Another supported target names its members from that target, with no
+        # implicit Windows executable suffix.
+        darwin = self.directory / 'darwin output'
+        result = self.package(self.binary, target=DARWIN_TARGET, output=darwin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        darwin_stem = f'magit-lsp-v{VERSION}-{DARWIN_TARGET}'
+        with tarfile.open(darwin / (darwin_stem + '.tar.gz')) as package:
+            self.assertEqual(package.getnames(),
+                             [f'{darwin_stem}/{name}' for name in MEMBER_NAMES])
+
     def test_package_rejects_version_mismatch(self):
+        # The requested version still has to match Cargo and the extension.
         self.assertNotEqual(self.package(self.binary, '99.0.0').returncode, 0)
-        self.binary.write_text('#!/bin/sh\necho wrong-version\n')
-        self.assertNotEqual(self.package(self.binary).returncode, 0)
+
+        # Provenance is mandatory and must agree with the requested identity.
+        absent = self.directory / 'missing-provenance.json'
+        self.assertNotEqual(self.package(self.binary, provenance=absent).returncode, 0)
+        for changes in ({'version': '0.0.1'}, {'target': 'x86_64-apple-darwin'},
+                        {'digest': '0' * 64}):
+            provenance = self.write_provenance(self.binary, **changes)
+            with self.subTest(changes=changes):
+                self.assertNotEqual(self.package(self.binary, provenance=provenance).returncode, 0)
+        for content in ('not json', '[]', '{}',
+                        json.dumps({'version': VERSION, 'target': TARGET}),
+                        json.dumps({'version': VERSION, 'target': TARGET,
+                                    'executable_sha256': 'A' * 64})):
+            provenance = self.directory / 'malformed-provenance.json'
+            provenance.write_text(content)
+            with self.subTest(content=content):
+                self.assertNotEqual(self.package(self.binary, provenance=provenance).returncode, 0)
+
+        # Unsupported or malicious target names are refused before any write.
+        for target in ('x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu/..',
+                       '../x86_64-unknown-linux-gnu', '', 'AMD64'):
+            with self.subTest(target=target):
+                self.assertNotEqual(self.package(self.binary, target=target).returncode, 0)
+
+        # Stale provenance cannot cover a replaced executable.
+        provenance = self.write_provenance(self.binary)
+        self.binary.write_bytes(b'#!/bin/sh\necho replacement\n')
+        self.assertNotEqual(self.package(self.binary, provenance=provenance).returncode, 0)
 
     @unittest.skipUnless(os.environ.get('MAGIT_LSP_TEST_BINARY'), 'set MAGIT_LSP_TEST_BINARY for actual-artifact smoke')
     def test_real_binary_package_install_launch(self):
