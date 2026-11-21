@@ -95,6 +95,16 @@ test: build test-rust test-lua vscode-test
 vscode-keybindings-generate:
 	$(call run,vscode-keybindings-generate,node clients/vscode/scripts/gen-keybindings.mjs)
 
+.PHONY: vscode-semantic-generate vscode-semantic-check vscode-semantic-test
+vscode-semantic-generate:
+	$(call run,vscode-semantic-generate,node clients/vscode/scripts/gen-semantic-roles.mjs)
+
+vscode-semantic-check:
+	$(call run,vscode-semantic-check,node clients/vscode/scripts/gen-semantic-roles.mjs --check)
+
+vscode-semantic-test:
+	$(call run,vscode-semantic-test,node --test clients/vscode/test/semantic-roles.test.mjs)
+
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
 
