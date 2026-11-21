@@ -30,6 +30,7 @@ class NativeArtifactTests(unittest.TestCase):
                                   ('LICENSE-APACHE', b'b'), ('INSTALL.md', b'n')]:
                 info = tarfile.TarInfo(stem + '/' + name)
                 info.size = len(content)
+                info.mode = 0o755 if name == 'magit-lsp' else 0o644
                 tar.addfile(info, io.BytesIO(content))
         ah = hashlib.sha256(archive.read_bytes()).hexdigest()
         (self.root / (archive.name + '.sha256')).write_text(f'{ah}  {archive.name}\n')
@@ -159,7 +160,8 @@ class NativeArtifactTests(unittest.TestCase):
 
     def test_safe_extract_rejects_traversal_and_links(self):
         for member_name, member_type in [('release/../outside', tarfile.REGTYPE),
-                                         ('release/magit-lsp', tarfile.SYMTYPE)]:
+                                         ('release/magit-lsp', tarfile.SYMTYPE),
+                                         ('release/magit-lsp', tarfile.LNKTYPE)]:
             archive = self.root / 'unsafe.tar.gz'
             with tarfile.open(archive, 'w:gz') as tar:
                 info = tarfile.TarInfo(member_name)
@@ -170,6 +172,27 @@ class NativeArtifactTests(unittest.TestCase):
             with self.subTest(member=member_name), self.assertRaisesRegex(
                     inspector.InspectionError, 'unsafe archive member'):
                 inspector.safe_extract(archive, self.root / 'extract', 'release')
+
+        archive = self.root / 'unexpected.tar.gz'
+        with tarfile.open(archive, 'w:gz') as tar:
+            for name in ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md', 'unexpected'):
+                info = tarfile.TarInfo('release/' + name)
+                info.size = 1
+                tar.addfile(info, io.BytesIO(b'x'))
+        with self.assertRaisesRegex(inspector.InspectionError,
+                                    'archive members do not match'):
+            inspector.safe_extract(archive, self.root / 'extract-unexpected',
+                                   archive.name.removesuffix('.tar.gz'))
+
+    def test_safe_extract_works_without_tarfile_filter_api_and_preserves_executable(self):
+        archive = self.candidate()
+        destination = self.root / 'extract'
+        with mock.patch.object(tarfile.TarFile, 'extractall',
+                               side_effect=TypeError('filter argument unavailable')):
+            executable = inspector.safe_extract(archive, destination,
+                archive.name.removesuffix('.tar.gz'))
+        self.assertEqual(executable.read_bytes(), b'ELF')
+        self.assertEqual(executable.stat().st_mode & 0o777, 0o755)
 
     def test_missing_tool(self):
         with mock.patch.dict(os.environ, {'PATH': str(self.tools)}):

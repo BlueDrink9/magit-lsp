@@ -210,7 +210,16 @@ def safe_extract(archive, destination, expected):
     names = {f'{expected}/{name}' for name in ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md')}
     if len(members) != len(names) or {m.name for m in members} != names:
         raise InspectionError('archive members do not match the exact expected set')
-    package.extractall(destination, members=members, filter='data')
+    root = Path(destination)
+    for member in members:
+        output = root.joinpath(*PurePosixPath(member.name).parts)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        source = package.extractfile(member)
+        if source is None:
+            raise InspectionError(f'unsafe archive member: {member.name}')
+        with source, output.open('xb') as target:
+            shutil.copyfileobj(source, target)
+        output.chmod(member.mode & 0o777)
     return Path(destination) / expected / 'magit-lsp'
 
 
