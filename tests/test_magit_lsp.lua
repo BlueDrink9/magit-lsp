@@ -550,6 +550,135 @@ T["the :Magit command delegates to the public open path"] = function()
   MiniTest.expect.equality(child.lua_get("CALLS"), { repo, "default" })
 end
 
+T["bare :Magit starts a session for the current directory without setup"] = function()
+  child.lua(string.format("vim.cmd('cd ' .. vim.fn.fnameescape(%q))", repo))
+  child.cmd("runtime plugin/magit-lsp.lua")
+  child.cmd("Magit")
+  local state = child.lua_get([[
+    (function()
+      M = require('magit-lsp')
+      local opened = vim.wait(10000, function()
+        local record = M.status_view()
+        return record ~= nil and record.version ~= nil and record.keymap_ready
+      end, 20)
+      local record = M.status_view()
+      local session = M.sessions[vim.fn.getcwd()]
+      return {
+        opened = opened,
+        session = session ~= nil,
+        clients = #vim.lsp.get_clients({ name = 'magit-lsp' }),
+        filetype = record and vim.api.nvim_get_option_value('filetype', { buf = record.buf }) or nil,
+        focused = record ~= nil and vim.api.nvim_get_current_buf() == record.buf,
+        lines = record and vim.api.nvim_buf_get_lines(record.buf, 0, -1, false) or {},
+      }
+    end)()
+  ]])
+  MiniTest.expect.equality(state.opened, true, "bare :Magit opened a status view")
+  MiniTest.expect.equality(state.session, true, "the cwd repository has a session")
+  MiniTest.expect.equality(state.clients, 1, "exactly one server started")
+  MiniTest.expect.equality(state.filetype, "magit-lsp")
+  MiniTest.expect.equality(state.focused, true, "the status view is focused")
+  MiniTest.expect.equality(
+    vim.tbl_contains(state.lines, "Unstaged changes (1)"),
+    true,
+    "the server rendered the repository status"
+  )
+  MiniTest.expect.equality(
+    vim.tbl_contains(state.lines, "    +NEW line"),
+    true,
+    "the server rendered the diff"
+  )
+end
+
+T["bare :Magit reopens a wiped status without a second server"] = function()
+  setup_child({ fold_keys = { ["<F3>"] = "common.toggle-section" } })
+  child.lua(string.format("vim.cmd('cd ' .. vim.fn.fnameescape(%q))", repo))
+  child.lua([[
+    M = require('magit-lsp')
+    SESSION = M.sessions[vim.fn.getcwd()]
+    CLIENT = SESSION.client_id
+    CLIENTS_BEFORE = #vim.lsp.get_clients({ name = 'magit-lsp' })
+    vim.api.nvim_buf_delete(STATUS.buf, { force = true })
+  ]])
+  MiniTest.expect.equality(
+    child.lua_get("M.status_view() == nil"),
+    true,
+    "the status view was wiped"
+  )
+
+  child.cmd("Magit")
+  local state = child.lua_get([[
+    (function()
+      local opened = vim.wait(10000, function()
+        local record = M.status_view()
+        return record ~= nil and record.version ~= nil and record.keymap_ready
+      end, 20)
+      STATUS = M.status_view()
+      local session = M.sessions[vim.fn.getcwd()]
+      return {
+        opened = opened,
+        same_session = session == SESSION,
+        same_client = session.client_id == CLIENT,
+        clients = #vim.lsp.get_clients({ name = 'magit-lsp' }),
+        clients_before = CLIENTS_BEFORE,
+        focused = STATUS ~= nil and vim.api.nvim_get_current_buf() == STATUS.buf,
+      }
+    end)()
+  ]])
+  MiniTest.expect.equality(state.opened, true, "bare :Magit reopened the status view")
+  MiniTest.expect.equality(state.same_session, true, "the configured session is reused")
+  MiniTest.expect.equality(state.same_client, true, "no duplicate server was started")
+  MiniTest.expect.equality(state.clients, state.clients_before, "the client count is unchanged")
+  MiniTest.expect.equality(state.focused, true, "the reopened status view is focused")
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.applied_lhs('n')['<F3>'] ~= nil"),
+    true,
+    "the session's configured fold key survived the reopen"
+  )
+  assert_line("Unstaged changes (1)")
+  assert_line("    +NEW line")
+end
+
+T[":Magit starts an explicit repository directory"] = function()
+  local other = make_repo(true, project .. "/build/test-repos/explicit start")
+  vim.fn.writefile({ "other" }, other .. "/other.txt")
+  child.cmd("runtime plugin/magit-lsp.lua")
+  child.cmd("Magit " .. vim.fn.fnameescape(other))
+  local state = child.lua_get(string.format(
+    [[
+    (function()
+      M = require('magit-lsp')
+      local opened = vim.wait(10000, function()
+        local record = M.status_view(%q)
+        return record ~= nil and record.version ~= nil and record.keymap_ready
+      end, 20)
+      local record = M.status_view(%q)
+      return {
+        opened = opened,
+        session = M.sessions[%q] ~= nil,
+        sessions = vim.tbl_count(M.sessions),
+        clients = #vim.lsp.get_clients({ name = 'magit-lsp' }),
+        focused = record ~= nil and vim.api.nvim_get_current_buf() == record.buf,
+        lines = record and vim.api.nvim_buf_get_lines(record.buf, 0, -1, false) or {},
+      }
+    end)()
+  ]],
+    other,
+    other,
+    other
+  ))
+  MiniTest.expect.equality(state.opened, true, "explicit :Magit opened a status view")
+  MiniTest.expect.equality(state.session, true, "the explicit repository has a session")
+  MiniTest.expect.equality(state.sessions, 1, "only the requested repository was started")
+  MiniTest.expect.equality(state.clients, 1, "exactly one server started")
+  MiniTest.expect.equality(state.focused, true, "the status view is focused")
+  MiniTest.expect.equality(
+    vim.tbl_contains(state.lines, "  ? other.txt"),
+    true,
+    "the server rendered the explicit repository's status"
+  )
+end
+
 T["creates a server-named virtual buffer and attaches LSP"] = function()
   setup_child()
   local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = STATUS.buf })")
