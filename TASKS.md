@@ -7,6 +7,11 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **PERF-OPEN-REUSE — Reuse discovered Git repository on status opening.** Remove verified duplicate discovery from the server status-open path without skipping status/rebase reads or changing rendered output, refresh freshness, worktree roots or Git failure handling. test: Rust regression coverage directly exercises opening from an already discovered repository and existing root/status invariants. Verification: `make test-rust FILTER="--lib"`.
+  - Verified: `make test-rust FILTER="--lib"` → exit 0 (`ok: rust (warnings detected; check log: build/test-logs/rust.oIXKon)`).
+
+- [ ] **PERF-OPEN-MEASURE — Measure repository-discovery reuse in Neovim.** After PERF-OPEN-REUSE, check: compare reproducible public :Magit cold/reopen distributions and Git subprocess counts before/after using the same harness, profile and fixtures; report actual improvement or lack thereof, preserving all baseline user edits. Verification: `make nvim-startup-check`.
+
 - [ ] **NVIM-HELP-DISCOVERY — Ship discoverable Neovim help.** User reports `:h magit` does not work. VERIFIED inspection at `9b9e97e`: `doc/magit.txt` defines the tag but `doc/tags` is absent; the existing help test generates temporary tags and masks missing packaging. Part 1: add a Make help-tags generation target; Part 2: generate and commit the standalone tag index separately from source/authored docs/bookkeeping; Part 3: replace test-only helptags setup with actual shipped-help discovery and correct the install note. check: `make help-tags` generates a valid index. test: `make test-file FILE=tests/test_magit_lsp.lua` resolves shipped `:h magit` without generating tags. Do not change protocol or unrelated concurrent work.
   - Verified: `make help-tags` → exit 0 (`ok: help-tags`); the generated `doc/tags` maps `magit` to `magit.txt`. With `doc/` absent the same target fails with `help-tags: helptags failed or doc/tags was not generated` and make exit 1. Part 1 check only; the generated index is left untracked for Part 2.
 

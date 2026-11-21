@@ -21,7 +21,8 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .repo_path()
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
-    let repo = crate::git::GitRepo::open(&repo)?
+    let discovered_repo = crate::git::GitRepo::open(&repo)?;
+    let repo = discovered_repo
         .root()
         .canonicalize()?
         .to_string_lossy()
@@ -76,8 +77,14 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             .or_insert_with(|| session.published());
         session.set_keymaps(keymaps);
         let placement = p.placement.unwrap_or_default();
-        let (descriptor, render) =
-            session.open_with_args(id.clone(), p.kind, placement, p.viewport, p.args.as_ref())?;
+        let (descriptor, render) = session.open_with_discovered_repo(
+            id.clone(),
+            p.kind,
+            placement,
+            p.viewport,
+            p.args.as_ref(),
+            discovered_repo,
+        )?;
         let keymap = session.keymap_notice(&id);
         (descriptor, render, keymap)
     };

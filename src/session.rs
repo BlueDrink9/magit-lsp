@@ -924,6 +924,19 @@ impl Session {
         self.open_internal(id.into(), kind, placement, viewport, args, None)
     }
 
+    /// Open a view using the repository already discovered by the server.
+    pub fn open_with_discovered_repo(
+        &mut self,
+        id: impl Into<String>,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+        repo: GitRepo,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_internal_with_repo(id.into(), kind, placement, viewport, args, None, Some(repo))
+    }
+
     fn open_internal(
         &mut self,
         id: String,
@@ -933,10 +946,31 @@ impl Session {
         args: Option<&Value>,
         section_line_limit: Option<usize>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_internal_with_repo(
+            id,
+            kind,
+            placement,
+            viewport,
+            args,
+            section_line_limit,
+            None,
+        )
+    }
+
+    fn open_internal_with_repo(
+        &mut self,
+        id: String,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+        section_line_limit: Option<usize>,
+        repo: Option<GitRepo>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         if self.views.get(&id).is_some() {
             return Err(Error::new(format!("view already open: {id}")));
         }
-        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps, repo)?;
         if let Some(limit) = section_line_limit {
             view.set_section_line_limit(Some(limit));
         }
@@ -2249,7 +2283,7 @@ impl Session {
         placement: Placement,
         args: Option<&Value>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let view = create_view(&self.repo_path, &kind, args, &self.keymaps, None)?;
         self.push_view(parent_id, kind, placement, view)
     }
 
@@ -2502,9 +2536,13 @@ fn create_view(
     kind: &ViewKind,
     args: Option<&Value>,
     keymaps: &BTreeMap<String, Keymap>,
+    repo: Option<GitRepo>,
 ) -> Result<Box<dyn View>> {
     match kind {
-        ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
+        ViewKind::Status => Ok(Box::new(match repo {
+            Some(repo) => StatusView::open_repo(repo)?,
+            None => StatusView::open(repo_path)?,
+        })),
         ViewKind::Log => {
             let options = match args {
                 Some(args) => {

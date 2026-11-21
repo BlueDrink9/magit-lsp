@@ -39,6 +39,11 @@ impl StatusView {
     /// Read the repository status and prepare a view for it.
     pub fn open(repo_path: &str) -> Result<Self> {
         let repo = GitRepo::open(repo_path)?;
+        Self::open_repo(repo)
+    }
+
+    /// Read status from an already discovered repository.
+    pub fn open_repo(repo: GitRepo) -> Result<Self> {
         let status = repo.status_listing()?;
         let rebase = repo.rebase_state()?;
         Ok(Self {
@@ -233,6 +238,100 @@ impl StatusView {
             }
             _ => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod reuse_tests {
+    use super::*;
+    use crate::view::{Ctx, View, Viewport};
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    fn committed_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "-q"]);
+        git(dir.path(), &["config", "user.email", "test@example.com"]);
+        git(dir.path(), &["config", "user.name", "Test"]);
+        std::fs::write(dir.path().join("tracked.txt"), "base\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(dir.path(), &["commit", "-qm", "base"]);
+        dir
+    }
+
+    #[test]
+    fn open_repo_uses_discovered_root_and_refreshes_live_status_without_rediscovery() {
+        let dir = committed_repo();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let discovered = GitRepo::open(&nested).unwrap();
+        let root = discovered.root().canonicalize().unwrap();
+        let before = crate::runner::global_log()
+            .iter()
+            .last()
+            .map(|record| record.id)
+            .unwrap_or(0);
+        let mut view = StatusView::open_repo(discovered).unwrap();
+        let new_records = crate::runner::global_log()
+            .iter()
+            .into_iter()
+            .filter(|record| record.id > before && record.cwd == root.display().to_string())
+            .collect::<Vec<_>>();
+        assert!(!new_records
+            .iter()
+            .any(|record| record.args.first().is_some_and(|arg| arg == "rev-parse")));
+        assert_eq!(view.repo.root().canonicalize().unwrap(), root);
+        let first = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert!(!first.lines.iter().any(|line| line.contains("tracked.txt")));
+        std::fs::write(dir.path().join("tracked.txt"), "changed\n").unwrap();
+        view.on_refresh().unwrap();
+        let refreshed = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert!(refreshed
+            .lines
+            .iter()
+            .any(|line| line.contains("tracked.txt")));
+    }
+
+    #[test]
+    fn opened_linked_worktree_keeps_its_worktree_root() {
+        let main = committed_repo();
+        let linked = tempfile::tempdir().unwrap();
+        git(
+            main.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "linked-test",
+                linked.path().to_str().unwrap(),
+            ],
+        );
+        let repo = GitRepo::open(linked.path()).unwrap();
+        assert_eq!(
+            repo.root().canonicalize().unwrap(),
+            linked.path().canonicalize().unwrap()
+        );
+        let view = StatusView::open_repo(repo).unwrap();
+        assert_eq!(
+            view.repo.root().canonicalize().unwrap(),
+            linked.path().canonicalize().unwrap()
+        );
     }
 }
 
