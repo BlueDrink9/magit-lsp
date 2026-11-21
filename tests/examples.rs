@@ -2601,6 +2601,100 @@ fn edits_uri(frame: &Value, uri: &str) -> bool {
             })
 }
 
+/// Direct `commit.create` delivers the pending row before an unchanged refresh.
+#[cfg(unix)]
+#[test]
+fn direct_commit_create_publishes_pending_draft_row_before_refresh() {
+    let (repo, _git) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .staged_file("f.txt", "after\n")
+        .build();
+    let draft_uri = uri_from_path(&repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native draft path has a file URI")
+        .as_str()
+        .to_owned();
+    let (mut server, mut editor, status_uri) = open_plain_status(&repo);
+    let mut frames = Vec::new();
+    let line = editor
+        .text(&status_uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .unwrap() as u32;
+    let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &status_uri, line);
+    let open = action_args(&actions, "open.commit").expect("status offers commit");
+    let view_id = open["target"]["viewId"]
+        .as_str()
+        .expect("view id")
+        .to_owned();
+    // The adapter opens the editor document before a commit operation can
+    // wait for the user to edit and confirm it.
+    server.send(editor.open(&draft_uri, "stale\n"));
+    frames.clear();
+    let response = plain_request(
+        &mut server,
+        &mut editor,
+        &mut frames,
+        json!({
+            "jsonrpc":"2.0", "id":fake_editor::allocate_request_id()+1000, "method":"view/invoke",
+            "params":{"viewId":view_id,"command":"commit.create"}
+        }),
+    );
+    assert!(
+        response.get("error").is_none(),
+        "direct commit.create failed: {response}"
+    );
+    let published = editor.text(&status_uri).to_owned();
+    assert!(
+        published.contains(".git/COMMIT_EDITMSG"),
+        "initial direct invocation delivers row: {published}"
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| edits_uri(frame, &status_uri))
+            .count(),
+        1,
+        "one initial status edit: {frames:#?}"
+    );
+    server.send(editor.open(&draft_uri, "stale\n"));
+    frames.clear();
+    let refreshed = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        refreshed.get("error").is_none(),
+        "refresh failed: {refreshed}"
+    );
+    assert!(
+        !frames.iter().any(|frame| edits_uri(frame, &status_uri)),
+        "unchanged refresh emits no status edit"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while editor.text(&draft_uri) == "stale\n" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "commit template never attached"
+        );
+        let received = server.recv();
+        if received["method"].is_string() && !received["id"].is_null() {
+            for frame in editor.dispatch(&received) {
+                server.send(frame);
+            }
+        }
+    }
+    let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &draft_uri, 0);
+    let abort = action_args(&actions, "common.cancel").expect("draft offers abort");
+    let aborted = plain_execute(&mut server, &mut editor, &mut frames, abort);
+    assert_eq!(aborted["result"]["type"], "aborted");
+    frames.clear();
+    let _ = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        !editor.text(&status_uri).contains(".git/COMMIT_EDITMSG"),
+        "abort clears pending row"
+    );
+    server.shutdown_and_exit();
+    let (exit, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(exit.success());
+}
+
 /// A commit run's published status already contains the pending draft row.
 ///
 /// The draft is admitted at the operation boundary, after the command's status

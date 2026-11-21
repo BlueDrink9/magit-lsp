@@ -484,14 +484,16 @@ pub(super) fn dispatched_outcome(
         })
         .effects;
     let mut notifications = Vec::new();
-    if let Some(operation) = outcome
+    let pending_render = if let Some(operation) = outcome
         .commit
         .filter(|_| !shared.closing.load(Ordering::SeqCst))
     {
         // Git must not run while this request still holds any session or repo
         // lock: it waits for the user to edit and confirm.
-        spawn_repository_operation(shared.clone(), repo.to_string(), operation);
-    }
+        spawn_repository_operation(shared.clone(), repo.to_string(), operation)
+    } else {
+        None
+    };
     // Views pushed or popped by an effect must be routable before the client
     // can send a key for them.
     let mut repo_view_pushed = false;
@@ -548,6 +550,14 @@ pub(super) fn dispatched_outcome(
         }
     }
     for view_id in plain_focus {
+        // The admission render below already publishes this view's new
+        // snapshot; routing it again here would duplicate the status edit.
+        if pending_render
+            .as_ref()
+            .is_some_and(|render| render.view_id == view_id)
+        {
+            continue;
+        }
         let snapshot = shared
             .published
             .lock()
@@ -555,6 +565,9 @@ pub(super) fn dispatched_outcome(
             .values()
             .find_map(|views| views.current_snapshot(&view_id));
         route_plain_render(shared, &view_id, snapshot, None);
+    }
+    if let Some(render) = pending_render {
+        notifications.extend(deliver_render(shared, render));
     }
     if let Some(render) = outcome.render {
         notifications.extend(deliver_render(shared, render));
@@ -687,18 +700,20 @@ impl Drop for RepositoryEdit {
 ///
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
 /// lock is held while Git blocks on the helper. Only the final refresh takes
-/// the session lock again, briefly.
+/// the session lock again, briefly. For a commit draft, the returned render is
+/// the admission of the pending row that the caller must deliver.
 fn spawn_repository_operation(
     shared: Shared,
     repo: String,
     operation: crate::git::RepositoryOperation,
-) {
+) -> Option<ViewRender> {
+    let mut pending_render = None;
     let Some(reservation) = shared.reserve_deferred(repo.clone()) else {
         let _ = shared.sender.send(show_message(
             1,
             "Wait for the current Git operation to finish".to_string(),
         ));
-        return;
+        return None;
     };
     let unsupported = shared
         .client
@@ -720,7 +735,7 @@ fn spawn_repository_operation(
                     "Client does not support editDocument",
                 )],
             }));
-        return;
+        return None;
     }
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
@@ -738,7 +753,7 @@ fn spawn_repository_operation(
                         1,
                         format!("Cannot open commit draft: {error}"),
                     ));
-                    return;
+                    return None;
                 }
             };
             // The command published the focused view before this draft existed,
@@ -746,7 +761,10 @@ fn spawn_repository_operation(
             // the pending row and an unchanged watcher refresh is a no-op.
             if let Some(handle) = shared.session(&repo) {
                 let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                let _ = session.publish_pending_draft();
+                match session.publish_pending_draft() {
+                    Ok(render) => pending_render = render,
+                    Err(error) => report_pending_refresh_error(&shared, error),
+                }
             }
             shared
                 .edit_configs
@@ -795,7 +813,7 @@ fn spawn_repository_operation(
                         1,
                         format!("Cannot open instant autosquash draft scope: {error}"),
                     ));
-                    return;
+                    return None;
                 }
             };
             (
@@ -941,4 +959,5 @@ fn spawn_repository_operation(
     if let Err(error) = worker {
         tracing::warn!(%error, "failed to start the commit worker");
     }
+    pending_render
 }

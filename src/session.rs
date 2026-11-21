@@ -2399,18 +2399,18 @@ impl Session {
     /// render, so the published snapshot predates the pending row. Rendering the
     /// active view again makes that snapshot and the retained tree include the
     /// row, so an unchanged watcher refresh sees no difference and emits no
-    /// second status edit.
-    pub fn publish_pending_draft(&mut self) -> Result<()> {
+    /// second status edit. The returned render carries that admission to the
+    /// client; `None` means the active view did not change.
+    pub fn publish_pending_draft(&mut self) -> Result<Option<ViewRender>> {
         let Some(view_id) = self
             .views
             .iter()
             .last()
             .map(|view| view.descriptor().id.clone())
         else {
-            return Ok(());
+            return Ok(None);
         };
-        self.refresh(&view_id)?;
-        Ok(())
+        self.refresh(&view_id)
     }
 
     /// Re-read every open view's backing state and collect the new renders.
