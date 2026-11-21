@@ -39,5 +39,5 @@ expect screen not-contains "Committing"
 snapshot: next-commit
 sh: test "$(git log -1 --format=%s)" = 'After progress cancellation'
 expect no_message /E5108|Error executing lua|expected one cancellation/
-keys: ":lua local d=require('magit-lsp.debug'); d.trace('cancel_scenario_complete',{token=vim.g.cancel_token}); local root=vim.api.nvim_get_runtime_file('lua/magit-lsp/debug.lua',false)[1]:gsub('/lua/magit%-lsp/debug.lua$',''); vim.fn.writefile(vim.fn.readfile(vim.env.MAGIT_LSP_TRACE),root..'/build/ui/commit-owned-cancel/'..vim.env.MAGIT_LSP_PROFILE..'-'..vim.o.columns..'x'..vim.o.lines..'/cancel.trace.jsonl')" Enter
+keys: ":lua local d=require('magit-lsp.debug'); d.trace('cancel_scenario_complete',{token=vim.g.cancel_token}); local root=assert(vim.env.MAGIT_LSP_WORKSPACE_ROOT,'MAGIT_LSP_WORKSPACE_ROOT missing'); vim.fn.writefile(vim.fn.readfile(vim.env.MAGIT_LSP_TRACE),root..'/build/ui/commit-owned-cancel/'..vim.env.MAGIT_LSP_PROFILE..'-'..vim.o.columns..'x'..vim.o.lines..'/cancel.trace.jsonl')" Enter
 wait

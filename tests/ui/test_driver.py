@@ -987,6 +987,57 @@ class StartPathTest(unittest.TestCase):
         self.assertIn("too long", str(caught.exception))
         tmux.assert_not_called()
 
+    def test_scenario_workspace_root_env_comes_from_the_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            state = startup.SocketState(path=str(run_dir / "nvim.sock"), length=1)
+            captured: dict[str, str] = {}
+
+            def capture(_run: object, env: dict[str, str]) -> None:
+                captured.update(env)
+                raise RuntimeError("stop after environment capture")
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build"),
+                patch.object(driver.startup, "inspect_socket", return_value=state),
+                patch.object(driver, "_launcher_script", side_effect=capture),
+                patch.object(driver, "_cleanup"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    driver.start("clean")
+        selected = Path(captured["MAGIT_LSP_WORKSPACE_ROOT"])
+        self.assertEqual(selected, ROOT)
+        self.assertNotEqual(selected, ROOT / "clients" / "neovim")
+
+
+class WorkspaceRootTest(unittest.TestCase):
+    def test_initializer_location_selects_checkout_not_nested_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init = root / "scripts" / "minimal_init.lua"
+            init.parent.mkdir(parents=True)
+            init.touch()
+            runtime = root / "clients" / "neovim"
+            debug = runtime / "lua" / "magit-lsp" / "debug.lua"
+            debug.parent.mkdir(parents=True)
+            debug.touch()
+            selected = driver.workspace_root(init)
+        self.assertEqual(selected, root)
+        self.assertNotEqual(selected, runtime)
+        self.assertTrue(debug.is_relative_to(runtime))
+        self.assertTrue(debug.is_relative_to(selected))
+
+    def test_live_initializer_selects_checkout_and_keeps_runtime_nested(self) -> None:
+        selected = driver.workspace_root()
+        runtime = selected / "clients" / "neovim"
+        self.assertEqual(selected, ROOT)
+        self.assertNotEqual(selected, runtime)
+        self.assertTrue(driver.MINIMAL_INIT.is_relative_to(selected))
+        self.assertFalse(driver.MINIMAL_INIT.is_relative_to(runtime))
+        self.assertTrue((runtime / "lua" / "magit-lsp" / "debug.lua").is_file())
+
 
 class NativeSessionTest(unittest.TestCase):
     def test_native_session_preserves_records_when_owned_process_survives(self) -> None:

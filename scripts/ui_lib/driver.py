@@ -126,6 +126,16 @@ def parse_size(value: str) -> tuple[int, int]:
     return cols, rows
 
 
+def workspace_root(init: Path = MINIMAL_INIT) -> Path:
+    """The checkout root that owns harness output such as `build/ui`.
+
+    Derived from the harness initializer under `scripts/`, not from the loaded
+    runtime: the Neovim runtime lives in the nested `clients/neovim` directory,
+    so a runtime path would select the wrong root.
+    """
+    return init.resolve().parents[1]
+
+
 def new_run_id() -> str:
     """Return a timestamped run id that is unique across parallel starts."""
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
@@ -886,6 +896,7 @@ def start(
                 "MAGIT_LSP_BIN": str(Path(__file__).resolve().parents[2] / "target" / "debug" / "magit-lsp"),
                 "MAGIT_LSP_TRACE": str(run.trace_path),
                 "MAGIT_LSP_UI_ROOT": str(run.repo_path),
+                "MAGIT_LSP_WORKSPACE_ROOT": str(workspace_root()),
             }
         )
         if extra_env:
