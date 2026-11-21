@@ -381,3 +381,84 @@ jobs:
       - name: Require successful functional run
         if: always()
         run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.harness.outcome }}" = success && test "${{ steps.rust-functional.outcome }}" = success
+
+  native-vscode-consumers:
+    # Required installed-extension acceptance consumes the exact native and VSIX uploads.
+    needs: [native-candidates, vsix]
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install VSCode on Linux
+        if: runner.os == 'Linux'
+        run: sudo snap install code --classic && sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install VSCode on macOS
+        if: runner.os == 'macOS'
+        run: brew install --cask visual-studio-code
+      - name: Download immutable native candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/download_native_candidate.py --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+          --source-sha "${{ github.sha }}" --target "${{ matrix.target }}"
+          --artifact-name "${{ matrix.artifact }}" --output "$RUNNER_TEMP/vscode-native"
+          > "$RUNNER_TEMP/vscode-native-download.json"
+      - name: Download immutable VSIX candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/download_vsix_candidate.py --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+          --source-sha "${{ github.sha }}" --ref "${{ github.ref }}"
+          --event "${{ github.event_name }}" --version "$(python3 scripts/check_release_automation.py --print-version)"
+          --output "$RUNNER_TEMP/vscode-vsix" > "$RUNNER_TEMP/vscode-vsix-download.json"
+      - name: Run installed VSIX acceptance
+        run: |
+          mkdir -p "$RUNNER_TEMP/vscode-native-bin"
+          python3 -c 'from pathlib import Path; from scripts.download_native_candidate import safe_extract; import json,sys; h=json.load(open(sys.argv[1])); safe_extract(Path(h["archive"]),Path(sys.argv[2]),Path(h["archive"]).name.removesuffix(".tar.gz"))' "$RUNNER_TEMP/vscode-native/native-candidate.json" "$RUNNER_TEMP/vscode-native-bin"
+          binary=$(find "$RUNNER_TEMP/vscode-native-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit)
+          handoff="$RUNNER_TEMP/vscode-native/native-candidate.json"; version=$(python3 scripts/check_release_automation.py --print-version); vsix="$RUNNER_TEMP/vscode-vsix/magit-lsp-$version.vsix"
+          evidence="$RUNNER_TEMP/native-vscode-evidence.json"; echo '{"ok":false,"phase":"not-run"}' > "$evidence"
+          native_before=$(shasum -a 256 "$binary" | awk '{print $1}'); vsix_before=$(shasum -a 256 "$vsix" | awk '{print $1}')
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a make native-vscode-artifact-check MAGIT_LSP_SERVER_PATH="$(realpath "$binary")" RELEASE_ARTIFACT="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff")")" RELEASE_MANIFEST="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")")" RELEASE_VSIX="$(realpath "$vsix")"; else make native-vscode-artifact-check MAGIT_LSP_SERVER_PATH="$(realpath "$binary")" RELEASE_ARTIFACT="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff")")" RELEASE_MANIFEST="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")")" RELEASE_VSIX="$(realpath "$vsix")"; fi
+          native_after=$(shasum -a 256 "$binary" | awk '{print $1}'); vsix_after=$(shasum -a 256 "$vsix" | awk '{print $1}')
+          test "$native_before" = "$native_after" && test "$vsix_before" = "$vsix_after"
+          printf '{"ok":true,"native_before":"%s","native_after":"%s","vsix_before":"%s","vsix_after":"%s","cleanup":"target completed"}\n' "$native_before" "$native_after" "$vsix_before" "$vsix_after" > "$evidence"
+      - name: Upload native VSCode evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-vscode-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vscode-native/native-candidate.json
+            ${{ runner.temp }}/vscode-native-download.json
+            ${{ runner.temp }}/vscode-vsix/vsix-candidate.json
+            ${{ runner.temp }}/vscode-vsix-download.json
+            ${{ runner.temp }}/native-vscode-evidence.json
+          if-no-files-found: warn
+          retention-days: 14

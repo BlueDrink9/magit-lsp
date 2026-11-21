@@ -118,6 +118,7 @@ FALLBACK_JOB = 'linux-x86_64-gnu'
 NATIVE_JOB = 'native-candidates'
 NATIVE_CONSUMER_JOB = 'native-consumers'
 NATIVE_FUNCTIONAL_JOB = 'native-functional-consumers'
+NATIVE_VSCODE_JOB = 'native-vscode-consumers'
 FALLBACK_TARGET = ASSET
 SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
 NATIVE_MATRIX = (
@@ -869,6 +870,51 @@ def check_native_functional_consumers(block):
         fail('build workflow: functional candidate/harness/runtime failures must fail the job')
 
 
+def check_native_vscode_consumers(block):
+    """Require installed-VSIX acceptance on each immutable native candidate host."""
+    code = '\n'.join(code_lines(block))
+    if 'continue-on-error:' in code or any(line.startswith('    if:') for line in block):
+        fail('build workflow: native VSCode consumers must be mandatory')
+    if 'needs: [native-candidates, vsix]' not in code:
+        fail('build workflow: native VSCode consumers must need native and VSIX producers')
+    matrix = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if match:
+            target = None
+            for entry in block[index + 1:]:
+                if entry.strip() and indent_of(entry) <= indent_of(line):
+                    break
+                found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+                if found:
+                    target = found.group(1)
+            matrix[match.group(1)] = target
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native VSCode matrix must exactly match all three native hosts')
+    required = ('scripts/download_native_candidate.py', 'scripts/download_vsix_candidate.py',
+                '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
+                '--source-sha "${{ github.sha }}"', '--ref "${{ github.ref }}"',
+                '--event "${{ github.event_name }}"', 'safe_extract',
+                'make native-vscode-artifact-check', 'MAGIT_LSP_SERVER_PATH=',
+                'RELEASE_ARTIFACT=', 'RELEASE_MANIFEST=', 'RELEASE_VSIX=',
+                'native-candidate.json', 'vsix-candidate.json',
+                'native_before', 'native_after', 'vsix_before', 'vsix_after',
+                'test "$native_before" = "$native_after"',
+                'test "$vsix_before" = "$vsix_after"',
+                'xvfb-run -a make native-vscode-artifact-check',
+                'if: always()', 'native-vscode-evidence.json', 'if-no-files-found: warn')
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native VSCode consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: native VSCode consumers must use immutable source checkout')
+    for forbidden in ('vscode-package', 'vscode-deps', 'cargo build', 'release-native-build'):
+        if forbidden in code:
+            fail(f'build workflow: native VSCode consumers must not build or package ({forbidden})')
+    if "if: runner.os == 'Linux'" not in code or "if: runner.os == 'macOS'" not in code:
+        fail('build workflow: editor setup must cover Linux and macOS hosted runners')
+
+
 def check_build_workflow(path=BUILD_WORKFLOW):
     """Structure-check the build workflow: locked builders, source checks,
     run-bound explicit candidates and read-only, non-publishing scope."""
@@ -911,7 +957,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
 
     jobs = workflow_jobs(lines)
     for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB,
-                     NATIVE_FUNCTIONAL_JOB):
+                     NATIVE_FUNCTIONAL_JOB, NATIVE_VSCODE_JOB):
         if required not in jobs:
             fail(f'build workflow: missing mandatory job {required!r}')
     require_pinned_builders(jobs)
@@ -979,6 +1025,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     check_native_candidates(jobs[NATIVE_JOB])
     check_native_consumers(jobs[NATIVE_CONSUMER_JOB])
     check_native_functional_consumers(jobs[NATIVE_FUNCTIONAL_JOB])
+    check_native_vscode_consumers(jobs[NATIVE_VSCODE_JOB])
     check_python_interpreter(lines)
     check_node_tooling(lines)
 
@@ -3351,9 +3398,25 @@ def run_self_tests():
               (('test "$after" = "$expected"', 'true', 1),),
               'hash must remain unchanged'),
              ('build workflow native functional consumer without Neovim target',
-              (('native-neovim-artifact-check', 'missing-neovim-target', 1),),
-              'native-neovim-artifact-check'),
-          ):
+               (('native-neovim-artifact-check', 'missing-neovim-target', 1),),
+               'native-neovim-artifact-check'),
+             ('build workflow missing native VSCode host',
+              (('  native-vscode-consumers:', '  native-vscode-consumers-disabled:', 1),),
+              "missing mandatory job 'native-vscode-consumers'"),
+             ('build workflow native VSCode job optional',
+              (('  native-vscode-consumers:\n',
+                '  native-vscode-consumers:\n    continue-on-error: true\n', 1),),
+              'native VSCode consumers must be mandatory'),
+             ('build workflow native VSCode skips VSIX producer',
+              (('needs: [native-candidates, vsix]', 'needs: native-candidates', 1),),
+              'must need native and VSIX producers'),
+             ('build workflow native VSCode misses immutable identity',
+              (('vsix-candidate.json', 'missing-identity.json', 1),),
+              "must include 'vsix-candidate.json'"),
+             ('build workflow native VSCode misses post-run hash',
+              (('test "$vsix_before" = "$vsix_after"', 'true', 1),),
+              "must include 'test \"$vsix_before\" = \"$vsix_after\"'"),
+           ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
