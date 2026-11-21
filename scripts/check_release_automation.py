@@ -45,7 +45,26 @@ PIPELINE = Path('scripts/check_release_pipeline.py')
 RELEASE_TOOLCHAIN = '1.94.1'
 PIPELINE_BUILD = 'python3 scripts/check_release_pipeline.py build'
 PIPELINE_BUILD_LOCAL = 'python3 scripts/check_release_pipeline.py build --local'
+PIPELINE_BUILD_NATIVE = 'python3 scripts/check_release_pipeline.py build-native'
+PIPELINE_CHECK = 'python3 scripts/check_release_automation.py --pipeline-self-tests'
 PIPELINE_ARTIFACTS = 'python3 scripts/check_release_pipeline.py artifacts'
+# The no-build release contract entry point selects these methods explicitly;
+# the optional real-binary smoke needs an actual artifact and must stay out.
+OFFLINE_RELEASE_TESTS = (
+    'test_latest_and_pinned',
+    'test_default_directory',
+    'test_download_failures',
+    'test_missing_asset',
+    'test_bad_metadata_and_versions',
+    'test_destination_failure_preserves_binary',
+    'test_checksum_failures',
+    'test_platform_failures',
+    'test_archive_structure',
+    'test_package_install_contract',
+    'test_package_rejects_version_mismatch',
+)
+REAL_BINARY_TEST = 'test_real_binary_package_install_launch'
+RELEASE_CONTRACT_UNIT = 'release-contract-unit'
 BUILD_WORKFLOW_PATH = '.github/workflows/release.yml'
 BUILD_WORKFLOW_NAME = 'Release artifact build (no publication)'
 API_ROOT = 'https://api.github.com'
@@ -535,6 +554,12 @@ def pipeline_violations(module, environment):
     if environment_vars.get('MAGIT_LSP_TEST_BINARY') != 'binary':
         problems.append('artifact environment must hand the binary to '
                         'MAGIT_LSP_TEST_BINARY')
+    if getattr(module, 'NATIVE_CC', None) != '/usr/bin/cc':
+        problems.append('the experimental native lane must use the host /usr/bin/cc')
+    if getattr(module, 'NATIVE_LINKER_VARIABLE', None) != \
+            'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER':
+        problems.append('the experimental native lane must set the explicit target '
+                        'linker variable')
     return problems
 
 
@@ -567,6 +592,8 @@ def check_local_pipeline(path=MAKEFILE):
         ('release-artifact-check', PIPELINE_ARTIFACTS),
         ('release-local', PIPELINE_BUILD_LOCAL),
         ('release-artifact-check-local', PIPELINE_ARTIFACTS),
+        ('release-native-build', PIPELINE_BUILD_NATIVE),
+        ('release-pipeline-check', PIPELINE_CHECK),
     ):
         number = next((index for index, line in enumerate(lines, 1)
                        if line.startswith(target + ':')), None)
@@ -577,6 +604,30 @@ def check_local_pipeline(path=MAKEFILE):
             fail(f'Makefile: {target} must run {command!r}')
     find_line(lines, 'release-artifact-check: release-locked', 'Makefile')
     find_line(lines, 'release-artifact-check-local: release-local', 'Makefile')
+
+
+def check_contract_unit(path=MAKEFILE):
+    """`release-contract-unit` must select the offline cases explicitly, with no build."""
+    lines = read_lines(path)
+    number = next((index for index, line in enumerate(lines, 1)
+                   if line.startswith(RELEASE_CONTRACT_UNIT + ':')), None)
+    if number is None:
+        fail(f'Makefile: missing {RELEASE_CONTRACT_UNIT}')
+    recipe = '\n'.join(make_recipe(lines, number))
+    for test in OFFLINE_RELEASE_TESTS:
+        if f'tests.release.test_release.ReleaseTests.{test}' not in recipe:
+            fail(f'Makefile: {RELEASE_CONTRACT_UNIT} must select '
+                 f'tests.release.test_release.ReleaseTests.{test}')
+    if REAL_BINARY_TEST in recipe:
+        fail(f'Makefile: {RELEASE_CONTRACT_UNIT} must exclude the optional '
+             f'real-binary {REAL_BINARY_TEST} case')
+    if 'discover' in recipe:
+        fail(f'Makefile: {RELEASE_CONTRACT_UNIT} must select cases explicitly, '
+             'not discover them')
+    if 'cargo' in recipe:
+        fail(f'Makefile: {RELEASE_CONTRACT_UNIT} must not build or run Cargo')
+    if 'shellcheck scripts/install.sh scripts/package-release.sh' not in recipe:
+        fail(f'Makefile: {RELEASE_CONTRACT_UNIT} must lint the release shell scripts')
 
 
 def check_artifact_consistency():
@@ -948,6 +999,192 @@ def mutated_workflow(directory, label, mutations):
     return mutated_file(WORKFLOW, directory, 'publish-' + label, mutations)
 
 
+def fake_native_probe(calls, missing=()):
+    """Return a probe that records argv and answers host-tool queries with fixtures.
+
+    The pipeline self-tests pass this instead of a real process boundary, so they
+    can prove the native lane's argv, refusals and evidence without invoking a
+    compiler, Cargo or a build.
+    """
+    def probe(argv, environment=None):
+        calls.append(list(argv))
+        if missing and argv[0] in missing:
+            return 127, '', f'fixture {argv[0]} is missing'
+        if argv[1:] == ['--version'] and os.path.basename(argv[0]) in ('cc', 'gcc'):
+            return 0, 'cc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0\n', ''
+        if argv[:1] == ['ldd'] and argv[1:] == ['--version']:
+            return 0, 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.1) 2.35\n', ''
+        if argv[:2] == ['git', 'rev-parse']:
+            return 0, SELF_TEST_SHA + '\n', ''
+        if argv[:1] == ['rustc']:
+            return 0, 'rustc 1.94.1 (fixture)\n', ''
+        if argv[:1] == ['cargo']:
+            return 0, 'cargo 1.94.1 (fixture)\n', ''
+        return 127, '', 'missing fixture tool'
+    return probe
+
+
+def run_pipeline_self_tests():
+    """Exercise the pipeline adapter with fake processes; never build or run Cargo."""
+    with tempfile.TemporaryDirectory(prefix='magit-lsp-release-pipeline-') as temporary:
+        directory = Path(temporary)
+        toolchain = write_fake_toolchain(directory)
+        pipeline = load_pipeline()
+
+        # Wiring: the local targets run the shared script; the native target is
+        # explicit and the contract unit selects only offline cases.
+        check_local_pipeline()
+        check_contract_unit()
+        for label, mutations in (
+            ('Makefile without the native build target',
+             ((PIPELINE_BUILD_NATIVE, 'true', None),)),
+            ('Makefile without the pipeline self-test target',
+             ((PIPELINE_CHECK, 'true', None),)),
+            ('Makefile without the pinned build target',
+             ((PIPELINE_BUILD, 'cargo build --release', None),)),
+            ('Makefile local target without --local',
+             ((PIPELINE_BUILD_LOCAL, PIPELINE_BUILD, None),)),
+        ):
+            expect_check(label, check_local_pipeline,
+                         mutated_file(MAKEFILE, directory, label, mutations),
+                         expected='Makefile:')
+        expect_check(
+            'Makefile with broad contract discovery', check_contract_unit,
+            mutated_file(MAKEFILE, directory, 'Makefile with broad contract discovery',
+                         (('tests.release.test_release.ReleaseTests.test_platform_failures',
+                           'discover -s tests/release', 1),)),
+            expected=RELEASE_CONTRACT_UNIT)
+        expect_check(
+            'Makefile with the real-binary contract case', check_contract_unit,
+            mutated_file(MAKEFILE, directory, 'Makefile with the real-binary contract case',
+                         ((f'tests.release.test_release.ReleaseTests.'
+                           f'test_package_rejects_version_mismatch',
+                           f'tests.release.test_release.ReleaseTests.'
+                           f'test_package_rejects_version_mismatch '
+                           f'tests.release.test_release.ReleaseTests.{REAL_BINARY_TEST}', 1),)),
+            expected=RELEASE_CONTRACT_UNIT)
+
+        # The shared script keeps the locked flags and the binary handoff, and
+        # the experimental lane keeps its explicit native linker identity.
+        for label, mutations, expected in (
+            ('pipeline without --locked',
+             (("'--locked', ", '', None),), 'build command is'),
+            ('pipeline without the binary handoff',
+             (("'MAGIT_LSP_TEST_BINARY': str(binary),", '', None),),
+             'MAGIT_LSP_TEST_BINARY'),
+            ('pipeline local mode forcing the pinned toolchain',
+             (('return installed_compiler(environment) if local else '
+               'compiler(environment)', 'return compiler(environment)', None),),
+             'local mode must use'),
+            ('pipeline without the explicit native linker variable',
+             (("NATIVE_LINKER_VARIABLE = "
+               "'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER'",
+               "NATIVE_LINKER_VARIABLE = 'OTHER_LINKER'", None),),
+             'explicit target linker'),
+        ):
+            problems = pipeline_violations(
+                load_pipeline(mutated_file(PIPELINE, directory, label, mutations)),
+                toolchain)
+            if not any(expected in problem for problem in problems):
+                fail(f'self-test: {label} was accepted')
+
+        # The strict 1.94.1 fallback is unchanged: its command still carries the
+        # locked target build and the pinned mode still refuses a foreign rustc.
+        expected_pinned = ['cargo', '+1.94.1', 'build', '--release', '--locked',
+                           '--target', ASSET]
+        if pipeline.build_command(['cargo', '+1.94.1']) != expected_pinned:
+            fail('self-test: the strict pinned fallback build command changed')
+        expect_pipeline_error(pipeline, 'pinned fallback accepting a foreign toolchain',
+                              pipeline.compiler_for, False, toolchain,
+                              expected='pinned release build needs')
+
+        # Native plan: explicit host linker, locked argv and recorded evidence.
+        # The host boundary is a fixture executable so this self-test is
+        # independent of whether the running machine has /usr/bin/cc.
+        calls = []
+        host = ('linux', 'x86_64')
+        fake_cc = directory / 'cc'
+        fake_cc.write_text('#!/bin/sh\n', encoding='utf-8')
+        fake_cc.chmod(0o755)
+        plan = pipeline.native_plan(pipeline.TARGET, {}, host=host,
+                                    compiler_path=str(fake_cc),
+                                    probe=fake_native_probe(calls))
+        expected_argv = ['cargo', 'build', '--release', '--locked', '--target', ASSET]
+        if plan['argv'] != expected_argv:
+            fail(f'self-test: native build argv is {plan["argv"]!r}')
+        if plan['environment'].get(pipeline.NATIVE_LINKER_VARIABLE) != '/usr/bin/cc':
+            fail('self-test: native mode must set the explicit target linker to /usr/bin/cc')
+        evidence = plan['evidence']
+        for field in ('target', 'compiler', 'linker', 'libc', 'argv', 'source_sha',
+                      'lock_hashes'):
+            if not evidence.get(field):
+                fail(f'self-test: native evidence is missing {field!r}')
+        if evidence['target'] != ASSET or evidence['argv'] != expected_argv:
+            fail('self-test: native evidence must record the target and exact argv')
+        if evidence['linker'] != '/usr/bin/cc':
+            fail('self-test: native evidence must record the explicit linker')
+        if evidence['source_sha'] != SELF_TEST_SHA:
+            fail('self-test: native evidence must record the source SHA')
+        if set(evidence['lock_hashes']) != {'Cargo.lock', 'flake.lock'}:
+            fail('self-test: native evidence must hash Cargo.lock and flake.lock')
+        if any(call[:2] == ['cargo', 'build'] for call in calls):
+            fail('self-test: the native plan must not run the build')
+        path = pipeline.write_evidence(evidence, directory=directory / 'evidence')
+        if json.loads(path.read_text(encoding='utf-8')) != evidence:
+            fail('self-test: the native evidence file must round-trip the record')
+
+        expect_pipeline_error(
+            pipeline, 'native mode on a non-Linux host',
+            lambda: pipeline.native_plan(ASSET, {}, host=('darwin', 'arm64'),
+                                         probe=fake_native_probe([])),
+            expected='Linux x86_64 host')
+        expect_pipeline_error(
+            pipeline, 'native mode for a cross target',
+            lambda: pipeline.native_plan('aarch64-unknown-linux-gnu', {}, host=host,
+                                         probe=fake_native_probe([])),
+            expected='only supports')
+        for label, variable, value in (
+            ('native mode with an inherited C compiler wrapper', 'CC',
+             '/nix/store/ffff-cc-wrapper/bin/cc'),
+            ('native mode with inherited C flags sysroot', 'CFLAGS',
+             '--sysroot=/nix/store/ffff-glibc'),
+            ('native mode with inherited linker sysroot', 'LDFLAGS',
+             '-Wl,--sysroot=/nix/store/ffff-glibc'),
+            ('native mode with an inherited Nix C compiler', 'NIX_CC',
+             '/nix/store/ffff-gcc-wrapper/bin/cc'),
+            ('native mode with a Nix target linker',
+             'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER',
+             '/nix/store/ffff-gcc-wrapper/bin/ld'),
+            ('native mode with an inherited SDK root', 'SDKROOT',
+             '/nix/store/ffff-apple-sdk'),
+        ):
+            expect_pipeline_error(
+                pipeline, label,
+                lambda env={variable: value}: pipeline.native_plan(
+                    ASSET, env, host=host, probe=fake_native_probe([])),
+                expected='inherited compiler/linker/sysroot')
+        expect_pipeline_error(
+            pipeline, 'native mode without the host C compiler',
+            lambda: pipeline.native_plan(ASSET, {}, host=host,
+                                         compiler_path=str(directory / 'missing-cc'),
+                                         probe=fake_native_probe([])),
+            expected='missing or not executable')
+        expect_pipeline_error(
+            pipeline, 'native mode without the host libc probe',
+            lambda: pipeline.native_plan(ASSET, {}, host=host,
+                                         compiler_path=str(fake_cc),
+                                         probe=fake_native_probe([], missing=('ldd',))),
+            expected='ldd --version failed')
+        expect_pipeline_error(
+            pipeline, 'native mode without git provenance',
+            lambda: pipeline.native_plan(ASSET, {}, host=host,
+                                         compiler_path=str(fake_cc),
+                                         probe=fake_native_probe([], missing=('git',))),
+            expected='git rev-parse HEAD failed')
+
+    print('ok: release pipeline adapter self-tests (fake processes; no build)')
+
+
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
     validate_run_metadata(run_metadata_fixture(), SELF_TEST_REPOSITORY, SELF_TEST_SHA)
@@ -1151,8 +1388,14 @@ def main():
                         help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
                         help='print RELEASE_VERSION=<X.Y.Z> for $GITHUB_ENV')
+    parser.add_argument('--pipeline-self-tests', action='store_true',
+                        help='run only the release pipeline adapter self-tests '
+                             '(fake processes; no Cargo, build or metadata)')
     args = parser.parse_args()
     try:
+        if args.pipeline_self_tests:
+            run_pipeline_self_tests()
+            return 0
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)
             return 0

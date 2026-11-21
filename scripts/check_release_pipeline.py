@@ -5,7 +5,11 @@
 then runs the workflow's ``--release --locked --target`` build; ``build
 --local`` instead uses the installed compiler without downloading one and
 records its real versions, while keeping the same locked command and artifact
-path. ``artifacts``
+path. ``build-native`` is the experimental hosted native-linker lane: it accepts
+only the Linux x86_64 host and target, points Cargo's target linker explicitly
+at ``/usr/bin/cc`` and records the exact locked argv plus compiler, linker, libc
+and source/lock provenance under ``build/release/``. It never changes or
+replaces the strict pinned/``--local`` commands. ``artifacts``
 packages that exact binary with ``scripts/package-release.sh``, validates the
 archive/sidecar set offline with the release checker and runs the release suite
 with ``MAGIT_LSP_TEST_BINARY`` set, so the real-binary case runs instead of
@@ -17,9 +21,11 @@ downloads or installs a toolchain and never publishes anything.
 """
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import subprocess
@@ -33,6 +39,21 @@ BINARY = Path('target') / TARGET / 'release' / 'magit-lsp'
 DIST = Path('dist')
 VALIDATOR = Path('scripts/check_release_automation.py')
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+# The experimental native lane supports only the hosted Linux GNU target; Darwin
+# selection is a separate task. The host compiler/linker is always the explicit
+# absolute host path, never a Nix wrapper discovered on PATH.
+NATIVE_HOST = ('linux', 'x86_64')
+NATIVE_CC = '/usr/bin/cc'
+NATIVE_LINKER_VARIABLE = 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER'
+NATIVE_EVIDENCE_DIR = Path('build/release')
+NATIVE_EVIDENCE_FILE = 'native-build.json'
+# Inherited settings that would inject a C compiler, linker or sysroot from a
+# Nix dev shell or a caller wrapper. The native lane refuses them instead of
+# trusting flags the release shell happened to export.
+NATIVE_INJECTION_VARIABLES = (
+    'CC', 'CXX', 'AR', 'CFLAGS', 'CPPFLAGS', 'LDFLAGS',
+    'NIX_CC', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'SDKROOT',
+)
 
 
 class PipelineError(Exception):
@@ -172,6 +193,150 @@ def run(argv, environment=None):
         raise PipelineError(f'{" ".join(argv)} exited {result.returncode}')
 
 
+def host_platform():
+    """Return the running host as a lower-cased ``(system, machine)`` pair."""
+    return (platform.system().lower(), platform.machine().lower())
+
+
+def run_probe(argv, environment=None):
+    """Run one host probe from the repository root and return (code, stdout, stderr)."""
+    result = subprocess.run(
+        argv, cwd=ROOT, env=process_environment(environment),
+        capture_output=True, text=True)
+    return result.returncode, result.stdout, result.stderr
+
+
+def inherited_injection(environment):
+    """Return inherited compiler/linker/sysroot settings the native lane refuses.
+
+    A Nix dev shell or caller wrapper can export ``CC``, target linker or
+    sysroot flags; the native lane sets its own explicit linker and refuses the
+    rest rather than trusting them. Only the exact host linker value is allowed
+    through the target linker variable.
+    """
+    names = [name for name in NATIVE_INJECTION_VARIABLES if environment.get(name)]
+    for name, value in environment.items():
+        if not value:
+            continue
+        if name.startswith('CARGO_TARGET_') and name.endswith(('_LINKER', '_RUSTFLAGS')):
+            if name == NATIVE_LINKER_VARIABLE and value == NATIVE_CC:
+                continue
+            names.append(name)
+        elif name in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS') and \
+                re.search(r'sysroot|linker|link-arg', value):
+            names.append(name)
+    return sorted(set(names))
+
+
+def native_cargo(environment, probe):
+    """Return the installed ``cargo`` prefix and versions, or fail readably."""
+    versions = {}
+    for tool in ('rustc', 'cargo'):
+        code, stdout, stderr = probe([tool, '--version'], environment)
+        line = stdout.strip() or stderr.strip()
+        if code != 0 or not line:
+            raise PipelineError(
+                f'{tool} --version failed; run the native lane inside '
+                '`nix develop --no-update-lock-file .#release-native -c`')
+        versions[tool] = line
+    return ['cargo'], versions
+
+
+def native_plan(target, environment, host=None, compiler_path=NATIVE_CC,
+                probe=run_probe):
+    """Return the validated native build plan and its provenance evidence.
+
+    The plan carries the strict ``--release --locked --target`` argv, the
+    environment with Cargo's target linker set explicitly to the host compiler,
+    and the compiler/linker/libc/argv/source-SHA/lock-hash record written under
+    ``build/release/``. ``host`` and ``probe`` are injectable so the self-tests
+    exercise the refusals and recorded values with fake processes, never a real
+    compiler, Cargo or build.
+    """
+    host = host or host_platform()
+    if host != NATIVE_HOST:
+        raise PipelineError(
+            f'native link mode needs a Linux x86_64 host; found {host[0]} {host[1]}')
+    if not target:
+        raise PipelineError(
+            'build-native needs RELEASE_TARGET (for example '
+            f'RELEASE_TARGET={TARGET})')
+    if target != TARGET:
+        raise PipelineError(
+            f'native link mode only supports {TARGET}; got {target!r}')
+    injected = inherited_injection(environment)
+    if injected:
+        raise PipelineError(
+            'refusing inherited compiler/linker/sysroot settings: ' + ', '.join(injected))
+    compiler = Path(compiler_path)
+    if not compiler.is_file() or not os.access(compiler, os.X_OK):
+        raise PipelineError(
+            f'{compiler_path} is missing or not executable; the native lane needs '
+            'the host C compiler and linker')
+    resolved = compiler.resolve()
+    if str(resolved).startswith('/nix/store/'):
+        raise PipelineError(
+            f'{compiler_path} resolves into the Nix store ({resolved}); point it at '
+            'the host C compiler')
+    code, stdout, stderr = probe([compiler_path, '--version'], environment)
+    compiler_version = stdout.strip() or stderr.strip()
+    if code != 0 or not compiler_version:
+        raise PipelineError(
+            f'{compiler_path} --version failed; the native lane needs a working '
+            'host C compiler')
+    code, stdout, stderr = probe(['ldd', '--version'], environment)
+    libc = stdout.strip().splitlines()[0] if stdout.strip() else ''
+    if code != 0 or not libc:
+        raise PipelineError('ldd --version failed; the native lane needs the host libc')
+    code, stdout, stderr = probe(['git', 'rev-parse', 'HEAD'], environment)
+    source_sha = stdout.strip()
+    if code != 0 or not re.fullmatch(r'[0-9a-f]{40}', source_sha):
+        raise PipelineError(
+            'git rev-parse HEAD failed; the native evidence needs the source SHA')
+    lock_hashes = {}
+    for lock in ('Cargo.lock', 'flake.lock'):
+        path = ROOT / lock
+        if not path.is_file():
+            raise PipelineError(f'{lock} is missing; the native evidence needs its hash')
+        lock_hashes[lock] = hashlib.sha256(path.read_bytes()).hexdigest()
+    cargo_prefix, versions = native_cargo(environment, probe)
+    merged = dict(environment)
+    merged[NATIVE_LINKER_VARIABLE] = NATIVE_CC
+    argv = build_command(cargo_prefix)
+    evidence = {
+        'target': target,
+        'host': {'system': host[0], 'machine': host[1]},
+        'compiler': compiler_version,
+        'linker': NATIVE_CC,
+        'libc': libc,
+        'argv': argv,
+        'source_sha': source_sha,
+        'lock_hashes': lock_hashes,
+        'rustc': versions['rustc'],
+        'cargo': versions['cargo'],
+        'linker_environment': {NATIVE_LINKER_VARIABLE: NATIVE_CC},
+    }
+    return {'argv': argv, 'environment': merged, 'evidence': evidence}
+
+
+def write_evidence(evidence, directory=None):
+    """Write the native build provenance JSON under ``build/release/``."""
+    root = Path(directory) if directory is not None else ROOT / NATIVE_EVIDENCE_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / NATIVE_EVIDENCE_FILE
+    path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + '\n',
+                    encoding='utf-8')
+    return path
+
+
+def native_build(target, environment):
+    """Run the experimental native-linker release build and record its provenance."""
+    plan = native_plan(target, environment)
+    path = write_evidence(plan['evidence'])
+    print(f'native release evidence: {path}', file=sys.stderr)
+    run(plan['argv'], plan['environment'])
+
+
 def build(local, environment):
     """Run the workflow's locked, target-specific release build.
 
@@ -194,15 +359,24 @@ def artifacts(environment):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('build', 'artifacts'),
-                        help='build the pinned binary, or package and smoke-test it')
+    parser.add_argument('mode', choices=('build', 'artifacts', 'build-native'),
+                        help='build the pinned binary, package and smoke-test it, '
+                             'or run the experimental native-linker build')
     parser.add_argument('--local', action='store_true',
                         help='build with the installed compiler instead of the '
                              'pinned toolchain (never downloads one)')
+    parser.add_argument('--target', default='',
+                        help='RELEASE_TARGET for build-native; must match the host')
     args = parser.parse_args()
     try:
         if args.mode == 'build':
             build(args.local, os.environ)
+        elif args.mode == 'build-native':
+            if args.local:
+                raise PipelineError(
+                    'build-native is a separate experimental lane; it never combines '
+                    'with the pinned/--local modes')
+            native_build(args.target, os.environ)
         else:
             artifacts(os.environ)
     except PipelineError as error:

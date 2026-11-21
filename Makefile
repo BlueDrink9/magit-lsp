@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-local release-artifact-check-local test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-local release-artifact-check-local release-native-build release-pipeline-check release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -59,6 +59,17 @@ release-local:
 
 release-artifact-check-local: release-local
 	$(call run,release-artifact-check-local,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py artifacts)
+
+# Experimental hosted native-linker lane, separate from the strict pinned
+# fallback above. Run only inside
+# `nix develop --no-update-lock-file .#release-native -c make release-native-build
+# RELEASE_TARGET=x86_64-unknown-linux-gnu`. It refuses a non-Linux/x86_64 host,
+# a different target, inherited Nix CC/linker/sysroot flags or a missing host
+# compiler, sets Cargo's target linker explicitly to /usr/bin/cc, and records
+# the locked argv plus compiler/linker/libc/source/lock evidence under
+# build/release/native-build.json before building.
+release-native-build:
+	$(call run,release-native-build,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py build-native --target "$(RELEASE_TARGET)")
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
@@ -233,6 +244,18 @@ vscode-package:
 # runs `cargo package --list` offline to catch an incomplete crate.
 release-automation-check:
 	$(call run,release-automation-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py)
+
+# Pipeline-adapter self-tests only: fake process boundaries for the native
+# linker lane, strict pinned-fallback assertions and Makefile wiring. No Cargo
+# invocation, no build, no toolchain download and no Cargo package metadata.
+release-pipeline-check:
+	$(call run,release-pipeline-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py --pipeline-self-tests)
+
+# Explicit offline release contract cases plus shellcheck. Selecting the
+# methods avoids optional real-binary cases and needs no Cargo build; the
+# real-binary install/launch smoke is only for an actual artifact.
+release-contract-unit:
+	$(call run,release-contract-unit,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-unit: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_release.ReleaseTests.test_latest_and_pinned tests.release.test_release.ReleaseTests.test_default_directory tests.release.test_release.ReleaseTests.test_download_failures tests.release.test_release.ReleaseTests.test_missing_asset tests.release.test_release.ReleaseTests.test_bad_metadata_and_versions tests.release.test_release.ReleaseTests.test_destination_failure_preserves_binary tests.release.test_release.ReleaseTests.test_checksum_failures tests.release.test_release.ReleaseTests.test_platform_failures tests.release.test_release.ReleaseTests.test_archive_structure tests.release.test_release.ReleaseTests.test_package_install_contract tests.release.test_release.ReleaseTests.test_package_rejects_version_mismatch)
 
 # Shellcheck plus the offline release contract suite for the download/packaging
 # scripts the release workflow and installer path depend on. The flake dev shell
