@@ -1995,7 +1995,8 @@ def publication_api_pages(repository, path, token, key):
 
 def validate_publication_orchestration(event, repository, checkout_ref,
                                        checkout_sha, readiness=None,
-                                       promotion=None, default_ref='refs/heads/main'):
+                                       promotion=None, default_ref='refs/heads/main',
+                                       require_gates=True):
     """Require trusted workflow_run orchestration and explicit proven gates."""
     if checkout_ref != default_ref:
         fail(f'publication orchestration ref is {checkout_ref!r}, expected protected default')
@@ -2006,9 +2007,10 @@ def validate_publication_orchestration(event, repository, checkout_ref,
     run = event.get('workflow_run')
     if not isinstance(run, dict) or full_name(run.get('repository')) != repository:
         fail('publication event run belongs to another repository')
-    if readiness is None or promotion is None:
+    if require_gates and (readiness is None or promotion is None):
         fail('publication readiness/promotion evidence is absent; ineligible')
-    if readiness.get('conclusion') != 'success' or promotion.get('eligible') is not True:
+    if require_gates and (readiness.get('conclusion') != 'success' or
+                          promotion.get('eligible') is not True):
         fail('publication readiness/promotion evidence is not successful')
     return run
 
@@ -2043,7 +2045,8 @@ def prepare_publication_runtime(event_path):
     if not isinstance(default_object, dict) or default_object.get('sha') != checkout_sha:
         fail('publication orchestration checkout SHA is not the current default branch SHA')
     run = validate_publication_orchestration(
-        event, repository, expected_ref, checkout_sha, default_ref=expected_ref)
+        event, repository, expected_ref, checkout_sha, default_ref=expected_ref,
+        require_gates=False)
     run_id = run.get('id')
     attempt = run.get('run_attempt')
     if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
@@ -3285,6 +3288,79 @@ def run_self_tests():
                  orchestration_event, SELF_TEST_REPOSITORY, 'refs/heads/main',
                  SELF_TEST_SHA, {'conclusion': 'success'}, {'eligible': False},
                  expected='not successful')
+
+    # Exercise the runtime boundary with mocked GitHub API responses: this
+    # proves the collector binds the workflow_run payload to upstream API data.
+    from unittest.mock import patch
+    runtime_event = {'action': 'completed', 'workflow_run': {
+        'id': int(SELF_TEST_RUN_ID), 'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'workflow_id': SELF_TEST_WORKFLOW_ID, 'event': 'push',
+        'head_branch': f'v{SELF_TEST_VERSION}',
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_sha': SELF_TEST_OTHER_SHA}}
+    runtime_responses = {
+        '': {'default_branch': 'main'},
+        '/branches/main/protection': {},
+        '/git/ref/heads/main': {'object': {'sha': SELF_TEST_SHA}},
+        f'/actions/runs/{SELF_TEST_RUN_ID}': run_binding_fixture(),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=1':
+            page_document('jobs', coherent_jobs[:1], total=2),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2':
+            page_document('jobs', coherent_jobs[1:], total=2),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1':
+            page_document('artifacts', coherent_artifacts[:1], total=2),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2':
+            page_document('artifacts', coherent_artifacts[1:], total=2),
+        f'/git/ref/tags/v{SELF_TEST_VERSION}': json.loads(tag_ref_body()),
+    }
+    runtime_calls = []
+    def runtime_fetch(repository, path, token):
+        runtime_calls.append((repository, path))
+        if path not in runtime_responses:
+            return 404, '{}'
+        return 200, json.dumps(runtime_responses[path])
+    saved_env = {key: os.environ.get(key) for key in (
+        'GITHUB_REPOSITORY', 'GITHUB_REF', 'GITHUB_SHA',
+        'GITHUB_EVENT_NAME', 'GH_TOKEN')}
+    try:
+        os.environ.update({'GITHUB_REPOSITORY': SELF_TEST_REPOSITORY,
+                           'GITHUB_REF': 'refs/heads/main',
+                           'GITHUB_SHA': SELF_TEST_SHA,
+                           'GITHUB_EVENT_NAME': 'workflow_run', 'GH_TOKEN': 'mock'})
+        with tempfile.TemporaryDirectory(prefix='publication-runtime-') as temporary:
+            event_path = Path(temporary) / 'event.json'
+            event_path.write_text(json.dumps(runtime_event), encoding='utf-8')
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+                expect_check('runtime collector stops without readiness',
+                             prepare_publication_runtime, str(event_path),
+                             expected='readiness/promotion evidence is absent')
+            required_paths = [f'/actions/runs/{SELF_TEST_RUN_ID}',
+                          f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2',
+                          f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2',
+                          f'/git/ref/tags/v{SELF_TEST_VERSION}']
+            missing_runtime_paths = [path for path in required_paths
+                                 if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
+            if missing_runtime_paths:
+                fail(f'self-test: runtime collector missed API paths {missing_runtime_paths!r}; calls={runtime_calls!r}')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture(name='untrusted')
+            runtime_calls.clear()
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+                expect_check('runtime collector rejects mismatched workflow',
+                             prepare_publication_runtime, str(event_path),
+                             expected='workflow name')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture()
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', [], total=2)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+                expect_check('runtime collector rejects a missing listing page',
+                             prepare_publication_runtime, str(event_path),
+                             expected='page 3 returned HTTP 404')
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     with tempfile.TemporaryDirectory(prefix='magit-lsp-binding-bundle-') as temporary:
         bundle = {
