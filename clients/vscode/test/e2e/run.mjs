@@ -72,6 +72,28 @@ const focusedF5 = suiteMode === "f5";
 const focusedDownload = suiteMode === "download";
 const focusedVsix = suiteMode === "vsix-install";
 const focusedCommands = suiteMode === "server-commands";
+const debugBinary = join(
+  root,
+  "target",
+  "debug",
+  `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+);
+const selectedServer = process.env.MAGIT_LSP_SERVER_PATH || debugBinary;
+function executableServer(command) {
+  if (!isAbsolute(command)) return false;
+  try {
+    accessSync(command, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (process.env.MAGIT_LSP_SERVER_PATH && !executableServer(process.env.MAGIT_LSP_SERVER_PATH)) {
+  console.error(
+    `FAIL e2e: MAGIT_LSP_SERVER_PATH must be an absolute executable file: ${process.env.MAGIT_LSP_SERVER_PATH}`,
+  );
+  process.exit(1);
+}
 const strictFocused =
   focusedEdit ||
   focusedHead ||
@@ -93,7 +115,7 @@ if (!process.env.DISPLAY) {
   );
   process.exit(strictFocused ? 1 : 0);
 }
-if (!existsSync(`${root}/target/debug/magit-lsp`)) {
+if (!process.env.MAGIT_LSP_SERVER_PATH && !existsSync(debugBinary)) {
   console.log(
     `${strictFocused ? "FAIL" : "skip"} e2e: missing target/debug/magit-lsp; run cargo build first`,
   );
@@ -140,7 +162,7 @@ writeFileSync(
     // pick a host binary; it resolves the seeded pinned release from the cache.
     ...(focusedDownload || focusedVsix || focusedCommands
       ? { "magit-lsp.server.source": "managed" }
-      : { "magit-lsp.server.path": `${root}/target/debug/magit-lsp` }),
+      : { "magit-lsp.server.path": selectedServer }),
   }),
 );
 writeFileSync(`${directory}/user/User/keybindings.json`, JSON.stringify(mirror, null, 2));
@@ -188,6 +210,7 @@ const env = Object.fromEntries(
     .map((key) => [key, process.env[key]]),
 );
 if (process.env.MAGIT_LSP_WIRELOG) env.MAGIT_LSP_WIRELOG = process.env.MAGIT_LSP_WIRELOG;
+if (process.env.MAGIT_LSP_SERVER_PATH) env.MAGIT_LSP_SERVER_PATH = selectedServer;
 if (process.env.MAGIT_VSCODE_A06_ONLY === "1") env.MAGIT_VSCODE_A06_ONLY = "1";
 if (process.env.MAGIT_VSCODE_A29_ONLY === "1") env.MAGIT_VSCODE_A29_ONLY = "1";
 if (process.env.MAGIT_VSCODE_A33_ONLY === "1") env.MAGIT_VSCODE_A33_ONLY = "1";
@@ -206,7 +229,7 @@ let downloadFixture;
 if (focusedDownload || focusedVsix || focusedCommands) {
   downloadFixture = await require("./download-startup.js").prepareDownloadCache({
     directory,
-    binary: `${root}/target/debug/magit-lsp`,
+    binary: selectedServer,
   });
   env.MAGIT_VSCODE_DOWNLOAD_EXPECTED = downloadFixture.executable;
   env.MAGIT_VSCODE_DOWNLOAD_CACHE = downloadFixture.cacheRoot;

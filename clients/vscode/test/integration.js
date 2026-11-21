@@ -14,6 +14,7 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { constants } = fs;
 const os = require("node:os");
 const path = require("node:path");
 const Module = require("node:module");
@@ -362,11 +363,48 @@ function loadExtension() {
 
 /** Run the scenario, reporting product output when an assertion fails. */
 async function run() {
-  const binary =
-    process.env.MAGIT_LSP_SERVER_PATH || path.resolve(here, "../../../target/debug/magit-lsp");
+  const defaultBinary = path.resolve(
+    here,
+    "../../../target/debug",
+    `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  function validateBinary(binary) {
+    if (!path.isAbsolute(binary)) throw new Error("MAGIT_LSP_SERVER_PATH must be absolute");
+    try {
+      fs.accessSync(binary, constants.X_OK);
+    } catch {
+      throw new Error(`MAGIT_LSP_SERVER_PATH must be an executable file: ${binary}`);
+    }
+    return binary;
+  }
+  assert.throws(() => validateBinary("relative/server"), /must be absolute/);
+  assert.throws(
+    () => validateBinary(path.join(os.tmpdir(), "missing-mag it-lsp")),
+    /executable file/,
+  );
+  const spacedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "magit lsp selected server "));
+  const spacedBinary = path.join(
+    spacedDirectory,
+    `server with spaces${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  fs.symlinkSync(defaultBinary, spacedBinary);
+  assert.equal(
+    validateBinary(spacedBinary),
+    spacedBinary,
+    "absolute executable paths with spaces are accepted",
+  );
+  fs.rmSync(spacedDirectory, { recursive: true, force: true });
+  const requestedBinary = process.env.MAGIT_LSP_SERVER_PATH;
+  let binary = requestedBinary ? validateBinary(requestedBinary) : defaultBinary;
   if (!fs.existsSync(binary)) {
     throw new Error(`missing ${binary}; run \`cargo build\` or \`make build\` first`);
   }
+  if (!requestedBinary) binary = validateBinary(binary);
+  assert.equal(
+    binary,
+    requestedBinary || defaultBinary,
+    "the selected absolute server path is retained",
+  );
 
   await automaticStartup(binary);
 
