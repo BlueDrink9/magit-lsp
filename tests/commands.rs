@@ -5,6 +5,7 @@ mod common;
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, EffectKind, Scope};
 use magit_lsp::config::Profile;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::protocol::{Cursor, EditDocumentMode, Effect, MessageLevel};
 
 /// Every command id named in TASKS.md §5.1–§5.5.
@@ -745,7 +746,10 @@ fn visit_reports_the_server_resolved_worktree_location() {
     let line = test.goto_text("f.txt", "line3 CHANGED");
     let outcome = test.invoke_at("common.visit", Cursor { line, column: 0 });
 
-    let uri = format!("file://{}/f.txt", tmp.path().display());
+    let uri = uri_from_path(&tmp.path().join("f.txt"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     assert_eq!(
         outcome.effects,
         vec![Effect::VisitFile {

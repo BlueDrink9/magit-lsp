@@ -3,6 +3,7 @@
 
 use magit_lsp::editor::draft::{Draft, DraftContext, MAX_DRAFT_BYTES};
 use magit_lsp::editor::{Reply, COMMIT_MESSAGE_KIND};
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::git::GitRepo;
 use magit_lsp::protocol::DraftFinishReason::{Confirm, NormalClose};
 use std::fs;
@@ -118,7 +119,12 @@ fn opaque_run_uri_and_helper_are_distinct_and_repository_bound() {
     assert_ne!(draft.run_id(), other.run_id());
     assert_ne!(draft.helper_token(), other.helper_token());
     assert_ne!(draft.run_id(), draft.helper_token());
-    assert_eq!(draft.uri(), format!("file://{}", first.target.display()));
+    assert_eq!(
+        draft.uri(),
+        uri_from_path(&first.target)
+            .expect("native path has a file URI")
+            .as_str()
+    );
     assert!(draft
         .uri()
         .contains(&first.repo.root().to_string_lossy().to_string()));

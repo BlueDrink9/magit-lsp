@@ -5,9 +5,11 @@ mod common;
 use common::stdio::TestServer;
 use common::*;
 use lsp_types::Position;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::status_view;
 use magit_lsp::tree::{NodeKind, Tree};
 use serde_json::{json, Value};
+use std::path::Path;
 
 fn line_of(
     tree: &Tree,
@@ -33,7 +35,10 @@ fn line_of(
 }
 
 fn file_uri(root: &str, path: &str) -> String {
-    format!("file://{root}/{path}")
+    uri_from_path(&Path::new(root).join(path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned()
 }
 
 #[test]
@@ -559,7 +564,7 @@ fn document_links_point_paths_at_worktree_files() {
         .expect("a link on the renamed file line");
     assert_eq!(
         link.target.as_ref().expect("file target").as_str(),
-        file_uri(&root, "renamed%20file.txt")
+        file_uri(&root, "renamed file.txt")
     );
     assert_eq!(link.range.start.character, 4);
     assert_eq!(

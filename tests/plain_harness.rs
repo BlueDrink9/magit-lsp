@@ -11,8 +11,10 @@ mod fixtures;
 mod stdio;
 use client_pump::ClientPump;
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 use std::fs;
+use std::path::Path;
 
 fn caps() -> Value {
     json!({"window":{"workDoneProgress":true},"general":{"positionEncodings":["utf-8","utf-16","utf-32"]}})
@@ -986,7 +988,10 @@ fn plain_did_open_apply_edit_is_pumped_and_echoed() {
         .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel\n");
-    let uri = format!("file://{}", path.display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN).strict();
     let mut client =
         ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
@@ -1576,7 +1581,10 @@ fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
 }
 
 fn plain_gate_open(repo: &fixtures::RepoFixture) -> (ClientPump, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     // Like plain_e2e, accept the command's opaque response payload. All editor
     // interaction must still use standard LSP, not custom requests/notices.
     let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
@@ -1756,7 +1764,10 @@ fn plain_selection_navigation_waits_for_success_and_ignores_invalid_edits() {
                 .commit("unselected tip", [("f.txt", "tip\n")])
                 .staged_file("f.txt", "fixup content\n")
                 .build();
-            let uri = format!("file://{}/.magit", repo.path().display());
+            let uri = uri_from_path(&repo.path().join(".magit"))
+                .expect("native path has a file URI")
+                .as_str()
+                .to_owned();
             let mut capabilities =
                 editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities();
             capabilities["window"]["showDocument"] = json!({"support":outcome != "unsupported"});
@@ -2113,7 +2124,10 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
         .modify("f.txt", &changed)
         .build();
     let head = repo.git(&["rev-parse", "HEAD"]);
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN)
         .with_module(editor_model::EXTRA_DECLARATIONS);
     let mut client =
@@ -2213,7 +2227,10 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
         .clone();
     assert!(execute_plain_action(&mut client, create)["error"].is_null());
     let draft_path = repo.path().join(".git/COMMIT_EDITMSG");
-    let draft_uri = format!("file://{}", draft_path.display());
+    let draft_uri = uri_from_path(&draft_path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     client.until(|c| {
         c.editor.outbound.iter().any(|message| {
             message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
@@ -2281,7 +2298,10 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             .modify_standard()
             .build();
         let head = repo.git(&["rev-parse", "HEAD"]);
-        let uri = format!("file://{}/.magit", repo.path().display());
+        let uri = uri_from_path(&repo.path().join(".magit"))
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         let mut capabilities = caps();
         capabilities["workspace"] =
             json!({"applyEdit":true,"workspaceEdit":{"documentChanges":true}});
@@ -2343,7 +2363,10 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             .join(".git/COMMIT_EDITMSG")
             .to_string_lossy()
             .to_string();
-        let expected_uri = format!("file://{expected_path}");
+        let expected_uri = uri_from_path(Path::new(&expected_path))
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         client.until(|c| c.editor.text(&uri).contains(&expected_uri));
         assert!(
             client
@@ -2536,7 +2559,9 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             let request = requests[0];
             assert_eq!(
                 request["params"]["uri"],
-                format!("file://{expected_path}"),
+                uri_from_path(Path::new(&expected_path))
+                    .expect("native path has a file URI")
+                    .as_str(),
                 "{case}"
             );
             assert_eq!(request["params"]["external"], false, "{case}");
@@ -2634,7 +2659,10 @@ fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
         .build();
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut capabilities = caps();
     capabilities["workspace"] = json!({"applyEdit":true,"workspaceEdit":{"documentChanges":true}});
     capabilities["textDocument"] = json!({"codeAction":{}});
@@ -2689,7 +2717,10 @@ fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     client.until(|c| c.editor.text(&uri).contains(&expected_uri));
     let token = client
         .server

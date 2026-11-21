@@ -9,7 +9,9 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 fn caps(show_document: bool) -> Value {
@@ -57,15 +59,17 @@ fn open_plain_inner(
     extra_env: &[(&str, &str)],
     client_name: Option<&str>,
 ) -> (stdio::TestServer, FakeEditor, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(extra_env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = capabilities;
     if let Some(client_name) = client_name {
         init["params"]["clientInfo"] = json!({"name":client_name});
     }
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     let initialized = server.response_with_id(1);
     assert!(
@@ -393,7 +397,10 @@ fn start_open_draft(
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let draft_uri = format!("file://{expected_path}");
+    let draft_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let create = prepare_commit(server, editor, &draft_uri, seen, status_uri);
     assert!(execute_action(server, editor, &draft_uri, seen, create, 95)["error"].is_null());
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -509,7 +516,10 @@ fn open_plain_commit_buffer_is_replaced_before_show_document() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let stale = "Previous commit message\n";
     // The client opened this buffer before the new run issued its template.
     server.send(editor.open(&expected_uri, stale));
@@ -589,7 +599,10 @@ fn rejected_draft_template_edit_is_reported_and_cancels_the_run() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let draft_uri = format!("file://{expected_path}");
+    let draft_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let stale = "Previous commit message\n";
     // The client opened this buffer before the new run issued its template.
     server.send(editor.open(&draft_uri, stale));
@@ -1513,7 +1526,10 @@ fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
     let edited = "Kept body\n";
     server.send(editor.edit(&draft_uri, edited));
 
-    let unrelated = format!("file://{}/unrelated.txt", repo.path().display());
+    let unrelated = uri_from_path(&repo.path().join("unrelated.txt"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":unrelated,"languageId":"plaintext","version":1,"text":"unrelated\n"}}}));
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":unrelated,"version":2},"contentChanges":[{"text":"changed\n"}]}}));
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":unrelated}}}));
@@ -1563,7 +1579,10 @@ fn unopened_plain_commit_buffer_is_only_shown() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
@@ -1620,7 +1639,10 @@ fn manual_plain_commit_instructions_have_no_apply_edit() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
@@ -1677,7 +1699,10 @@ fn manual_preopened_draft_attaches_on_exact_template_echo() {
         caps(false),
         &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "800")],
     );
-    let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", repo.path().display());
+    let draft_uri = uri_from_path(&repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     server.send(editor.open(&draft_uri, "Previous message\n"));
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
@@ -1752,7 +1777,10 @@ fn commit_menu_is_offered_after_a_queued_status_render_is_released() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let draft_uri = format!("file://{expected_path}");
+    let draft_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut seen = Vec::new();
 
     // Stage f.txt and wait until the synced document offers open.commit.
@@ -1942,7 +1970,10 @@ fn unopened_plain_commit_draft_expires_and_allows_retry() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
@@ -2006,7 +2037,10 @@ fn opened_plain_commit_draft_is_not_expired() {
         .join(".git/COMMIT_EDITMSG")
         .to_string_lossy()
         .to_string();
-    let expected_uri = format!("file://{expected_path}");
+    let expected_uri = uri_from_path(Path::new(&expected_path))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
 
     let mut seen = Vec::new();
     let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
@@ -2188,7 +2222,10 @@ fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeo
             .join(".git/COMMIT_EDITMSG")
             .to_string_lossy()
             .to_string();
-        let draft_uri = format!("file://{expected_path}");
+        let draft_uri = uri_from_path(Path::new(&expected_path))
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         server.send(editor.open(&draft_uri, "Previous commit message\n"));
 
         let mut seen = Vec::new();
@@ -2252,7 +2289,10 @@ fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
             .join(".git/COMMIT_EDITMSG")
             .to_string_lossy()
             .to_string();
-        let draft_uri = format!("file://{expected_path}");
+        let draft_uri = uri_from_path(Path::new(&expected_path))
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         server.send(editor.open(&draft_uri, "Previous commit message\n"));
 
         let mut seen = Vec::new();
