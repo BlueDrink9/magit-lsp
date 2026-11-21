@@ -583,6 +583,83 @@ async function run() {
     }
   }
 
+  await check("artifact acquisition seeds the unchanged archive through the helper", async () => {
+    const directory = temporaryRoot();
+    const inputs = path.join(directory, "inputs");
+    fs.mkdirSync(inputs);
+    try {
+      const archiveName = archiveNameOf();
+      const archive = packagedArchive(BINARY);
+      const artifact = path.join(inputs, archiveName);
+      fs.writeFileSync(artifact, archive);
+      fs.writeFileSync(`${artifact}.sha256`, `${digest(archive)}  ${archiveName}\n`);
+      fs.writeFileSync(
+        path.join(inputs, "manifest.json"),
+        JSON.stringify({
+          target: ASSET,
+          version: VERSION,
+          archive_sha256: digest(archive),
+          executable_sha256: digest(BINARY),
+        }),
+      );
+      const helper = require("./e2e/download-startup.js");
+      const result = await helper.prepareDownloadCache({
+        directory,
+        artifact,
+        manifest: path.join(inputs, "manifest.json"),
+      });
+      assert.equal(result.archiveHash, digest(archive));
+      assert.equal(result.executableHash, digest(BINARY));
+      assert.deepEqual(fs.readFileSync(result.executable), BINARY);
+      assert.equal(
+        fs.readFileSync(artifact).equals(archive),
+        true,
+        "resolver input archive remains unchanged",
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  await check("artifact helper rejects absent and manifest-mismatched inputs", async () => {
+    const directory = temporaryRoot();
+    try {
+      const helper = require("./e2e/download-startup.js");
+      await assert.rejects(
+        helper.prepareDownloadCache({ directory, binary: BINARY, manifest: "missing" }),
+      );
+      const archive = packagedArchive(BINARY);
+      const artifact = path.join(directory, archiveNameOf());
+      fs.writeFileSync(artifact, archive);
+      fs.writeFileSync(`${artifact}.sha256`, `${digest(archive)}  ${archiveNameOf()}\n`);
+      const manifestPath = path.join(directory, "manifest.json");
+      const manifest = {
+        target: ASSET,
+        version: VERSION,
+        archive_sha256: digest(archive),
+        executable_sha256: digest(BINARY),
+      };
+      for (const changed of [
+        { ...manifest, target: "aarch64-apple-darwin" },
+        { ...manifest, version: "0.0.0" },
+        { ...manifest, archive_sha256: "0".repeat(64) },
+        { ...manifest, executable_sha256: "0".repeat(64) },
+      ]) {
+        fs.writeFileSync(manifestPath, JSON.stringify(changed));
+        await assert.rejects(
+          helper.prepareDownloadCache({ directory, artifact, manifest: manifestPath }),
+        );
+      }
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+      fs.writeFileSync(artifact, Buffer.concat([archive, Buffer.from("changed")]));
+      await assert.rejects(
+        helper.prepareDownloadCache({ directory, artifact, manifest: manifestPath }),
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   await check("downloads, verifies and caches the exact released binary", async () => {
     const root = temporaryRoot();
     try {

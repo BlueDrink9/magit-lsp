@@ -230,9 +230,15 @@ if (focusedDownload || focusedVsix || focusedCommands) {
   downloadFixture = await require("./download-startup.js").prepareDownloadCache({
     directory,
     binary: selectedServer,
+    artifact: process.env.RELEASE_ARTIFACT,
+    manifest: process.env.RELEASE_MANIFEST,
+    sidecar: process.env.RELEASE_SIDECAR,
   });
   env.MAGIT_VSCODE_DOWNLOAD_EXPECTED = downloadFixture.executable;
   env.MAGIT_VSCODE_DOWNLOAD_CACHE = downloadFixture.cacheRoot;
+  if (downloadFixture.archiveHash) env.MAGIT_VSCODE_ARCHIVE_SHA256 = downloadFixture.archiveHash;
+  if (downloadFixture.executableHash)
+    env.MAGIT_VSCODE_CACHE_EXECUTABLE_SHA256 = downloadFixture.executableHash;
 }
 
 /**
