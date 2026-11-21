@@ -2126,5 +2126,93 @@
         }
       }
     }
+  },
+  "contributions": {
+    "semanticTokenTypes": [
+      {
+        "id": "heading",
+        "description": "Title"
+      },
+      {
+        "id": "muted",
+        "description": "Comment"
+      },
+      {
+        "id": "added",
+        "description": "Added"
+      },
+      {
+        "id": "removed",
+        "description": "Removed"
+      },
+      {
+        "id": "changed",
+        "description": "Changed"
+      },
+      {
+        "id": "path",
+        "description": "Directory"
+      },
+      {
+        "id": "identifier",
+        "description": "Identifier"
+      },
+      {
+        "id": "ref",
+        "description": "Constant"
+      },
+      {
+        "id": "key",
+        "description": "Keyword"
+      },
+      {
+        "id": "warning",
+        "description": "WarningMsg"
+      },
+      {
+        "id": "error",
+        "description": "ErrorMsg"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "magit",
+        "scopes": {
+          "heading": [
+            "entity.name.section"
+          ],
+          "muted": [
+            "comment"
+          ],
+          "added": [
+            "markup.inserted"
+          ],
+          "removed": [
+            "markup.deleted"
+          ],
+          "changed": [
+            "markup.changed"
+          ],
+          "path": [
+            "entity.name.filename"
+          ],
+          "identifier": [
+            "entity.name"
+          ],
+          "ref": [
+            "entity.name.tag"
+          ],
+          "key": [
+            "keyword.other"
+          ],
+          "warning": [
+            "message.warning"
+          ],
+          "error": [
+            "message.error"
+          ]
+        }
+      }
+    ]
   }
 }
