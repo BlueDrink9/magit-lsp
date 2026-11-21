@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createServer } from "node:net";
 const root = resolve(import.meta.dirname, "../../../..");
 if (process.argv[2] === "--cdp") {
@@ -178,7 +179,9 @@ async function lifecycle() {
         throw new Error("Missing actual deactivation");
       if (action !== "close-window") {
         const resumed = events.find((e) => e.event === "lifecycle-reactivated");
-        const workspace = `file://${dir}/${action === "workspace-change" ? "other-workspace" : "repo"}`;
+        const workspace = pathToFileURL(
+          resolve(dir, action === "workspace-change" ? "other-workspace" : "repo"),
+        ).href;
         if (!resumed?.workspace?.includes(workspace))
           throw new Error("Unexpected reactivated workspace");
       }

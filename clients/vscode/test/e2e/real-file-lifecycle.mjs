@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createServer } from "node:net";
 
 const root = resolve(fileURLToPath(new URL("../../../..", import.meta.url)));
@@ -203,11 +203,10 @@ try {
           "saved editor text survives native close",
         );
       } else {
-        assert(
-          json(`${base}/resumed.json`).workspace.includes(
-            `file://${base}/${action === "workspace-change" ? "other-workspace" : "repo"}`,
-          ),
-        );
+        const workspace = pathToFileURL(
+          resolve(base, action === "workspace-change" ? "other-workspace" : "repo"),
+        ).href;
+        assert(json(`${base}/resumed.json`).workspace.includes(workspace));
         if (action === "reload-window")
           await wait(
             () => existsSync(`${base}/fresh.json`),
