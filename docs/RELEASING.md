@@ -92,38 +92,24 @@ make release-artifact-check
 
 `release-locked` runs the workflow's exact locked build
 (`cargo build --release --locked --target x86_64-unknown-linux-gnu`).
-`release-artifact-check` depends on it, then packages
+`release-artifact-check` depends on it, then validates the run-bound identity
+(target, original ref, version, source SHA, event, run id/attempt), writes the
+explicit provenance record and packages
 `target/x86_64-unknown-linux-gnu/release/magit-lsp` with
-`scripts/package-release.sh`, validates the archive/sidecar set offline
-(`--validate-artifacts`) and runs the release suite with
-`MAGIT_LSP_TEST_BINARY` set, so the actual-binary package/install/launch case
-runs instead of skipping. `dist/` must contain only the current version's
-archive and sidecar.
+`scripts/package-release.sh` into `build/release/artifacts`, validates the
+archive/sidecar set offline (`--validate-artifacts`) and writes the run manifest
+with its external digest under `build/release/`. Packaging never executes the
+binary; native runtime validation consumes the archive separately. The
+protected `dist/` directory is never a pipeline output.
 
-When the exact pin is unavailable, an explicit local mode uses the installed
-compiler and never downloads one:
+The strict Rust 1.94.1 pin is the only release build: there is no
+installed-compiler or `--local` alias. A missing pin fails readably, and no
+target downloads or installs Rust.
 
-```sh
-make release-local
-make release-artifact-check-local
-```
-
-`release-local` runs `python3 scripts/check_release_pipeline.py build --local`,
-which prints the actual `rustc`/`cargo` versions it used, and
-`release-artifact-check-local` packages, validates and smoke-tests the same
-`target/x86_64-unknown-linux-gnu/release/magit-lsp` through the shared artifact
-path. This is local toolchain evidence only: it does not reproduce the hosted
-Rust 1.94.1 build or the Ubuntu 22.04 glibc 2.35 baseline, and CI keeps the
-strict pin with no `--local` fallback.
-
-The pinned targets and their local variants run
-`scripts/check_release_pipeline.py`, the script
+Those pinned targets run `scripts/check_release_pipeline.py`, the script
 `.github/workflows/release.yml` invokes, so there is no CI-only build or
 packaging path. The pinned build requires exactly Rust 1.94.1: another
 toolchain fails with the found version and a request to provide the pin.
-`--local` is an explicit opt-in to the installed compiler, never a fallback:
-no target downloads or installs Rust, and the flake dev shell's newer Rust is
-not silently substituted.
 Use the matching Cargo/extension version (0.2.0); the packager checks both and
 the supplied binary's `--version`. `RELEASE_VERSION` reaches packaging from the
 workflow's `--validate-release-ref` step, which writes it to `$GITHUB_ENV`;
@@ -258,8 +244,9 @@ syntax, expression and `run:` shell lint over every workflow),
 pinned build/artifact handoff and Cargo packaging) and
 `make release-contract-check` (shellcheck plus the offline release suite). Two
 more reproduce the build side locally without publishing: `release-locked` and
-`release-artifact-check` above, plus the explicit installed-compiler
-`release-local` and `release-artifact-check-local`.
+`release-artifact-check` above. The no-build `release-automation-unit` runs the
+static workflow/pipeline guards and their fixture self-tests without Cargo
+metadata or package.
 
 In `.github/workflows/ci.yml`, the `native-test` matrix keeps the
 `windows-2025` (`x86_64-pc-windows-msvc`) lane explicitly informational: only

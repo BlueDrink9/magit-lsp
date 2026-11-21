@@ -115,7 +115,15 @@ def execute() -> None:
         (registry_dir / "checksums.txt").write_text(
             hashlib.sha256(registry_json).hexdigest() + "  registry.json\n")
         dist = base / "dist"
-        run(["sh", "scripts/package-release.sh", "0.2.0", str(ROOT / "target/debug/magit-lsp"), str(dist)], cwd=ROOT, env=env)
+        binary = ROOT / "target/debug/magit-lsp"
+        provenance = base / "provenance.json"
+        provenance.write_text(json.dumps({
+            "version": "0.2.0",
+            "target": "x86_64-unknown-linux-gnu",
+            "executable_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        }), encoding="utf-8")
+        run(["sh", "scripts/package-release.sh", "0.2.0", str(binary), str(dist),
+             "x86_64-unknown-linux-gnu", str(provenance)], cwd=ROOT, env=env)
         asset = spec["source"]["asset"][0]["file"]
         served = web / "bluedrink9/magit-lsp/v0.2.0" / asset
         served.parent.mkdir(parents=True)

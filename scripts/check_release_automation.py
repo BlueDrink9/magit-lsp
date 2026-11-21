@@ -17,10 +17,14 @@ jobs. The default mode also verifies that the build workflow and the local
 `make release-locked`/`release-artifact-check` targets share one pinned
 release pipeline script, and runs fixture-driven self-tests of those decision
 points, so the rejections are exercised rather than only described.
+``--automation-unit`` runs only the static workflow/pipeline guards and their
+fixtures, with no Cargo metadata or package, so it is usable in a tools-only
+shell.
 """
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -44,9 +48,12 @@ PIPELINE = Path('scripts/check_release_pipeline.py')
 # artifact paths the workflow may use.
 RELEASE_TOOLCHAIN = '1.94.1'
 PIPELINE_BUILD = 'python3 scripts/check_release_pipeline.py build'
+# The removed local-compiler alias is retained only as a forbidden fixture, so
+# the workflow and Makefile guards can prove they still refuse it.
 PIPELINE_BUILD_LOCAL = 'python3 scripts/check_release_pipeline.py build --local'
 PIPELINE_BUILD_NATIVE = 'python3 scripts/check_release_pipeline.py build-native'
 PIPELINE_CHECK = 'python3 scripts/check_release_automation.py --pipeline-self-tests'
+PIPELINE_AUTOMATION_UNIT = 'python3 scripts/check_release_automation.py --automation-unit'
 PIPELINE_ARTIFACTS = 'python3 scripts/check_release_pipeline.py artifacts'
 # The no-build release contract entry point selects these methods explicitly;
 # the optional real-binary smoke needs an actual artifact and must stay out.
@@ -65,6 +72,7 @@ OFFLINE_RELEASE_TESTS = (
 )
 REAL_BINARY_TEST = 'test_real_binary_package_install_launch'
 RELEASE_CONTRACT_UNIT = 'release-contract-unit'
+RELEASE_AUTOMATION_UNIT = 'release-automation-unit'
 BUILD_WORKFLOW_PATH = '.github/workflows/release.yml'
 BUILD_WORKFLOW_NAME = 'Release artifact build (no publication)'
 API_ROOT = 'https://api.github.com'
@@ -513,9 +521,10 @@ def load_pipeline(path=PIPELINE):
 def pipeline_violations(module, environment):
     """Return the contract violations of a release pipeline module.
 
-    ``environment`` supplies the PATH the local mode reads, so the self-tests can
-    prove with a fixture toolchain that local mode uses the installed compiler
-    while the pinned mode still rejects a wrong version.
+    ``environment`` supplies the PATH the strict pinned probe reads, so the
+    self-tests can prove the fixture toolchain is still rejected. The module must
+    keep one strict build, separate packaging from native execution and offer no
+    permissive local compiler alias.
     """
     problems = []
     if getattr(module, 'TOOLCHAIN', None) != RELEASE_TOOLCHAIN:
@@ -527,33 +536,48 @@ def pipeline_violations(module, environment):
     if module.build_command(['cargo']) != expected_build:
         problems.append(f'build command is {module.build_command(["cargo"])!r}, '
                         f'expected {expected_build!r}')
+    source = inspect.getsource(module)
+    if '--local' in source:
+        problems.append('the pipeline must not offer a permissive --local build mode')
+    for removed in ('installed_compiler', 'installed_prefix', 'compiler_for'):
+        if removed in source:
+            problems.append(f'the pipeline must not keep the local build path {removed}')
     try:
-        local = module.compiler_for(True, environment)
-    except module.PipelineError:
-        problems.append('local mode must use the installed compiler without a pin')
-    else:
-        if local != ['cargo']:
-            problems.append(f'local compiler prefix is {local!r}, expected the '
-                            'installed cargo')
-    try:
-        pinned = module.compiler_for(False, environment)
+        pinned = module.compiler(environment)
     except module.PipelineError:
         pass
     else:
         if pinned != ['cargo', f'+{RELEASE_TOOLCHAIN}'] and pinned != ['cargo']:
             problems.append(f'pinned compiler prefix is {pinned!r}, expected the '
                             f'{RELEASE_TOOLCHAIN} pin')
-    steps, environment_vars = module.artifact_commands('1.2.3', 'binary', 'dist')
-    if steps[:1] != [['sh', 'scripts/package-release.sh', '1.2.3', 'binary', 'dist']]:
-        problems.append('artifact steps must package the explicit binary with '
-                        'scripts/package-release.sh')
-    if len(steps) < 3 or steps[1][-2:] != ['--validate-artifacts', 'dist']:
+    plan = {
+        'identity': {'version': '1.2.3', 'target': ASSET},
+        'binary': 'binary',
+        'output': 'build/release/artifacts',
+        'provenance_path': 'build/release/provenance.json',
+    }
+    steps, environment_vars = module.artifact_commands(plan)
+    expected_package = ['sh', 'scripts/package-release.sh', '1.2.3', 'binary',
+                        'build/release/artifacts', ASSET,
+                        'build/release/provenance.json']
+    if not steps or steps[0] != expected_package:
+        problems.append('artifact steps must package the explicit binary with its '
+                        'target and provenance record')
+    if len(steps) != 2 or steps[1][-2:] != ['--validate-artifacts',
+                                           'build/release/artifacts']:
         problems.append('artifact steps must validate the archive set offline')
-    if len(steps) < 3 or steps[-1][1:4] != ['-m', 'unittest', 'discover']:
-        problems.append('artifact steps must run the release suite')
-    if environment_vars.get('MAGIT_LSP_TEST_BINARY') != 'binary':
-        problems.append('artifact environment must hand the binary to '
-                        'MAGIT_LSP_TEST_BINARY')
+    if environment_vars != {'PYTHONDONTWRITEBYTECODE': '1'}:
+        problems.append('artifact steps must not hand the binary to a runtime test')
+    for step in steps:
+        joined = ' '.join(step)
+        for forbidden in ('cargo', 'unittest', 'MAGIT_LSP_TEST_BINARY'):
+            if forbidden in joined:
+                problems.append(f'artifact step must not run {forbidden}')
+    for name in ('validate_identity', 'resolve_identity', 'verify_source',
+                 'package_plan', 'release_manifest', 'manifest_digest',
+                 'write_manifest'):
+        if not callable(getattr(module, name, None)):
+            problems.append(f'the pipeline is missing {name}')
     if getattr(module, 'NATIVE_CC', None) != '/usr/bin/cc':
         problems.append('the experimental native lane must use the host /usr/bin/cc')
     if getattr(module, 'NATIVE_LINKER_VARIABLE', None) != \
@@ -613,15 +637,20 @@ def make_recipe(lines, number):
 
 
 def check_local_pipeline(path=MAKEFILE):
-    """The Make targets must run the same pipeline script as the workflow."""
+    """The Make targets must share the pipeline and offer no local build alias."""
     lines = read_lines(path)
+    for removed in ('release-local', 'release-artifact-check-local'):
+        if any(line.startswith(removed + ':') for line in lines):
+            fail(f'Makefile: {removed} is a prohibited local build alias')
+    for line in lines:
+        if line.startswith('\t') and 'check_release_pipeline.py build --local' in line:
+            fail('Makefile: the pipeline must not offer a permissive local build')
     for target, command in (
         ('release-locked', PIPELINE_BUILD),
         ('release-artifact-check', PIPELINE_ARTIFACTS),
-        ('release-local', PIPELINE_BUILD_LOCAL),
-        ('release-artifact-check-local', PIPELINE_ARTIFACTS),
         ('release-native-build', PIPELINE_BUILD_NATIVE),
         ('release-pipeline-check', PIPELINE_CHECK),
+        ('release-automation-unit', PIPELINE_AUTOMATION_UNIT),
     ):
         number = next((index for index, line in enumerate(lines, 1)
                        if line.startswith(target + ':')), None)
@@ -631,7 +660,22 @@ def check_local_pipeline(path=MAKEFILE):
         if not any(command in line for line in recipe):
             fail(f'Makefile: {target} must run {command!r}')
     find_line(lines, 'release-artifact-check: release-locked', 'Makefile')
-    find_line(lines, 'release-artifact-check-local: release-local', 'Makefile')
+
+
+def check_automation_unit(path=MAKEFILE):
+    """`release-automation-unit` must run the static self-tests without Cargo."""
+    lines = read_lines(path)
+    number = next((index for index, line in enumerate(lines, 1)
+                   if line.startswith(RELEASE_AUTOMATION_UNIT + ':')), None)
+    if number is None:
+        fail(f'Makefile: missing {RELEASE_AUTOMATION_UNIT}')
+    recipe = '\n'.join(make_recipe(lines, number))
+    if PIPELINE_AUTOMATION_UNIT not in recipe:
+        fail(f'Makefile: {RELEASE_AUTOMATION_UNIT} must run '
+             f'{PIPELINE_AUTOMATION_UNIT!r}')
+    for forbidden in ('cargo', 'release-locked', 'release-native-build', '--release'):
+        if forbidden in recipe:
+            fail(f'Makefile: {RELEASE_AUTOMATION_UNIT} must not run {forbidden!r}')
 
 
 def check_contract_unit(path=MAKEFILE):
@@ -985,8 +1029,8 @@ def write_fake_toolchain(directory):
     """Write installed-looking cargo/rustc stubs and return their environment.
 
     The stubs report versions unlike the release pin and refuse the ``+1.94.1``
-    probe, so a fixture can prove local mode accepts the installed compiler while
-    the pinned CI mode still rejects it.
+    probe, so a fixture can prove the strict pinned mode still rejects a foreign
+    compiler.
     """
     root = Path(directory) / 'toolchain-bin'
     root.mkdir(parents=True, exist_ok=True)
@@ -1090,10 +1134,12 @@ def run_pipeline_self_tests():
         if problems:
             fail('release pipeline: ' + '; '.join(problems))
 
-        # Wiring: the local targets run the shared script; the native target is
-        # explicit and the contract unit selects only offline cases.
+        # Wiring: the shared targets run the same script; the native target is
+        # explicit, the contract unit selects only offline cases and the
+        # automation unit stays Cargo-free.
         check_local_pipeline()
         check_contract_unit()
+        check_automation_unit()
         for label, mutations in (
             ('Makefile without the native build target',
              ((PIPELINE_BUILD_NATIVE, 'true', None),)),
@@ -1101,12 +1147,21 @@ def run_pipeline_self_tests():
              ((PIPELINE_CHECK, 'true', None),)),
             ('Makefile without the pinned build target',
              ((PIPELINE_BUILD, 'cargo build --release', None),)),
-            ('Makefile local target without --local',
-             ((PIPELINE_BUILD_LOCAL, PIPELINE_BUILD, None),)),
+            ('Makefile reintroducing the local build target',
+             (('release-locked:\n',
+               'release-local:\n'
+               '\tpython3 scripts/check_release_pipeline.py build --local\n'
+               'release-locked:\n', 1),)),
         ):
             expect_check(label, check_local_pipeline,
                          mutated_file(MAKEFILE, directory, label, mutations),
                          expected='Makefile:')
+        expect_check(
+            'Makefile with a Cargo automation unit', check_automation_unit,
+            mutated_file(MAKEFILE, directory, 'Makefile with a Cargo automation unit',
+                         ((PIPELINE_AUTOMATION_UNIT,
+                           f'{PIPELINE_AUTOMATION_UNIT} && cargo metadata', None),)),
+            expected=RELEASE_AUTOMATION_UNIT)
         expect_check(
             'Makefile with broad contract discovery', check_contract_unit,
             mutated_file(MAKEFILE, directory, 'Makefile with broad contract discovery',
@@ -1123,18 +1178,16 @@ def run_pipeline_self_tests():
                            f'tests.release.test_release.ReleaseTests.{REAL_BINARY_TEST}', 1),)),
             expected=RELEASE_CONTRACT_UNIT)
 
-        # The shared script keeps the locked flags and the binary handoff, and
-        # the experimental lane keeps its explicit native linker identity.
+        # The shared script keeps the locked flags and the single strict build,
+        # and the experimental lane keeps its explicit native linker identity.
         for label, mutations, expected in (
             ('pipeline without --locked',
              (("'--locked', ", '', None),), 'build command is'),
-            ('pipeline without the binary handoff',
-             (("'MAGIT_LSP_TEST_BINARY': str(binary),", '', None),),
-             'MAGIT_LSP_TEST_BINARY'),
-            ('pipeline local mode forcing the pinned toolchain',
-             (('return installed_compiler(environment) if local else '
-               'compiler(environment)', 'return compiler(environment)', None),),
-             'local mode must use'),
+            ('pipeline reintroducing a local build alias',
+             (("    parser.add_argument('--target', default='',",
+               "    parser.add_argument('--local', action='store_true')\n"
+               "    parser.add_argument('--target', default='',", 1),),
+             'permissive --local'),
             ('pipeline without the explicit native linker variable',
              (("NATIVE_LINKER_VARIABLE = "
                "'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER'",
@@ -1154,15 +1207,122 @@ def run_pipeline_self_tests():
             if not any(expected in problem for problem in problems):
                 fail(f'self-test: {label} was accepted')
 
-        # The strict 1.94.1 fallback is unchanged: its command still carries the
-        # locked target build and the pinned mode still refuses a foreign rustc.
+        # The strict 1.94.1 fallback is unchanged and is the only build: its
+        # command keeps the locked target build, refuses a foreign rustc and the
+        # module exposes no installed-compiler path.
         expected_pinned = ['cargo', '+1.94.1', 'build', '--release', '--locked',
                            '--target', ASSET]
         if pipeline.build_command(['cargo', '+1.94.1']) != expected_pinned:
             fail('self-test: the strict pinned fallback build command changed')
         expect_pipeline_error(pipeline, 'pinned fallback accepting a foreign toolchain',
-                              pipeline.compiler_for, False, toolchain,
+                              pipeline.compiler, toolchain,
                               expected='pinned release build needs')
+        for removed in ('compiler_for', 'installed_compiler', 'installed_prefix'):
+            if hasattr(pipeline, removed):
+                fail(f'self-test: the pipeline still exposes {removed}')
+
+        # Separate package planning: a valid exact identity is accepted and a
+        # missing or contradictory target/ref/version/source is refused before
+        # the packager runs. The manifest binds the run identity and the archive
+        # and executable digests; its digest stays outside the payload.
+        version = pipeline.manifest_version()
+        identity = {
+            'target': ASSET,
+            'original_ref': f'refs/tags/v{version}',
+            'version': version,
+            'source_sha': SELF_TEST_SHA,
+            'event': 'push',
+            'run_id': '123456',
+            'run_attempt': '1',
+        }
+        fake_binary = directory / 'magit-lsp'
+        fake_binary.write_bytes(b'fixture release binary bytes')
+        output = directory / 'artifacts'
+        plan = pipeline.package_plan(identity, binary=str(fake_binary),
+                                     output=str(output))
+        expected_sha = hashlib.sha256(fake_binary.read_bytes()).hexdigest()
+        if plan['identity'] != identity:
+            fail('self-test: package planning must normalize the exact identity')
+        if plan['provenance'] != {'version': version, 'target': ASSET,
+                                  'executable_sha256': expected_sha}:
+            fail('self-test: package planning must bind the explicit provenance')
+        steps, step_environment = pipeline.artifact_commands(plan)
+        if steps[0] != ['sh', 'scripts/package-release.sh', version,
+                        str(fake_binary), str(output.resolve()), ASSET,
+                        plan['provenance_path']]:
+            fail(f'self-test: package step is {steps[0]!r}')
+        if len(steps) != 2 or steps[1][-2:] != ['--validate-artifacts',
+                                               str(output.resolve())]:
+            fail('self-test: packaging must validate the archive set offline')
+        if step_environment != {'PYTHONDONTWRITEBYTECODE': '1'}:
+            fail('self-test: packaging must not hand the binary to a test process')
+        for step in steps:
+            if any(part in ' '.join(step) for part in
+                   ('cargo', 'unittest', 'MAGIT_LSP_TEST_BINARY')):
+                fail('self-test: packaging steps must not compile or execute')
+        for key in pipeline.REQUIRED_IDENTITY:
+            incomplete = dict(identity)
+            incomplete.pop(key)
+            expect_pipeline_error(
+                pipeline, f'package identity without {key}',
+                pipeline.validate_identity, incomplete, expected=key)
+        for label, broken, expected in (
+            ('package identity with an unsupported target',
+             dict(identity, target='aarch64-unknown-linux-gnu'), 'unsupported'),
+            ('package identity with a contradictory tag ref',
+             dict(identity, original_ref='refs/tags/v9.9.9'), 'does not name'),
+            ('package identity with a malformed version',
+             dict(identity, version='1.2'), 'stable X.Y.Z'),
+            ('package identity with a contradictory manifest version',
+             dict(identity, version='9.9.9'), 'manifest version'),
+            ('package identity with a malformed source',
+             dict(identity, source_sha='not-a-sha'), 'full commit SHA'),
+        ):
+            expect_pipeline_error(pipeline, label, pipeline.validate_identity,
+                                  broken, expected=expected)
+        expect_pipeline_error(
+            pipeline, 'package identity from a foreign source',
+            lambda: pipeline.verify_source(
+                dict(identity, source_sha=SELF_TEST_OTHER_SHA), {},
+                probe=fake_native_probe([])),
+            expected='does not match the checked-out source')
+        pipeline.verify_source(identity, {}, probe=fake_native_probe([]))
+        expect_pipeline_error(
+            pipeline, 'package planning into the protected dist directory',
+            lambda: pipeline.package_plan(identity, binary=str(fake_binary),
+                                          output=str(pipeline.ROOT / 'dist')),
+            expected='protected output')
+        archive_sha = 'c' * 64
+        manifest = pipeline.release_manifest(plan, archive_sha)
+        for field in ('source_sha', 'original_ref', 'event', 'run_id',
+                      'run_attempt', 'version', 'lock_hashes', 'target',
+                      'toolchain', 'archive_sha256', 'executable_sha256'):
+            if not manifest.get(field):
+                fail(f'self-test: release manifest is missing {field!r}')
+        if manifest['source_sha'] != SELF_TEST_SHA or \
+                manifest['original_ref'] != identity['original_ref']:
+            fail('self-test: release manifest must bind the source and original ref')
+        if set(manifest['lock_hashes']) != {'Cargo.lock', 'flake.lock',
+                                           'clients/vscode/pnpm-lock.yaml'}:
+            fail('self-test: release manifest must hash Cargo, flake and pnpm locks')
+        if manifest['executable_sha256'] != expected_sha or \
+                manifest['archive_sha256'] != archive_sha:
+            fail('self-test: release manifest must bind archive and executable hashes')
+        if 'manifest_sha256' in manifest or 'digest' in manifest:
+            fail('self-test: the manifest must not contain its own digest')
+        manifest_path, digest = pipeline.write_manifest(
+            plan, archive_sha, directory=directory / 'manifest')
+        if json.loads(manifest_path.read_text(encoding='utf-8')) != manifest:
+            fail('self-test: the release manifest must round-trip')
+        sidecar = (manifest_path.parent / (manifest_path.name + '.sha256')).read_text(
+            encoding='utf-8')
+        if sidecar != f'{digest}  {manifest_path.name}\n':
+            fail('self-test: the external manifest digest must match the payload')
+        if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != digest:
+            fail('self-test: the manifest digest must hash the written payload')
+        provenance = pipeline.write_provenance(plan, directory=directory / 'manifest')
+        if json.loads(provenance.read_text(encoding='utf-8')) != plan['provenance']:
+            fail('self-test: the packager provenance must round-trip')
 
         # Native plan: explicit host linker, locked argv and recorded evidence.
         # The host boundary is a fixture executable so this self-test is
@@ -1505,44 +1665,54 @@ def run_self_tests():
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
 
-        # The local Make targets must run that same script, not a parallel path.
+        # The shared Make targets must run that same script, must not offer a
+        # local compiler alias and the automation unit must stay Cargo-free.
         for label, mutations in (
             ('Makefile without the pinned build target',
              ((PIPELINE_BUILD, 'cargo build --release', None),)),
             ('Makefile without the artifact target',
              ((PIPELINE_ARTIFACTS, 'true', None),)),
-            ('Makefile local target without --local',
-             ((PIPELINE_BUILD_LOCAL, PIPELINE_BUILD, None),)),
+            ('Makefile reintroducing the local build target',
+             (('release-locked:\n',
+               'release-local:\n'
+               '\tpython3 scripts/check_release_pipeline.py build --local\n'
+               'release-locked:\n', 1),)),
         ):
             expect_check(label, check_local_pipeline,
                          mutated_file(MAKEFILE, directory, label, mutations),
                          expected='Makefile:')
+        expect_check(
+            'Makefile with a Cargo automation unit', check_automation_unit,
+            mutated_file(MAKEFILE, directory, 'Makefile with a Cargo automation unit',
+                         ((PIPELINE_AUTOMATION_UNIT,
+                           f'{PIPELINE_AUTOMATION_UNIT} && cargo metadata', None),)),
+            expected=RELEASE_AUTOMATION_UNIT)
 
-        # The local targets must use the installed compiler, not the CI pin,
-        # while the pinned targets keep rejecting a wrong compiler. The fixture
-        # toolchain reports 1.99.x and refuses `+1.94.1`, like this environment.
+        # The strict pin is the only release build. Its locked GNU target
+        # command is unchanged and a fixture toolchain that refuses `+1.94.1`
+        # is still rejected; no installed-compiler path remains.
         toolchain = write_fake_toolchain(directory)
         pipeline = load_pipeline()
-        if pipeline.compiler_for(True, toolchain) != ['cargo']:
-            fail('self-test: local release mode must use the installed compiler')
-        if pipeline.build_command(pipeline.compiler_for(True, toolchain)) != [
-                'cargo', 'build', '--release', '--locked', '--target', ASSET]:
-            fail('self-test: local release mode must keep the locked GNU target build')
+        expected_pinned = ['cargo', '+1.94.1', 'build', '--release', '--locked',
+                           '--target', ASSET]
+        if pipeline.build_command(['cargo', '+1.94.1']) != expected_pinned:
+            fail('self-test: the strict pinned fallback build command changed')
         expect_pipeline_error(pipeline, 'installed compiler satisfying the CI pin',
                               pipeline.compiler, toolchain,
                               expected='pinned release build needs')
+        for removed in ('compiler_for', 'installed_compiler', 'installed_prefix'):
+            if hasattr(pipeline, removed):
+                fail(f'self-test: the pipeline still exposes {removed}')
 
-        # The shared script keeps the locked flags and the binary handoff.
+        # The shared script keeps the locked flags and refuses a local alias.
         for label, mutations, expected in (
             ('pipeline without --locked',
              (("'--locked', ", '', None),), 'build command is'),
-            ('pipeline without the binary handoff',
-             (("'MAGIT_LSP_TEST_BINARY': str(binary),", '', None),),
-             'MAGIT_LSP_TEST_BINARY'),
-            ('pipeline local mode forcing the pinned toolchain',
-             (('return installed_compiler(environment) if local else '
-               'compiler(environment)', 'return compiler(environment)', None),),
-             'local mode must use'),
+            ('pipeline reintroducing a local build alias',
+             (("    parser.add_argument('--target', default='',",
+               "    parser.add_argument('--local', action='store_true')\n"
+               "    parser.add_argument('--target', default='',", 1),),
+             'permissive --local'),
         ):
             problems = pipeline_violations(
                 load_pipeline(mutated_file(PIPELINE, directory, label, mutations)),
@@ -1563,6 +1733,23 @@ def run_self_tests():
     print('ok: release provenance, tag, artifact and workflow wiring self-tests')
 
 
+def run_automation_unit():
+    """Run the static workflow/pipeline guards and fixtures without Cargo.
+
+    This is the honest no-build boundary: it excludes ``cargo metadata`` and
+    ``cargo package`` so it can run in a tools-only shell. The broad
+    ``release-automation-check`` remains the hosted Cargo-aware target.
+    """
+    run_self_tests()
+    check_workflow()
+    check_build_workflow()
+    check_release_pipeline()
+    check_local_pipeline()
+    check_automation_unit()
+    check_artifact_consistency()
+    print('ok: release automation unit guards (no Cargo metadata or package)')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--validate-artifacts', metavar='DIR',
@@ -1580,10 +1767,16 @@ def main():
     parser.add_argument('--pipeline-self-tests', action='store_true',
                         help='run only the release pipeline adapter self-tests '
                              '(fake processes; no Cargo, build or metadata)')
+    parser.add_argument('--automation-unit', action='store_true',
+                        help='run the static/self-test guards without Cargo '
+                             'metadata or package')
     args = parser.parse_args()
     try:
         if args.pipeline_self_tests:
             run_pipeline_self_tests()
+            return 0
+        if args.automation_unit:
+            run_automation_unit()
             return 0
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)

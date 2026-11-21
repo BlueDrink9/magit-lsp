@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-local release-artifact-check-local release-native-build release-pipeline-check release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -49,17 +49,6 @@ release-locked:
 
 release-artifact-check: release-locked
 	$(call run,release-artifact-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py artifacts)
-
-# The same shared pipeline in explicit local mode: the installed cargo/rustc
-# build the same --release --locked GNU target and the same artifact path is
-# packaged, validated and smoke-tested. It records the actual compiler versions
-# and never downloads a toolchain, so it is local evidence, not the hosted Rust
-# 1.94.1/Ubuntu 22.04 glibc baseline; CI keeps `release-locked` strictness.
-release-local:
-	$(call run,release-local,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py build --local)
-
-release-artifact-check-local: release-local
-	$(call run,release-artifact-check-local,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py artifacts)
 
 # Experimental hosted native-linker lane, separate from the strict pinned
 # fallback above. Run only inside
@@ -251,6 +240,12 @@ release-automation-check:
 # invocation, no build, no toolchain download and no Cargo package metadata.
 release-pipeline-check:
 	$(call run,release-pipeline-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py --pipeline-self-tests)
+
+# Static workflow/pipeline guards plus their fixture self-tests, excluding the
+# Cargo metadata/package half. This is the honest no-build boundary for a
+# tools-only shell; the broad release-automation-check remains Cargo-aware.
+release-automation-unit:
+	$(call run,release-automation-unit,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py --automation-unit)
 
 # Explicit offline release contract cases plus shellcheck. Selecting the
 # methods avoids optional real-binary cases and needs no Cargo build; the

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""Run the release workflow's locked build and actual-artifact checks locally.
+"""Run the release workflow's locked build and separate package/consume steps.
 
 ``build`` refuses any compiler that is not exactly the pinned Rust toolchain and
-then runs the workflow's ``--release --locked --target`` build; ``build
---local`` instead uses the installed compiler without downloading one and
-records its real versions, while keeping the same locked command and artifact
-path. ``build-native`` is the experimental hosted native-linker lane: it accepts
-only the matching Linux x86_64, Darwin arm64 or Darwin x86_64 host and target.
-Linux points Cargo's target linker explicitly at ``/usr/bin/cc``; Darwin resolves
-Apple Clang, ld and the Xcode macOS SDK through the system ``/usr/bin/xcrun`` and
-sets an explicit deployment target. Both record the exact locked argv plus
-compiler, linker, SDK/libc and source/lock provenance under ``build/release/``. It
-never changes or replaces the strict pinned/``--local`` commands. ``artifacts``
-packages that exact binary with ``scripts/package-release.sh``, validates the
-archive/sidecar set offline with the release checker and runs the release suite
-with ``MAGIT_LSP_TEST_BINARY`` set, so the real-binary case runs instead of
-skipping. ``.github/workflows/release.yml`` invokes this same script, so the
-local targets are the workflow's steps rather than a parallel implementation.
+then runs the workflow's ``--release --locked --target`` build. There is no local
+compiler alias: the strict pin is the only release build. ``build-native`` is the
+experimental hosted native-linker lane: it accepts only the matching Linux
+x86_64, Darwin arm64 or Darwin x86_64 host and target. Linux points Cargo's
+target linker explicitly at ``/usr/bin/cc``; Darwin resolves Apple Clang, ld and
+the Xcode macOS SDK through the system ``/usr/bin/xcrun`` and sets an explicit
+deployment target. Both record the exact locked argv plus compiler, linker,
+SDK/libc and source/lock provenance under ``build/release/``.
+
+``artifacts`` is the packaging interface, separate from building and from native
+runtime validation. It resolves a run-bound identity (target, original ref,
+version, source SHA, event, run ID/attempt), refuses absent or contradictory
+values before invoking the packager, writes the explicit provenance record the
+deterministic packager needs, then packages and validates the archive/sidecar
+offline. It never executes the packaged binary and never writes to the protected
+``dist/`` directory. The run manifest binds the identity to the Cargo, flake and
+pnpm lock hashes, toolchain, target and archive/executable digests; its digest is
+written to a separate file so the manifest is not self-referential. Native
+runtime checks consume the produced archive separately.
 
 A missing pinned compiler fails with a readable message; this script never
 downloads or installs a toolchain and never publishes anything.
@@ -35,12 +39,25 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'scripts'))
+import package_release  # noqa: E402  (the single intended-target contract)
+
 TOOLCHAIN = '1.94.1'
 TARGET = 'x86_64-unknown-linux-gnu'
-BINARY = Path('target') / TARGET / 'release' / 'magit-lsp'
-DIST = Path('dist')
+RELEASE_DIR = Path('build/release')
+ARTIFACT_OUTPUT = RELEASE_DIR / 'artifacts'
+PROVENANCE_FILE = 'provenance.json'
+MANIFEST_FILE = 'release-manifest.json'
+# The archive path the packaging interface must never write to: it is the
+# operator's protected local directory, not a pipeline output.
+PROTECTED_OUTPUT = Path('dist')
+LOCK_FILES = ('Cargo.lock', 'flake.lock', 'clients/vscode/pnpm-lock.yaml')
+PACKAGE_TARGETS = tuple(sorted(package_release.TARGETS))
+REQUIRED_IDENTITY = ('target', 'original_ref', 'version', 'source_sha', 'event',
+                     'run_id', 'run_attempt')
 VALIDATOR = Path('scripts/check_release_automation.py')
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+HASH_PATTERN = re.compile(r'[0-9a-f]{64}')
 # The experimental native lane builds only on the matching native host, never a
 # cross or Nix-wrapped toolchain. Linux uses the explicit host compiler; Darwin
 # resolves Apple Clang, ld and the Xcode SDK through the system xcrun and pins
@@ -105,25 +122,27 @@ def build_command(cargo, target=TARGET):
     return list(cargo) + ['build', '--release', '--locked', '--target', target]
 
 
-def artifact_commands(version, binary, dist):
-    """Return the ordered package/validate/test step argv list and their environment.
+def target_binary(target=TARGET):
+    """Return the built executable path for ``target``."""
+    return Path('target') / target / 'release' / 'magit-lsp'
 
-    ``binary`` is the actual release binary and ``dist`` the output directory.
-    The environment carries the ``MAGIT_LSP_TEST_BINARY`` handoff the release
-    suite needs to exercise packaging, installation and launch instead of
-    skipping, plus bytecode suppression.
+
+def artifact_commands(plan):
+    """Return the package/validate step argv list and their environment.
+
+    ``plan`` is a validated package plan from :func:`package_plan`. The steps are
+    only the deterministic packager and the offline archive checker: this
+    interface never compiles, runs Cargo or executes the packaged binary, and it
+    does not hand the binary to a test process.
     """
+    identity = plan['identity']
     steps = [
-        ['sh', 'scripts/package-release.sh', version, str(binary), str(dist)],
-        [sys.executable, str(VALIDATOR), '--validate-artifacts', str(dist)],
-        [sys.executable, '-m', 'unittest', 'discover', '-s', 'tests/release',
-         '-p', 'test_*.py', '-v'],
+        ['sh', 'scripts/package-release.sh', identity['version'],
+         plan['binary'], plan['output'], identity['target'],
+         plan['provenance_path']],
+        [sys.executable, str(VALIDATOR), '--validate-artifacts', plan['output']],
     ]
-    environment = {
-        'MAGIT_LSP_TEST_BINARY': str(binary),
-        'PYTHONDONTWRITEBYTECODE': '1',
-    }
-    return steps, environment
+    return steps, {'PYTHONDONTWRITEBYTECODE': '1'}
 
 
 def manifest_version():
@@ -158,6 +177,212 @@ def resolve_version(environment):
     return version
 
 
+def identity_value(identity, key):
+    """Return one required non-empty release-identity string or refuse it."""
+    value = identity.get(key) if isinstance(identity, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise PipelineError(f'release identity is missing {key}')
+    return value
+
+
+def validate_identity(identity):
+    """Validate and normalize the run-bound packaging identity.
+
+    Target, original ref, version, source SHA, event and run ID/attempt must all
+    be present and mutually consistent before any packaging step runs. A tag ref
+    must name ``v<version>`` and the version must equal the manifests, so a
+    split or foreign identity is refused rather than packed.
+    """
+    target = identity_value(identity, 'target')
+    if target not in PACKAGE_TARGETS:
+        raise PipelineError(
+            f'release identity target {target!r} is unsupported; expected one of '
+            + ', '.join(PACKAGE_TARGETS))
+    version = identity_value(identity, 'version')
+    if not VERSION_PATTERN.fullmatch(version):
+        raise PipelineError(
+            f'release identity version {version!r} is not a stable X.Y.Z version')
+    expected_version = manifest_version()
+    if version != expected_version:
+        raise PipelineError(
+            f'release identity version {version} does not match the manifest '
+            f'version {expected_version}')
+    ref = identity_value(identity, 'original_ref')
+    if not ref.startswith(('refs/tags/', 'refs/heads/')):
+        raise PipelineError(f'release identity original_ref {ref!r} is not a Git ref')
+    if ref.startswith('refs/tags/') and ref != f'refs/tags/v{version}':
+        raise PipelineError(
+            f'release identity tag ref {ref} does not name v{version}')
+    source_sha = identity_value(identity, 'source_sha')
+    if not re.fullmatch(r'[0-9a-f]{40}', source_sha):
+        raise PipelineError(
+            f'release identity source_sha {source_sha!r} is not a full commit SHA')
+    event = identity_value(identity, 'event')
+    run_id = identity_value(identity, 'run_id')
+    if not re.fullmatch(r'[0-9]+', run_id):
+        raise PipelineError(f'release identity run_id {run_id!r} is not numeric')
+    run_attempt = identity_value(identity, 'run_attempt')
+    if not re.fullmatch(r'[0-9]+', run_attempt):
+        raise PipelineError(
+            f'release identity run_attempt {run_attempt!r} is not numeric')
+    return {
+        'target': target,
+        'original_ref': ref,
+        'version': version,
+        'source_sha': source_sha,
+        'event': event,
+        'run_id': run_id,
+        'run_attempt': run_attempt,
+    }
+
+
+def resolve_identity(environment):
+    """Return the packaging identity the workflow environment supplies.
+
+    The build lane's fixed target is the default; everything else must come from
+    the run environment and is validated by :func:`validate_identity`.
+    """
+    return validate_identity({
+        'target': environment.get('RELEASE_BUILD_TARGET') or TARGET,
+        'original_ref': environment.get('RELEASE_REF') or environment.get('GITHUB_REF', ''),
+        'version': resolve_version(environment),
+        'source_sha': environment.get('RELEASE_SOURCE_SHA') or environment.get('GITHUB_SHA', ''),
+        'event': environment.get('RELEASE_EVENT') or environment.get('GITHUB_EVENT_NAME', ''),
+        'run_id': environment.get('RELEASE_RUN_ID') or environment.get('GITHUB_RUN_ID', ''),
+        'run_attempt': (environment.get('RELEASE_RUN_ATTEMPT')
+                        or environment.get('GITHUB_RUN_ATTEMPT', '')),
+    })
+
+
+def verify_source(identity, environment, probe=None):
+    """Refuse a source SHA that is not the checked-out commit."""
+    probe = probe or run_probe
+    code, stdout, stderr = probe(['git', 'rev-parse', 'HEAD'], environment)
+    head = stdout.strip()
+    if code != 0 or not re.fullmatch(r'[0-9a-f]{40}', head):
+        raise PipelineError(
+            f'git rev-parse HEAD failed ({stderr.strip() or "no output"}); the '
+            'release identity needs the checked-out source SHA')
+    if head != identity['source_sha']:
+        raise PipelineError(
+            f'release identity source {identity["source_sha"]} does not match the '
+            f'checked-out source {head}')
+    return identity
+
+
+def lock_hashes():
+    """Return the SHA-256 of every lock file the run manifest binds."""
+    hashes = {}
+    for lock in LOCK_FILES:
+        path = ROOT / lock
+        if not path.is_file():
+            raise PipelineError(f'{lock} is missing; the run manifest needs its hash')
+        hashes[lock] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
+def package_plan(identity, binary=None, output=None):
+    """Return the isolated package plan for one validated identity.
+
+    The plan binds the explicit provenance record the packager consumes and the
+    run-manifest fields available before packaging. It refuses a missing binary,
+    an absent or contradictory identity and a protected ``dist/`` output, so
+    none of those can reach the packager.
+    """
+    validated = validate_identity(identity)
+    binary_path = Path(binary) if binary is not None else target_binary(validated['target'])
+    if not binary_path.is_file():
+        raise PipelineError(
+            f'{binary_path} is missing; build the {validated["target"]} release first')
+    output_path = Path(output).resolve() if output is not None else \
+        (ROOT / ARTIFACT_OUTPUT).resolve()
+    protected = (ROOT / PROTECTED_OUTPUT).resolve()
+    if output_path == protected or protected in output_path.parents:
+        raise PipelineError(
+            f'refusing protected output {output_path}; package into a build directory')
+    try:
+        content = binary_path.read_bytes()
+    except OSError as error:
+        raise PipelineError(
+            f'cannot read binary {binary_path}: {error.strerror or error}') from error
+    executable_sha256 = hashlib.sha256(content).hexdigest()
+    return {
+        'identity': validated,
+        'binary': str(binary_path),
+        'output': str(output_path),
+        'provenance_path': str(ROOT / RELEASE_DIR / PROVENANCE_FILE),
+        'provenance': {
+            'version': validated['version'],
+            'target': validated['target'],
+            'executable_sha256': executable_sha256,
+        },
+        'executable_sha256': executable_sha256,
+        'lock_hashes': lock_hashes(),
+        'toolchain': {'rust': TOOLCHAIN},
+    }
+
+
+def release_manifest(plan, archive_sha256):
+    """Return the run-bound manifest for one packaged archive.
+
+    The manifest carries no digest of itself: :func:`write_manifest` emits the
+    manifest digest as a separate file, so it cannot be self-referential.
+    """
+    if not isinstance(archive_sha256, str) or not HASH_PATTERN.fullmatch(archive_sha256):
+        raise PipelineError('archive_sha256 must be 64 lowercase hex digits')
+    identity = plan['identity']
+    return {
+        'source_sha': identity['source_sha'],
+        'original_ref': identity['original_ref'],
+        'event': identity['event'],
+        'run_id': identity['run_id'],
+        'run_attempt': identity['run_attempt'],
+        'version': identity['version'],
+        'lock_hashes': dict(plan['lock_hashes']),
+        'target': identity['target'],
+        'toolchain': dict(plan['toolchain']),
+        'archive_sha256': archive_sha256,
+        'executable_sha256': plan['executable_sha256'],
+    }
+
+
+def manifest_bytes(manifest):
+    """Return the canonical UTF-8 manifest payload."""
+    return (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode('utf-8')
+
+
+def manifest_digest(manifest):
+    """Return the SHA-256 of the canonical manifest payload."""
+    return hashlib.sha256(manifest_bytes(manifest)).hexdigest()
+
+
+def write_provenance(plan, directory=None):
+    """Write the packager's explicit provenance record and return its path."""
+    path = (Path(directory) / PROVENANCE_FILE if directory is not None
+            else Path(plan['provenance_path']))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(plan['provenance'], sort_keys=True) + '\n',
+                    encoding='utf-8')
+    return path
+
+
+def write_manifest(plan, archive_sha256, directory=None):
+    """Write the run manifest plus its external SHA-256 sidecar.
+
+    Returns ``(manifest_path, digest)``. The digest lives only in the sidecar so
+    the manifest payload stays non-self-referential.
+    """
+    root = Path(directory) if directory is not None else ROOT / RELEASE_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = release_manifest(plan, archive_sha256)
+    path = root / MANIFEST_FILE
+    path.write_bytes(manifest_bytes(manifest))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    (root / (MANIFEST_FILE + '.sha256')).write_text(
+        f'{digest}  {MANIFEST_FILE}\n', encoding='utf-8')
+    return path, digest
+
+
 def process_environment(environment):
     """Return ``environment`` layered over this process's environment."""
     return dict(os.environ, **(environment or {}))
@@ -185,43 +410,6 @@ def compiler(environment):
         f'Provide that exact toolchain and target {TARGET} (for example with '
         f'`rustup toolchain install {TOOLCHAIN}`); this target never downloads '
         'or installs a toolchain itself.')
-
-
-def installed_prefix(environment):
-    """Return the installed ``cargo`` prefix without downloading or pinning one."""
-    merged = process_environment(environment)
-    missing = [tool for tool in ('cargo', 'rustc')
-               if not shutil.which(tool, path=merged['PATH'])]
-    if missing:
-        raise PipelineError(
-            f'the local release build needs installed {" and ".join(missing)} on PATH; '
-            'this target never downloads or installs a toolchain')
-    return ['cargo']
-
-
-def installed_compiler(environment):
-    """Return the installed ``cargo`` prefix after recording the real toolchain."""
-    prefix = installed_prefix(environment)
-    versions = []
-    for tool in ('rustc', 'cargo'):
-        result = subprocess.run(
-            [tool, '--version'], cwd=ROOT, env=process_environment(environment),
-            capture_output=True, text=True)
-        line = result.stdout.strip() or result.stderr.strip()
-        if result.returncode != 0 or not line:
-            raise PipelineError(f'{tool} --version failed; the local release build '
-                                'needs a working installed toolchain')
-        versions.append(line)
-    print(f'local release toolchain: {versions[0]}; {versions[1]}', file=sys.stderr)
-    print('note: local mode proves the installed compiler; the hosted workflow '
-          f'keeps Rust {TOOLCHAIN} on Ubuntu 22.04 (glibc 2.35) for the exact '
-          'binary/glibc baseline', file=sys.stderr)
-    return prefix
-
-
-def compiler_for(local, environment):
-    """Return the cargo prefix: the installed compiler for ``local``, else the pin."""
-    return installed_compiler(environment) if local else compiler(environment)
 
 
 def run(argv, environment=None):
@@ -468,45 +656,49 @@ def native_build(target, environment):
     run(plan['argv'], plan['environment'])
 
 
-def build(local, environment):
-    """Run the workflow's locked, target-specific release build.
+def build(environment):
+    """Run the workflow's locked, target-specific release build with the strict pin.
 
-    ``local`` selects the installed compiler (never downloading one) and records
-    its actual versions; both modes issue the same ``--release --locked
-    --target`` command and produce the binary ``artifacts`` later packages.
+    The pinned toolchain is the only release build; there is no installed-compiler
+    alias, and the produced binary is what ``artifacts`` later packages.
     """
-    run(build_command(compiler_for(local, environment)), environment)
+    run(build_command(compiler(environment)), environment)
 
 
 def artifacts(environment):
-    """Package, validate and smoke-test the actual release binary the build produced."""
-    version = resolve_version(environment)
-    if not (ROOT / BINARY).is_file():
-        raise PipelineError(f'{BINARY} is missing; run `make release-locked` first')
-    steps, step_environment = artifact_commands(version, BINARY, DIST)
+    """Package and validate the target binary for one validated run identity.
+
+    Identity and source are checked before the packager runs. Packaging and
+    offline archive validation are the only steps; the packaged binary is never
+    executed, and the manifest digest is written outside the manifest payload.
+    """
+    identity = verify_source(resolve_identity(environment), environment)
+    plan = package_plan(identity)
+    provenance = write_provenance(plan)
+    print(f'release provenance: {provenance}', file=sys.stderr)
+    steps, step_environment = artifact_commands(plan)
     for argv in steps:
         run(argv, step_environment)
+    archive = (Path(plan['output'])
+               / f'magit-lsp-v{identity["version"]}-{identity["target"]}.tar.gz')
+    if not archive.is_file():
+        raise PipelineError(f'{archive} is missing after packaging')
+    manifest, digest = write_manifest(plan, hashlib.sha256(archive.read_bytes()).hexdigest())
+    print(f'release manifest: {manifest} (sha256 {digest})', file=sys.stderr)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('build', 'artifacts', 'build-native'),
-                        help='build the pinned binary, package and smoke-test it, '
-                             'or run the experimental native-linker build')
-    parser.add_argument('--local', action='store_true',
-                        help='build with the installed compiler instead of the '
-                             'pinned toolchain (never downloads one)')
+                        help='build the pinned binary, package/validate it, or run '
+                             'the experimental native-linker build')
     parser.add_argument('--target', default='',
                         help='RELEASE_TARGET for build-native; must match the host')
     args = parser.parse_args()
     try:
         if args.mode == 'build':
-            build(args.local, os.environ)
+            build(os.environ)
         elif args.mode == 'build-native':
-            if args.local:
-                raise PipelineError(
-                    'build-native is a separate experimental lane; it never combines '
-                    'with the pinned/--local modes')
             native_build(args.target, os.environ)
         else:
             artifacts(os.environ)
