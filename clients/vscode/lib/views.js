@@ -1,12 +1,12 @@
-'use strict';
+"use strict";
 
-const vscode = require('vscode');
+const vscode = require("vscode");
 
-const { deriveContext, inactiveContext } = require('./context');
-const { showMenu, hideMenu } = require('./menus');
-const { applyRender } = require('./requests');
-const { SCHEME, store } = require('./store');
-const { message } = require('./util');
+const { deriveContext, inactiveContext } = require("./context");
+const { showMenu, hideMenu } = require("./menus");
+const { applyRender } = require("./requests");
+const { SCHEME, store } = require("./store");
+const { message } = require("./util");
 
 /**
  * The view state that owns a virtual document.
@@ -35,7 +35,7 @@ function activeState() {
  * @returns {boolean}
  */
 function isMenuKind(kind) {
-  return typeof kind === 'string' && kind.startsWith('menu.');
+  return typeof kind === "string" && kind.startsWith("menu.");
 }
 
 /**
@@ -60,7 +60,7 @@ function ensureView(descriptor) {
   const uri = vscode.Uri.from({
     scheme: SCHEME,
     authority: descriptor.id,
-    path: `/${encodeURIComponent(descriptor.title || descriptor.kind || 'Magit')}`,
+    path: `/${encodeURIComponent(descriptor.title || descriptor.kind || "Magit")}`,
   });
   let resolveFirstRender;
   const state = {
@@ -76,10 +76,13 @@ function ensureView(descriptor) {
     quickPick: undefined,
     quickPickHiding: false,
     pressQueue: Promise.resolve(),
-    firstRender: new Promise((resolve) => { resolveFirstRender = resolve; }),
+    firstRender: new Promise((resolve) => {
+      resolveFirstRender = resolve;
+    }),
     resolveFirstRender: undefined,
   };
   state.resolveFirstRender = resolveFirstRender;
+  state.firstRenderSettled = false;
   store.views.set(descriptor.id, state);
   store.uriToView.set(uri.toString(), descriptor.id);
   store.documentsChanged.fire(uri);
@@ -117,11 +120,12 @@ async function showView(descriptor) {
 async function showDocument(state) {
   // `view/open` returns its descriptor before the first `view/render` can
   // arrive. Do not open the provider document until its initial text is ready.
-  await state.firstRender;
+  const rendered = await state.firstRender;
+  if (!rendered || store.views.get(state.id) !== state) return;
   const document = await vscode.workspace.openTextDocument(state.uri);
   state.changingLanguage = true;
   try {
-    await vscode.languages.setTextDocumentLanguage(document, 'magit');
+    await vscode.languages.setTextDocumentLanguage(document, "magit");
   } catch (error) {
     store.output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
   } finally {
@@ -132,6 +136,15 @@ async function showDocument(state) {
   if (state.id === store.activeViewId) {
     applyCursor(state, state.cursor);
   }
+}
+
+/** Resolve a view's initial-render wait once, whether rendered or removed. */
+function settleFirstRender(state, rendered = false) {
+  if (state.firstRenderSettled) return;
+  state.firstRenderSettled = true;
+  const resolve = state.resolveFirstRender;
+  state.resolveFirstRender = undefined;
+  if (resolve) resolve(rendered);
 }
 
 /**
@@ -145,7 +158,7 @@ function applyCursor(state, cursor) {
     return;
   }
   const editor = vscode.window.visibleTextEditors.find(
-    (candidate) => candidate.document.uri.toString() === state.uri.toString()
+    (candidate) => candidate.document.uri.toString() === state.uri.toString(),
   );
   if (!editor) {
     return;
@@ -157,7 +170,7 @@ function applyCursor(state, cursor) {
   editor.selection = new vscode.Selection(position, position);
   editor.revealRange(
     new vscode.Range(position, position),
-    vscode.TextEditorRevealType.InCenterIfOutsideViewport
+    vscode.TextEditorRevealType.InCenterIfOutsideViewport,
   );
 }
 
@@ -168,11 +181,9 @@ function applyCursor(state, cursor) {
  */
 function activateView(state) {
   store.activeViewId = state ? state.id : undefined;
-  const values = state
-    ? deriveContext(state.descriptor, state.mode)
-    : inactiveContext();
+  const values = state ? deriveContext(state.descriptor, state.mode) : inactiveContext();
   for (const [key, value] of Object.entries(values)) {
-    void vscode.commands.executeCommand('setContext', key, value);
+    void vscode.commands.executeCommand("setContext", key, value);
   }
 }
 
@@ -189,6 +200,7 @@ async function closeView(viewId, focusPrevious) {
   }
 
   hideMenu(state);
+  settleFirstRender(state);
   store.views.delete(viewId);
   store.uriToView.delete(state.uri.toString());
   store.documentsChanged.fire(state.uri);
@@ -216,7 +228,7 @@ async function closeView(viewId, focusPrevious) {
  */
 function tabUri(tab) {
   const input = tab.input;
-  if (!input || typeof input !== 'object' || !('uri' in input) || !input.uri) {
+  if (!input || typeof input !== "object" || !("uri" in input) || !input.uri) {
     return undefined;
   }
   return /** @type {vscode.Uri} */ (input.uri).toString();
@@ -229,17 +241,30 @@ async function closeRoot(rootId) {
   const uris = new Set(states.map((state) => state.uri.toString()));
   for (const state of states) {
     hideMenu(state);
+    settleFirstRender(state);
     store.views.delete(state.id);
     store.uriToView.delete(state.uri.toString());
     store.pendingRenders.delete(state.id);
     store.documentsChanged.fire(state.uri);
   }
-  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
-    const uri = tabUri(tab);
-    return uri !== undefined && uris.has(uri);
-  });
+  const tabs = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => {
+      const uri = tabUri(tab);
+      return uri !== undefined && uris.has(uri);
+    });
   if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
   if (states.some((state) => state.id === store.activeViewId)) activateView(undefined);
+}
+
+/** Remove all local views when their server transport disconnects. */
+async function disconnectViews() {
+  const roots = new Set(Array.from(store.views.values(), (state) => state.rootId).filter(Boolean));
+  if (roots.size) {
+    for (const rootId of roots) await closeRoot(rootId);
+  }
+  for (const state of Array.from(store.views.values())) await closeView(state.id, false);
+  store.pendingRenders.clear();
 }
 
 /**
@@ -270,4 +295,6 @@ exports.applyCursor = applyCursor;
 exports.activateView = activateView;
 exports.closeView = closeView;
 exports.closeRoot = closeRoot;
+exports.settleFirstRender = settleFirstRender;
+exports.disconnectViews = disconnectViews;
 exports.focusView = focusView;
