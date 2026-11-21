@@ -118,6 +118,9 @@ pub(super) struct DeferredStatus {
     pub(super) repo_path: String,
     pub(super) view_id: String,
     pub(super) generation: u64,
+    /// Correlation id of the originating request, carried onto the deferred
+    /// blocking acquisition so its Git/status phases stay traceable.
+    pub(super) trace_id: u64,
 }
 
 impl DeferredStatus {
@@ -125,14 +128,17 @@ impl DeferredStatus {
         let repo_path = self.repo_path;
         let view_id = self.view_id;
         let generation = self.generation;
+        let trace_id = self.trace_id;
         let acquisition_path = repo_path.clone();
         let acquired = tokio::task::spawn_blocking(move || {
-            let repo = crate::git::GitRepo::open(&acquisition_path)?;
-            crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+            crate::runner::with_trace_id(trace_id, || {
+                let repo = crate::git::GitRepo::open(&acquisition_path)?;
+                crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+            })
         })
         .await;
         super::view_execution::finish_status_acquisition(
-            shared, repo_path, view_id, generation, acquired,
+            shared, repo_path, view_id, generation, trace_id, acquired,
         );
     }
 }

@@ -145,6 +145,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             repo_path: repo.to_string(),
             view_id: id,
             generation: 0,
+            trace_id: crate::runner::current_trace_id(),
         }))
     } else {
         Ok(dispatched)
@@ -156,6 +157,7 @@ pub(super) fn finish_status_acquisition(
     repo_path: String,
     view_id: String,
     generation: u64,
+    trace_id: u64,
     acquired: std::result::Result<
         std::result::Result<crate::status_view::FreshStatus, crate::Error>,
         tokio::task::JoinError,
@@ -170,11 +172,20 @@ pub(super) fn finish_status_acquisition(
         tokio::spawn(async move {
             let acquisition_path = repo_path.clone();
             let acquired = tokio::task::spawn_blocking(move || {
-                let repo = crate::git::GitRepo::open(&acquisition_path)?;
-                crate::status_view::StatusView::acquire_opening_state(&repo, next_generation)
+                crate::runner::with_trace_id(trace_id, || {
+                    let repo = crate::git::GitRepo::open(&acquisition_path)?;
+                    crate::status_view::StatusView::acquire_opening_state(&repo, next_generation)
+                })
             })
             .await;
-            finish_status_acquisition(shared, repo_path, view_id, next_generation, acquired);
+            finish_status_acquisition(
+                shared,
+                repo_path,
+                view_id,
+                next_generation,
+                trace_id,
+                acquired,
+            );
         });
         return;
     }
