@@ -1249,32 +1249,11 @@ pub(super) fn deliver_plain_effects(shared: &Arc<Shared>, effects: Vec<Effect>) 
                 if kind == editor::COMMIT_MESSAGE_KIND {
                     arm_draft_open_timeout(shared, run_id.clone());
                 }
-                let repo = shared
-                    .progress
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .values()
-                    .find(|run| run.edit_id.as_deref() == Some(&run_id))
-                    .and_then(|run| run.repo.clone());
-                if let Some(repo) = repo {
-                    let shared = shared.clone();
-                    // The emitter that delivers these effects runs inside
-                    // `handle_edit` while `editor::registry().lock()` is held, so
-                    // the refresh must run off the emitting thread: it re-enters
-                    // that lock through `EditRegistry::pending_for` and would
-                    // self-deadlock inline. This detached thread only reads
-                    // registry state and delivers renders through the sender.
-                    std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
-                        Ok(renders) => {
-                            for render in renders {
-                                if let Some(message) = deliver_render(&shared, render) {
-                                    let _ = shared.sender.send(message);
-                                }
-                            }
-                        }
-                        Err(error) => report_pending_refresh_error(&shared, error),
-                    });
-                }
+                // Pending-draft rows arrive with explicit renders and run
+                // outcomes, which append them from the registry. Do not push an
+                // extra detached render while delivering the template: that
+                // unsolicited frame races the commit handshake and consumes
+                // outbound ids between `window/showDocument` and confirmation.
             }
             message @ Effect::Message { .. } => {
                 for notification in effect_notifications(&shared.client, vec![message]) {

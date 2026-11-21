@@ -708,6 +708,86 @@ fn commit_edit_abort_example_records_the_cancellation() {
     );
 }
 
+/// An explicit status refresh while a commit draft is pending renders its row.
+///
+/// Template delivery no longer pushes a detached status render, so this guards
+/// the behavior that deletion must preserve: pending-draft rows come from the
+/// session's registry lookup on every explicit render.
+///
+/// A scheduling red against the removed detached refresh is not reproducible
+/// deterministically: the extra frame came from an OS thread racing the client
+/// handshake, and forcing that order would need sleeps or production hooks.
+#[cfg(unix)]
+#[test]
+fn explicit_status_refresh_while_a_commit_draft_is_pending_renders_its_row() {
+    let (repo, _git) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let root = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .root()
+        .to_string_lossy()
+        .to_string();
+    let owner = "pending-row-refresh";
+    let mut session =
+        magit_lsp::session::Session::new_with_draft_owner(root.clone(), Some(owner.to_owned()));
+    session
+        .open(
+            "v1",
+            magit_lsp::view::ViewKind::Status,
+            magit_lsp::view::Placement::Main,
+            fixtures::STATUS_VIEWPORT,
+        )
+        .expect("open the status view");
+    assert!(
+        !session
+            .rendered_text("v1")
+            .expect("status render")
+            .contains(".git/COMMIT_EDITMSG"),
+        "no pending row exists before the draft"
+    );
+
+    let run_id = magit_lsp::editor::registry()
+        .create(&root, owner, magit_lsp::editor::DraftKind::CommitMessage)
+        .expect("create a pending commit draft");
+    let pending = magit_lsp::editor::registry().pending_for(owner, &root);
+    assert_eq!(
+        pending.len(),
+        1,
+        "one pending draft for this owner and repo"
+    );
+    let pending_uri = pending[0].uri.clone();
+
+    let render = session
+        .refresh("v1")
+        .expect("refresh the status view")
+        .expect("the pending row changes the status render");
+    let text = render
+        .text
+        .as_deref()
+        .map(|lines| lines.join("\n"))
+        .or_else(|| session.rendered_text("v1"))
+        .expect("status render text");
+    assert!(
+        text.lines().any(|line| line.trim() == pending_uri),
+        "the explicit refresh renders the pending draft row {pending_uri}: {text}"
+    );
+
+    assert!(
+        magit_lsp::editor::registry().resolve(&run_id, magit_lsp::editor::Reply::Abort),
+        "the pending draft is cleaned up"
+    );
+    session.refresh("v1").expect("refresh after the abort");
+    assert!(
+        !session
+            .rendered_text("v1")
+            .expect("status render")
+            .contains(&pending_uri),
+        "the row disappears once the draft is no longer pending"
+    );
+}
+
 #[test]
 fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let lines = example_lines("rich-lifecycle.jsonl");
