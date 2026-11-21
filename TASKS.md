@@ -339,6 +339,7 @@ Inventory VERIFIED: reuse `scripts/check_release_pipeline.py:42-97` locked comma
   - Evidence (implementation slice, 2026-11-21): source SHA `d7b0837`; prior `nix develop -c make ui-unit` → exit 0 (`ok: build`, `ok: ui-unit`). JS fixture execution is pending nextticket; hosted acceptance remains pending. No native proof is claimed.
   - Evidence (focused fixture, 2026-11-21): `nix develop -c make vscode-download-unit` → exit 0 (`ok: vscode-download-unit`); direct helper checks reject absent archive/manifest and manifest/hash mismatches; static-only run.mjs input/evidence contracts checked. Hosted native acceptance remains pending.
   - Evidence (Part 3a helper, 2026-11-21): commit `4346533`; `nix develop -c make vsix-candidate-unit` → exit 0 (`ok: vsix-candidate-unit`). Hosted/native proof remains pending; item stays unchecked.
+  - Evidence (Part 3b wiring, 2026-11-21): source SHA `218e7a4`; `nix develop -c make release-automation-unit` → exit 0 (`ok: release-automation-unit`); hosted native VSCode acceptance remains pending; item stays unchecked.
 
 - [ ] **[P1] NREL-17 — Gate native-linker promotion on hosted experimental evidence** (`.github/workflows/release.yml:13-50`, producer/consumer jobs; `scripts/check_release_automation.py:402-480`, `check_build_workflow`; `docs/RELEASING.md`, toolchain decision)
   - **Problem:** Local toolchain availability and static inspection cannot prove portable artifacts; replacing the established fallback before the experiment passes would make the release depend on an unverified path.
