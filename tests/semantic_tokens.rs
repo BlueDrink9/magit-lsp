@@ -6,7 +6,7 @@ mod common;
 use common::stdio::*;
 use common::*;
 use magit_lsp::status_view;
-use magit_lsp::tree::Tree;
+use magit_lsp::tree::{Token, Tree};
 use magit_lsp::view::{Placement, ViewKind};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -54,15 +54,76 @@ fn log_view_semantic_response_emits_identifiers_and_refs() {
 }
 
 #[test]
-fn menu_view_semantic_response_emits_key_role() {
+fn menu_view_semantic_response_emits_key_role_and_item_attributes() {
     let (fixture, _) = RepoFixture::new()
         .commit("menu fixture", [("file.txt", "content\n")])
         .build();
     let (mut test, _) =
         TestSession::open_status_at(&fixture, magit_lsp::config::Profile::Vim, WIDE_VIEWPORT);
     let (menu, _) = test.open_via_command("open.commit");
-    let roles = emitted_roles(test.tree_of(&menu.id));
-    assert!(roles.contains("key"), "menu response roles: {roles:?}");
+
+    {
+        let tree = test.tree_of(&menu.id);
+        let roles = emitted_roles(tree);
+        assert!(roles.contains("key"), "menu response roles: {roles:?}");
+
+        let decoded = response_tokens(tree);
+        let (types, modifiers) = legend_names();
+        assert_eq!(
+            decoded,
+            expected_tokens(tree, &types, &modifiers),
+            "the response must carry the rendered tree's spans and modifiers"
+        );
+
+        // `d` is the planned Reshelve action; `e` is the implemented Extend.
+        let planned = label_attribute_modifiers(tree, &decoded, "Reshelve");
+        assert_eq!(planned, vec!["planned".to_string()], "planned label span");
+        let planned_key = key_attribute_modifiers(tree, &decoded, "d", "Reshelve");
+        assert_eq!(planned_key, planned, "planned key span");
+        let implemented = label_attribute_modifiers(tree, &decoded, "Extend");
+        assert!(
+            implemented.is_empty(),
+            "implemented label span: {implemented:?}"
+        );
+        let implemented_key = key_attribute_modifiers(tree, &decoded, "e", "Extend");
+        assert!(
+            implemented_key.is_empty(),
+            "implemented key span: {implemented_key:?}"
+        );
+    }
+
+    // A pending `-` leaves the switches reachable and disables the actions.
+    test.press("-");
+    let tree = test.tree_of(&menu.id);
+    let decoded = response_tokens(tree);
+    let (types, modifiers) = legend_names();
+    assert_eq!(
+        decoded,
+        expected_tokens(tree, &types, &modifiers),
+        "the pending-step response must carry the rendered tree's spans and modifiers"
+    );
+
+    let disabled = label_attribute_modifiers(tree, &decoded, "Extend");
+    assert_eq!(
+        disabled,
+        vec!["disabled".to_string()],
+        "disabled label span"
+    );
+    let disabled_key = key_attribute_modifiers(tree, &decoded, "e", "Extend");
+    assert_eq!(disabled_key, disabled, "disabled key span");
+    let both = label_attribute_modifiers(tree, &decoded, "Reshelve");
+    assert_eq!(
+        both,
+        vec!["planned".to_string(), "disabled".to_string()],
+        "a planned action disabled by the pending step keeps both attributes"
+    );
+    let both_key = key_attribute_modifiers(tree, &decoded, "d", "Reshelve");
+    assert_eq!(both_key, both, "planned+disabled key span");
+    let enabled = label_attribute_modifiers(tree, &decoded, "Stage all modified and deleted files");
+    assert!(
+        enabled.is_empty(),
+        "the still-enabled switch span stays untagged: {enabled:?}"
+    );
 }
 
 #[test]
@@ -152,6 +213,109 @@ fn decode(data: &[Value], token_types: &[String], token_modifiers: &[String]) ->
 
 fn utf16_len(text: &str) -> u32 {
     text.encode_utf16().count() as u32
+}
+
+/// The real encoded semantic response for `tree`, decoded for assertions.
+fn response_tokens(tree: &Tree) -> Vec<DecodedToken> {
+    let encoded = magit_lsp::semantic_tokens::encode(tree);
+    let mut line: u32 = 0;
+    let mut start: u32 = 0;
+    encoded
+        .data
+        .iter()
+        .map(|token| {
+            line += token.delta_line;
+            start = if token.delta_line == 0 {
+                start + token.delta_start
+            } else {
+                token.delta_start
+            };
+            DecodedToken {
+                line,
+                start,
+                length: token.length,
+                token_type: magit_lsp::semantic_tokens::TOKEN_TYPES[token.token_type as usize]
+                    .to_string(),
+                modifiers: magit_lsp::semantic_tokens::TOKEN_MODIFIERS
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| token.token_modifiers_bitset & (1 << index) != 0)
+                    .map(|(_, modifier)| (*modifier).to_string())
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+/// The advertised legend names, as the decode helpers consume them.
+fn legend_names() -> (Vec<String>, Vec<String>) {
+    (
+        magit_lsp::semantic_tokens::TOKEN_TYPES
+            .iter()
+            .map(|name| name.to_string())
+            .collect(),
+        magit_lsp::semantic_tokens::TOKEN_MODIFIERS
+            .iter()
+            .map(|name| name.to_string())
+            .collect(),
+    )
+}
+
+/// The decoded response token covering a tree token's rendered span.
+fn decoded_for<'a>(tree: &Tree, decoded: &'a [DecodedToken], token: &Token) -> &'a DecodedToken {
+    let line = &tree.lines[token.line];
+    let start = utf16_len(&line[..token.start]);
+    let length = utf16_len(&line[token.start..token.start + token.length]);
+    decoded
+        .iter()
+        .find(|candidate| {
+            candidate.line == token.line as u32
+                && candidate.start == start
+                && candidate.length == length
+        })
+        .unwrap_or_else(|| panic!("no decoded token for {token:?}"))
+}
+
+/// Modifiers on the rendered label span of `label`, found in the real tokens.
+fn label_attribute_modifiers(tree: &Tree, decoded: &[DecodedToken], label: &str) -> Vec<String> {
+    let index = tree
+        .tokens
+        .iter()
+        .position(|token| {
+            let line = &tree.lines[token.line];
+            &line[token.start..token.start + token.length] == label
+        })
+        .unwrap_or_else(|| panic!("no label span for {label}"));
+    decoded_for(tree, decoded, &tree.tokens[index])
+        .modifiers
+        .clone()
+}
+
+/// Modifiers on an intact key span ending two columns before its label.
+fn key_attribute_modifiers(
+    tree: &Tree,
+    decoded: &[DecodedToken],
+    item_key: &str,
+    label: &str,
+) -> Vec<String> {
+    let label_token = tree
+        .tokens
+        .iter()
+        .find(|token| {
+            let line = &tree.lines[token.line];
+            &line[token.start..token.start + token.length] == label
+        })
+        .unwrap_or_else(|| panic!("no label span for {label}"));
+    let key_token = tree
+        .tokens
+        .iter()
+        .find(|token| {
+            token.line == label_token.line
+                && token.start + token.length + 2 == label_token.start
+                && &tree.lines[token.line][token.start..token.start + token.length] == item_key
+        })
+        .unwrap_or_else(|| panic!("no intact key span for {item_key}"));
+    decoded_for(tree, decoded, key_token).modifiers.clone()
 }
 
 /// The tree's tokens as the client should see them, computed independently.

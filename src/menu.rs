@@ -10,6 +10,41 @@ use crate::view::{Ctx, Scope, View, ViewKind, Viewport};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// One rendered token span: byte range, role name and attribute modifiers.
+type MenuSpan = (usize, usize, &'static str, Attributes);
+
+/// Presentation attributes a menu item carries onto its rendered spans.
+///
+/// Roles stay in the token type; [`MenuStatus`] and pending-key reachability
+/// decide the `planned` and `disabled` modifiers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Attributes {
+    planned: bool,
+    disabled: bool,
+}
+
+impl Attributes {
+    /// Attributes derived from structured item metadata, never rendered text.
+    fn of(item: &Item, live: bool) -> Self {
+        Self {
+            planned: matches!(item.status(), MenuStatus::Planned { .. }),
+            disabled: !live,
+        }
+    }
+
+    /// Semantic token modifier names in legend order.
+    fn names(self) -> Vec<String> {
+        let mut names = Vec::new();
+        if self.planned {
+            names.push("planned".to_string());
+        }
+        if self.disabled {
+            names.push("disabled".to_string());
+        }
+        names
+    }
+}
+
 /// How an option's value is collected. Prompts arrive in R-3.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -434,7 +469,13 @@ impl<'a> Builder<'a> {
             self.menu.title.clone(),
             line,
         ));
-        self.token(line, 1, self.menu.title.len(), "heading");
+        self.token(
+            line,
+            1,
+            self.menu.title.len(),
+            "heading",
+            Attributes::default(),
+        );
     }
 
     /// The `Arguments` group is vertical: one switch or option per line,
@@ -454,7 +495,7 @@ impl<'a> Builder<'a> {
             self.tree
                 .line_nodes
                 .push(LineNode::new(&group_id, NodeKind::Section));
-            self.token(line, 1, group.title.len(), "heading");
+            self.token(line, 1, group.title.len(), "heading", Attributes::default());
 
             let index = self.tree.nodes.len();
             let mut group_node =
@@ -477,8 +518,9 @@ impl<'a> Builder<'a> {
         let id = format!("menu:{}/item:{key}", self.menu.id);
         let mut text = format!("  {key}  {label}");
         let live = self.item_live(key);
+        let attributes = Attributes::of(item, live);
         let label_start = 2 + key.len() + 2;
-        let mut tokens = self.item_tokens(0, item);
+        let mut tokens = self.item_tokens(0, item, attributes);
 
         if let Item::Switch { flag, on, .. } = item {
             text.push_str(&format!(" ({flag})"));
@@ -490,7 +532,7 @@ impl<'a> Builder<'a> {
             } else {
                 "removed"
             };
-            tokens.push((flag_start, flag.len(), flag_type));
+            tokens.push((flag_start, flag.len(), flag_type, attributes));
             text.push_str("  ");
             let marker = if *on { "[x]" } else { "[ ]" };
             let marker_start = text.len();
@@ -502,11 +544,16 @@ impl<'a> Builder<'a> {
             } else {
                 "removed"
             };
-            tokens.push((marker_start, 3, marker_type));
+            tokens.push((marker_start, 3, marker_type, attributes));
         } else if let Item::Option { flag, value, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            tokens.push((flag_start, flag.len(), if live { "muted" } else { "muted" }));
+            tokens.push((
+                flag_start,
+                flag.len(),
+                if live { "muted" } else { "muted" },
+                attributes,
+            ));
             if let Some(value) = value {
                 text.push_str("  ");
                 let value_start = text.len();
@@ -515,6 +562,7 @@ impl<'a> Builder<'a> {
                     value_start,
                     value.len(),
                     if live { "muted" } else { "muted" },
+                    attributes,
                 ));
             }
         }
@@ -527,8 +575,8 @@ impl<'a> Builder<'a> {
         for (offset, (line_text, line_tokens)) in wrapped.into_iter().enumerate() {
             let line = first_line + offset;
             self.tree.lines.push(line_text);
-            for (start, length, token_type) in line_tokens {
-                self.token(line, start, length, token_type);
+            for (start, length, token_type, attributes) in line_tokens {
+                self.token(line, start, length, token_type, attributes);
             }
             let mut entry = LineNode::new(&id, NodeKind::Line);
             entry.status = Some(status_name(item.status()));
@@ -548,29 +596,30 @@ impl<'a> Builder<'a> {
     }
 
     /// Key and label tokens for an item whose key starts at `base + 2`.
-    fn item_tokens(&self, base: usize, item: &Item) -> Vec<(usize, usize, &'static str)> {
+    fn item_tokens(&self, base: usize, item: &Item, attributes: Attributes) -> Vec<MenuSpan> {
         let key = item.key();
         let label = item.label();
         let key_start = base + 2;
         let label_start = key_start + key.len() + 2;
         let mut tokens = Vec::new();
-        if !self.item_live(key) {
-            tokens.push((key_start, key.len(), "muted"));
-            tokens.push((label_start, label.len(), "muted"));
+        if attributes.disabled {
+            tokens.push((key_start, key.len(), "muted", attributes));
+            tokens.push((label_start, label.len(), "muted", attributes));
             return tokens;
         }
         let pending = self.pending.join(" ");
         if !pending.is_empty() && key.starts_with(&pending) {
-            tokens.push((key_start, pending.len(), "muted"));
+            tokens.push((key_start, pending.len(), "muted", attributes));
             tokens.push((
                 key_start + pending.len(),
                 key.len() - pending.len(),
                 key_token(item),
+                attributes,
             ));
         } else {
-            tokens.push((key_start, key.len(), key_token(item)));
+            tokens.push((key_start, key.len(), key_token(item), attributes));
         }
-        tokens.push((label_start, label.len(), label_token(item)));
+        tokens.push((label_start, label.len(), label_token(item), attributes));
         tokens
     }
 
@@ -594,7 +643,7 @@ impl<'a> Builder<'a> {
         self.tree
             .nodes
             .push(Node::new(&id, NodeKind::Message, text.clone(), line));
-        self.token(line, 1, text.len(), "heading");
+        self.token(line, 1, text.len(), "heading", Attributes::default());
     }
 
     /// Action groups are laid out side by side, wrapping by viewport width.
@@ -640,7 +689,7 @@ impl<'a> Builder<'a> {
             for line_offset in 0..height {
                 let line = start + line_offset;
                 let mut text = String::new();
-                let mut tokens: Vec<(usize, usize, &'static str)> = Vec::new();
+                let mut tokens: Vec<MenuSpan> = Vec::new();
                 let mut owner: Option<(&str, &Item)> = None;
                 for block in &row {
                     let content = block.content(line_offset);
@@ -648,10 +697,17 @@ impl<'a> Builder<'a> {
                     let base = text.len();
                     if let Some(content) = content {
                         if line_offset == 0 {
-                            self.token(line, base + 1, block.group.title.len(), "heading");
+                            self.token(
+                                line,
+                                base + 1,
+                                block.group.title.len(),
+                                "heading",
+                                Attributes::default(),
+                            );
                         } else {
                             let item = &block.group.items[line_offset - 1];
-                            tokens.extend(self.item_tokens(base, item));
+                            let attributes = Attributes::of(item, self.item_live(item.key()));
+                            tokens.extend(self.item_tokens(base, item, attributes));
                             owner = Some((item.key(), item));
                         }
                         text.push_str(&content);
@@ -662,8 +718,8 @@ impl<'a> Builder<'a> {
                 }
                 let text = text.trim_end().to_string();
                 self.tree.lines.push(text);
-                for (start, length, token_type) in tokens {
-                    self.token(line, start, length, token_type);
+                for (start, length, token_type, attributes) in tokens {
+                    self.token(line, start, length, token_type, attributes);
                 }
                 match owner {
                     Some((key, item)) => {
@@ -686,7 +742,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn token(&mut self, line: usize, start: usize, length: usize, token_type: &str) {
+    fn token(
+        &mut self,
+        line: usize,
+        start: usize,
+        length: usize,
+        token_type: &str,
+        attributes: Attributes,
+    ) {
         if length == 0 {
             return;
         }
@@ -695,7 +758,7 @@ impl<'a> Builder<'a> {
             start,
             length,
             token_type: token_type.to_string(),
-            modifiers: Vec::new(),
+            modifiers: attributes.names(),
         });
     }
 
@@ -769,10 +832,10 @@ fn wrap<'a>(blocks: &'a [Block], cols: usize) -> Vec<Vec<&'a Block>> {
 /// column limit.
 fn wrap_line(
     text: &str,
-    tokens: &[(usize, usize, &'static str)],
+    tokens: &[MenuSpan],
     cols: usize,
     indent: usize,
-) -> Vec<(String, Vec<(usize, usize, &'static str)>)> {
+) -> Vec<(String, Vec<MenuSpan>)> {
     if text.len() <= cols || cols == 0 {
         return vec![(text.to_string(), tokens.to_vec())];
     }
@@ -842,7 +905,7 @@ fn wrap_line(
             let offset = padding.len();
             let line_tokens = tokens
                 .iter()
-                .filter_map(|&(token_start, token_length, token_type)| {
+                .filter_map(|&(token_start, token_length, token_type, attributes)| {
                     let token_end = token_start + token_length;
                     let clipped_start = token_start.max(start);
                     let clipped_end = token_end.min(end);
@@ -851,6 +914,7 @@ fn wrap_line(
                             offset + (clipped_start - start),
                             clipped_end - clipped_start,
                             token_type,
+                            attributes,
                         )
                     })
                 })
