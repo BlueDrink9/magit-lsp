@@ -146,6 +146,47 @@ whether status-listing subprocess/filesystem activity explains the larger
 worktree span; obtain syscall/CPU attribution before proposing batching or
 another code change. No optimization follows from wall-time spans alone.
 
+### Syscall and subprocess tracing (2026-11-21)
+
+`make nvim-startup-strace` exits 0 (`ok: nvim-startup-strace`). It builds the
+debug server, supplies it to the same public-command Python/Lua harness through
+a generated executable `$MAGIT_LSP_BIN` wrapper, and runs strace 7.3 with
+`%process,%file`, following forks. Each fresh server launch gets its own trace
+file; the run's `summary.json` and raw traces are in the ignored
+`build/startup-strace/20261121T231900-8241/`. Six launches were measured (three
+one-file fixture, three this dirty worktree), and every trace contained the
+server executable, child Git execs, filesystem calls and wait calls. The target
+fails on an absent/unusable tracer, fewer, duplicate, empty or missing traces,
+or a trace without a server exit record.
+
+Observed per launch:
+
+| Launches | Git execs | Filesystem syscalls | Traced syscall time, ms |
+|---|---:|---:|---:|
+| Fixture ×3 | 27 each | 3,322 each | 61.7 / 81.6 / 143.8 |
+| Worktree ×3 | 177 / 177 / 231 | 70,890 / 70,898 / 86,250 | 1,999.7 / 2,256.4 / 2,033.3 |
+
+Ranked median per-launch syscall time across all six launches: `newfstatat`
+371.0 ms (17,695 calls), `openat` 209.2 ms (6,972), `statx` 138.2 ms (9,320),
+`execve` 95.2 ms (103), `clone` 72.3 ms (101), `access` 38.5 ms (1,481),
+`inotify_add_watch` 16.5 ms (998), `waitid` 15.7 ms (604), `getcwd` 6.9 ms
+(339) and `chdir` 4.9 ms (135). These are syscall durations summed per launch,
+not exclusive CPU or wall time: `waitid`/`wait4` block on child Git processes
+whose own filesystem and process syscalls run concurrently, so categories
+overlap and must not be added. Median blocking `wait4` time was 4.3 ms over 104
+calls; the observed cost sits in the volume of filesystem/probe syscalls and
+process creation around child Git, not in `wait4` blocking.
+
+Limits: strace adds ptrace and record overhead that is not calibrated against
+the harness, so traced totals (up to ~2.3 s per worktree launch) are not
+comparable with its wall-time spans; the server is a debug build. strace
+reports syscall/service and blocking time but no CPU time, so no CPU or hotspot
+claim follows. Three samples per repository, a dirty worktree and a shared host
+make the values descriptive, not controlled. The endpoint is the harness's
+visible `Head:` status in a valid window, not terminal redraw or first-window
+creation. Raw traces keep local paths and arguments and remain in ignored
+`build/`; only aggregates are recorded here.
+
 ## Early loading display evidence (2026-11-21)
 
 `make ui-file FILE=tests/ui/scenarios/status-loading.scn` exits 0
