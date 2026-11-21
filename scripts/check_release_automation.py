@@ -142,7 +142,6 @@ NODE_TOOLING = ('pnpm', 'npm ', 'vsce', 'ovsx')
 # yet, so those names stay outside the gate until NREL-19 promotes them; this
 # checker makes no publication-readiness claim about them.
 MANDATORY_RUN_JOBS = (SOURCE_CHECK_JOB, FALLBACK_JOB)
-PENDING_READINESS_JOBS = ('native-candidates', 'vsix', 'release-ready')
 REQUIRED_RUN_ARTIFACTS = (ARTIFACT_NAME, f'{ARTIFACT_NAME}-identity')
 RUN_EVENT = 'push'
 # The run-bound manifest fields emitted by scripts/check_release_pipeline.py.
@@ -557,240 +556,6 @@ def check_producer_handoff(block, target, context, experimental):
         fail(f'build workflow: {context} packaging target is '
              f'{environment.get("RELEASE_BUILD_TARGET")!r}, expected {target!r}')
     return check_uploads(block, target, context, experimental)
-
-
-READINESS_TARGETS = tuple(target for _, target in NATIVE_MATRIX)
-READINESS_OUTCOMES = ('source', 'package', 'build', 'abi', 'lsp', 'git',
-                      'functional_rust', 'neovim', 'vsix')
-
-
-def collect_release_readiness(repository, run_id, attempt, source_sha, ref, event,
-                              workflow_id, token, api_get=None,
-                              artifact_get=None):
-    """Collect and validate exact successful job/evidence records for one run.
-
-    ``api_get`` and ``artifact_get`` are injectable for deterministic offline
-    tests. Evidence JSON must contain the measured fields consumed by the
-    readiness validator; job success is never converted into test success.
-    """
-    identity = {'source_sha': source_sha, 'ref': ref, 'event': event,
-                'run_id': str(run_id), 'run_attempt': str(attempt),
-                'workflow_id': str(workflow_id),
-                'run_url': f'https://github.com/{repository}/actions/runs/{run_id}'}
-    if api_get is None:
-        api_get = fetch_api
-    if not repository or not re.fullmatch(r'[0-9a-f]{40}', str(source_sha)) or \
-            not all((run_id, attempt, workflow_id, ref, event)):
-        fail('readiness collector: explicit repository/run/attempt/source/ref/event/workflow identity required')
-    owner, _, repo = repository.partition('/')
-    if not owner or not repo:
-        fail('readiness collector: invalid repository slug')
-    run_status, run_body = api_get(repository, f'/actions/runs/{run_id}', token)
-    if run_status != 200:
-        fail(f'readiness collector: run API returned HTTP {run_status}')
-    run = parse_json(run_body, 'readiness run')
-    expected_run = {'id': int(run_id), 'run_attempt': int(attempt), 'head_sha': source_sha,
-                    'event': event, 'head_branch': ref.removeprefix('refs/tags/'),
-                    'workflow_id': int(workflow_id), 'status': 'completed',
-                    'conclusion': 'success'}
-    for key, value in expected_run.items():
-        if run.get(key) != value:
-            fail(f'readiness collector: run {key} mismatch (expected {value!r})')
-    jobs = publication_api_pages(repository, f'/actions/runs/{run_id}/jobs', token, 'jobs', api_get)
-    artifacts = publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token,
-                                      'artifacts', api_get)
-    job_entries = paginated_entries(jobs, 'jobs', 'readiness jobs')
-    required = {'source-checks', 'vsix', 'linux-x86_64-gnu', 'native-candidates'}
-    matrix_families = ('native-consumers', 'native-functional-consumers',
-                       'native-vscode-consumers')
-    seen = set()
-    for job in job_entries:
-        name = job.get('name')
-        target = next((target for target in READINESS_TARGETS
-                       if isinstance(name, str) and target in name), None)
-        family = next((family for family in matrix_families
-                       if isinstance(name, str) and name.startswith(family)), None)
-        key = (family, target) if family and target else name if name in required else None
-        if key is not None:
-            if key in seen:
-                fail(f'readiness collector: duplicate mandatory job {name!r}')
-            seen.add(key)
-            if job.get('run_attempt') != int(attempt) or job.get('conclusion') != 'success':
-                fail(f'readiness collector: mandatory job {name!r} is not successful in attempt {attempt}')
-    expected = required | {(family, target) for family in matrix_families
-                           for target in READINESS_TARGETS}
-    missing = sorted(expected - seen, key=str)
-    if missing:
-        fail(f'readiness collector: missing mandatory jobs {missing}')
-    by_name = {}
-    for artifact in paginated_entries(artifacts, 'artifacts', 'readiness artifacts'):
-        name = artifact.get('name')
-        if not name or name in by_name:
-            fail('readiness collector: missing or duplicate artifact name')
-        if artifact.get('expired') is not False or not isinstance(artifact.get('id'), int) or \
-                not ARTIFACT_DIGEST_PATTERN.fullmatch(str(artifact.get('digest', ''))):
-            fail(f'readiness collector: invalid/expired artifact {name!r}')
-        workflow_run = artifact.get('workflow_run')
-        if not isinstance(workflow_run, dict) or workflow_run.get('id') != int(run_id):
-            fail(f'readiness collector: artifact {name!r} belongs to another run')
-        by_name[name] = artifact
-    if artifact_get is None:
-        def artifact_get(artifact):
-            from scripts import download_native_candidate as transport
-            url = f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/{artifact["id"]}/zip'
-            try:
-                with transport.request(url, token) as response:
-                    data = response.read()
-            except transport.DownloadError as error:
-                fail(f'readiness collector: artifact download failed: {error}')
-            digest = 'sha256:' + hashlib.sha256(data).hexdigest()
-            if digest != artifact['digest']:
-                fail(f'readiness collector: artifact {artifact["name"]!r} digest mismatch')
-            return data
-    records = {}
-    collected_bundle = None
-    for artifact_name, artifact in by_name.items():
-        if artifact_name.startswith(('native-consumer-', 'native-functional-', 'native-vscode-')):
-            payload = artifact_get(artifact)
-            if isinstance(payload, bytes):
-                if 'sha256:' + hashlib.sha256(payload).hexdigest() != artifact['digest']:
-                    fail(f'readiness collector: artifact {artifact_name!r} digest mismatch')
-                import io
-                import zipfile
-                try:
-                    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-                        names = archive.namelist()
-                        if len(names) != len(set(names)) or any(
-                                name.startswith('/') or '..' in Path(name).parts
-                                for name in names):
-                            fail(f'readiness collector: unsafe archive {artifact_name!r}')
-                        docs = [json.loads(archive.read(name)) for name in names
-                                if name.endswith('.json')]
-                except (OSError, ValueError, zipfile.BadZipFile, KeyError) as error:
-                    fail(f'readiness collector: invalid evidence archive {artifact_name!r}: {error}')
-                if len(docs) != 1:
-                    fail(f'readiness collector: expected one evidence JSON in {artifact_name!r}')
-                document = docs[0]
-            else:
-                document = payload
-            if not isinstance(document, dict):
-                fail(f'readiness collector: invalid evidence JSON in {artifact_name!r}')
-            if isinstance(document.get('readiness_bundle'), dict):
-                if collected_bundle is not None and collected_bundle != document['readiness_bundle']:
-                    fail('readiness collector: evidence artifacts disagree on readiness bundle')
-                collected_bundle = document['readiness_bundle']
-            target = next((target for target in READINESS_TARGETS if target in artifact_name), None)
-            if target is None:
-                fail(f'readiness collector: target missing from {artifact_name!r}')
-            family = ('abi' if artifact_name.startswith('native-consumer-') else
-                      'functional_rust' if artifact_name.startswith('native-functional-') else 'vsix')
-            records[(family, target)] = (artifact, document)
-    missing_records = [(family, target) for family in ('abi', 'functional_rust', 'vsix')
-                       for target in READINESS_TARGETS if (family, target) not in records]
-    if missing_records:
-        fail(f'readiness collector: missing evidence artifacts {missing_records}')
-    # The producer handoffs currently do not carry every family metric. Refuse
-    # explicitly rather than infer counts or outcomes from a successful job.
-    for (family, target), (_, document) in records.items():
-        metrics = document.get('tests')
-        if not isinstance(metrics, dict) or not isinstance(metrics.get('executed'), int):
-            fail(f'readiness collector: missing measured test metrics in {family}/{target} evidence')
-    if collected_bundle is None:
-        fail('readiness collector: evidence is missing an identity-bound readiness bundle')
-    if collected_bundle.get('identity') != identity:
-        fail('readiness collector: readiness bundle identity mismatch')
-    validate_release_readiness(collected_bundle)
-    return collected_bundle
-
-
-def validate_release_readiness(bundle):
-    """Validate an exact, identity-bound readiness bundle without claiming hosted proof."""
-    if not isinstance(bundle, dict):
-        fail('readiness: expected a JSON object')
-    identity = bundle.get('identity')
-    keys = ('source_sha', 'ref', 'event', 'run_id', 'run_attempt', 'workflow_id')
-    if not isinstance(identity, dict) or not all(identity.get(key) for key in keys):
-        fail('readiness: missing source/ref/event/run/workflow identity')
-    if not re.fullmatch(r'[0-9a-f]{40}', str(identity['source_sha'])):
-        fail('readiness: invalid source SHA')
-    if identity['event'] != 'push' or not str(identity['ref']).startswith('refs/tags/'):
-        fail('readiness: expected a tag push')
-    candidates = bundle.get('candidates')
-    if not isinstance(candidates, dict) or set(candidates) != set(READINESS_TARGETS):
-        fail('readiness: candidate target set must match all expected targets')
-    for target, candidate in candidates.items():
-        if not isinstance(candidate, dict):
-            fail(f'readiness: invalid candidate for {target}')
-        for key in ('immutable_id', 'archive_sha256', 'executable_sha256'):
-            if not candidate.get(key):
-                fail(f'readiness: missing {key} for {target}')
-        for key in ('archive_sha256', 'executable_sha256'):
-            if not re.fullmatch(r'[0-9a-f]{64}', str(candidate[key])):
-                fail(f'readiness: invalid {key} for {target}')
-        if candidate.get('archive_evidence_sha256') != candidate['archive_sha256'] or \
-                candidate.get('executable_evidence_sha256') != candidate['executable_sha256']:
-            fail(f'readiness: candidate byte hash mismatch for {target}')
-        if any(candidate.get(key) != identity.get(key) for key in keys):
-            fail(f'readiness: candidate identity mismatch for {target}')
-    vsix = bundle.get('vsix')
-    if not isinstance(vsix, dict) or not vsix.get('immutable_id') or \
-            not re.fullmatch(r'[0-9a-f]{64}', str(vsix.get('sha256', ''))):
-        fail('readiness: invalid VSIX identity/hash')
-    if any(vsix.get(key) != identity.get(key) for key in keys):
-        fail('readiness: VSIX identity mismatch')
-    outcomes = bundle.get('outcomes')
-    if not isinstance(outcomes, dict) or set(outcomes) != set(READINESS_OUTCOMES):
-        fail('readiness: missing or unexpected mandatory outcome family')
-    for family, results in outcomes.items():
-        if not isinstance(results, dict) or set(results) != set(READINESS_TARGETS):
-            fail(f'readiness: {family} target set must match all expected targets')
-        for target, record in results.items():
-            if not isinstance(record, dict) or record.get('result') != 'success':
-                fail(f'readiness: {family} outcome for {target} must be success')
-            if record.get('identity') != identity:
-                fail(f'readiness: {family} evidence identity mismatch for {target}')
-            expected_artifact = vsix if family == 'vsix' else candidates[target]
-            artifact_id_key = 'immutable_id'
-            digest_key = 'sha256' if family == 'vsix' else 'archive_sha256'
-            if record.get('artifact_id') != expected_artifact[artifact_id_key] or \
-                    record.get('artifact_sha256') != expected_artifact[digest_key]:
-                fail(f'readiness: {family} evidence artifact mismatch for {target}')
-            if record.get('executable_sha256') != candidates[target]['executable_sha256']:
-                fail(f'readiness: {family} executable hash mismatch for {target}')
-            counts = record.get('tests')
-            if not isinstance(counts, dict) or not isinstance(counts.get('executed'), int) or \
-                    counts['executed'] <= 0 or counts.get('skipped') != 0 or \
-                    counts.get('ignored') != 0:
-                fail(f'readiness: {family} tests need execution and zero skipped/ignored for {target}')
-            if record.get('lifecycle') != 'success' or record.get('cleanup') != 'success':
-                fail(f'readiness: {family} lifecycle/cleanup must succeed for {target}')
-    if bundle.get('experimental_complete') is not True:
-        fail('readiness: experimental checks are incomplete')
-    promotion = bundle.get('promotion')
-    publishable = False
-    if isinstance(promotion, dict) and bundle.get('fallback_only') is not True:
-        proof = promotion.get('evidence')
-        if isinstance(proof, dict):
-            proof_identity = proof.get('identity')
-            expected_identity = {'source_sha': identity['source_sha'],
-                                 'run_url': identity.get('run_url'),
-                                 'run_attempt': identity['run_attempt']}
-            artifacts = proof.get('artifacts')
-            if proof_identity == expected_identity and isinstance(artifacts, dict):
-                for target in READINESS_TARGETS:
-                    artifact = artifacts.get(target)
-                    candidate = candidates[target]
-                    if not isinstance(artifact, dict) or \
-                            artifact.get('immutable_id') != candidate['immutable_id'] or \
-                            artifact.get('sha256') != candidate['archive_sha256'] or \
-                            any(artifact.get(key) != proof_identity.get(key)
-                                for key in ('source_sha', 'run_url', 'run_attempt')):
-                        break
-                else:
-                    check_native_promotion_evidence('native-experimental', proof)
-                    publishable = identity['event'] == 'push' and \
-                        str(identity['ref']).startswith('refs/tags/')
-    return {'experimental_ready': True, 'publishable': publishable}
 
 
 def check_native_promotion_evidence(selected_artifact, evidence):
@@ -3025,253 +2790,26 @@ def run_pipeline_self_tests():
 
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
-    readiness_identity = {'source_sha': SELF_TEST_SHA, 'ref': 'refs/tags/v1.2.3',
-                          'event': 'push', 'run_id': '42', 'run_attempt': '1',
-                          'workflow_id': '7',
-                          'run_url': 'https://github.com/example/magit-lsp/actions/runs/42'}
-    readiness_bundle = {
-        'identity': readiness_identity,
-        'candidates': {target: {**readiness_identity, 'immutable_id': f'artifact-{i}',
-                                'archive_sha256': 'a' * 64,
-                                'archive_evidence_sha256': 'a' * 64,
-                                'executable_sha256': 'b' * 64,
-                                'executable_evidence_sha256': 'b' * 64}
-                       for i, target in enumerate(READINESS_TARGETS)},
-        'vsix': {**readiness_identity, 'immutable_id': 'vsix-artifact',
-                 'sha256': 'c' * 64},
-        'outcomes': {},
-        'experimental_complete': True, 'fallback_only': False,
-    }
-    for family in READINESS_OUTCOMES:
-        readiness_bundle['outcomes'][family] = {}
-        for target in READINESS_TARGETS:
-            artifact = readiness_bundle['vsix'] if family == 'vsix' else \
-                readiness_bundle['candidates'][target]
-            readiness_bundle['outcomes'][family][target] = {
-                'result': 'success', 'identity': readiness_identity,
-                'artifact_id': artifact['immutable_id'],
-                'artifact_sha256': artifact.get('sha256', artifact.get('archive_sha256')),
-                'executable_sha256': readiness_bundle['candidates'][target]['executable_sha256'],
-                'tests': {'executed': 1, 'skipped': 0, 'ignored': 0},
-                'lifecycle': 'success', 'cleanup': 'success'}
-    result = validate_release_readiness(readiness_bundle)
-    if result != {'experimental_ready': True, 'publishable': False}:
-        fail('self-test: complete experimental readiness must not imply publication')
-    # Exercise the API adapter with current run/job/artifact shapes and a
-    # future producer bundle; API access and artifact bytes remain mocked.
-    collector_jobs = ['source-checks', 'vsix', 'linux-x86_64-gnu', 'native-candidates'] + [
-        f'{family} ({target})' for family in
-        ('native-consumers', 'native-functional-consumers', 'native-vscode-consumers')
-        for target in READINESS_TARGETS]
-    collector_artifacts = []
-    collector_payloads = {}
-    for index, (family, prefix) in enumerate((('abi', 'native-consumer-'),
-                                               ('functional_rust', 'native-functional-'),
-                                               ('vsix', 'native-vscode-'))):
-        for target in READINESS_TARGETS:
-            name = f'{prefix}{target}-1'
-            artifact = {'id': 100 + index * 10 + READINESS_TARGETS.index(target),
-                        'name': name, 'digest': 'sha256:' + 'a' * 64,
-                        'expired': False, 'workflow_run': {'id': 42}}
-            collector_artifacts.append(artifact)
-            collector_payloads[name] = {'readiness_bundle': readiness_bundle,
-                                        'tests': {'executed': 1, 'skipped': 0, 'ignored': 0}}
-    def collector_api(_repository, path, _token):
-        if path == '/actions/runs/42':
-            body = {'id': 42, 'run_attempt': 1, 'head_sha': SELF_TEST_SHA,
-                    'event': 'push', 'head_branch': 'v1.2.3', 'workflow_id': 7,
-                    'status': 'completed', 'conclusion': 'success'}
-        elif path.startswith('/actions/runs/42/jobs?'):
-            body = {'total_count': len(collector_jobs), 'jobs': [
-                {'name': name, 'run_attempt': 1, 'conclusion': 'success'}
-                for name in collector_jobs]}
-        elif path.startswith('/actions/runs/42/artifacts?'):
-            body = {'total_count': len(collector_artifacts), 'artifacts': collector_artifacts}
-        else:
-            return 404, b'{}'
-        return 200, json.dumps(body).encode()
-    collected = collect_release_readiness(
-        'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
-        'push', '7', 'mock-token', api_get=collector_api,
-        artifact_get=lambda artifact: collector_payloads[artifact['name']])
-    if collected != readiness_bundle:
-        fail('self-test: mocked readiness collection did not preserve the bound bundle')
-    missing_metrics = dict(collector_payloads)
-    missing_metrics['native-consumer-x86_64-unknown-linux-gnu-1'] = {
-        'readiness_bundle': readiness_bundle}
-    expect_check('readiness collector missing measured metrics',
-                 lambda: collect_release_readiness(
-                     'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
-                     'push', '7', 'mock-token', api_get=collector_api,
-                     artifact_get=lambda artifact: missing_metrics[artifact['name']]),
-                 expected='missing measured test metrics')
-    def collector_with(jobs=None, artifact_list=None, api_mutation=None,
-                       artifact_payload_map=None):
-        def api(_repository, path, _token):
-            status, body = collector_api(_repository, path, _token)
-            if api_mutation:
-                status, body = api_mutation(path, status, body)
-            return status, body
-        original_jobs = collector_jobs[:]
-        original_artifacts = collector_artifacts[:]
-        if jobs is not None:
-            collector_jobs[:] = jobs
-        if artifact_list is not None:
-            collector_artifacts[:] = artifact_list
-        try:
-            return collect_release_readiness(
-                'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
-                'push', '7', 'mock-token', api_get=api,
-                artifact_get=lambda artifact: (artifact_payload_map or collector_payloads)[artifact['name']])
-        finally:
-            collector_jobs[:] = original_jobs
-            collector_artifacts[:] = original_artifacts
-    for state in ('failure', 'skipped', 'cancelled'):
-        def change_job(path, status, body, state=state):
-            if path.startswith('/actions/runs/42/jobs?'):
-                document = json.loads(body)
-                document['jobs'][0]['conclusion'] = state
-                return status, json.dumps(document).encode()
-            return status, body
-        expect_check(f'readiness collector job {state}', lambda: collector_with(
-            api_mutation=change_job), expected='is not successful')
-    expect_check('readiness collector missing matrix job',
-                 lambda: collector_with(jobs=collector_jobs[:-1]),
-                 expected='missing mandatory jobs')
-    expect_check('readiness collector pagination gap', lambda: collector_with(
-        api_mutation=lambda path, status, body: (status, b'{"total_count":2,"jobs":[]}')
-        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
-        expected='made no pagination progress')
-    expect_check('readiness collector empty pagination', lambda: collector_with(
-        api_mutation=lambda path, status, body: (status, b'{"total_count":1,"jobs":[]}')
-        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
-        expected='made no pagination progress')
-    expect_check('readiness collector repeating pagination', lambda: collector_with(
-        api_mutation=lambda path, status, body: (status, b'{"total_count":3,"jobs":[{"name":"repeated"}]}')
-        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
-        expected='repeats an earlier page')
-    expect_check('readiness collector wrong attempt', lambda: collect_release_readiness(
-        'example/magit-lsp', '42', '2', SELF_TEST_SHA, 'refs/tags/v1.2.3',
-        'push', '7', 'mock-token', api_get=collector_api,
-        artifact_get=lambda artifact: collector_payloads[artifact['name']]),
-        expected='run_attempt mismatch')
-    expect_check('readiness collector wrong source', lambda: collect_release_readiness(
-        'example/magit-lsp', '42', '1', SELF_TEST_OTHER_SHA, 'refs/tags/v1.2.3',
-        'push', '7', 'mock-token', api_get=collector_api,
-        artifact_get=lambda artifact: collector_payloads[artifact['name']]),
-        expected='head_sha mismatch')
-    expect_check('readiness collector absent VSIX evidence', lambda: collector_with(
-        artifact_list=[a for a in collector_artifacts
-                       if not a['name'].startswith('native-vscode-')]),
-        expected='missing evidence artifacts')
-    expect_check('readiness collector wrong artifact digest', lambda: collect_release_readiness(
-        'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
-        'push', '7', 'mock-token', api_get=collector_api,
-        artifact_get=lambda _artifact: b'not the declared artifact bytes'),
-        expected='digest mismatch')
-    import io
-    import zipfile
-    tampered_zip = io.BytesIO()
-    with zipfile.ZipFile(tampered_zip, 'w') as archive:
-        archive.writestr('evidence.json', '{not-json')
-    tampered_bytes = tampered_zip.getvalue()
-    tampered_artifacts = [dict(artifact) for artifact in collector_artifacts]
-    tampered_artifacts[0]['digest'] = 'sha256:' + hashlib.sha256(tampered_bytes).hexdigest()
-    tampered_payloads = dict(collector_payloads)
-    tampered_payloads[tampered_artifacts[0]['name']] = tampered_bytes
-    expect_check('readiness collector tampered evidence JSON', lambda: collector_with(
-        artifact_list=tampered_artifacts,
-        artifact_payload_map=tampered_payloads), expected='invalid evidence archive')
-    if validate_release_readiness({**readiness_bundle, 'windows_outcome': 'failure'})[
-            'experimental_ready'] is not True:
-        fail('self-test: irrelevant Windows job failure must not block readiness collection')
-    promotion_proof = {
-        'identity': {'source_sha': SELF_TEST_SHA, 'run_url': readiness_identity['run_url'],
-                     'run_attempt': '1'},
-        'artifacts': {target: {'immutable_id': readiness_bundle['candidates'][target]['immutable_id'],
-                               'sha256': readiness_bundle['candidates'][target]['archive_sha256'],
-                               'source_sha': SELF_TEST_SHA,
-                               'run_url': readiness_identity['run_url'], 'run_attempt': '1'}
-                      for target in READINESS_TARGETS},
-        'outcomes': {gate: {target: 'success' for target in READINESS_TARGETS}
-                     for gate in ('abi', 'functional', 'vsix')}}
-    promoted = {**readiness_bundle, 'promotion': {'evidence': promotion_proof}}
-    if validate_release_readiness(promoted)['publishable'] is not True:
-        fail('self-test: matching recorded promotion must enable publication eligibility')
-    for event in ('workflow_dispatch', 'push'):
-        invalid = {**promoted, 'identity': {**readiness_identity, 'event': event}}
-        if event == 'push':
-            invalid['identity']['ref'] = 'refs/heads/main'
-        expect_check(f'readiness refuses {event} non-tag/manual origin',
-                     validate_release_readiness, invalid, expected='expected a tag push')
-    for family in READINESS_OUTCOMES:
-        for outcome in ('failure', 'skipped', 'cancelled', 'inconclusive', 'missing'):
-            invalid = {**readiness_bundle, 'outcomes': {
-                key: dict(value) for key, value in readiness_bundle['outcomes'].items()}}
-            if outcome == 'missing':
-                del invalid['outcomes'][family][READINESS_TARGETS[0]]
-            else:
-                invalid['outcomes'][family][READINESS_TARGETS[0]] = {
-                    **invalid['outcomes'][family][READINESS_TARGETS[0]], 'result': outcome}
-            expect_check(f'readiness {family} {outcome}', validate_release_readiness,
-                         invalid, expected=('target set' if outcome == 'missing'
-                                            else 'must be success'))
-    invalid_targets = {**readiness_bundle, 'candidates': dict(readiness_bundle['candidates'])}
-    del invalid_targets['candidates'][READINESS_TARGETS[0]]
-    expect_check('readiness missing target', validate_release_readiness, invalid_targets,
-                 expected='candidate target set')
-    for label, field, value, expected in (
-            ('candidate hash mismatch', 'archive_evidence_sha256', 'd' * 64,
-             'candidate byte hash mismatch'),
-            ('candidate attempt mismatch', 'run_attempt', '2', 'candidate identity mismatch'),
-            ('candidate source mismatch', 'source_sha', SELF_TEST_OTHER_SHA,
-             'candidate identity mismatch')):
-        invalid = {**readiness_bundle, 'candidates': dict(readiness_bundle['candidates'])}
-        invalid['candidates'] = {**invalid['candidates'], READINESS_TARGETS[0]:
-                                 {**invalid['candidates'][READINESS_TARGETS[0]], field: value}}
-        expect_check(f'readiness {label}', validate_release_readiness, invalid,
-                     expected=expected)
-    invalid_vsix = {**readiness_bundle, 'vsix': {**readiness_bundle['vsix'], 'sha256': 'bad'}}
-    expect_check('readiness VSIX hash mismatch', validate_release_readiness, invalid_vsix,
-                 expected='invalid VSIX identity/hash')
-    for field, value, expected in (
-            ('executed', 0, 'need execution'), ('skipped', 1, 'zero skipped/ignored'),
-            ('ignored', 1, 'zero skipped/ignored')):
-        invalid = {**readiness_bundle, 'outcomes': {
-            family: dict(records) for family, records in readiness_bundle['outcomes'].items()}}
-        family = READINESS_OUTCOMES[0]
-        target = READINESS_TARGETS[0]
-        record = {**invalid['outcomes'][family][target],
-                  'tests': {**invalid['outcomes'][family][target]['tests'], field: value}}
-        invalid['outcomes'][family][target] = record
-        expect_check(f'readiness measured test count {field}', validate_release_readiness,
-                     invalid, expected=expected)
-    for field, value, expected in (
-            ('identity', {**readiness_identity, 'run_attempt': '2'}, 'evidence identity mismatch'),
-            ('artifact_id', 'other-artifact', 'evidence artifact mismatch'),
-            ('lifecycle', 'failure', 'lifecycle/cleanup'),
-            ('cleanup', 'missing', 'lifecycle/cleanup')):
-        invalid = {**readiness_bundle, 'outcomes': {
-            family: dict(records) for family, records in readiness_bundle['outcomes'].items()}}
-        family = READINESS_OUTCOMES[0]
-        target = READINESS_TARGETS[0]
-        invalid['outcomes'][family][target] = {
-            **invalid['outcomes'][family][target], field: value}
-        expect_check(f'readiness evidence {field}', validate_release_readiness,
-                     invalid, expected=expected)
-    invalid_proof = {**promotion_proof, 'artifacts': dict(promotion_proof['artifacts'])}
-    invalid_proof['artifacts'] = {**invalid_proof['artifacts'], READINESS_TARGETS[0]:
-                                  {**invalid_proof['artifacts'][READINESS_TARGETS[0]],
-                                   'sha256': 'd' * 64}}
-    invalid_promotion = {**promoted, 'promotion': {'evidence': invalid_proof}}
-    if validate_release_readiness(invalid_promotion)['publishable']:
-        fail('self-test: mismatched promotion attempt must not be publishable')
-    windows_failure = {**readiness_bundle, 'windows_outcome': 'failure'}
-    if validate_release_readiness(windows_failure)['experimental_ready'] is not True:
-        fail('self-test: informational Windows outcome must not block readiness')
-    fallback = {**promoted, 'fallback_only': True}
-    if validate_release_readiness(fallback)['publishable']:
-        fail('self-test: fallback-only candidate set must not be publishable')
+    # The retired readiness draft must not reappear: neither its CLI
+    # entrypoints/arguments nor its collector/validator symbols may remain.
+    options = set(build_parser()._option_string_actions)
+    for retired in ('--collect-release-readiness', '--validate-release-readiness',
+                    '--repository', '--run-id', '--attempt', '--source-sha',
+                    '--ref', '--event', '--workflow-id'):
+        if retired in options:
+            fail(f'self-test: retired readiness entrypoint {retired} is exposed')
+    for retired in ('collect_release_readiness', 'validate_release_readiness',
+                    'READINESS_TARGETS', 'READINESS_OUTCOMES',
+                    'PENDING_READINESS_JOBS'):
+        if hasattr(sys.modules[__name__], retired):
+            fail(f'self-test: retired readiness symbol {retired} remains')
+    # The ordinary publication boundary keeps its required helpers and caller.
+    for retained in ('validate_run_binding', 'validate_run_jobs',
+                     'validate_run_artifacts', 'validate_upload_identity',
+                     'validate_tag_binding', 'publication_api_pages',
+                     'prepare_publication_runtime'):
+        if not callable(globals().get(retained)):
+            fail(f'self-test: retained publication helper {retained} is missing')
     promotion_identity = {
         'source_sha': SELF_TEST_SHA,
         'run_url': 'https://github.com/example/magit-lsp/actions/runs/42',
@@ -3334,11 +2872,7 @@ def run_self_tests():
 
     # Publication binding: a coherent push-tag run, every paginated job and
     # artifact entry, the exact trusted manifest and both tag shapes are
-    # accepted together. The native matrix stays a non-gating experiment and
-    # the release-ready/VSIX contract is explicitly pending, so this fixture
-    # makes no publication-readiness claim.
-    if set(MANDATORY_RUN_JOBS) & set(PENDING_READINESS_JOBS):
-        fail('self-test: pending readiness jobs must not be mandatory yet')
+    # accepted together. The native matrix stays a non-gating experiment.
     validate_run_binding(run_binding_fixture(), SELF_TEST_REPOSITORY,
                          SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
                          SELF_TEST_WORKFLOW_ID, SELF_TEST_TAG_REF)
@@ -4334,7 +3868,8 @@ def run_automation_unit():
     print('ok: release automation unit guards (no Cargo metadata or package)')
 
 
-def main():
+def build_parser():
+    """Return the CLI parser without the retired readiness entrypoints."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--validate-artifacts', metavar='DIR',
                         help='verify the downloaded release archive and sidecar')
@@ -4361,20 +3896,13 @@ def main():
     parser.add_argument('--validate-publication-binding', metavar='BUNDLE',
                         help='validate an offline JSON run/tag/asset binding '
                              'bundle and print its source commit')
-    parser.add_argument('--validate-release-readiness', metavar='BUNDLE',
-                        help='validate exact identity-bound readiness JSON bundle')
-    parser.add_argument('--collect-release-readiness', action='store_true',
-                        help='collect and validate readiness from this GitHub Actions run')
-    parser.add_argument('--repository', help='explicit owner/repository for readiness collection')
-    parser.add_argument('--run-id', help='explicit producer run ID')
-    parser.add_argument('--attempt', help='explicit producer run attempt')
-    parser.add_argument('--source-sha', help='explicit producer source commit')
-    parser.add_argument('--ref', help='explicit producer ref')
-    parser.add_argument('--event', help='explicit producer event')
-    parser.add_argument('--workflow-id', help='explicit producer workflow ID')
     parser.add_argument('--prepare-publication-runtime', metavar='EVENT',
                         help='read-only validate workflow_run event and upstream API')
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     try:
         if args.pipeline_self_tests:
             run_pipeline_self_tests()
@@ -4390,21 +3918,6 @@ def main():
             return 0
         if args.validate_publication_binding:
             validate_publication_binding_bundle(args.validate_publication_binding)
-            return 0
-        if args.validate_release_readiness:
-            with open(args.validate_release_readiness, encoding='utf-8') as stream:
-                result = validate_release_readiness(json.load(stream))
-            print(json.dumps(result, sort_keys=True))
-            return 0
-        if args.collect_release_readiness:
-            required = (args.repository, args.run_id, args.attempt, args.source_sha,
-                        args.ref, args.event, args.workflow_id)
-            if not all(required):
-                fail('--collect-release-readiness requires explicit repository/run-id/attempt/source-sha/ref/event/workflow-id')
-            bundle = collect_release_readiness(
-                args.repository, args.run_id, args.attempt, args.source_sha, args.ref,
-                args.event, args.workflow_id, os.environ.get('GH_TOKEN'))
-            print(json.dumps(bundle, sort_keys=True))
             return 0
         if args.prepare_publication_runtime:
             prepare_publication_runtime(args.prepare_publication_runtime)
