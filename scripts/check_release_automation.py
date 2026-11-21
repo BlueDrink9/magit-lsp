@@ -559,6 +559,67 @@ def check_producer_handoff(block, target, context, experimental):
     return check_uploads(block, target, context, experimental)
 
 
+READINESS_TARGETS = tuple(target for _, target in NATIVE_MATRIX)
+READINESS_OUTCOMES = ('source', 'package', 'build', 'abi', 'lsp', 'git',
+                      'functional_rust', 'neovim', 'vsix')
+
+
+def validate_release_readiness(bundle):
+    """Validate an exact, identity-bound readiness bundle without claiming hosted proof."""
+    if not isinstance(bundle, dict):
+        fail('readiness: expected a JSON object')
+    identity = bundle.get('identity')
+    keys = ('source_sha', 'ref', 'event', 'run_id', 'run_attempt', 'workflow_id')
+    if not isinstance(identity, dict) or not all(identity.get(key) for key in keys):
+        fail('readiness: missing source/ref/event/run/workflow identity')
+    if not re.fullmatch(r'[0-9a-f]{40}', str(identity['source_sha'])):
+        fail('readiness: invalid source SHA')
+    if identity['event'] != 'push' or not str(identity['ref']).startswith('refs/tags/'):
+        fail('readiness: expected a tag push')
+    candidates = bundle.get('candidates')
+    if not isinstance(candidates, dict) or set(candidates) != set(READINESS_TARGETS):
+        fail('readiness: candidate target set must match all expected targets')
+    for target, candidate in candidates.items():
+        if not isinstance(candidate, dict):
+            fail(f'readiness: invalid candidate for {target}')
+        for key in ('immutable_id', 'archive_sha256', 'executable_sha256'):
+            if not candidate.get(key):
+                fail(f'readiness: missing {key} for {target}')
+        for key in ('archive_sha256', 'executable_sha256'):
+            if not re.fullmatch(r'[0-9a-f]{64}', str(candidate[key])):
+                fail(f'readiness: invalid {key} for {target}')
+        if candidate.get('archive_evidence_sha256') != candidate['archive_sha256'] or \
+                candidate.get('executable_evidence_sha256') != candidate['executable_sha256']:
+            fail(f'readiness: candidate byte hash mismatch for {target}')
+        if any(candidate.get(key) != identity.get(key) for key in keys):
+            fail(f'readiness: candidate identity mismatch for {target}')
+    vsix = bundle.get('vsix')
+    if not isinstance(vsix, dict) or not vsix.get('immutable_id') or \
+            not re.fullmatch(r'[0-9a-f]{64}', str(vsix.get('sha256', ''))):
+        fail('readiness: invalid VSIX identity/hash')
+    if any(vsix.get(key) != identity.get(key) for key in keys):
+        fail('readiness: VSIX identity mismatch')
+    outcomes = bundle.get('outcomes')
+    if not isinstance(outcomes, dict) or set(outcomes) != set(READINESS_OUTCOMES):
+        fail('readiness: missing or unexpected mandatory outcome family')
+    for family, results in outcomes.items():
+        if not isinstance(results, dict) or set(results) != set(READINESS_TARGETS):
+            fail(f'readiness: {family} target set must match all expected targets')
+        for target, outcome in results.items():
+            if outcome != 'success':
+                fail(f'readiness: {family} outcome for {target} must be success')
+    if bundle.get('experimental_complete') is not True:
+        fail('readiness: experimental checks are incomplete')
+    promotion = bundle.get('promotion')
+    publishable = (identity['event'] == 'push' and isinstance(promotion, dict) and
+                   promotion.get('status') == 'success' and
+                   promotion.get('source_sha') == identity['source_sha'] and
+                   promotion.get('run_id') == identity['run_id'] and
+                   promotion.get('run_attempt') == identity['run_attempt'] and
+                   bundle.get('fallback_only') is not True)
+    return {'experimental_ready': True, 'publishable': publishable}
+
+
 def check_native_promotion_evidence(selected_artifact, evidence):
     """Fail closed if production selects a native artifact without complete hosted proof."""
     if 'experimental' not in selected_artifact:
@@ -2781,6 +2842,75 @@ def run_pipeline_self_tests():
 
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
+    readiness_identity = {'source_sha': SELF_TEST_SHA, 'ref': 'refs/tags/v1.2.3',
+                          'event': 'push', 'run_id': '42', 'run_attempt': '1',
+                          'workflow_id': '7'}
+    readiness_bundle = {
+        'identity': readiness_identity,
+        'candidates': {target: {**readiness_identity, 'immutable_id': f'artifact-{i}',
+                                'archive_sha256': 'a' * 64,
+                                'archive_evidence_sha256': 'a' * 64,
+                                'executable_sha256': 'b' * 64,
+                                'executable_evidence_sha256': 'b' * 64}
+                       for i, target in enumerate(READINESS_TARGETS)},
+        'vsix': {**readiness_identity, 'immutable_id': 'vsix-artifact',
+                 'sha256': 'c' * 64},
+        'outcomes': {family: {target: 'success' for target in READINESS_TARGETS}
+                     for family in READINESS_OUTCOMES},
+        'experimental_complete': True, 'fallback_only': False,
+    }
+    result = validate_release_readiness(readiness_bundle)
+    if result != {'experimental_ready': True, 'publishable': False}:
+        fail('self-test: complete experimental readiness must not imply publication')
+    promoted = {**readiness_bundle, 'promotion': {
+        'status': 'success', 'source_sha': SELF_TEST_SHA, 'run_id': '42',
+        'run_attempt': '1'}}
+    if validate_release_readiness(promoted)['publishable'] is not True:
+        fail('self-test: matching recorded promotion must enable publication eligibility')
+    for event in ('workflow_dispatch', 'push'):
+        invalid = {**promoted, 'identity': {**readiness_identity, 'event': event}}
+        if event == 'push':
+            invalid['identity']['ref'] = 'refs/heads/main'
+        expect_check(f'readiness refuses {event} non-tag/manual origin',
+                     validate_release_readiness, invalid, expected='expected a tag push')
+    for family in READINESS_OUTCOMES:
+        for outcome in ('failure', 'skipped', 'cancelled', 'inconclusive', 'missing'):
+            invalid = {**readiness_bundle, 'outcomes': {
+                key: dict(value) for key, value in readiness_bundle['outcomes'].items()}}
+            if outcome == 'missing':
+                del invalid['outcomes'][family][READINESS_TARGETS[0]]
+            else:
+                invalid['outcomes'][family][READINESS_TARGETS[0]] = outcome
+            expect_check(f'readiness {family} {outcome}', validate_release_readiness,
+                         invalid, expected=('target set' if outcome == 'missing'
+                                            else 'must be success'))
+    invalid_targets = {**readiness_bundle, 'candidates': dict(readiness_bundle['candidates'])}
+    del invalid_targets['candidates'][READINESS_TARGETS[0]]
+    expect_check('readiness missing target', validate_release_readiness, invalid_targets,
+                 expected='candidate target set')
+    for label, field, value, expected in (
+            ('candidate hash mismatch', 'archive_evidence_sha256', 'd' * 64,
+             'candidate byte hash mismatch'),
+            ('candidate attempt mismatch', 'run_attempt', '2', 'candidate identity mismatch'),
+            ('candidate source mismatch', 'source_sha', SELF_TEST_OTHER_SHA,
+             'candidate identity mismatch')):
+        invalid = {**readiness_bundle, 'candidates': dict(readiness_bundle['candidates'])}
+        invalid['candidates'] = {**invalid['candidates'], READINESS_TARGETS[0]:
+                                 {**invalid['candidates'][READINESS_TARGETS[0]], field: value}}
+        expect_check(f'readiness {label}', validate_release_readiness, invalid,
+                     expected=expected)
+    invalid_vsix = {**readiness_bundle, 'vsix': {**readiness_bundle['vsix'], 'sha256': 'bad'}}
+    expect_check('readiness VSIX hash mismatch', validate_release_readiness, invalid_vsix,
+                 expected='invalid VSIX identity/hash')
+    invalid_promotion = {**promoted, 'promotion': {**promoted['promotion'], 'run_attempt': '2'}}
+    if validate_release_readiness(invalid_promotion)['publishable']:
+        fail('self-test: mismatched promotion attempt must not be publishable')
+    windows_failure = {**readiness_bundle, 'windows_outcome': 'failure'}
+    if validate_release_readiness(windows_failure)['experimental_ready'] is not True:
+        fail('self-test: informational Windows outcome must not block readiness')
+    fallback = {**promoted, 'fallback_only': True}
+    if validate_release_readiness(fallback)['publishable']:
+        fail('self-test: fallback-only candidate set must not be publishable')
     promotion_identity = {
         'source_sha': SELF_TEST_SHA,
         'run_url': 'https://github.com/example/magit-lsp/actions/runs/42',
@@ -3870,6 +4000,8 @@ def main():
     parser.add_argument('--validate-publication-binding', metavar='BUNDLE',
                         help='validate an offline JSON run/tag/asset binding '
                              'bundle and print its source commit')
+    parser.add_argument('--validate-release-readiness', metavar='BUNDLE',
+                        help='validate exact identity-bound readiness JSON bundle')
     parser.add_argument('--prepare-publication-runtime', metavar='EVENT',
                         help='read-only validate workflow_run event and upstream API')
     args = parser.parse_args()
@@ -3888,6 +4020,11 @@ def main():
             return 0
         if args.validate_publication_binding:
             validate_publication_binding_bundle(args.validate_publication_binding)
+            return 0
+        if args.validate_release_readiness:
+            with open(args.validate_release_readiness, encoding='utf-8') as stream:
+                result = validate_release_readiness(json.load(stream))
+            print(json.dumps(result, sort_keys=True))
             return 0
         if args.prepare_publication_runtime:
             prepare_publication_runtime(args.prepare_publication_runtime)
