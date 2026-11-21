@@ -945,6 +945,31 @@ class StartPathTest(unittest.TestCase):
     def test_explicit_server_binary_override_survives_environment_isolation(self) -> None:
         self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/test-magit-lsp"}, Path("/tmp/test-magit-lsp"))
 
+    def test_external_artifact_path_with_spaces_is_propagated_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "artifact with spaces" / "magit-lsp"
+            binary.parent.mkdir()
+            binary.write_text("binary", encoding="utf-8")
+            binary.chmod(0o755)
+            with patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": str(binary)}, clear=True):
+                self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/ordinary"}, binary)
+
+    def test_invalid_external_artifact_fails_before_fixture_or_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            non_executable = Path(directory) / "not executable"
+            non_executable.write_text("binary", encoding="utf-8")
+            for explicit in (str(Path(directory) / "missing"), str(non_executable), "relative/path"):
+                with (
+                    patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": explicit,
+                                            "MAGIT_LSP_BIN": "/tmp/fallback"}, clear=True),
+                    patch.object(driver, "check_tools") as check_tools,
+                    patch.object(driver.fixtures, "build") as build,
+                ):
+                    with self.assertRaisesRegex(driver.DriverError, "MAGIT_LSP_TEST_BINARY"):
+                        driver.start("clean")
+                check_tools.assert_not_called()
+                build.assert_not_called()
+
     def _assert_server_binary(self, extra_env: dict[str, str] | None, expected: Path) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"
@@ -955,7 +980,11 @@ class StartPathTest(unittest.TestCase):
                 captured.update(env)
                 raise RuntimeError("stop after environment capture")
 
+            isolated_env = dict(extra_env or {})
+            if "MAGIT_LSP_TEST_BINARY" in os.environ:
+                isolated_env["MAGIT_LSP_TEST_BINARY"] = os.environ["MAGIT_LSP_TEST_BINARY"]
             with (
+                patch.dict(os.environ, isolated_env, clear=True),
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build"),
