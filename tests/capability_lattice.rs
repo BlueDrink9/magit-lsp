@@ -304,6 +304,9 @@ fn encoding_ranges_and_document_changes_cross_echo_order() {
     eprintln!("encoding/render scenario: 12 combinations + 1 independent baseline");
 }
 
+// Managed commit drafts require Unix domain sockets, so this scenario and its
+// helpers are exercised only where the server can create them.
+#[cfg(unix)]
 fn actions(client: &mut client_pump::ClientPump, uri: &str, row: &str) -> Vec<Value> {
     let line = client
         .editor
@@ -322,6 +325,7 @@ fn actions(client: &mut client_pump::ClientPump, uri: &str, row: &str) -> Vec<Va
         .clone()
 }
 
+#[cfg(unix)]
 fn run_action(client: &mut client_pump::ClientPump, action: &Value) -> Value {
     let request = client
         .editor
@@ -332,6 +336,7 @@ fn run_action(client: &mut client_pump::ClientPump, action: &Value) -> Value {
     response
 }
 
+#[cfg(unix)]
 fn draft_chain(
     show: bool,
     progress: bool,
@@ -553,6 +558,7 @@ fn draft_chain(
     state
 }
 
+#[cfg(unix)]
 #[test]
 fn template_refresh_mixed_fallback_chain_and_progress_cancel() {
     let baseline = draft_chain(true, true, true);
