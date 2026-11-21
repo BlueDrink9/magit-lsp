@@ -1,6 +1,7 @@
 mod common;
 
 use common::stdio::TestServer;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::presentation::resolve::{resolve, Resolution};
 use std::path::Path;
 
@@ -88,17 +89,10 @@ fn real_binary_accepts_workspace_file_uri_and_preserves_explicit_rich_open() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo é #%");
     repo(&root);
-    let uri = format!(
-        "file://{}",
-        root.to_string_lossy()
-            .replace('%', "%25")
-            .replace(' ', "%20")
-            .replace('#', "%23")
-            .replace('é', "%C3%A9")
-    );
+    let uri = uri_from_path(&root).expect("native path has a file URI");
     let mut server = TestServer::spawn(&[]);
     let mut init = common::stdio::initialize_message();
-    init["params"]["rootUri"] = serde_json::Value::String(uri);
+    init["params"]["rootUri"] = serde_json::Value::String(uri.as_str().to_owned());
     init["params"]["capabilities"] = serde_json::json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full",
         "layout":["main","side","bottom","float"],
