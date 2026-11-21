@@ -24,6 +24,7 @@ from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, NATIVE_SHUTDOWN, PLAIN_INIT
 SESSION = "magit"
 DEFAULT_SIZE = (100, 30)
 DEFAULT_PROFILE = "vim"
+STARTUP_MODES = ("ready", "held")
 START_TIMEOUT_MS = 20000
 SOCKET_TIMEOUT_MS = 15000
 SCREEN_POLL_MS = 50
@@ -64,6 +65,7 @@ class Run:
     trace: str
     tmux: str
     client: str = "rich"
+    startup_mode: str = "ready"
 
     @property
     def dir(self) -> Path:
@@ -89,6 +91,13 @@ class Run:
     def trace_path(self) -> Path:
         """The `MAGIT_LSP_TRACE` file."""
         return Path(self.trace)
+
+    @property
+    def gate(self) -> fixtures.FirstStatusGate | None:
+        """The first-status gate for `held` runs, else `None`."""
+        if self.startup_mode == "held":
+            return fixtures.FirstStatusGate(self.dir)
+        return None
 
     def save(self) -> None:
         """Persist this run so later commands can find it."""
@@ -124,6 +133,14 @@ def parse_size(value: str) -> tuple[int, int]:
     if cols <= 0 or rows <= 0:
         raise DriverError(f"invalid size `{value}`")
     return cols, rows
+
+
+def parse_startup_mode(value: str) -> str:
+    """Validate a startup mode: `ready` (default) or `held`."""
+    if value not in STARTUP_MODES:
+        expected = " or ".join(STARTUP_MODES)
+        raise DriverError(f"unknown startup mode `{value}`; expected {expected}")
+    return value
 
 
 def new_run_id() -> str:
@@ -836,14 +853,18 @@ def start(
     color: str = "ansi",
     extra_env: dict[str, str] | None = None,
     client: str = "rich",
+    startup_mode: str = "ready",
 ) -> Run:
     """Build a fixture, start Neovim in tmux and wait for the first render.
 
     `extra_env` adds scenario-specific variables (such as
     `MAGIT_LSP_PLACEMENT`) to Neovim's otherwise cleared environment.
     `client` selects the Rich adapter or the plugin-free Plain initialization.
+    `startup_mode` is `ready` (wait for the first rendered view) or `held`
+    (return after RPC readiness and hold the first Git `status` subprocess).
     """
     check_tools()
+    mode = parse_startup_mode(startup_mode)
     if client not in ("rich", "plain"):
         raise DriverError(f"unknown client `{client}`; expected rich or plain")
     if profile not in ("standard", "vim"):
@@ -865,6 +886,7 @@ def start(
         trace=str(directory / "trace.jsonl"),
         tmux=f"magit-ui-{run_id}",
         client=client,
+        startup_mode=mode,
     )
     try:
         directory.mkdir(parents=True)
@@ -890,6 +912,10 @@ def start(
         )
         if extra_env:
             env.update(extra_env)
+        if mode == "held":
+            if run.gate is None:
+                raise DriverError("held startup requires a first-status gate")
+            env["PATH"] = run.gate.install(env["PATH"])
 
         socket = startup.inspect_socket(run.socket_path)
         if socket.too_long:
@@ -952,8 +978,10 @@ def start(
             _launcher_command(run),
         )
 
-        _wait_for_socket(run)
-        _wait_for_view(run)
+        readiness = _rpc_probe if mode == "held" else _idle_probe
+        _wait_for_socket(run, readiness_probe=readiness)
+        if mode == "ready":
+            _wait_for_view(run)
         _update_last_run(run.id)
         return run
     except BaseException:
@@ -1063,6 +1091,9 @@ def _stop_roles(run: Run) -> dict:
 
 def stop(run: Run) -> dict:
     """Attempt bounded Neovim and tmux teardown, then delete run files."""
+    gate = getattr(run, "gate", None)
+    if gate is not None:
+        gate.cleanup()
     role_file = run.dir / "server.pid"
     command = ":qa!"
     if role_file.is_file():

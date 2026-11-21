@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -152,6 +153,72 @@ class FixtureTest(unittest.TestCase):
         repo, env = self.build("in-progress-cherry-pick")
         self.assertTrue((repo / ".git" / "CHERRY_PICK_HEAD").is_file())
         self.assertIn("u UU ", status(repo, env))
+
+
+class FirstStatusGateTest(unittest.TestCase):
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        self.repo = fixtures.build("clean", root / "repo", root / "home")
+        self.env = fixtures.determinism_env(root / "home")
+        self.root = root
+
+    def gate(self, name: str = "gate") -> fixtures.FirstStatusGate:
+        gate = fixtures.FirstStatusGate(self.root / name)
+        self.env["PATH"] = gate.install(self.env["PATH"])
+        return gate
+
+    def run_status(self, gate: fixtures.FirstStatusGate) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(gate.wrapper_dir / "git"), "status", "--porcelain"],
+            cwd=self.repo,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    def test_gate_holds_the_first_status_once_and_later_git_passes(self) -> None:
+        gate = self.gate()
+        process = subprocess.Popen(
+            [str(gate.wrapper_dir / "git"), "status", "--porcelain"],
+            cwd=self.repo,
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(process.kill)
+        gate.wait_entered(timeout_ms=5000)
+        self.assertTrue(gate.held)
+        self.assertIsNone(process.poll())
+        self.assertTrue(gate.release())
+        self.assertFalse(gate.release())
+        stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertTrue(gate.passed_path.exists())
+        later = self.run_status(gate)
+        self.assertEqual(later.returncode, 0, later.stderr)
+        self.assertEqual(later.stdout, stdout)
+
+    def test_cleanup_releases_a_held_status_subprocess(self) -> None:
+        gate = self.gate("cleanup-gate")
+        process = subprocess.Popen(
+            [str(gate.wrapper_dir / "git"), "status", "--porcelain"],
+            cwd=self.repo,
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(process.kill)
+        gate.wait_entered(timeout_ms=5000)
+        self.assertIsNone(process.poll())
+        gate.cleanup()
+        _, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertTrue(gate.passed_path.exists())
 
 
 if __name__ == "__main__":

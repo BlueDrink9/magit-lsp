@@ -88,6 +88,7 @@ class Scenario:
     env: dict[str, str] = field(default_factory=dict)
     statements: list[Statement] = field(default_factory=list)
     client: str = "rich"
+    startup: str = "ready"
 
 
 @dataclass
@@ -302,6 +303,10 @@ def parse_statement(line: str, where: str) -> Statement:
         return Statement(kind="wait")
     if line == "wait prompt":
         return Statement(kind="wait-prompt")
+    if line == "wait status entered":
+        return Statement(kind="wait-status-entered")
+    if line == "release status":
+        return Statement(kind="release-status")
     if line.startswith("wait state "):
         expectation = parse_expectation("expect " + line[len("wait state "):])
         if expectation.kind != "path":
@@ -383,6 +388,7 @@ def parse_scenario(path: Path) -> Scenario:
                 "matrix",
                 "xfail",
                 "env",
+                "startup",
             ):
                 raise ScenarioError(f"{where}: unknown header `{key}`")
             header[key] = value
@@ -412,6 +418,7 @@ def parse_scenario(path: Path) -> Scenario:
         xfail=header.get("xfail") or None,
         env=parse_env(header["env"]) if "env" in header else {},
         statements=statements,
+        startup=header.get("startup", "ready").strip(),
     )
     if scenario.size:
         driver.parse_size(scenario.size)
@@ -421,6 +428,17 @@ def parse_scenario(path: Path) -> Scenario:
         raise ScenarioError(
             f"{path.name}: unknown profile `{scenario.profile}`; expected standard or vim"
         )
+    try:
+        driver.parse_startup_mode(scenario.startup)
+    except driver.DriverError as error:
+        raise ScenarioError(f"{path.name}: {error}") from error
+    if scenario.startup == "ready":
+        for statement in scenario.statements:
+            if statement.kind in ("wait-status-entered", "release-status"):
+                raise ScenarioError(
+                    f"{path.name}:{statement.line}: `{statement.kind.replace('-', ' ')}` "
+                    "needs `startup: held`"
+                )
     return scenario
 
 
@@ -885,7 +903,7 @@ def _run_combo(
     try:
         run = driver.start(
             scenario.fixture, size=size, profile=profile, extra_env=scenario.env,
-            client=scenario.client,
+            client=scenario.client, startup_mode=scenario.startup,
         )
     except driver.StartupError as error:
         return ComboResult(
@@ -958,6 +976,37 @@ def _run_live(
                         profile=profile,
                         size=size,
                     )
+            elif statement.kind == "wait-status-entered":
+                gate = getattr(run, "gate", None)
+                if gate is None:
+                    return ComboResult(
+                        ok=False,
+                        reason=f"{scenario.path.name}:{statement.line}: no held first-status gate",
+                        screen=driver.capture(run),
+                        profile=profile,
+                        size=size,
+                    )
+                try:
+                    gate.wait_entered()
+                except RuntimeError as error:
+                    return ComboResult(
+                        ok=False,
+                        reason=f"{scenario.path.name}:{statement.line}: {error}",
+                        screen=driver.capture(run),
+                        profile=profile,
+                        size=size,
+                    )
+            elif statement.kind == "release-status":
+                gate = getattr(run, "gate", None)
+                if gate is None:
+                    return ComboResult(
+                        ok=False,
+                        reason=f"{scenario.path.name}:{statement.line}: no held first-status gate",
+                        screen=driver.capture(run),
+                        profile=profile,
+                        size=size,
+                    )
+                gate.release()
             elif statement.kind == "wait-state":
                 expectation = statement.expectation
                 assert expectation is not None

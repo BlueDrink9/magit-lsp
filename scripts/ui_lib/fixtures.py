@@ -9,12 +9,96 @@ the same commit hashes on every machine and every run.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 FIXED_NAME = "Test User"
 FIXED_EMAIL = "test@example.com"
 FIXED_DATE = "2000-01-01T00:00:00+0000"
+
+
+class FirstStatusGate:
+    """Hold exactly the first Git `status` subprocess until released."""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+        self.wrapper_dir = directory / "git-bin"
+        self.claim_path = directory / "first-status.claimed"
+        self.entered_path = directory / "first-status.entered"
+        self.release_path = directory / "first-status.release"
+        self.passed_path = directory / "first-status.passed"
+
+    @property
+    def entered(self) -> bool:
+        """Whether the first status subprocess reached the hold point."""
+        return self.entered_path.exists()
+
+    @property
+    def held(self) -> bool:
+        """Whether the gate has entered and has not been released."""
+        return self.entered and not self.release_path.exists()
+
+    def install(self, path: str) -> str:
+        """Prepend a Git wrapper that gates only the first `status` call."""
+        real_git = shutil.which("git")
+        if real_git is None:
+            raise RuntimeError("git is required to install the first-status gate")
+        self.wrapper_dir.mkdir(parents=True, exist_ok=True)
+        wrapper = self.wrapper_dir / "git"
+        wrapper.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys, time\n"
+            f"claim = {str(self.claim_path)!r}\n"
+            f"entered = {str(self.entered_path)!r}\n"
+            f"release = {str(self.release_path)!r}\n"
+            f"passed = {str(self.passed_path)!r}\n"
+            f"real_git = {real_git!r}\n"
+            "if 'status' in sys.argv[1:]:\n"
+            "    try:\n"
+            "        fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)\n"
+            "    except FileExistsError:\n"
+            "        pass\n"
+            "    else:\n"
+            "        os.close(fd)\n"
+            "        open(entered, 'w').close()\n"
+            "        while not os.path.exists(release):\n"
+            "            time.sleep(0.01)\n"
+            "        open(passed, 'w').close()\n"
+            "os.execv(real_git, [real_git, *sys.argv[1:]])\n",
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        return os.pathsep.join((str(self.wrapper_dir), path))
+
+    def wait_entered(self, timeout_ms: int = 20000) -> None:
+        """Wait for the explicit entered marker, failing if it never appears."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        while not self.entered:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("first-status Git gate was not entered")
+            time.sleep(0.01)
+
+    def release(self) -> bool:
+        """Release the gate once; return false when it was already released."""
+        try:
+            fd = os.open(self.release_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return False
+        os.close(fd)
+        return True
+
+    def cleanup(self) -> None:
+        """Release a held subprocess and wait briefly for its handoff marker."""
+        self.release()
+        if not self.entered:
+            return
+        deadline = time.monotonic() + 2
+        while not self.passed_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+
 
 TEN_LINES = "".join(f"line{number}\n" for number in range(1, 11))
 
