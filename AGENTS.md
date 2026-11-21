@@ -41,7 +41,7 @@ Start in these components:
   applies patch/hunk operations. Keep VCS work behind these boundaries.
 - `src/server.rs` connects LSP/transport requests to sessions and notifications;
   `src/protocol.rs` defines wire payloads. The Neovim adapter lives in
-  `lua/magit-lsp/` and should remain a thin display/input client.
+  `clients/neovim/lua/magit-lsp/` and should remain a thin display/input client.
 
 ## Read the right source
 

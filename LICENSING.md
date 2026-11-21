@@ -6,7 +6,7 @@ by Cargo as `GPL-3.0-only`. This is not a whole-crate Apache-2.0 license or a
 GPL/Apache-2.0 dual license.
 
 The following project-owned components are separately licensed under the Apache-2.0
-License in `LICENCES/Apache-2.0`: `lua/`, `clients/`, `src/protocol.rs`, `docs/`,
+License in `LICENCES/Apache-2.0`: `clients/neovim/lua/`, `clients/`, `src/protocol.rs`, `docs/`,
 `README.md`, `TASKS.md`, `AGENTS.md`, `ui-test-plan.md`, and `LICENSING.md`.
 The `src/protocol.rs` file itself, including its protocol helpers and
 implementations, is Apache-2.0-licensed and grants downstream protocol implementers

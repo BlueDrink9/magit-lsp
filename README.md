@@ -50,7 +50,7 @@ Two processes talking over LSP (JSON-RPC on stdio):
 - **`magit-lsp` server (Rust).** Owns all VCS work by shelling out to the `git`
   CLI (like Magit/Neogit), and exposes it as custom requests plus standard LSP
   features (folding).
-- **Neovim client (`lua/magit-lsp`).** Starts the server, opens a status view,
+- **Neovim client (`clients/neovim/lua/magit-lsp`).** Starts the server, opens a status view,
   renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
   buffer, and forwards keys as `view/key` steps against the server's keymap.
 - **VSCode client (`clients/vscode`).** Launches an external server and displays
@@ -412,7 +412,7 @@ sends atomically: it deletes exactly the maps it applied last time, sets the
 new buffer-local maps and records them in one synchronous call. Keys are
 translated from the canonical notation in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#38-key-notation) (`ctrl+c`, `g r`,
-`shift+Tab`, …) by `lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
+`shift+Tab`, …) by `clients/neovim/lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
 binding comes from the server.
 
 Folding is server-owned. The view window uses `foldmethod=manual` with

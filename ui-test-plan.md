@@ -38,11 +38,11 @@ To rerun only one newline variant, use `make plain-neovim PLAIN_ARGS="--final-ne
 
 ### R-UI-1 — tmux driver, debug API, scenario runner
 
-**Target files:** `scripts/ui`, `lua/magit-lsp/debug.lua`, `tests/ui/` (runner, decoder, fixtures, scenarios), `Makefile`, `AGENTS.md`.
+**Target files:** `scripts/ui`, `clients/neovim/lua/magit-lsp/debug.lua`, `tests/ui/` (runner, decoder, fixtures, scenarios), `Makefile`, `AGENTS.md`.
 **Reference files:** `scripts/minimal_init.lua`, `tests/common/mod.rs` (determinism env), existing mini.test cases.
 **Constraints:** no new runtime dependency for the product; the driver may use `tmux`, `nvim`, and either POSIX shell or Python 3. If `tmux` or `nvim` is missing, `make ui-test` prints "SKIP: tmux not found" and exits 0 locally (non-zero in CI).
 
-- [x] **U0.1 Debug API** in `lua/magit-lsp/debug.lua`:
+- [x] **U0.1 Debug API** in `clients/neovim/lua/magit-lsp/debug.lua`:
   - [x] `snapshot()` returns the JSON shape in §A.2.
   - [x] `idle()` is true only when: no request in flight, last rendered version equals acked version, no prompt pending, no scheduled callback outstanding.
   - [x] `trace` support behind `MAGIT_LSP_TRACE=<path>` (§A.4).
@@ -417,7 +417,7 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 
 `wait state <path> == <value>` polls structured native state with the same bounded timeout as `wait`; it does not infer readiness from document text. For example, `wait state draft == true` waits until Plain Neovim has actually opened `COMMIT_EDITMSG`, not merely displayed its pending URI.
 
-`client: plain` uses `tests/ui/plain_init.lua` and stock `vim.lsp.start`, without loading `lua/magit-lsp/`. The test-only `PlainUI` observations expose native buffer/client state, not fabricated Rich view metadata; `PlainUI.action` selects a server-returned command through Neovim's built-in code-action API. Plain snapshots also write `.json` state, and each combination retains `lsp.log` plus `cleanup.json` with owned editor/server PIDs and verified teardown. Run `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn` and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` for the focused 80x24 scenarios. These do not replace the retained `make plain-neovim` workflow or its distinct 120x100 coverage.
+`client: plain` uses `tests/ui/plain_init.lua` and stock `vim.lsp.start`, without loading `clients/neovim/lua/magit-lsp/`. The test-only `PlainUI` observations expose native buffer/client state, not fabricated Rich view metadata; `PlainUI.action` selects a server-returned command through Neovim's built-in code-action API. Plain snapshots also write `.json` state, and each combination retains `lsp.log` plus `cleanup.json` with owned editor/server PIDs and verified teardown. Run `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn` and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` for the focused 80x24 scenarios. These do not replace the retained `make plain-neovim` workflow or its distinct 120x100 coverage.
 
 For opt-in commit-input diagnosis, run the focused scenario with `MAGIT_LSP_UI_PROBE=1`; the harness records Enter token tmux arguments/timestamps in run-specific files under `build/ui/probes/`, and Plain Neovim records Enter and commit-buffer text, typed key/key translation, detailed mode/blocking state, cursor, command-line type, messages, changedtick/document-version, mappings, options and relevant autocmd observations there. It also records scoped `.magit`/`COMMIT_EDITMSG` workspace/applyEdit versions and results, warning print/notify before/after call state and traceback, and `ModeChanged` transitions using a shared monotonically increasing event sequence. Probing is restricted to those fixture buffers; files are diagnostic, not pass/fail oracles.
 

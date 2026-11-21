@@ -77,20 +77,20 @@ unused-dependency probe above still governs ordinary imports.
 All 34 warnings / 0 errors from the baseline are itemized. They are pre-existing
 code issues, not allowlisted source suppressions; fix or disposition individually.
 
-- `lua/magit-lsp/debug.lua:91:3`: unused assignment to `opts`.
-- Over-120-character lines: `lua/magit-lsp/edit.lua:98` (125 chars),
-  `lua/magit-lsp/highlights.lua:19` (146), `lua/magit-lsp/keymap.lua:83` (140),
-  `lua/magit-lsp/requests.lua:179` (127), `lua/magit-lsp/view.lua:626` (211),
-  `lua/magit-lsp/view.lua:728` (190), `tests/spikes/real_file_nvim.lua:14`
+- `clients/neovim/lua/magit-lsp/debug.lua:91:3`: unused assignment to `opts`.
+- Over-120-character lines: `clients/neovim/lua/magit-lsp/edit.lua:98` (125 chars),
+  `clients/neovim/lua/magit-lsp/highlights.lua:19` (146), `clients/neovim/lua/magit-lsp/keymap.lua:83` (140),
+  `clients/neovim/lua/magit-lsp/requests.lua:179` (127), `clients/neovim/lua/magit-lsp/view.lua:626` (211),
+  `clients/neovim/lua/magit-lsp/view.lua:728` (190), `tests/spikes/real_file_nvim.lua:14`
   (127), `tests/test_magit_lsp.lua:514` (125), `:894` (126), `:1143` (126),
   `:1526` (170), `:1550` (133), `:1553` (171), `:1555` (369), `:1556` (323),
   `:1557` (292).
-- `lua/magit-lsp/hooks.lua:42:3`, `:49:3`, `:56:3`, `:63:3`, `:70:3`, `:78:3`,
+- `clients/neovim/lua/magit-lsp/hooks.lua:42:3`, `:49:3`, `:56:3`, `:63:3`, `:70:3`, `:78:3`,
   `:103:3`: assignment has more right-side values than left-side variables.
-- `lua/magit-lsp/init.lua:122:10`: writes undeclared global `open_status`;
+- `clients/neovim/lua/magit-lsp/init.lua:122:10`: writes undeclared global `open_status`;
   `:167:3` and `:373:3`: reads that undefined global. Likely spelling mismatch
   with declared `open_status`/configured global; confirm intended name.
-- Empty branches: `lua/magit-lsp/keys.lua:256:106`,
+- Empty branches: `clients/neovim/lua/magit-lsp/keys.lua:256:106`,
   `scripts/color_spike.lua:57:19`, `tests/test_magit_lsp.lua:45:21`.
 - `tests/spikes/real_file_nvim.lua:27:10`, `:40:10`, `:47:10`: writes
   undeclared globals `SpikeState`, `SpikeShow`, `SpikeRefresh`; declare local or
@@ -134,7 +134,7 @@ Tracked marker matches:
 - `src/keymap.rs:63`: keymap payload metadata retained per [architecture §3.9](docs/ARCHITECTURE.md#39-keybinding-architecture) despite
   no functional client reader.
 - `src/menu.rs:19`: reader schema retained for [architecture §3.11](docs/ARCHITECTURE.md#311-menus-transients-and-how-they-appear-in-each-editor) Phase-2/R-2.7.
-- `src/semantic_tokens.rs:44`, `:48` and `lua/magit-lsp/highlights.lua:19`:
+- `src/semantic_tokens.rs:44`, `:48` and `clients/neovim/lua/magit-lsp/highlights.lua:19`:
   selected token use plus planned/disabled/bold modifier and type-to-theme
   presentation contracts in [architecture §3.15](docs/ARCHITECTURE.md#315-highlighting-and-theme-integration)/R-5.3.
 - `src/ui.rs:27`: generic prompt kind retained for [architecture §3.6](docs/ARCHITECTURE.md#36-prompts-what-each-kind-means)/R-3.1; no current

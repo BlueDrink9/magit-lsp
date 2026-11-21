@@ -90,10 +90,10 @@ exchanges separately.
 | --- | --- | --- |
 | Plain minimum | `workspace.applyEdit=true`, `textDocument.codeAction={}`; no Rich selector | **VERIFIED** [tests/common/editor_model/mod.rs:82–86](../tests/common/editor_model/mod.rs#L82) |
 | Rich minimum | v1, dynamic keys, basic modifiers, main layout; empty optional effects/prompts, no picker | **VERIFIED** [tests/common/editor_model/mod.rs:82–86](../tests/common/editor_model/mod.rs#L82) |
-| Current Neovim | v1, dynamic keys; basic/full modifiers depending on terminal/GUI; main/side/bottom/float | **VERIFIED** [lua/magit-lsp/config.lua:84–106](../lua/magit-lsp/config.lua#L84) |
+| Current Neovim | v1, dynamic keys; basic/full modifiers depending on terminal/GUI; main/side/bottom/float | **VERIFIED** [clients/neovim/lua/magit-lsp/config.lua:84–106](../clients/neovim/lua/magit-lsp/config.lua#L84) |
 | Current VSCode | v1, static keys, full modifiers, main only | **VERIFIED** [clients/vscode/lib/session.js:50–58](../clients/vscode/lib/session.js#L50) |
-| Both current clients | Effects: visitFile, clipboard, editDocument; prompts: confirm, text, choice, multiChoice, secret | **VERIFIED** [lua/magit-lsp/config.lua:107–108](../lua/magit-lsp/config.lua#L107), [lua/magit-lsp/shared.lua:11–15](../lua/magit-lsp/shared.lua#L11), [clients/vscode/lib/session.js:57–58](../clients/vscode/lib/session.js#L57), [clients/vscode/types/shared-lists.js:6–20](../clients/vscode/types/shared-lists.js#L6) |
-| Current Neovim picker | Only fallbackView=true; multi/freeText/description/detail/group/preselection=false; maxItems=100 | **VERIFIED** [lua/magit-lsp/config.lua:109–117](../lua/magit-lsp/config.lua#L109) |
+| Both current clients | Effects: visitFile, clipboard, editDocument; prompts: confirm, text, choice, multiChoice, secret | **VERIFIED** [clients/neovim/lua/magit-lsp/config.lua:107–108](../clients/neovim/lua/magit-lsp/config.lua#L107), [clients/neovim/lua/magit-lsp/shared.lua:11–15](../clients/neovim/lua/magit-lsp/shared.lua#L11), [clients/vscode/lib/session.js:57–58](../clients/vscode/lib/session.js#L57), [clients/vscode/types/shared-lists.js:6–20](../clients/vscode/types/shared-lists.js#L6) |
+| Current Neovim picker | Only fallbackView=true; multi/freeText/description/detail/group/preselection=false; maxItems=100 | **VERIFIED** [clients/neovim/lua/magit-lsp/config.lua:109–117](../clients/neovim/lua/magit-lsp/config.lua#L109) |
 | Current VSCode picker | multi/description/detail/preselection/fallbackView=true; freeText/group=false; no declared item limit | **VERIFIED** [clients/vscode/lib/session.js:59–67](../clients/vscode/lib/session.js#L59), [src/presentation/mod.rs:104–105](../src/presentation/mod.rs#L104) |
 
 - **VERIFIED:** Named `Plain` uses Plain minimum; `RichNative`/`RichDoc` use retained Neovim/VSCode rows, respectively. Those rows omit `pick`, unlike current producers; the labels are harness profiles, not alternate protocol modes ([tests/common/editor_model/presets.rs:7–9,38–55](../tests/common/editor_model/presets.rs#L38), [tests/fixtures/current-client-capabilities.json:7–28,46–64](../tests/fixtures/current-client-capabilities.json#L7)).
@@ -313,7 +313,7 @@ the command line and real colours.
   and opens the client in a dedicated tmux server; `keys`, `wait`, `screen`,
   `state`, `trace` and `stop` form the "inspect, act, inspect" loop described
   in `AGENTS.md`.
-- `lua/magit-lsp/debug.lua` exposes `snapshot()` (windows, view stack, pending
+- `clients/neovim/lua/magit-lsp/debug.lua` exposes `snapshot()` (windows, view stack, pending
   chord, render versions, keymap, messages) and `idle()`; `MAGIT_LSP_TRACE=<path>`
   records per-hop timings for `ui trace`.
 - Scenarios are `.scn` files in `tests/ui/` using the DSL in
