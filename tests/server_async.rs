@@ -35,6 +35,242 @@ fn status_open_held_git_acknowledged_completion_uses_exact_base() {
 }
 
 #[cfg(unix)]
+#[test]
+fn status_open_close_drops_held_success_without_resurrection() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/close",
+        "params":{"viewId":view}}));
+    let closed = server.response_with_id(3);
+    assert!(closed["error"].is_null(), "{closed}");
+    gate.release();
+
+    server.send(
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/foldingRange",
+        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    );
+    assert!(server.response_with_id(4)["result"].is_null());
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "closed status view was resurrected: {:?}",
+        server.notifications
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_close_drops_held_error_without_resurrection() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    assert_eq!(server.recv()["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/close",
+        "params":{"viewId":view}}));
+    assert!(server.response_with_id(3)["error"].is_null());
+    let git_dir = tmp.path().join(".git");
+    let saved_git = tmp.path().join(".git-held");
+    std::fs::rename(&git_dir, &saved_git).unwrap();
+    gate.release();
+
+    server.send(
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/foldingRange",
+        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    );
+    assert!(server.response_with_id(4)["result"].is_null());
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "closed status view was resurrected by late Git error: {:?}",
+        server.notifications
+    );
+    std::fs::rename(saved_git, git_dir).unwrap();
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_refreshes_while_loading_are_coalesced() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+    assert_eq!(gate.invocation_count(), 1);
+
+    write(
+        &tmp.path().join("overlap-fresh.txt"),
+        "fresh after refresh\n",
+    );
+    for id in 3..=6 {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+            "params":{"viewId":view,"command":"common.refresh"}}));
+        let refreshed = server.response_with_id(id);
+        assert!(refreshed["error"].is_null(), "{refreshed}");
+        assert_eq!(
+            gate.invocation_count(),
+            1,
+            "refresh during held acquisition must not start Git"
+        );
+    }
+    assert!(
+        !gate.is_released(),
+        "all refresh requests answered while Git stayed held"
+    );
+
+    gate.release();
+    let ready =
+        server.wait_for_view_render_after(&view, loading["params"]["version"].as_u64().unwrap());
+    let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        lines.iter().any(|line| line.contains("overlap-fresh.txt")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("Loading repository status")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        gate.invocation_count(),
+        2,
+        "overlapping refreshes schedule one follow-up acquisition"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"status.stage"}}));
+    let refused = server.response_with_id(3);
+    assert!(
+        refused["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"),
+        "{refused}"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let menu = server.response_with_id(4);
+    assert!(menu["error"].is_null(), "{menu}");
+    assert_eq!(menu["result"]["effects"], json!([]), "{menu}");
+    let mode_render = server.recv();
+    assert_eq!(mode_render["method"], "view/render", "{mode_render}");
+    assert_eq!(mode_render["params"]["mode"], "text", "{mode_render}");
+    assert!(
+        !gate.is_released(),
+        "safe menu affordance responds while status Git is held"
+    );
+
+    let git_dir = tmp.path().join(".git");
+    let saved_git = tmp.path().join(".git-held");
+    std::fs::rename(&git_dir, &saved_git).unwrap();
+    gate.release();
+    let failed =
+        server.wait_for_view_render_after(view, loading["params"]["version"].as_u64().unwrap());
+    std::fs::rename(&saved_git, &git_dir).unwrap();
+    let lines: Vec<String> = serde_json::from_value(failed["params"]["text"].clone()).unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Unable to load repository status")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("Loading repository status")),
+        "{lines:?}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
 fn status_open_held_git(acknowledge: bool) {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
@@ -449,7 +685,8 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     assert!(server.initialize_rich(json!({}))["error"].is_null());
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { 2 } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -1789,12 +2026,13 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     assert_eq!(render["method"], json!("view/render"), "{render}");
     let keymap = server.recv();
     assert_eq!(keymap["method"], json!("view/keymap"), "{keymap}");
-    server.wait_for_view_render_after(
+    let ready = server.wait_for_view_render_after(
         &view_id,
         render["params"]["version"]
             .as_u64()
             .expect("initial render version"),
     );
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":ready["params"]["version"]}}));
     view_id
 }
 
@@ -1884,11 +2122,7 @@ fn a_declared_native_pick_answers_the_staged_menu_prompt() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize(rich_pick_capabilities());
-    server.send(open_view_message(2, &repo_param(tmp.path())));
-    let status = server.response_with_id(2)["result"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
         "params":{"viewId":status,"command":"open.branch"}}));
     let opened = server.response_with_id(3);
@@ -2296,11 +2530,7 @@ fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize(limited_rich(json!([]), json!([])));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
-    let status = server.response_with_id(2)["result"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
         "params":{"viewId":status,"command":"open.branch"}}));
     let opened = server.response_with_id(3);

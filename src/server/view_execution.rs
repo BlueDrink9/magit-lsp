@@ -165,6 +165,19 @@ pub(super) fn finish_status_acquisition(
         return;
     };
     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(next_generation) = session.take_pending_status_refresh(&view_id, generation) {
+        drop(session);
+        tokio::spawn(async move {
+            let acquisition_path = repo_path.clone();
+            let acquired = tokio::task::spawn_blocking(move || {
+                let repo = crate::git::GitRepo::open(&acquisition_path)?;
+                crate::status_view::StatusView::acquire_opening_state(&repo, next_generation)
+            })
+            .await;
+            finish_status_acquisition(shared, repo_path, view_id, next_generation, acquired);
+        });
+        return;
+    }
     let render = match acquired {
         Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
         Ok(Err(error)) => session.fail_fresh_status(

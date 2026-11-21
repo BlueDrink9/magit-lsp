@@ -84,9 +84,15 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"].as_str().unwrap().to_owned();
     let uri = opened["result"]["uri"].as_str().unwrap().to_owned();
-    let initial = server.recv();
-    assert_eq!(initial["method"], "view/render");
+    let initial_loading = server.recv();
+    assert_eq!(initial_loading["method"], "view/render");
     assert_eq!(server.recv()["method"], "view/keymap");
+    let initial = server.wait_for_view_render_after(
+        &view,
+        initial_loading["params"]["version"].as_u64().unwrap(),
+    );
+    let mut version = initial["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
     let initial_text = initial["params"]["text"].clone();
     let mut text: Vec<String> = serde_json::from_value(initial_text.clone()).unwrap();
     assert!(initial_text
@@ -103,7 +109,6 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
         !initial_ranges.as_array().unwrap().is_empty(),
         "initial expanded tree supplies native fold ranges"
     );
-    let mut version = 1;
     for (index, command) in [
         "common.hide-all",
         "common.refresh",
@@ -215,12 +220,10 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
         assert_eq!(render["method"], "view/render");
         let keymap = server.recv();
         assert_eq!(keymap["method"], "view/keymap");
-        server.wait_for_view_render_after(
-            &view,
-            render["params"]["version"]
-                .as_u64()
-                .expect("render version"),
-        );
+        let ready =
+            server.wait_for_view_render_after(&view, render["params"]["version"].as_u64().unwrap());
+        let version = ready["params"]["version"].as_u64().unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
         assert_eq!(
             keymap_keys(&keymap, "common.refresh"),
             Some(vec!["K".into(), "ctrl+alt+r".into()])
@@ -236,25 +239,23 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
             ]
         };
         assert_eq!(keymap_keys(&keymap, "open.commit"), Some(expected));
-        server.send(
-            json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":1}}),
-        );
         server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/key",
-            "params":{"viewId":view,"version":1,"key":"ctrl+alt+r","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+            "params":{"viewId":view,"version":version,"key":"ctrl+alt+r","editorMode":"normal","cursor":{"line":0,"column":0}}}));
         assert_eq!(server.response_with_id(7)["result"]["effects"], json!([]));
         let refreshed = server.recv();
         assert_eq!(refreshed["method"], "view/render");
         assert_eq!(
-            refreshed["params"]["version"], 2,
+            refreshed["params"]["version"],
+            version + 1,
             "basic retains ctrl/alt resolution"
         );
         server.send(
-            json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":2}}),
+            json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version + 1}}),
         );
         if modifiers == "basic" {
             for (id, key) in [(8, "ctrl+shift+Tab"), (9, "k")] {
                 server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key",
-                    "params":{"viewId":view,"version":2,"key":key,"editorMode":"normal","cursor":{"line":0,"column":0}}}));
+                    "params":{"viewId":view,"version":version + 1,"key":key,"editorMode":"normal","cursor":{"line":0,"column":0}}}));
                 let response = server.response_with_id(id);
                 assert_eq!(
                     response["result"]["effects"],
@@ -263,7 +264,7 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
                 );
             }
             server.send(json!({"jsonrpc":"2.0","id":10,"method":"view/key",
-                "params":{"viewId":view,"version":2,"key":"shift+Tab","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+                "params":{"viewId":view,"version":version + 1,"key":"shift+Tab","editorMode":"normal","cursor":{"line":0,"column":0}}}));
             let backtab = server.response_with_id(10);
             assert_eq!(
                 backtab["result"]["effects"][0]["type"], "pushView",
@@ -824,22 +825,20 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize_rich(json!({}));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
-    let opened = server.response_with_id(2);
-    let view = opened["result"]["id"].as_str().unwrap();
-    let uri = opened["result"]["uri"].as_str().unwrap();
-    server.wait_for_view_resync_after(view, 200_000, 1);
-    server.send(
-        json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":1}}),
+    let view = super::open_view(&mut server, 2, &repo_param(tmp.path()));
+    let uri = format!(
+        "magit://status/{}",
+        tmp.path().to_string_lossy().trim_start_matches('/')
     );
+    let version = 2;
     // Resolve the request position from the server's structured outline.
-    let line = first_hunk_line(&mut server, uri);
+    let line = first_hunk_line(&mut server, &uri);
     for (id, command, effect) in [
         (3, "common.copy-value", "clipboard"),
         (4, "common.visit", "visitFile"),
     ] {
         server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
-            "params":{"viewId":view,"version":1,"command":command,"cursor":{"line":line,"column":0}}}));
+            "params":{"viewId":view,"version":version,"command":command,"cursor":{"line":line,"column":0}}}));
         let response = server.response_with_id(id);
         assert!(
             response["result"]["effects"]

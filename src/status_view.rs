@@ -24,6 +24,7 @@ pub struct StatusView {
     repo: GitRepo,
     state: StatusState,
     generation: u64,
+    pending_refresh: bool,
     /// Hunks loaded for visible files this refresh, keyed by `(path, staged)`.
     hunks: HashMap<(String, bool), Vec<Hunk>>,
     /// Per-view visibility, keyed by node id so it survives a refresh.
@@ -72,6 +73,7 @@ impl StatusView {
             repo,
             state: StatusState::Loading,
             generation: 0,
+            pending_refresh: false,
             hunks: HashMap::new(),
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
@@ -152,6 +154,28 @@ impl StatusView {
     /// Whether repository state has been acquired for this view.
     pub fn is_ready(&self) -> bool {
         matches!(self.state, StatusState::Ready { .. })
+    }
+
+    /// Coalesce refresh requests that arrive while an acquisition is in flight.
+    pub fn queue_refresh_while_loading(&mut self) -> Option<u64> {
+        if !matches!(self.state, StatusState::Loading) {
+            return None;
+        }
+        if !self.pending_refresh {
+            self.generation = self.generation.wrapping_add(1);
+            self.pending_refresh = true;
+        }
+        Some(self.generation)
+    }
+
+    /// Take the single queued follow-up when the completed acquisition is stale.
+    pub fn take_pending_refresh(&mut self, completed_generation: u64) -> Option<u64> {
+        if self.pending_refresh && self.generation != completed_generation {
+            self.pending_refresh = false;
+            Some(self.generation)
+        } else {
+            None
+        }
     }
 
     /// Render the visible tree, loading hunks only for expanded files.

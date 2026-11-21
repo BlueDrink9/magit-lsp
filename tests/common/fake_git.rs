@@ -92,6 +92,8 @@ pub struct GatedGit {
     script: PathBuf,
     entered_path: PathBuf,
     release_path: PathBuf,
+    claimed_path: PathBuf,
+    invocations_path: PathBuf,
 }
 
 impl GatedGit {
@@ -104,6 +106,8 @@ impl GatedGit {
         let dir = tempfile::TempDir::new().expect("fake git tempdir");
         let entered_path = dir.path().join("entered");
         let release_path = dir.path().join("release");
+        let claimed_path = dir.path().join("claimed");
+        let invocations_path = dir.path().join("invocations");
         let script = dir.path().join("git");
         std::fs::write(
             &script,
@@ -113,7 +117,9 @@ impl GatedGit {
                  # file exists, then run the real Git so the repository stays correct.\n\
                  subcommand=\"$1\"\n\
                  if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
-                 if [ \"$subcommand\" = '{command}' ] && [ ! -f '{release}' ]; then\n\
+                 if [ \"$subcommand\" = '{command}' ]; then echo invocation >> '{invocations}'; fi\n\
+                 if [ \"$subcommand\" = '{command}' ] && [ ! -f '{claimed}' ]; then\n\
+                   : > '{claimed}'\n\
                    echo \"$$\" > '{entered}'\n\
                    n=0\n\
                    while [ ! -f '{release}' ]; do\n\
@@ -127,6 +133,8 @@ impl GatedGit {
                 command = command,
                 release = release_path.display(),
                 entered = entered_path.display(),
+                claimed = claimed_path.display(),
+                invocations = invocations_path.display(),
                 timeout = GATE_TIMEOUT_POLLS,
                 real = real_git.display(),
             ),
@@ -144,6 +152,8 @@ impl GatedGit {
             script,
             entered_path,
             release_path,
+            claimed_path,
+            invocations_path,
         }
     }
 
@@ -187,6 +197,13 @@ impl GatedGit {
     /// Whether [`Self::release`] has been called at least once.
     pub fn is_released(&self) -> bool {
         self.release_path.exists()
+    }
+
+    /// Number of matching Git invocations observed by this fixture.
+    pub fn invocation_count(&self) -> usize {
+        std::fs::read_to_string(&self.invocations_path)
+            .map(|calls| calls.lines().count())
+            .unwrap_or(0)
     }
 
     /// The pid of the child currently blocked in the gate, if any.

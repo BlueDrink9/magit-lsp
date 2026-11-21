@@ -767,7 +767,11 @@ fn prompt_busy() -> InvokeResult {
 }
 
 fn loading_action_blocked(command: &str, ready: bool) -> bool {
-    !ready && !matches!(command, "common.refresh" | "common.help" | "common.close")
+    !ready
+        && !matches!(
+            command,
+            "common.refresh" | "common.toggle-text-mode" | "common.close"
+        )
 }
 
 #[cfg(test)]
@@ -779,7 +783,7 @@ mod loading_action_tests {
         assert!(loading_action_blocked("file.stage", false));
         assert!(loading_action_blocked("rebase.continue", false));
         assert!(!loading_action_blocked("common.refresh", false));
-        assert!(!loading_action_blocked("common.help", false));
+        assert!(!loading_action_blocked("common.toggle-text-mode", false));
         assert!(!loading_action_blocked("common.close", false));
         assert!(!loading_action_blocked("file.stage", true));
     }
@@ -837,6 +841,17 @@ impl Session {
             view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
         self.publish();
         Ok(Some(render))
+    }
+
+    /// Take a coalesced loading refresh for the next status acquisition.
+    pub(crate) fn take_pending_status_refresh(
+        &mut self,
+        view_id: &str,
+        completed_generation: u64,
+    ) -> Option<u64> {
+        let view = self.views.get_mut(view_id)?;
+        let status = view.view.as_any_mut()?.downcast_mut::<StatusView>()?;
+        status.take_pending_refresh(completed_generation)
     }
 
     /// Create a session for a repository root.
@@ -1295,6 +1310,11 @@ impl Session {
                 )],
                 ..InvokeResult::empty()
             });
+        }
+        if request.command == "common.refresh"
+            && self.queue_loading_status_refresh(&request.target.view_id)
+        {
+            return Ok(InvokeResult::empty());
         }
         if self.pending_prompt.is_some() && request.command != "common.refresh" {
             return Ok(prompt_busy());
@@ -2507,6 +2527,14 @@ impl Session {
             .views
             .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        if view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+            .is_some_and(|status| status.queue_refresh_while_loading().is_some())
+        {
+            return Ok(None);
+        }
         if prompt_active {
             view.queue_refresh();
             return Ok(None);
@@ -2531,6 +2559,14 @@ impl Session {
             None,
             RenderDelivery::Acknowledged,
         )?))
+    }
+
+    fn queue_loading_status_refresh(&mut self, view_id: &str) -> bool {
+        self.views
+            .get_mut(view_id)
+            .and_then(|view| view.view.as_any_mut())
+            .and_then(|state| state.downcast_mut::<StatusView>())
+            .is_some_and(|status| status.queue_refresh_while_loading().is_some())
     }
 
     /// Re-render and publish the active view after a pending draft is admitted.
