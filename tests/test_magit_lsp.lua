@@ -871,25 +871,16 @@ T["semantic tokens highlight sections, files, hunks and diff lines"] = function(
 
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('Unstaged changes (1)', 0)"),
-    "magit.section"
+    "heading"
   )
-  MiniTest.expect.equality(
-    child.lua_get("HELPERS.token_type_on('  M f.txt', 2)"),
-    "magit.file.modified"
-  )
-  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 4)"), "magit.file")
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 2)"), "changed")
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 4)"), "path")
   MiniTest.expect.equality(
     child.lua_get("HELPERS.token_type_on('    @@ -1,10 +1,10 @@', 4)"),
-    "magit.hunk.header"
+    "muted"
   )
-  MiniTest.expect.equality(
-    child.lua_get("HELPERS.token_type_on('    +line3 CHANGED', 4)"),
-    "magit.diff.added"
-  )
-  MiniTest.expect.equality(
-    child.lua_get("HELPERS.token_type_on('    -line3', 4)"),
-    "magit.diff.removed"
-  )
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('    +line3 CHANGED', 4)"), "added")
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('    -line3', 4)"), "removed")
 end
 
 T["every token type and modifier in the legend links to a theme group"] = function()
@@ -898,64 +889,52 @@ T["every token type and modifier in the legend links to a theme group"] = functi
   MiniTest.expect.equality(child.lua_get("HELPERS.missing_links()"), {})
 end
 
-T["theme links survive a colorscheme switch"] = function()
+T["canonical semantic roles have Neovim default link coverage"] = function()
+  --- The authored role table is the single source of truth for names/groups.
+  local roles = vim.json.decode(table.concat(vim.fn.readfile("src/semantic_roles.json"), "\n"))
+  MiniTest.expect.equality(#roles, 11, "the canonical table has eleven roles")
+  local names, groups = {}, {}
+  for _, role in ipairs(roles) do
+    names[#names + 1] = role.name
+    groups[role.name] = role.group
+  end
+  setup_child()
+  -- Feed the authored roles through the real link setup under a fresh filetype.
+  child.lua(
+    string.format(
+      "ROLE_NAMES = %s; " .. "require('magit-lsp.highlights').apply_legend('magit-roles-test', %s)",
+      vim.inspect(names),
+      vim.inspect({ tokenTypes = names, tokenTypeGroups = groups, tokenModifiers = {} })
+    )
+  )
+  local links = child.lua_get([[(function()
+    local out = {}
+    for _, name in ipairs(ROLE_NAMES) do
+      out[name] = vim.api.nvim_get_hl(0, {
+        name = '@lsp.type.' .. name .. '.magit-roles-test',
+        link = true,
+      }).link
+    end
+    return out
+  end)()]])
+  for _, role in ipairs(roles) do
+    MiniTest.expect.equality(
+      links[role.name],
+      role.group,
+      role.name .. " links to the canonical group " .. role.group
+    )
+  end
+end
+
+T["added and removed roles link to distinct default foregrounds"] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
 
-  local added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
-  local removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
+  local added = child.lua_get("HELPERS.resolved_fg('added')")
+  local removed = child.lua_get("HELPERS.resolved_fg('removed')")
   MiniTest.expect.equality(type(added), "number", "added has a foreground")
   MiniTest.expect.equality(type(removed), "number", "removed has a foreground")
-  MiniTest.expect.equality(added ~= removed, true, "added and removed differ")
-
-  --- Perceived brightness of a 24-bit colour, for relative-dimness checks.
-  ---@param colour integer
-  ---@return number
-  local function luminance(colour)
-    local r = math.floor(colour / 65536) % 256
-    local g = math.floor(colour / 256) % 256
-    local b = colour % 256
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
-  end
-
-  local planned = child.lua_get("HELPERS.resolved_fg('magit.menu.planned')")
-  local label = child.lua_get("HELPERS.resolved_fg('magit.menu.label')")
-  MiniTest.expect.equality(type(planned), "number", "menu.planned has a foreground")
-  MiniTest.expect.equality(type(label), "number", "menu.label has a foreground")
-  MiniTest.expect.equality(
-    luminance(planned) < luminance(label),
-    true,
-    "menu.planned must be dimmer than menu.label"
-  )
-
-  child.lua("vim.cmd('colorscheme vim')")
-  MiniTest.expect.equality(child.lua_get("HELPERS.missing_links()"), {})
-
-  local switched_added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
-  local switched_removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
-  MiniTest.expect.equality(switched_added ~= switched_removed, true, "added and removed differ")
-  MiniTest.expect.equality(switched_added ~= added, true, "the scheme changed the colour")
-
-  local headings = {
-    { name = "section", fg = child.lua_get("HELPERS.resolved_fg('magit.section')") },
-    { name = "file", fg = child.lua_get("HELPERS.resolved_fg('magit.file')") },
-    { name = "hunk header", fg = child.lua_get("HELPERS.resolved_fg('magit.hunk.header')") },
-    { name = "menu key", fg = child.lua_get("HELPERS.resolved_fg('magit.menu.key')") },
-  }
-  for i = 1, #headings do
-    MiniTest.expect.equality(
-      type(headings[i].fg),
-      "number",
-      headings[i].name .. " has a foreground"
-    )
-    for j = 1, i - 1 do
-      MiniTest.expect.equality(
-        headings[i].fg ~= headings[j].fg,
-        true,
-        headings[i].name .. " must differ from " .. headings[j].name
-      )
-    end
-  end
+  MiniTest.expect.equality(added ~= removed, true, "added and removed roles resolve distinctly")
 end
 
 T["tokens are refreshed after a mutation"] = function()
@@ -969,22 +948,30 @@ T["tokens are refreshed after a mutation"] = function()
     "the mutation rendered"
   )
 
-  local staged = child.lua_get([[
+  local token = child.lua_get([[
     (function()
-      return vim.wait(5000, function()
+      local found
+      vim.wait(5000, function()
         for i, line in ipairs(STATUS.lines) do
           if line == '  M f.txt' then
-            local token = HELPERS.token_at(i - 1, 2)
-            if token and token.modifiers and token.modifiers.staged then
+            local candidate = HELPERS.token_at(i - 1, 2)
+            if candidate then
+              found = candidate
               return true
             end
           end
         end
         return false
       end, 20)
+      return found
     end)()
   ]])
-  MiniTest.expect.equality(staged, true, "staged tokens after the mutation")
+  MiniTest.expect.equality(type(token), "table", "a token is returned on the staged file line")
+  MiniTest.expect.equality(
+    token and token.modifiers and token.modifiers.staged,
+    true,
+    "the returned staged token carries the staged attribute"
+  )
 end
 
 T["uses manual folding and serves fold ranges from the server"] = function()

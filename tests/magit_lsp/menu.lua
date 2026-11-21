@@ -657,7 +657,7 @@ return function(T, child, setup_child)
     return nil
   end
 
-  --- Locate the `magit.menu.planned` token for `label` through the server's
+  --- Locate the `muted` planned-action token for `label` through the server's
   --- semantic-token ranges, never by searching the rendered labels.
   ---@param view_id string the composite key of the open menu view
   ---@param label string the label of the planned action to locate
@@ -685,7 +685,7 @@ return function(T, child, setup_child)
           data[i], data[i + 1], data[i + 2], data[i + 3]
         line = line + delta_line
         char = delta_line > 0 and delta_start or char + delta_start
-        if capability.legend.tokenTypes[token_type + 1] == 'magit.menu.planned'
+        if capability.legend.tokenTypes[token_type + 1] == 'muted'
           and vim.api.nvim_buf_get_text(
             view.buf, line, char, line, char + length, {})[1] == %q then
           return { row = line, col = char }
@@ -699,7 +699,7 @@ return function(T, child, setup_child)
     ))
   end
 
-  T["planned menu actions are greyed with the menu.planned token"] = function()
+  T["planned menu actions use the muted role with the planned modifier"] = function()
     setup_child()
     local planned, state = find_planned_action()
     MiniTest.expect.equality(type(state), "table", "a menu with a planned action opened")
@@ -712,11 +712,12 @@ return function(T, child, setup_child)
     (function()
       local view = require('magit-lsp.view').views[%q]
       local ok = vim.wait(5000, function()
-        return vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d) ~= nil
+        local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d)
+        return tokens ~= nil and tokens[1] ~= nil
       end, 20)
       if not ok then return nil end
       local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d)
-      return tokens and tokens[1] and tokens[1].type or nil
+      return tokens and tokens[1] or nil
     end)()
   ]],
       state.id,
@@ -725,7 +726,13 @@ return function(T, child, setup_child)
       position.row,
       position.col
     ))
-    MiniTest.expect.equality(token, "magit.menu.planned")
+    MiniTest.expect.equality(type(token), "table", "the planned action token")
+    MiniTest.expect.equality(token.type, "muted", "planned actions use the muted role")
+    MiniTest.expect.equality(
+      token.modifiers and token.modifiers.planned,
+      true,
+      "planned actions carry the planned modifier"
+    )
   end
 
   T["a planned menu action notifies once and keeps the menu open"] = function()
