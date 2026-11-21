@@ -60,6 +60,31 @@ time beyond traced Git is not classified and may include session, view, render
 and watcher work; this does not prove a single source-level cause. The
 worktree's own modifications make it nonrepresentative of a clean user checkout.
 
+### Repository-discovery reuse comparison (2026-11-21)
+
+For PERF-OPEN-REUSE, the same committed harness and debug profile were run
+serially from an archive of pre-change `1863cfd` and the post-change worktree;
+both used NVIM v0.12.6, Python 3.14.10, Linux `b9ff40574f5a`, three samples,
+and the harness's one-file temporary fixture. Raw baseline data and merged
+traces are in `build/startup-before-auNEBO/build/startup-diagnosis/20261121T103133Z/`;
+post-change artifacts are in `build/startup-diagnosis/20261121T103146Z/`.
+The measured fixture cold medians were 744.3 ms before (606.3–755.1) and
+506.3 ms after (499.2–538.8); initialized-server reopen was 229.0 ms
+(227.3–266.5) and 176.6 ms (166.3–180.0), respectively. Already-open focus
+medians were 0.055 and 0.063 ms. Across each three cold fixture traces, Git
+calls fell from 22 to 16 per sample and `rev-parse` calls from 14 to 8; the
+traces therefore show the repeated discovery reduction, not its isolated
+contribution to wall time.
+
+Observed timings improved in these samples, but this is not a controlled
+speedup claim: there are only three samples per side, host load and filesystem
+caches vary, and process-cold does not mean cache-cold. The larger cold and
+reopen reductions are consistent with the removed discovery work but cannot
+attribute the full difference to it. Existing measurements still rank the
+server handler as the largest measured internal span, with substantial
+unclassified non-Git handler time; finer session/view/render/watcher spans are
+the next discriminating measurement, not another implementation.
+
 The measured `render_sent` to `render_applied` wall-clock gap is negligible in
 these samples, but does not measure a real terminal/UI redraw or perceived
 display. Buffer application and current-window `Head:` validation are the
