@@ -252,6 +252,10 @@ vscode-unit: vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode-unit,node clients/vscode/test/test.js)
 
+.PHONY: vscode-download-unit
+vscode-download-unit:
+	$(call run,vscode-download-unit,node clients/vscode/test/server-download.test.js)
+
 # Offline distributable VSIX (no bundler, no publish): package the unbundled
 # client with its runtime deps into build/ and fail if the archive lacks the
 # entry files or either runtime dependency. vsce discovers dependencies through

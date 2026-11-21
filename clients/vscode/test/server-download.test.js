@@ -41,13 +41,13 @@ function digest(bytes) {
 }
 
 /** Versioned archive directory name published for one release. */
-function stemOf(version = VERSION) {
-  return `magit-lsp-v${version}-${ASSET}`;
+function stemOf(version = VERSION, asset = ASSET) {
+  return `magit-lsp-v${version}-${asset}`;
 }
 
 /** Archive file name published for one release. */
-function archiveNameOf(version = VERSION) {
-  return `${stemOf(version)}.tar.gz`;
+function archiveNameOf(version = VERSION, asset = ASSET) {
+  return `${stemOf(version, asset)}.tar.gz`;
 }
 
 /**
@@ -178,8 +178,9 @@ function paxMember(records, name = "././@PaxHeader") {
  */
 function releaseFixture(options = {}) {
   const version = options.version ?? VERSION;
-  const stem = stemOf(version);
-  const archiveName = archiveNameOf(version);
+  const asset = options.asset ?? ASSET;
+  const stem = stemOf(version, asset);
+  const archiveName = archiveNameOf(version, asset);
   const base = `https://github.com/BlueDrink9/magit-lsp/releases/download/v${version}`;
   const archive =
     options.archive ??
@@ -199,8 +200,8 @@ function releaseFixture(options = {}) {
 }
 
 /** Cache directory the helper owns for one version. */
-function entryOf(root, version = VERSION) {
-  return path.join(root, "server", `v${version}`, ASSET);
+function entryOf(root, version = VERSION, asset = ASSET) {
+  return path.join(root, "server", `v${version}`, asset);
 }
 
 /**
@@ -296,7 +297,7 @@ function stagingSiblings(entry) {
  * @param {Buffer} binary expected executable bytes
  * @param {string} version expected release version
  */
-function assertCompleteInstall(entry, binary, version) {
+function assertCompleteInstall(entry, binary, version, asset = ASSET) {
   assert.deepEqual(
     fs.readdirSync(entry).sort(),
     ["magit-lsp", "manifest.json"],
@@ -304,7 +305,7 @@ function assertCompleteInstall(entry, binary, version) {
   );
   const manifest = JSON.parse(fs.readFileSync(path.join(entry, "manifest.json"), "utf8"));
   assert.equal(manifest.version, version);
-  assert.equal(manifest.asset, ASSET);
+  assert.equal(manifest.asset, asset);
   assert.equal(manifest.size, binary.length);
   assert.equal(manifest.digest, digest(binary));
   assert.deepEqual(fs.readFileSync(path.join(entry, "magit-lsp")), binary);
@@ -953,6 +954,81 @@ async function run() {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  await check(
+    "approved extension-host targets use exact archive and cache identities",
+    async () => {
+      const targets = [
+        [{ platform: "linux", arch: "x64", glibc: "2.36" }, "x86_64-unknown-linux-gnu"],
+        [{ platform: "darwin", arch: "arm64", glibc: null }, "aarch64-apple-darwin"],
+        [{ platform: "darwin", arch: "x64", glibc: null }, "x86_64-apple-darwin"],
+      ];
+      const root = temporaryRoot();
+      try {
+        for (const [runtime, asset] of targets) {
+          const fixture = releaseFixture({ asset });
+          const installed = await resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: fixture.transport,
+            runtime,
+          });
+          const archiveName = archiveNameOf(VERSION, asset);
+          const expectedEntry = entryOf(root, VERSION, asset);
+          assert.equal(installed.executable, path.join(expectedEntry, "magit-lsp"));
+          assert.deepEqual(fixture.calls, [
+            `${RELEASE_BASE}/${archiveName}.sha256`,
+            `${RELEASE_BASE}/${archiveName}`,
+          ]);
+          assertCompleteInstall(expectedEntry, BINARY, VERSION, asset);
+          const manifest = JSON.parse(
+            fs.readFileSync(path.join(expectedEntry, "manifest.json"), "utf8"),
+          );
+          assert.equal(manifest.asset, asset);
+          fs.writeFileSync(installed.executable, "tampered\n");
+          const repaired = releaseFixture({ asset });
+          await resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: repaired.transport,
+            runtime,
+          });
+          assert.deepEqual(
+            fs.readFileSync(installed.executable),
+            BINARY,
+            `${asset} tamper repaired`,
+          );
+          assert.deepEqual(repaired.calls, [
+            `${RELEASE_BASE}/${archiveName}.sha256`,
+            `${RELEASE_BASE}/${archiveName}`,
+          ]);
+        }
+        const wrongHost = releaseFixture({ asset: "x86_64-apple-darwin" });
+        await rejects(
+          resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: wrongHost.transport,
+            runtime: { platform: "darwin", arch: "arm64", glibc: null },
+          }),
+          /unexpected download/,
+        );
+        const unsupported = releaseFixture();
+        await rejects(
+          resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: unsupported.transport,
+            runtime: { platform: "win32", arch: "x64", glibc: null },
+          }),
+          /no release asset/,
+        );
+        assert.deepEqual(unsupported.calls, []);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   await check("malformed versions fail before any URL is built", async () => {
     const root = temporaryRoot();
