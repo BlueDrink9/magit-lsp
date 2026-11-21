@@ -286,6 +286,10 @@ release-contract-unit:
 native-artifact-unit:
 	$(call run,native-artifact-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_native_artifact)
 
+# Mocked API and synthetic archive fixtures only; never executes a candidate.
+native-candidate-unit:
+	$(call run,native-candidate-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_native_candidate_download)
+
 native-artifact-inspect:
 	$(call run,native-artifact-inspect,test -n "$(RELEASE_ARTIFACT)" && python3 scripts/check_native_artifact.py "$(RELEASE_ARTIFACT)")
 
