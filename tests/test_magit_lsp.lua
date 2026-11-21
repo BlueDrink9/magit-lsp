@@ -523,6 +523,68 @@ T["plugin loading registers :Magit without setup"] = function()
   )
 end
 
+T[":h magit resolves the shipped help file"] = function()
+  local help_dir = project .. "/build/test-help-magit"
+  child.lua(string.format(
+    [[
+    local help_dir = %q
+    vim.fn.delete(help_dir, 'rf')
+    vim.fn.mkdir(help_dir .. '/doc', 'p')
+    vim.fn.writefile(vim.fn.readfile(%q .. '/doc/magit.txt'), help_dir .. '/doc/magit.txt')
+    vim.cmd('helptags ' .. vim.fn.fnameescape(help_dir .. '/doc'))
+    vim.opt.runtimepath:append(help_dir)
+    vim.cmd('help magit')
+    local stack = vim.fn.gettagstack(0).items
+    local last = stack[#stack]
+    HELP = {
+      file = vim.api.nvim_buf_get_name(0),
+      tag = last and last.tagname,
+      lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
+      tags_generated = vim.fn.filereadable(help_dir .. '/doc/tags') == 1,
+      repo_tags = vim.fn.filereadable(%q .. '/doc/tags') == 1,
+      help_buffer = vim.bo.filetype == 'help',
+    }
+  ]],
+    help_dir,
+    project,
+    project
+  ))
+  local file = child.lua_get("HELP.file")
+  local lines = child.lua_get("HELP.lines")
+  local function has_prefix(prefix)
+    for _, line in ipairs(lines) do
+      if line:sub(1, #prefix) == prefix then
+        return true
+      end
+    end
+    return false
+  end
+  local text = table.concat(lines, "\n")
+  MiniTest.expect.equality(file, help_dir .. "/doc/magit.txt")
+  MiniTest.expect.equality(((child.lua_get("HELP.tag") or ""):gsub("@.*$", "")), "magit")
+  MiniTest.expect.equality(child.lua_get("HELP.tags_generated"), true)
+  MiniTest.expect.equality(child.lua_get("HELP.repo_tags"), false, "no doc/tags in the repository")
+  MiniTest.expect.equality(child.lua_get("HELP.help_buffer"), true)
+  MiniTest.expect.equality(
+    has_prefix(":Magit [directory]"),
+    true,
+    "help documents :Magit [directory]"
+  )
+  MiniTest.expect.equality(
+    text:find("Open the status view.  Without an argument, focus the current", 1, true) ~= nil,
+    true,
+    "help documents the default-root behavior"
+  )
+  for _, needle in ipairs({ "*magit*", "$MAGIT_LSP_BIN", "docs/KEYMAPS.md", "protocol mismatch" }) do
+    MiniTest.expect.equality(
+      text:find(needle, 1, true) ~= nil,
+      true,
+      "help text mentions " .. needle
+    )
+  end
+  child.lua(string.format("vim.fn.delete(%q, 'rf')", help_dir))
+end
+
 T["the :Magit command delegates to the public open path"] = function()
   repo = make_repo(true, project .. "/build/test-repos/dir with space")
   setup_child()

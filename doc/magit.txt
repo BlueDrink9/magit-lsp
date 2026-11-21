@@ -1,0 +1,109 @@
+*magit.txt*  Git status through the magit-lsp server           *magit* *magit-lsp*
+
+magit-lsp is a thin Neovim client for the magit-lsp language server.  Status
+is rendered and owned by the server in a read-only buffer named
+`magit://status/<repo>`; the client displays that text and forwards keys and
+commands.  The server is an external executable: the Neovim client never
+downloads or builds it.
+
+Requires Neovim 0.11+ and an installed `magit-lsp` server.
+See https://github.com/BlueDrink9/magit-lsp/blob/main/docs/CLIENT_INSTALL.md
+
+==============================================================================
+COMMANDS                                                     *magit-commands*
+
+:Magit [directory]                                                  *:Magit*
+        Open the status view.  Without an argument, focus the current
+        magit-lsp view, or the current directory's session; when neither
+        exists, start a session for Neovim's current directory (|getcwd()|).
+        With `directory`, start or reuse that repository instead.  Directory
+        completion is available.  Loading the plugin registers the command
+        and does not start a session.
+
+`require('magit-lsp').open([directory])` is the same public entry point from
+Lua.  `require('magit-lsp').setup(opts)` configures the client but starts the
+server and opens status immediately; do not call it unconditionally during
+startup.
+
+==============================================================================
+SETUP                                                           *magit-setup*
+
+Minimal setup needs no configuration: load the plugin and run `:Magit`
+inside a repository.  `setup()` is needed only to pass options or to start
+status immediately:
+
+>lua
+  require('magit-lsp').setup({
+    root_dir = '/path/to/repo',         -- default: vim.fn.getcwd()
+    cmd = { '/path/to/magit-lsp' },     -- default: discovery, see below
+    profile = 'vim',                    -- 'vim' (default) or 'standard'
+    status = { placement = 'replace' }, -- also 'vsplit', 'split', 'tab'
+  })
+<
+`setup()` starts one server per repository and opens status asynchronously.
+Options: `root_dir`, `cmd`, `profile`, `status`, `fold_keys` and `menu`.
+
+==============================================================================
+SERVER EXECUTABLE                                             *magit-server*
+
+The client spawns the first usable server, in this order:
+  1. `setup({ cmd = ... })`
+  2. `$MAGIT_LSP_BIN`
+  3. `target/release/magit-lsp` in the checkout
+  4. `target/debug/magit-lsp` in the checkout
+  5. `magit-lsp` on `$PATH`
+
+There is no `cargo run` fallback.  `$MAGIT_LSP_BIN` must name an executable
+file.  When nothing is usable, opening reports
+"magit-lsp: server binary not found" with a hint to set `cmd` or
+`$MAGIT_LSP_BIN`, build the checkout, or put `magit-lsp` on `$PATH`.
+
+==============================================================================
+KEYS                                                             *magit-keys*
+
+The default profile is `vim`; select `standard` with
+`setup({ profile = 'standard' })`.
+
+    `g r` / `g`        Refresh status (vim / standard)
+    `Tab`              Toggle the section at the cursor
+    `Enter`            Visit the item at the cursor
+    `g ?` / `?`        Open the menu of menus
+    `ctrl+t`           Toggle plain editable text mode
+    `q`                Close the view
+
+Full tables: https://github.com/BlueDrink9/magit-lsp/blob/main/docs/KEYMAPS.md
+
+==============================================================================
+DOCUMENTATION                                                *magit-docs*
+
+    Repository and overview:
+        https://github.com/BlueDrink9/magit-lsp
+    Client installation and tested snippets:
+        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/CLIENT_INSTALL.md
+    Keymaps and profiles:
+        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/KEYMAPS.md
+    Protocol and capabilities:
+        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/PROTOCOL.md
+
+==============================================================================
+TROUBLESHOOTING                                       *magit-troubleshooting*
+
+"magit-lsp: server binary not found"~
+        Discovery found no usable executable.  Set `setup({ cmd = ... })` or
+        `$MAGIT_LSP_BIN`, build `target/debug/magit-lsp`, or put `magit-lsp`
+        on `$PATH`.
+
+"rich protocol mismatch: required version N, server advertised none" or
+"capabilities.experimental.magit render is required and must be a string"~
+        The Lua client and the selected server executable come from different
+        protocol versions.  An older server is being picked up, for example a
+        stale `target/release/magit-lsp` shadowing a newer debug build.  Rebuild
+        from the same checkout (`make build` or `make release`), or point
+        `cmd` / `$MAGIT_LSP_BIN` at the matching binary, then check
+        `magit-lsp --version`.  Keep client and server from the same
+        checkout/version.
+
+Missing or stale status~
+        Press `g r` (vim) or `g` (standard) to re-read the repository.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

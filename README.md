@@ -101,6 +101,8 @@ server discovery finds `target/release/magit-lsp`:
 For a native package or lazy.nvim install (a clone under your Neovim data
 directory, with `cmd` pointing at the installed binary), copy the tested snippets
 in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages).
+Once the plugin is installed, `:h magit` documents `:Magit [directory]`,
+setup/server discovery and protocol-version troubleshooting.
 
 ### VS Code (1.85+)
 

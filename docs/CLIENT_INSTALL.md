@@ -70,6 +70,10 @@ git clone https://github.com/BlueDrink9/magit-lsp.git \
   "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/magit/start/magit-lsp"
 ```
 
+The client ships `doc/magit.txt`: `:h magit` documents `:Magit [directory]`,
+minimal setup, server discovery and protocol-version troubleshooting. Run
+`:helptags ALL` if your package manager does not generate help tags.
+
 Add this to `init.lua`. `MagitStatus` is a **user command defined by this
 example**, not a built-in plugin command:
 
