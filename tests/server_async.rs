@@ -2648,3 +2648,147 @@ fn rich_choice_item_row_enter_answers_the_pick() {
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
+
+#[test]
+fn the_shared_selector_uses_a_supplied_server_verbatim_and_cargo_otherwise() {
+    match std::env::var_os(SERVER_BINARY_ENV) {
+        Some(value) => assert_eq!(
+            server_binary(),
+            std::path::PathBuf::from(&value),
+            "an explicit selection must be used verbatim, never resolved or rebuilt"
+        ),
+        None => assert_eq!(
+            server_binary(),
+            std::path::PathBuf::from(env!("CARGO_BIN_EXE_magit-lsp")),
+            "without a selection the transport keeps using the Cargo-built server"
+        ),
+    }
+}
+
+#[test]
+fn an_invalid_explicit_server_selection_is_refused_without_a_cargo_fallback() {
+    for (value, expected) in [
+        ("", "is set but empty"),
+        ("relative/magit-lsp", "must be an absolute path"),
+        ("/nonexistent/magit-lsp", "does not name a readable file"),
+    ] {
+        let error = explicit_server_binary(std::ffi::OsStr::new(value))
+            .expect_err("an invalid explicit server path must be refused");
+        assert!(
+            error.contains(expected),
+            "refusal {error:?} does not mention {expected:?}"
+        );
+    }
+
+    let temp = tempfile::TempDir::new().expect("selection tempdir");
+    let directory = explicit_server_binary(temp.path().as_os_str())
+        .expect_err("a directory is not a server executable");
+    assert!(
+        directory.contains("does not name a regular file"),
+        "refusal {directory:?} does not mention a regular file"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = temp.path().join("magit-lsp");
+        std::fs::write(&path, b"#!/bin/sh\n").expect("write placeholder server");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("make the placeholder non-executable");
+        let error = explicit_server_binary(path.as_os_str())
+            .expect_err("a non-executable file must be refused");
+        assert!(
+            error.contains("is not executable"),
+            "refusal {error:?} does not mention executability"
+        );
+    }
+}
+
+/// Selects the re-executed child of [`every_spawn_variant_runs_the_supplied_server`].
+#[cfg(unix)]
+const SPAWN_CHILD_ENV: &str = "MAGIT_LSP_TEST_SPAWN_CHILD";
+/// Marker the wrapper writes for each spawn variant that runs it.
+#[cfg(unix)]
+const SPAWN_MARKER_ENV: &str = "MAGIT_LSP_TEST_SPAWN_MARKER";
+
+#[cfg(unix)]
+#[test]
+fn every_spawn_variant_runs_the_supplied_server() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    if std::env::var_os(SPAWN_CHILD_ENV).is_none() {
+        // The selector lives on the child's `Command`, so this parallel test
+        // binary never rewrites its own environment.
+        let temp = tempfile::TempDir::new().expect("wrapper tempdir");
+        let wrapper = temp.path().join("magit-lsp");
+        let marker = temp.path().join("spawned");
+        let served = server_binary().display().to_string().replace('\'', r"'\''");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$MAGIT_LSP_TEST_VARIANT\" >> \"${SPAWN_MARKER_ENV}\"\nexec '{served}' \"$@\"\n"
+            ),
+        )
+        .expect("write server wrapper");
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
+            .expect("make the wrapper executable");
+
+        let output = Command::new(std::env::current_exe().expect("current test binary"))
+            .args([
+                "--exact",
+                "every_spawn_variant_runs_the_supplied_server",
+                "--test-threads=1",
+            ])
+            .env(SPAWN_CHILD_ENV, "1")
+            .env(SERVER_BINARY_ENV, &wrapper)
+            .env(SPAWN_MARKER_ENV, &marker)
+            .output()
+            .expect("re-exec the spawn child");
+        assert!(
+            output.status.success(),
+            "spawn child failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let spawned = std::fs::read_to_string(&marker).expect("wrapper recorded its spawns");
+        assert_eq!(
+            spawned.lines().collect::<Vec<_>>(),
+            ["spawn", "prepared", "umask"],
+            "every spawn variant must execute the selected server"
+        );
+        return;
+    }
+
+    let selection = std::env::var_os(SERVER_BINARY_ENV).expect("the child is given a selection");
+    assert_eq!(
+        server_binary(),
+        std::path::PathBuf::from(selection),
+        "the child must spawn exactly the wrapper it was given"
+    );
+    let marker = std::env::var(SPAWN_MARKER_ENV).expect("the child is given a marker");
+    let capabilities = || json!({"window": {"workDoneProgress": true}});
+
+    let mut server = TestServer::spawn(&[
+        ("MAGIT_LSP_TEST_VARIANT", "spawn"),
+        (SPAWN_MARKER_ENV, marker.as_str()),
+    ]);
+    server.initialize(capabilities());
+
+    let mut server = TestServer::spawn_prepared(
+        &[
+            ("MAGIT_LSP_TEST_VARIANT", "prepared"),
+            (SPAWN_MARKER_ENV, marker.as_str()),
+        ],
+        "true",
+    );
+    server.initialize(capabilities());
+
+    let mut server = TestServer::spawn_with_umask(
+        &[
+            ("MAGIT_LSP_TEST_VARIANT", "umask"),
+            (SPAWN_MARKER_ENV, marker.as_str()),
+        ],
+        "077",
+    );
+    server.initialize(capabilities());
+}

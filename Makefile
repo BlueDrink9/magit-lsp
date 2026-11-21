@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -120,6 +120,23 @@ vscode-keybindings-generate:
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
+
+# Real-pipe Rust suites against one explicitly supplied server executable. The
+# native harness may be compiled here, but the server under test must be the
+# supplied artifact, never the binary Cargo builds: `MAGIT_LSP_TEST_BINARY` is
+# required, absolute and executable, and its SHA-256 is recorded before Cargo
+# starts. There is no `build` (server) prerequisite.
+MAGIT_LSP_TEST_BINARY ?=
+test-rust-artifact:
+	@case "$(MAGIT_LSP_TEST_BINARY)" in \
+	'') echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
+	/*) if [ ! -f "$(MAGIT_LSP_TEST_BINARY)" ] || [ ! -x "$(MAGIT_LSP_TEST_BINARY)" ]; then \
+	      echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is not an executable file: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2; \
+	    fi;; \
+	*) echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
+	esac
+	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("test-rust-artifact: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
+	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q --test server_async)
 
 # Exercises the real `run` macro above through temporary included Makefiles.
 .PHONY: wrapper-check

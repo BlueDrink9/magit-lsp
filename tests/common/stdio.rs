@@ -1,12 +1,64 @@
 //! Shared bounded real-pipe JSON-RPC test transport.
 
 use serde_json::{json, Value};
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+/// Environment variable naming the one server executable real-pipe tests run.
+///
+/// When set it is authoritative: the path must be absolute and name an
+/// executable file, and the server Cargo built for the test harness is never
+/// used as a fallback. `make test-rust-artifact` sets it for the artifact lane;
+/// ordinary source tests leave it unset.
+pub const SERVER_BINARY_ENV: &str = "MAGIT_LSP_TEST_BINARY";
+
+/// Resolve the server executable a real-pipe spawn must run.
+///
+/// An explicit [`SERVER_BINARY_ENV`] selection is used verbatim; only without
+/// one does the shared transport use the server Cargo built alongside the test
+/// harness. An invalid explicit selection panics instead of falling back.
+pub fn server_binary() -> PathBuf {
+    match std::env::var_os(SERVER_BINARY_ENV) {
+        Some(value) => explicit_server_binary(&value)
+            .unwrap_or_else(|error| panic!("{SERVER_BINARY_ENV} {error}")),
+        None => PathBuf::from(env!("CARGO_BIN_EXE_magit-lsp")),
+    }
+}
+
+/// Validate one explicit server path and return it unchanged.
+///
+/// The path must be absolute, name an existing regular file and, on Unix, carry
+/// an execute bit. Errors are readable fragments prefixed with
+/// [`SERVER_BINARY_ENV`] by [`server_binary`].
+pub fn explicit_server_binary(value: &OsStr) -> Result<PathBuf, String> {
+    let path = PathBuf::from(value);
+    let shown = path.display();
+    if value.is_empty() {
+        return Err("is set but empty; pass the absolute path to the verified server".to_string());
+    }
+    if !path.is_absolute() {
+        return Err(format!("must be an absolute path, got {shown}"));
+    }
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| format!("does not name a readable file: {shown}: {error}"))?;
+    if !metadata.is_file() {
+        return Err(format!("does not name a regular file: {shown}"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(format!("is not executable: {shown}"));
+        }
+    }
+    Ok(path)
+}
 
 /// A running server plus its framed stdout stream.
 pub struct TestServer {
@@ -34,9 +86,10 @@ impl TestServer {
         assert_eq!(response["result"], Value::Null);
         self.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
     }
-    /// Spawn the real binary with logging on stderr and optional extra env vars.
+    /// Spawn the real binary (see [`server_binary`]) with logging on stderr and
+    /// optional extra env vars.
     pub fn spawn(extra_env: &[(&str, &str)]) -> Self {
-        Self::from_command(Command::new(env!("CARGO_BIN_EXE_magit-lsp")), extra_env)
+        Self::from_command(Command::new(server_binary()), extra_env)
     }
 
     fn from_command(mut command: Command, extra_env: &[(&str, &str)]) -> Self {
@@ -45,7 +98,8 @@ impl TestServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env(magit_lsp::logging::LEVEL_ENV, "trace")
-            .env_remove(magit_lsp::logging::FILE_ENV);
+            .env_remove(magit_lsp::logging::FILE_ENV)
+            .env_remove(SERVER_BINARY_ENV);
         for (key, value) in extra_env {
             command.env(key, value);
         }
@@ -74,7 +128,8 @@ impl TestServer {
         }
     }
 
-    /// Spawn the real server with a child-only umask before exec.
+    /// Spawn the real server (see [`server_binary`]) with a child-only umask
+    /// before exec.
     pub fn spawn_with_umask(extra_env: &[(&str, &str)], umask: &str) -> Self {
         let mut command = Command::new("sh");
         command
@@ -82,18 +137,19 @@ impl TestServer {
             .arg("umask \"$1\"; shift; exec \"$@\"")
             .arg("magit-lsp-test")
             .arg(umask)
-            .arg(env!("CARGO_BIN_EXE_magit-lsp"));
+            .arg(server_binary());
         Self::from_command(command, extra_env)
     }
 
-    /// Spawn the server after child-only shell setup, retaining the shell's PID.
+    /// Spawn the server (see [`server_binary`]) after child-only shell setup,
+    /// retaining the shell's PID.
     pub fn spawn_prepared(extra_env: &[(&str, &str)], setup: &str) -> Self {
         let mut command = Command::new("sh");
         command
             .arg("-c")
             .arg(format!("set -e; {setup}; exec \"$1\""))
             .arg("magit-lsp-test")
-            .arg(env!("CARGO_BIN_EXE_magit-lsp"));
+            .arg(server_binary());
         Self::from_command(command, extra_env)
     }
 
