@@ -16,7 +16,9 @@ local function record(case, started)
   local buf = vim.api.nvim_get_current_buf()
   local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
   local win = vim.api.nvim_get_current_win()
-  local ok = text:find("Head:", 1, true) ~= nil and vim.api.nvim_win_is_valid(win)
+  local ok = text:find("Head:", 1, true) ~= nil
+    and vim.api.nvim_win_is_valid(win)
+    and vim.api.nvim_win_get_buf(win) == buf
   local f = assert(io.open(output, "a"))
   f:write(vim.json.encode({
     case = case,
