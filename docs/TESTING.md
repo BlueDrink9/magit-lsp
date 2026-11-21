@@ -276,14 +276,18 @@ drives the real `run` macro through temporary included Makefiles.
 
 ### Documentation maintenance
 
-Behavior tests cover runtime behavior and generator/checker logic using temporary
-fixtures. Checkout freshness for generated references and authored Markdown links
-are separate maintenance checks: `make docs-artifacts-check` checks committed
-outputs, and `make docs-check` runs checker unit tests plus link validation.
-`make docs-generate` refreshes schema and registry references. Commit generated
-references separately from source or authored documentation, with a commit
-message naming the changed source/contract and generation command; inspect its
-diff before commit. Ordinary `make test` does not regenerate or check artifacts.
+Behavior tests cover runtime behavior and generator/checker logic using
+temporary fixtures. Checkout freshness for generated references and authored
+Markdown links are separate maintenance checks: `make docs-artifacts-check`
+checks committed outputs, and `make docs-check` runs checker unit tests plus
+link validation. Ordinary `make test` does not regenerate or check artifacts.
+
+Generated references live in standalone files linked from authored docs. Produce
+them with `make docs-generate` (schema and registry references) or the other
+generation targets, never by hand. Commit them separately from implementation,
+authored documentation and queue bookkeeping, with a message naming the changed
+source or contract and the generation command. Inspect the generated diff before
+committing, and never regenerate merely to silence a failing behavior test.
 The Nix development shell supplies Node.js and pnpm. VSCode TypeScript and
 declarations remain owned by `clients/vscode/pnpm-lock.yaml`; VSCode Make targets
 install locked dependencies when needed, using the shared pnpm store.

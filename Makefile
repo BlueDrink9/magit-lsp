@@ -25,8 +25,9 @@ export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
 -include local.mk
 
 # Convention: targets that rewrite files must be named update-*, *-generate,
-# hooks-* or format, because .opencode/agents/scout.md denies those patterns.
-# Name any new mutating target to match, or add a deny rule there.
+# hooks-*, *-refresh, format or format-all (help-tags is a fixed exception),
+# because .opencode/agents/scout.md denies those patterns. Name any new
+# mutating target to match, or add a deny rule there.
 
 define run
 @if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)'; if grep -Eq '$(WARN_RE)' "$$log"; then printf ' (warnings detected; check log: %s)\n' "$$log"; else printf '\n'; rm -f "$$log"; fi; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
@@ -281,7 +282,7 @@ mason-package-check:
 vscode-version-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-version-startup,MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
-vscode-version-warning: build vscode-deps
+vscode-version-warning: vscode-prereqs build vscode-deps
 	$(call run,vscode-version-warning,MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 # Focused native automatic startup: an isolated profile with no serverPath must
@@ -304,7 +305,7 @@ vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps
 vscode-server-commands: vscode-prereqs build vscode-deps
 	$(call run,vscode-server-commands,MAGIT_VSCODE_SERVER_COMMANDS_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
-vscode-e2e: build vscode-deps
+vscode-e2e: vscode-prereqs build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 # Focused native F5 check: physical F5 on the focused status view must dispatch
