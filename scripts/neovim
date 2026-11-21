@@ -108,14 +108,18 @@ def isolated_environment(
 
 
 def command(nvim: str, *, init: Path = INIT, base: Path) -> list[str]:
-    """Build the Neovim argv as discrete items so spaces need no escaping."""
+    """Build the Neovim argv as discrete items so spaces need no escaping.
+
+    `-i` names a ShaDa file inside the isolated `shada` directory, which
+    `isolated_environment` creates: Neovim rejects a directory there.
+    """
     return [
         nvim,
         "--noplugin",
         "-u",
         str(init),
         "-i",
-        str(base / "shada"),
+        str(base / "shada" / "main.shada"),
     ]
 
 

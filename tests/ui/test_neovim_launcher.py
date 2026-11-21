@@ -50,6 +50,10 @@ class Recorded:
         self.environment = dict(options["env"])  # type: ignore[arg-type]
         self.base = Path(self.environment["MAGIT_LSP_LAUNCH_DIR"])
         self.base_existed = self.base.is_dir()
+        # Snapshot the ShaDa path while the isolated directories still exist.
+        self.shada = Path(command[command.index("-i") + 1])
+        self.shada_parent_existed = self.shada.parent.is_dir()
+        self.shada_is_directory = self.shada.is_dir()
 
     @property
     def cwd(self) -> str:
@@ -125,8 +129,12 @@ class LauncherTest(unittest.TestCase):
             call.command[call.command.index("-u") + 1], str(INIT_PATH)
         )
         shada = Path(call.command[call.command.index("-i") + 1])
-        self.assertEqual(shada.name, "shada")
-        self.assertEqual(shada.parent, call.base)
+        self.assertEqual(shada, call.shada)
+        self.assertEqual(shada.name, "main.shada")
+        self.assertEqual(shada.parent, call.base / "shada")
+        self.assertTrue(shada.is_relative_to(call.base))
+        self.assertTrue(call.shada_parent_existed)
+        self.assertFalse(call.shada_is_directory)
         self.assertTrue(call.base_existed)
         self.assertEqual(call.command.count("-u"), 1)
         self.assertNotIn("-c", call.command)
