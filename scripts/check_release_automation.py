@@ -1962,6 +1962,130 @@ def validate_publication_binding_bundle(path):
     return result
 
 
+def publication_api_pages(repository, path, token, key):
+    """Collect every API page for a publication listing, rejecting truncation."""
+    entries = []
+    total = None
+    page = 1
+    while True:
+        status, body = fetch_api(
+            repository, f'{path}?per_page=100&page={page}', token)
+        if status != 200:
+            fail(f'publication API {path} page {page} returned HTTP {status}')
+        document = parse_json(body, f'publication API {path} page {page}')
+        if not isinstance(document, dict):
+            fail(f'publication API {path} page {page}: expected object')
+        count = document.get('total_count')
+        values = document.get(key)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0 or \
+                not isinstance(values, list):
+            fail(f'publication API {path} page {page}: invalid listing')
+        if total is None:
+            total = count
+        elif total != count:
+            fail(f'publication API {path} pages disagree on total_count')
+        entries.extend(values)
+        if len(entries) >= total:
+            break
+        page += 1
+    if len(entries) != total:
+        fail(f'publication API {path}: incomplete pagination')
+    return [{'total_count': total, key: entries}]
+
+
+def validate_publication_orchestration(event, repository, checkout_ref,
+                                       checkout_sha, readiness=None,
+                                       promotion=None, default_ref='refs/heads/main'):
+    """Require trusted workflow_run orchestration and explicit proven gates."""
+    if checkout_ref != default_ref:
+        fail(f'publication orchestration ref is {checkout_ref!r}, expected protected default')
+    if not isinstance(checkout_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', checkout_sha):
+        fail('publication orchestration checkout SHA is invalid')
+    if not isinstance(event, dict) or event.get('action') != 'completed':
+        fail('publication event must be workflow_run completed')
+    run = event.get('workflow_run')
+    if not isinstance(run, dict) or full_name(run.get('repository')) != repository:
+        fail('publication event run belongs to another repository')
+    if readiness is None or promotion is None:
+        fail('publication readiness/promotion evidence is absent; ineligible')
+    if readiness.get('conclusion') != 'success' or promotion.get('eligible') is not True:
+        fail('publication readiness/promotion evidence is not successful')
+    return run
+
+
+def prepare_publication_runtime(event_path):
+    """Validate event and upstream API binding; never execute producer content."""
+    event = parse_json(Path(event_path).read_bytes(), 'workflow_run event')
+    repository = os.environ.get('GITHUB_REPOSITORY', '')
+    ref = os.environ.get('GITHUB_REF', '')
+    checkout_sha = os.environ.get('GITHUB_SHA', '')
+    if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_run':
+        fail('publication orchestration requires workflow_run event')
+    token = os.environ.get('GH_TOKEN', '')
+    status, body = fetch_api(repository, '', token)
+    if status != 200:
+        fail(f'publication repository metadata returned HTTP {status}')
+    repo_document = parse_json(body, 'publication repository metadata')
+    default_branch = repo_document.get('default_branch') if isinstance(repo_document, dict) else None
+    if not isinstance(default_branch, str) or not default_branch:
+        fail('publication repository has no default branch')
+    expected_ref = f'refs/heads/{default_branch}'
+    if ref != expected_ref:
+        fail(f'publication orchestration ref is {ref!r}, expected default {expected_ref!r}')
+    status, body = fetch_api(repository, f'/branches/{default_branch}/protection', token)
+    if status != 200:
+        fail(f'publication default branch protection returned HTTP {status}')
+    status, body = fetch_api(repository, f'/git/ref/heads/{default_branch}', token)
+    if status != 200:
+        fail(f'publication default branch ref returned HTTP {status}')
+    default_ref = parse_json(body, 'publication default branch ref')
+    default_object = default_ref.get('object') if isinstance(default_ref, dict) else None
+    if not isinstance(default_object, dict) or default_object.get('sha') != checkout_sha:
+        fail('publication orchestration checkout SHA is not the current default branch SHA')
+    run = validate_publication_orchestration(
+        event, repository, expected_ref, checkout_sha, default_ref=expected_ref)
+    run_id = run.get('id')
+    attempt = run.get('run_attempt')
+    if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+        fail('publication event has invalid upstream run id')
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        fail('publication event has invalid upstream run attempt')
+    status, body = fetch_api(repository, f'/actions/runs/{run_id}', token)
+    if status != 200:
+        fail(f'publication upstream run returned HTTP {status}')
+    upstream = parse_json(body, 'publication upstream run')
+    if not isinstance(upstream, dict):
+        fail('publication upstream run: expected object')
+    workflow_id = upstream.get('workflow_id')
+    if run.get('workflow_id') != workflow_id or run.get('event') != RUN_EVENT:
+        fail('publication event/upstream workflow identity or event differs')
+    original_ref = run.get('head_branch')
+    if not isinstance(original_ref, str) or not original_ref.startswith('v'):
+        fail('publication upstream run does not identify an original version tag')
+    tag_ref = f'refs/tags/{original_ref}'
+    validate_run_binding(upstream, repository, run_id, attempt, workflow_id,
+                         tag_ref)
+    publication_api_pages(repository, f'/actions/runs/{run_id}/jobs', token, 'jobs')
+    publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token, 'artifacts')
+    tag_status, tag_body = fetch_api(repository, f'/git/ref/tags/{original_ref}', token)
+    tag_document = parse_json(tag_body, 'publication original tag ref') if tag_status == 200 else None
+    if tag_status != 200:
+        fail(f'publication original tag lookup returned HTTP {tag_status}')
+    target = tag_document.get('object') if isinstance(tag_document, dict) else None
+    tag_object = None
+    if isinstance(target, dict) and target.get('type') == 'tag':
+        object_sha = target.get('sha')
+        tag_status, tag_body = fetch_api(repository, f'/git/tags/{object_sha}', token)
+        if tag_status != 200:
+            fail(f'publication annotated tag lookup returned HTTP {tag_status}')
+        tag_object = parse_json(tag_body, 'publication annotated tag')
+    # Source comparison awaits the downloaded producer manifest; readiness is
+    # intentionally absent until NREL-19 supplies its evidence contract.
+    if tag_object is None and isinstance(target, dict) and target.get('type') != 'commit':
+        fail('publication original tag has an unsupported object type')
+    fail('publication readiness/promotion evidence is absent; ineligible')
+
+
 def repository_and_sha():
     """Return ``(repository, sha)`` from the workflow environment, validated."""
     repository = os.environ.get('GITHUB_REPOSITORY', '')
@@ -3127,6 +3251,41 @@ def run_self_tests():
         expect_check(label, lambda options=options: binding(**options),
                      expected=expected)
 
+    orchestration_event = {
+        'action': 'completed',
+        'workflow_run': {'id': int(SELF_TEST_RUN_ID),
+                         'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+                         'repository': {'full_name': SELF_TEST_REPOSITORY},
+                         'head_sha': SELF_TEST_OTHER_SHA},
+    }
+    if validate_publication_orchestration(
+            orchestration_event, SELF_TEST_REPOSITORY,
+            'refs/heads/main', SELF_TEST_SHA,
+            {'conclusion': 'success'}, {'eligible': True}) != \
+            orchestration_event['workflow_run']:
+        fail('self-test: protected-default orchestration must remain distinct from source SHA')
+    for label, event, repo, ref, sha, expected in (
+        ('branch orchestration', orchestration_event, SELF_TEST_REPOSITORY,
+         'refs/heads/feature', SELF_TEST_SHA, 'protected default'),
+        ('foreign event repository', dict(orchestration_event, workflow_run=dict(
+            orchestration_event['workflow_run'], repository={'full_name': 'other/repo'})),
+         SELF_TEST_REPOSITORY, 'refs/heads/main', SELF_TEST_SHA, 'another repository'),
+        ('malformed orchestration checkout SHA', orchestration_event,
+         SELF_TEST_REPOSITORY, 'refs/heads/main', 'not-a-sha',
+         'orchestration checkout SHA'),
+    ):
+        expect_check(label, validate_publication_orchestration, event, repo,
+                     ref, sha, {'conclusion': 'success'}, {'eligible': True},
+                     expected=expected)
+    expect_check('missing readiness/promotion proof',
+                 validate_publication_orchestration, orchestration_event,
+                 SELF_TEST_REPOSITORY, 'refs/heads/main', SELF_TEST_SHA,
+                 expected='evidence is absent')
+    expect_check('pending promotion proof', validate_publication_orchestration,
+                 orchestration_event, SELF_TEST_REPOSITORY, 'refs/heads/main',
+                 SELF_TEST_SHA, {'conclusion': 'success'}, {'eligible': False},
+                 expected='not successful')
+
     with tempfile.TemporaryDirectory(prefix='magit-lsp-binding-bundle-') as temporary:
         bundle = {
             'repository': SELF_TEST_REPOSITORY,
@@ -3629,6 +3788,8 @@ def main():
     parser.add_argument('--validate-publication-binding', metavar='BUNDLE',
                         help='validate an offline JSON run/tag/asset binding '
                              'bundle and print its source commit')
+    parser.add_argument('--prepare-publication-runtime', metavar='EVENT',
+                        help='read-only validate workflow_run event and upstream API')
     args = parser.parse_args()
     try:
         if args.pipeline_self_tests:
@@ -3645,6 +3806,9 @@ def main():
             return 0
         if args.validate_publication_binding:
             validate_publication_binding_bundle(args.validate_publication_binding)
+            return 0
+        if args.prepare_publication_runtime:
+            prepare_publication_runtime(args.prepare_publication_runtime)
             return 0
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)
