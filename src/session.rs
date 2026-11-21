@@ -806,12 +806,37 @@ impl Session {
             return Ok(None);
         }
         let tree = view.render_tree();
-        Ok(Some(view.render_tree_with_delivery(
-            tree,
-            None,
-            None,
-            RenderDelivery::Acknowledged,
-        )?))
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        self.publish();
+        Ok(Some(render))
+    }
+
+    /// Render a terminal status-acquisition error only into the live loading generation.
+    pub fn fail_fresh_status(
+        &mut self,
+        view_id: &str,
+        generation: u64,
+        message: String,
+    ) -> Result<Option<ViewRender>> {
+        let Some(view) = self.views.get_mut(view_id) else {
+            return Ok(None);
+        };
+        let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        else {
+            return Ok(None);
+        };
+        if !status.fail_loading(message, generation) {
+            return Ok(None);
+        }
+        let tree = view.render_tree();
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        self.publish();
+        Ok(Some(render))
     }
 
     /// Create a session for a repository root.
@@ -992,6 +1017,17 @@ impl Session {
         repo: GitRepo,
     ) -> Result<(ViewDescriptor, ViewRender)> {
         self.open_internal_with_repo(id.into(), kind, placement, viewport, args, None, Some(repo))
+    }
+
+    /// Open a status view in its loading state without acquiring Git status.
+    pub fn open_status_loading(
+        &mut self,
+        id: impl Into<String>,
+        placement: Placement,
+        viewport: Viewport,
+        repo: GitRepo,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_provider_view(id, placement, viewport, Box::new(StatusView::loading(repo)))
     }
 
     fn open_internal(

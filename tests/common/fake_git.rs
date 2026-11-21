@@ -111,7 +111,9 @@ impl GatedGit {
                 "#!/bin/sh\n\
                  # Tests-only gate: block the first '{command}' until the release\n\
                  # file exists, then run the real Git so the repository stays correct.\n\
-                 if [ \"$1\" = '{command}' ] && [ ! -f '{release}' ]; then\n\
+                 subcommand=\"$1\"\n\
+                 if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
+                 if [ \"$subcommand\" = '{command}' ] && [ ! -f '{release}' ]; then\n\
                    echo \"$$\" > '{entered}'\n\
                    n=0\n\
                    while [ ! -f '{release}' ]; do\n\

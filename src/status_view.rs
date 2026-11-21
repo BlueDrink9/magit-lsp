@@ -36,6 +36,7 @@ pub struct StatusView {
 
 enum StatusState {
     Loading,
+    Failed(String),
     Ready {
         status: Status,
         rebase: Option<RebaseState>,
@@ -47,6 +48,7 @@ pub struct FreshStatus {
     generation: u64,
     status: Status,
     rebase: Option<RebaseState>,
+    hunks: HashMap<(String, bool), Vec<Hunk>>,
 }
 
 impl StatusView {
@@ -79,23 +81,50 @@ impl StatusView {
 
     /// Acquire current Git state tagged with this view's lifecycle generation.
     pub fn acquire_fresh_state(&self) -> Result<FreshStatus> {
+        Self::acquire_for_generation(&self.repo, self.generation)
+    }
+
+    /// Acquire Git state without holding a session lock, tagged with its view generation.
+    pub fn acquire_for_generation(repo: &GitRepo, generation: u64) -> Result<FreshStatus> {
         let status_started = std::time::Instant::now();
-        let status = self.repo.status_listing()?;
+        let status = repo.status_listing()?;
         crate::runner::trace_current(
             "phase_status_listing",
             serde_json::json!({ "duration_ms": status_started.elapsed().as_secs_f64() * 1000.0 }),
         );
         let rebase_started = std::time::Instant::now();
-        let rebase = self.repo.rebase_state()?;
+        let rebase = repo.rebase_state()?;
         crate::runner::trace_current(
             "phase_rebase_state",
             serde_json::json!({ "duration_ms": rebase_started.elapsed().as_secs_f64() * 1000.0 }),
         );
         Ok(FreshStatus {
-            generation: self.generation,
+            generation,
             status,
             rebase,
+            hunks: HashMap::new(),
         })
+    }
+
+    /// Acquire the default-expanded opening bodies before taking the session lock.
+    pub fn acquire_opening_state(repo: &GitRepo, generation: u64) -> Result<FreshStatus> {
+        let mut fresh = Self::acquire_for_generation(repo, generation)?;
+        for (staged, files) in [
+            (true, &fresh.status.staged),
+            (false, &fresh.status.unstaged),
+        ] {
+            for file in files {
+                let hunks = match repo.file_hunks(&file.path, staged) {
+                    Ok(hunks) => hunks,
+                    Err(error) => {
+                        tracing::warn!(path = %file.path, %error, "failed to load file body");
+                        Vec::new()
+                    }
+                };
+                fresh.hunks.insert((file.path.clone(), staged), hunks);
+            }
+        }
+        Ok(fresh)
     }
 
     /// Install acquired state only if no refresh has superseded its generation.
@@ -107,7 +136,16 @@ impl StatusView {
             status: fresh.status,
             rebase: fresh.rebase,
         };
-        self.hunks.clear();
+        self.hunks = fresh.hunks;
+        true
+    }
+
+    /// End loading with a readable error if this acquisition is still current.
+    pub fn fail_loading(&mut self, message: String, generation: u64) -> bool {
+        if self.generation != generation || !matches!(self.state, StatusState::Loading) {
+            return false;
+        }
+        self.state = StatusState::Failed(message);
         true
     }
 
@@ -118,6 +156,23 @@ impl StatusView {
 
     /// Render the visible tree, loading hunks only for expanded files.
     fn render_tree(&mut self) -> Tree {
+        if let StatusState::Failed(message) = &self.state {
+            let mut tree = Tree {
+                version: 0,
+                lines: Vec::new(),
+                nodes: Vec::new(),
+                line_nodes: Vec::new(),
+                tokens: Vec::new(),
+                symbols: Vec::new(),
+                links: Vec::new(),
+            };
+            tree.lines.push(message.clone());
+            tree.line_nodes
+                .push(LineNode::new("status:error", NodeKind::Message));
+            tree.nodes
+                .push(Node::new("status:error", NodeKind::Message, message, 0));
+            return tree;
+        }
         let StatusState::Ready { status, rebase } = &self.state else {
             let mut tree = Tree {
                 version: 0,

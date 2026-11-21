@@ -1,3 +1,4 @@
+use super::requests::DeferredStatus;
 use super::*;
 
 /// Worker-owned same-repository mutation reservation.
@@ -63,6 +64,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         }
     };
     let session_start = std::time::Instant::now();
+    let is_status = matches!(&p.kind, ViewKind::Status);
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         let rich = match shared
@@ -84,14 +86,18 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             .or_insert_with(|| session.published());
         session.set_keymaps(keymaps);
         let placement = p.placement.unwrap_or_default();
-        let (descriptor, render) = session.open_with_discovered_repo(
-            id.clone(),
-            p.kind,
-            placement,
-            p.viewport,
-            p.args.as_ref(),
-            discovered_repo,
-        )?;
+        let (descriptor, render) = if is_status {
+            session.open_status_loading(id.clone(), placement, p.viewport, discovered_repo)?
+        } else {
+            session.open_with_discovered_repo(
+                id.clone(),
+                p.kind,
+                placement,
+                p.viewport,
+                p.args.as_ref(),
+                discovered_repo,
+            )?
+        };
         let keymap = session.keymap_notice(&id);
         (descriptor, render, keymap)
     };
@@ -104,7 +110,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .view_repos
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(id, repo.to_string());
+        .insert(id.clone(), repo.to_string());
     let watcher = std::time::Instant::now();
     shared.ensure_watcher(repo);
     crate::runner::trace_current(
@@ -133,10 +139,51 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         "phase_view_open_total",
         serde_json::json!({ "duration_ms": total.elapsed().as_secs_f64() * 1000.0 }),
     );
-    Ok(Dispatched::with(
-        serde_json::to_value(descriptor)?,
-        notifications,
-    ))
+    let dispatched = Dispatched::with(serde_json::to_value(descriptor)?, notifications);
+    if is_status {
+        Ok(dispatched.with_deferred(DeferredStatus {
+            repo_path: repo.to_string(),
+            view_id: id,
+            generation: 0,
+        }))
+    } else {
+        Ok(dispatched)
+    }
+}
+
+pub(super) fn finish_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    acquired: std::result::Result<
+        std::result::Result<crate::status_view::FreshStatus, crate::Error>,
+        tokio::task::JoinError,
+    >,
+) {
+    let Some(handle) = shared.session(&repo_path) else {
+        return;
+    };
+    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+    let render = match acquired {
+        Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
+        Ok(Err(error)) => session.fail_fresh_status(
+            &view_id,
+            generation,
+            format!("Unable to load repository status: {error}"),
+        ),
+        Err(error) => session.fail_fresh_status(
+            &view_id,
+            generation,
+            format!("Unable to load repository status: {error}"),
+        ),
+    };
+    drop(session);
+    if let Ok(Some(render)) = render {
+        if let Some(message) = super::plain::deliver_render(&shared, render) {
+            let _ = shared.sender.send(message);
+        }
+    }
 }
 
 pub(super) fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {

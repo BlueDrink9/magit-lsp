@@ -211,9 +211,16 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
         server.send(open_view_message(2, &repo_param(tmp.path())));
         let opened = server.response_with_id(2);
         let view = opened["result"]["id"].as_str().unwrap().to_owned();
-        assert_eq!(server.recv()["method"], "view/render");
+        let render = server.recv();
+        assert_eq!(render["method"], "view/render");
         let keymap = server.recv();
         assert_eq!(keymap["method"], "view/keymap");
+        server.wait_for_view_render_after(
+            &view,
+            render["params"]["version"]
+                .as_u64()
+                .expect("render version"),
+        );
         assert_eq!(
             keymap_keys(&keymap, "common.refresh"),
             Some(vec!["K".into(), "ctrl+alt+r".into()])
@@ -821,6 +828,7 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"].as_str().unwrap();
     let uri = opened["result"]["uri"].as_str().unwrap();
+    server.wait_for_view_resync_after(view, 200_000, 1);
     server.send(
         json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":1}}),
     );

@@ -1083,6 +1083,12 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         keymap_keys(&keymap, "status.stage"),
         Some(vec!["s".to_string()])
     );
+    server.wait_for_view_render_after(
+        &view_id,
+        render["params"]["version"]
+            .as_u64()
+            .expect("render version"),
+    );
 
     assert!(render["params"]["text"].is_array());
     let line = first_hunk_line(&mut server, &uri);

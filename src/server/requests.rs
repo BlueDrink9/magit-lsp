@@ -18,13 +18,14 @@ pub(super) async fn handle_request(
     }
     let turn = turn;
 
-    let (response, notifications) = if !is_request_method(&method) {
+    let (response, notifications, deferred) = if !is_request_method(&method) {
         (
             Response::new_err(
                 id,
                 ErrorCode::MethodNotFound as i32,
                 format!("unknown method: {method}"),
             ),
+            Vec::new(),
             Vec::new(),
         )
     } else if let Some(active) = turn.as_ref() {
@@ -95,6 +96,12 @@ pub(super) async fn handle_request(
         }
         let _ = sender.send(notification);
     }
+    for work in deferred {
+        let shared = shared.clone();
+        tokio::spawn(async move {
+            work.run(shared).await;
+        });
+    }
     // Release the mutation slot only after this request's messages are queued,
     // so responses for one repository keep their request order.
     drop(turn);
@@ -104,6 +111,30 @@ pub(super) async fn handle_request(
 pub(super) struct Dispatched {
     pub(super) result: Value,
     pub(super) notifications: Vec<Message>,
+    pub(super) deferred: Vec<DeferredStatus>,
+}
+
+pub(super) struct DeferredStatus {
+    pub(super) repo_path: String,
+    pub(super) view_id: String,
+    pub(super) generation: u64,
+}
+
+impl DeferredStatus {
+    async fn run(self, shared: Shared) {
+        let repo_path = self.repo_path;
+        let view_id = self.view_id;
+        let generation = self.generation;
+        let acquisition_path = repo_path.clone();
+        let acquired = tokio::task::spawn_blocking(move || {
+            let repo = crate::git::GitRepo::open(&acquisition_path)?;
+            crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+        })
+        .await;
+        super::view_execution::finish_status_acquisition(
+            shared, repo_path, view_id, generation, acquired,
+        );
+    }
 }
 
 impl Dispatched {
@@ -111,6 +142,7 @@ impl Dispatched {
         Self {
             result,
             notifications: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
@@ -118,7 +150,13 @@ impl Dispatched {
         Self {
             result,
             notifications,
+            deferred: Vec::new(),
         }
+    }
+
+    pub(super) fn with_deferred(mut self, deferred: DeferredStatus) -> Self {
+        self.deferred.push(deferred);
+        self
     }
 }
 
@@ -131,7 +169,7 @@ async fn dispatch_response(
     shared: &Shared,
     cancel: Option<CancelHandle>,
     trace_id: u64,
-) -> (Response, Vec<Message>) {
+) -> (Response, Vec<Message>, Vec<DeferredStatus>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
@@ -146,10 +184,11 @@ async fn dispatch_response(
         Ok(Ok(dispatched)) => (
             Response::new_ok(id, dispatched.result),
             dispatched.notifications,
+            dispatched.deferred,
         ),
         Ok(Err(error)) => {
             tracing::warn!(method = %method, error = %error, "request failed");
-            (error_response(id, error), Vec::new())
+            (error_response(id, error), Vec::new(), Vec::new())
         }
         Err(error) => (
             Response::new_err(
@@ -157,6 +196,7 @@ async fn dispatch_response(
                 ErrorCode::InternalError as i32,
                 format!("request task failed: {error}"),
             ),
+            Vec::new(),
             Vec::new(),
         ),
     }
