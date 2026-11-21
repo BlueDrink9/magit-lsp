@@ -318,8 +318,10 @@ release-contract-check:
 # layer (malformed `${{ }}`, unknown job/output references, shell defects).
 # It is in the flake dev shell, so a missing tool fails readably, never skips;
 # when shellcheck is also on PATH actionlint lints the shell snippets too.
+# WORKFLOW_FILES selects specific workflows for a scoped check; unset lints all.
+WORKFLOW_FILES ?=
 workflows-check:
-	$(call run,workflows-check,command -v actionlint >/dev/null 2>&1 || { echo 'workflows-check: actionlint is required (install it or add it to the flake dev shell)' >&2; exit 1; }; actionlint .github/workflows/*.yml)
+	$(call run,workflows-check,command -v actionlint >/dev/null 2>&1 || { echo 'workflows-check: actionlint is required (install it or add it to the flake dev shell)' >&2; exit 1; }; actionlint $(if $(strip $(WORKFLOW_FILES)),$(WORKFLOW_FILES),.github/workflows/*.yml))
 
 # Static guard for the prepared (not submitted) Mason registry package. PyYAML
 # is absent, so clients/mason/package.yaml is checked line by line against

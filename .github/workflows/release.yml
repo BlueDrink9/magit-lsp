@@ -1,4 +1,9 @@
 
+# Read-only, unprivileged producer of release candidates. Each required
+# platform (Ubuntu 22.04 GNU x86_64, macOS arm64, macOS Intel) runs its debug
+# server tests, then its release build and release-server tests, in one job.
+# Windows is informational only and appears in no required matrix, readiness
+# condition or downstream gate.
 name: Release artifact build (no publication)
 
 on:
@@ -108,6 +113,13 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: python3 scripts/check_release_automation.py --validate-release-ref
 
+      # Debug server tests run in this build job before the release build, with
+      # the same source, pinned toolchain and workspace cache. Only the server
+      # suite is repeated against the release executable below; instrumented
+      # coverage stays in the separate read-only CI coverage job.
+      - name: Debug server tests
+        run: make test-rust FILTER="--locked --test server_async"
+
       # The shared pipeline script is also what `make release-locked` and
       # `make release-artifact-check` run locally, so this workflow has no
       # separate build/packaging path to drift. `--validate-release-ref` above
@@ -124,6 +136,16 @@ jobs:
           RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu
         run: python3 scripts/check_release_pipeline.py artifacts
+
+      # The server suite runs a second time only here, against the exact release
+      # executable whose digest the run-bound manifest records. ABI, runtime and
+      # editor/package acceptance run once per platform in the consumers below.
+      - name: Release server tests against the exact release executable
+        run: |
+          binary="$(realpath target/x86_64-unknown-linux-gnu/release/magit-lsp)"
+          expected=$(python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
+          test "$(sha256sum "$binary" | awk '{print $1}')" = "$expected"
+          make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -192,6 +214,12 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_automation.py --validate-release-ref
 
+      # Each required platform runs its debug server suite in this same build
+      # job, before its native release build, sharing source, locked toolchain
+      # and workspace cache. Only the server suite is repeated after packaging.
+      - name: Debug server tests
+        run: nix develop --no-update-lock-file .#release-native -c make test-rust FILTER="--locked --test server_async"
+
       - name: Experimental native-linker build
         run: nix develop --no-update-lock-file .#release-native -c make release-native-build RELEASE_TARGET=${{ matrix.target }}
 
@@ -204,6 +232,15 @@ jobs:
           RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_BUILD_TARGET: ${{ matrix.target }}
         run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_pipeline.py artifacts
+
+      # Second and last server run for this platform: the exact release
+      # executable recorded by the run-bound manifest, not a debug rebuild.
+      - name: Release server tests against the exact release executable
+        run: |
+          binary="$(realpath "target/${{ matrix.target }}/release/magit-lsp")"
+          expected=$(nix develop --no-update-lock-file .#release-native -c python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
+          test "$(shasum -a 256 "$binary" | awk '{print $1}')" = "$expected"
+          nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -238,8 +275,10 @@ jobs:
           retention-days: 14
 
   native-consumers:
-    # Required clean-host consumers of the producer's immutable experimental
-    # candidates. These validate candidates; they do not promote them.
+    # Acceptance of the producer's immutable candidates, once per required
+    # platform and against the uploaded release output only: these consumers
+    # never rebuild the server and never repeat the debug server suite.
+    # Experimental candidates stay non-promoting until hosted proof exists.
     needs: native-candidates
     permissions:
       actions: read
