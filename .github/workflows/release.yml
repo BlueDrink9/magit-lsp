@@ -175,3 +175,68 @@ jobs:
           path: build/release/upload-identity.json
           if-no-files-found: error
           retention-days: 14
+
+  native-consumers:
+    # Required clean-host consumers of the producer's immutable experimental
+    # candidates. These validate candidates; they do not promote them.
+    needs: native-candidates
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Download and validate immutable candidate
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/download_native_candidate.py
+          --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
+          --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
+          --output "$RUNNER_TEMP/native-candidate" > "$RUNNER_TEMP/native-candidate-download.json"
+
+      - name: Run native ABI and functional checks
+        id: native-check
+        run: |
+          echo '{"ok":false,"error":"native check did not run"}' > "$RUNNER_TEMP/native-evidence.json"
+          archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$RUNNER_TEMP/native-candidate/native-candidate.json")
+          python3 scripts/check_native_artifact.py --functional "$archive" > "$RUNNER_TEMP/native-evidence.json"
+
+      - name: Upload identity-bound evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-consumer-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-candidate/native-candidate.json
+            ${{ runner.temp }}/native-candidate-download.json
+            ${{ runner.temp }}/native-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require successful candidate checks
+        if: always()
+        run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.native-check.outcome }}" = success

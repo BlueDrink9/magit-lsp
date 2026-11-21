@@ -116,6 +116,7 @@ PYTHON_CONSUMER = re.compile(r'\bpython3(?:\s|$)')
 SOURCE_CHECK_JOB = 'source-checks'
 FALLBACK_JOB = 'linux-x86_64-gnu'
 NATIVE_JOB = 'native-candidates'
+NATIVE_CONSUMER_JOB = 'native-consumers'
 FALLBACK_TARGET = ASSET
 SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
 NATIVE_MATRIX = (
@@ -754,6 +755,63 @@ def check_native_candidates(block):
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
 
 
+def check_native_consumers(block):
+    """Require clean native hosts to consume only their bound immutable candidates."""
+    code = '\n'.join(code_lines(block))
+    if not any(line.strip() == 'needs: native-candidates' for line in block):
+        fail('build workflow: native consumers must need native-candidates')
+    if 'continue-on-error:' in code:
+        fail('build workflow: native consumers must be mandatory')
+    matrix = {}
+    artifacts = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if not match:
+            continue
+        target = artifact = None
+        for entry in block[index + 1:]:
+            if entry.strip() and indent_of(entry) <= indent_of(line):
+                break
+            found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+            if found:
+                target = found.group(1)
+            found = re.match(r'^\s*artifact:\s*(\S+)\s*$', entry)
+            if found:
+                artifact = found.group(1)
+        matrix[match.group(1)] = target
+        artifacts[match.group(1)] = artifact
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native consumer matrix must exactly match all three native hosts')
+    expected_artifacts = dict(zip((host for host, _ in NATIVE_MATRIX), (
+        'native-linux-x86_64-gnu-experimental',
+        'native-macos-arm64-experimental',
+        'native-macos-intel-experimental')))
+    if artifacts != expected_artifacts:
+        fail('build workflow: native consumers must select each exact experimental candidate')
+    if 'cachix/install-nix-action' in code or 'nix develop' in code:
+        fail('build workflow: native consumers must run on clean hosts without Nix')
+    for forbidden in ('cargo ', 'rustup ', 'release-native-build', 'make '):
+        if forbidden in code:
+            fail(f'build workflow: native consumers must not build or install tools ({forbidden.strip()})')
+    required = (
+        'permissions:', 'actions: read', 'contents: read',
+        'GITHUB_TOKEN: ${{ github.token }}', 'actions/setup-python@',
+        "python-version: '3.12'", 'scripts/download_native_candidate.py',
+        '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
+        '--source-sha "${{ github.sha }}"', '--target "${{ matrix.target }}"',
+        '--artifact-name "${{ matrix.artifact }}"',
+        'scripts/check_native_artifact.py --functional "$archive"', 'if: always()',
+        'native-candidate.json', 'native-evidence.json', 'if-no-files-found: error',
+    )
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: native consumers must use immutable credential-free source checkout')
+    if 'test "${{ steps.candidate.outcome }}" = success' not in code:
+        fail('build workflow: native consumer candidate/check failures must fail the job')
+
+
 def check_build_workflow(path=BUILD_WORKFLOW):
     """Structure-check the build workflow: locked builders, source checks,
     run-bound explicit candidates and read-only, non-publishing scope."""
@@ -795,7 +853,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     check_inline_scripts(lines, 'build workflow')
 
     jobs = workflow_jobs(lines)
-    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB):
+    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB):
         if required not in jobs:
             fail(f'build workflow: missing mandatory job {required!r}')
     require_pinned_builders(jobs)
@@ -859,6 +917,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
              'so the publisher consumes the strict fallback')
 
     check_native_candidates(jobs[NATIVE_JOB])
+    check_native_consumers(jobs[NATIVE_CONSUMER_JOB])
     check_python_interpreter(lines)
     check_node_tooling(lines)
 
@@ -3008,12 +3067,35 @@ def run_self_tests():
             ('build workflow building a native candidate outside its locked shell',
              (('.#release-native', '.#release-naive', None),),
              '.#release-native'),
-            ('build workflow native candidate skipping the shared pipeline',
-             (('nix develop --no-update-lock-file .#release-native -c python3 '
-               'scripts/check_release_pipeline.py artifacts',
-               'nix develop --no-update-lock-file .#release-native -c true', 1),),
-             'shared pipeline'),
-        ):
+             ('build workflow native candidate skipping the shared pipeline',
+              (('nix develop --no-update-lock-file .#release-native -c python3 '
+                'scripts/check_release_pipeline.py artifacts',
+                'nix develop --no-update-lock-file .#release-native -c true', 1),),
+              'shared pipeline'),
+             ('build workflow missing a native consumer host',
+              (('  native-consumers:', '  native-consumers-disabled:', 1),),
+              "missing mandatory job 'native-consumers'"),
+             ('build workflow native consumers with Nix',
+              (('    needs: native-candidates\n',
+                '    needs: native-candidates\n    steps:\n      - run: nix develop\n', 1),),
+              'without Nix'),
+             ('build workflow native consumer with a build command',
+              (('      - name: Run native ABI and functional checks\n',
+                '      - run: cargo build\n      - name: Run native ABI and functional checks\n', 1),),
+              'must not build or install tools'),
+             ('build workflow optional native consumer',
+              (('  native-consumers:\n', '  native-consumers:\n    continue-on-error: true\n', 1),),
+              'must be mandatory'),
+             ('build workflow native consumer without immutable run binding',
+              (('--attempt "${{ github.run_attempt }}"', '--attempt "1"', 1),),
+              'github.run_attempt'),
+             ('build workflow native consumer without functional probe',
+              (('scripts/check_native_artifact.py --functional', 'true', 1),),
+              'scripts/check_native_artifact.py --functional'),
+             ('build workflow native consumer without failure evidence',
+              (('native-evidence.json', 'native-result.json', None),),
+              'native-evidence.json'),
+         ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
