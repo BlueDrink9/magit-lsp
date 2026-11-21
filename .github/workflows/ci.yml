@@ -23,7 +23,7 @@ jobs:
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: Install VSCode dependencies
-        run: nix develop --no-update-lock-file -c make vscode-deps
+        run: nix develop --no-update-lock-file -c make vscode-deps V=1
 
       - name: Check changed committed sources
         env:
@@ -50,7 +50,7 @@ jobs:
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: Test download and packaging contracts (no Rust release build)
-        run: nix develop --no-update-lock-file -c make release-contract-check
+        run: nix develop --no-update-lock-file -c make release-contract-check V=1
 
   test:
     runs-on: ubuntu-24.04
@@ -66,10 +66,10 @@ jobs:
       # The vscode Make target installs locked dependencies when needed.
 
       - name: make vscode-test
-        run: nix develop --no-update-lock-file -c make vscode-test
+        run: nix develop --no-update-lock-file -c make vscode-test V=1
 
       - name: make test-rust test-lua
-        run: nix develop --no-update-lock-file -c make test-rust test-lua
+        run: nix develop --no-update-lock-file -c make test-rust test-lua V=1
 
 
   coverage:
@@ -92,7 +92,7 @@ jobs:
       # instrumentation, so a failing test fails this job instead of yielding a
       # coverage report; the report and command log are still uploaded below.
       - name: make coverage-rust
-        run: nix develop --no-update-lock-file -c make coverage-rust
+        run: nix develop --no-update-lock-file -c make coverage-rust V=1
 
       - name: Upload Rust coverage report
         if: always()
@@ -128,7 +128,7 @@ jobs:
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: make docs-artifacts-check docs-check
-        run: nix develop --no-update-lock-file -c make docs-artifacts-check docs-check
+        run: nix develop --no-update-lock-file -c make docs-artifacts-check docs-check V=1
 
   ui-test:
     runs-on: ubuntu-24.04
@@ -142,10 +142,10 @@ jobs:
       # Build first: the client starts the binary, and compiling inside the
       # harness's 15 s socket wait would time out.
       - name: make build
-        run: nix develop --no-update-lock-file -c make build
+        run: nix develop --no-update-lock-file -c make build V=1
 
       - name: make ui-unit ui-test
-        run: nix develop --no-update-lock-file -c env CI=1 make ui-unit ui-test
+        run: nix develop --no-update-lock-file -c env CI=1 make ui-unit ui-test V=1
 
       - name: Upload UI artefacts
         if: failure()

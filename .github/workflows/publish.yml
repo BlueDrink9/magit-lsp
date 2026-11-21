@@ -75,7 +75,7 @@ jobs:
         run: python3 scripts/check_release_automation.py --print-version >> "$GITHUB_ENV"
 
       - name: Build the offline VSIX
-        run: make vscode-package
+        run: make vscode-package V=1
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -123,7 +123,7 @@ jobs:
       # dependencies; installing them here, before the release exists, keeps a
       # missing local CLI from leaving a partially published release behind.
       - name: Install frozen VS Code CLI dependencies
-        run: make vscode-deps
+        run: make vscode-deps V=1
 
       # Re-check the handed-off archive set and checksum: the publish job trusts
       # only bytes that still match the validated artifact names.
