@@ -101,6 +101,11 @@ class NativeCandidateDownloadTests(unittest.TestCase):
             self.assertEqual(result['artifact_id'], '22')
             self.assertTrue(Path(result['archive']).is_file())
             self.assertTrue(Path(result['manifest']).is_file())
+            self.assertTrue((Path(temp) / 'out' / 'native-candidate.json').is_file())
+            self.assertEqual(result['archive_sha256'], hashlib.sha256(Path(result['archive']).read_bytes()).hexdigest())
+            manifest = json.loads(Path(result['manifest']).read_text())
+            self.assertEqual((manifest['source_sha'], manifest['run_id'], manifest['run_attempt'], manifest['target']),
+                             (self.source, self.run_id, self.attempt, self.target))
             self.assertEqual(result['executable_sha256'], hashlib.sha256(b'not executed').hexdigest())
 
     def test_rejects_duplicate_identity_and_candidate(self):
