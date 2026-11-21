@@ -10,8 +10,25 @@ permissions:
   contents: read
 
 jobs:
+  source-checks:
+    # Read-only source checks reuse the same Make targets as CI. This job is the
+    # mandatory precondition for every producer; it never invokes the release
+    # producer. NREL-15 finalizes the full CI/release target reuse.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+
+      - name: Check the release source
+        run: nix develop --no-update-lock-file -c make format-check hygiene test-rust test-lua V=1
+
   linux-x86_64-gnu:
-    # Retain the older glibc baseline for Linux binary compatibility.
+    # Strict, established fallback: the older glibc baseline and the pinned
+    # rustup toolchain stay the only path the publisher may consume.
+    needs: source-checks
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,12 +56,122 @@ jobs:
       - name: Locked Linux GNU build
         run: python3 scripts/check_release_pipeline.py build
 
-      - name: Package and smoke test actual binary
+      - name: Package the verified binary
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu
         run: python3 scripts/check_release_pipeline.py artifacts
+
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-x86_64-gnu-release-candidate
+          path: |
+            build/release/artifacts/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+            build/release/artifacts/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+            build/release/release-manifest.json
+            build/release/release-manifest.json.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record immutable upload identity
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_TARGET: x86_64-unknown-linux-gnu
+        run: |
+          test -n "$ARTIFACT_ID" && test -n "$ARTIFACT_DIGEST"
+          printf '{"artifact_id":"%s","artifact_digest":"%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
+            "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$RUN_ID" "$RUN_ATTEMPT" "$CANDIDATE_TARGET" \
+            > build/release/upload-identity.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-x86_64-gnu-release-candidate
-          path: dist/*
+          name: linux-x86_64-gnu-candidate-identity
+          path: build/release/upload-identity.json
+          if-no-files-found: error
+          retention-days: 14
+
+  native-candidates:
+    # Isolated, non-publishing native-linker experiments. They are not a
+    # production promotion and never gate the fallback: NREL-17 owns the hosted
+    # proof that would justify promotion. Each matrix row uses the same shared
+    # pipeline to build and package its own explicitly named candidate.
+    needs: source-checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+
+      - name: Validate tag and package versions
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_automation.py --validate-release-ref
+
+      - name: Experimental native-linker build
+        run: nix develop --no-update-lock-file .#release-native -c make release-native-build RELEASE_TARGET=${{ matrix.target }}
+
+      - name: Package the experimental candidate
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_BUILD_TARGET: ${{ matrix.target }}
+        run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_pipeline.py artifacts
+
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/release/artifacts/magit-lsp-v${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
+            build/release/artifacts/magit-lsp-v${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz.sha256
+            build/release/release-manifest.json
+            build/release/release-manifest.json.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record immutable upload identity
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          CANDIDATE_TARGET: ${{ matrix.target }}
+        run: |
+          test -n "$ARTIFACT_ID" && test -n "$ARTIFACT_DIGEST"
+          printf '{"artifact_id":"%s","artifact_digest":"%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
+            "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$RUN_ID" "$RUN_ATTEMPT" "$CANDIDATE_TARGET" \
+            > build/release/upload-identity.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}-identity
+          path: build/release/upload-identity.json
           if-no-files-found: error
           retention-days: 14

@@ -270,6 +270,33 @@ def verify_source(identity, environment, probe=None):
     return identity
 
 
+def verify_native_evidence(identity, path=None):
+    """Refuse native-linker evidence that belongs to another source or target.
+
+    A native experiment writes ``build/release/native-build.json`` before its
+    build. Packaging accepts that record only when its source SHA and target
+    match the run-bound identity, so native evidence can never be attached to
+    the fallback candidate or to a different commit.
+    """
+    path = (Path(path) if path is not None
+            else ROOT / NATIVE_EVIDENCE_DIR / NATIVE_EVIDENCE_FILE)
+    try:
+        document = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as error:
+        raise PipelineError(f'cannot read native evidence {path}: {error}') from error
+    if not isinstance(document, dict):
+        raise PipelineError(f'native evidence {path} is not a JSON object')
+    if document.get('source_sha') != identity['source_sha']:
+        raise PipelineError(
+            f'native evidence source {document.get("source_sha")!r} does not match '
+            f'the package source {identity["source_sha"]!r}')
+    if document.get('target') != identity['target']:
+        raise PipelineError(
+            f'native evidence target {document.get("target")!r} does not match '
+            f'the package target {identity["target"]!r}')
+    return document
+
+
 def lock_hashes():
     """Return the SHA-256 of every lock file the run manifest binds."""
     hashes = {}
@@ -673,6 +700,9 @@ def artifacts(environment):
     executed, and the manifest digest is written outside the manifest payload.
     """
     identity = verify_source(resolve_identity(environment), environment)
+    evidence = ROOT / NATIVE_EVIDENCE_DIR / NATIVE_EVIDENCE_FILE
+    if evidence.is_file():
+        verify_native_evidence(identity)
     plan = package_plan(identity)
     provenance = write_provenance(plan)
     print(f'release provenance: {provenance}', file=sys.stderr)

@@ -106,6 +106,31 @@ PUBLISHING_STEPS = ('gh release create',) + PUBLISH_COMMANDS
 SETUP_PYTHON = 'actions/setup-python@'
 MIN_PYTHON = (3, 11)
 PYTHON_CONSUMER = re.compile(r'\bpython3(?:\s|$)')
+# The build workflow's producer roles. `source-checks` is the mandatory
+# precondition; the fallback keeps the established rustup path the publisher may
+# consume, while the native matrix stays an isolated non-gating experiment until
+# NREL-17 supplies hosted proof.
+SOURCE_CHECK_JOB = 'source-checks'
+FALLBACK_JOB = 'linux-x86_64-gnu'
+NATIVE_JOB = 'native-candidates'
+FALLBACK_TARGET = ASSET
+SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
+NATIVE_MATRIX = (
+    ('ubuntu-22.04', 'x86_64-unknown-linux-gnu'),
+    ('macos-26', 'aarch64-apple-darwin'),
+    ('macos-26-intel', 'x86_64-apple-darwin'),
+)
+# Every producer packages the exact source/ref/event/run identity it was
+# triggered from; an inferred head_branch or workflow_run SHA is never accepted.
+IDENTITY_ENV = (
+    ('RELEASE_REF', '${{ github.ref }}'),
+    ('RELEASE_SOURCE_SHA', '${{ github.sha }}'),
+    ('RELEASE_EVENT', '${{ github.event_name }}'),
+    ('RELEASE_RUN_ID', '${{ github.run_id }}'),
+    ('RELEASE_RUN_ATTEMPT', '${{ github.run_attempt }}'),
+)
+UPLOAD_IDENTITY_FILE = 'build/release/upload-identity.json'
+NODE_TOOLING = ('pnpm', 'npm ', 'vsce', 'ovsx')
 
 
 class CheckError(Exception):
@@ -382,7 +407,11 @@ def require_job(lines, name):
 
 
 def check_pinned_actions(lines, context):
-    """Every `uses:` needs a full action sha plus a `# vX.Y.Z` comment."""
+    """Every `uses:` needs a full action sha plus a `# vX.Y.Z` comment.
+
+    A one- or two-component release tag (for example `v31`) is accepted because
+    some upstream actions publish only those; the full SHA remains mandatory.
+    """
     for number, line in enumerate(lines, 1):
         match = re.match(r'^\s*(?:-\s*)?uses:\s*(\S+)(.*)$', line)
         if not match:
@@ -390,7 +419,7 @@ def check_pinned_actions(lines, context):
         reference, rest = match.groups()
         if not re.fullmatch(r'[\w.\-]+/[\w.\-]+@[0-9a-f]{40}', reference):
             fail(f'{context}:{number}: action {reference!r} is not pinned to a full sha')
-        if not re.search(r'#\s*v\d+\.\d+\.\d+\s*$', rest):
+        if not re.search(r'#\s*v\d+(?:\.\d+){0,2}\s*$', rest):
             fail(f'{context}:{number}: pinned action needs a `# vX.Y.Z` comment')
 
 
@@ -406,33 +435,66 @@ def check_inline_scripts(lines, context):
             fail(f'{context}:{index + 1}: inline script has {len(script)} lines (max 10)')
 
 
-def check_python_interpreter(lines):
-    """Require a pinned setup-python >= 3.11 step before the first python3 use."""
-    consumers = [index for index, line in enumerate(lines)
-                 if PYTHON_CONSUMER.search(line) and not line.lstrip().startswith('#')]
-    if not consumers:
-        fail('build workflow: no python3 consumer found to order against')
+def check_python_interpreter(lines, context='build workflow'):
+    """Require a pinned setup-python >= 3.11 before python3 in each job.
+
+    Steps that run inside the locked Nix dev shell get Python from the flake, so
+    only bare ``python3`` consumers need their own pinned interpreter. Checking
+    per job keeps a consumer in one job from borrowing another job's setup step.
+    """
+    found_consumer = False
+    for name, block in workflow_jobs(lines).items():
+        consumers = [index for index, line in enumerate(block)
+                     if PYTHON_CONSUMER.search(line)
+                     and not line.lstrip().startswith('#')
+                     and 'nix develop' not in line]
+        if not consumers:
+            continue
+        found_consumer = True
+        setup_at = next((index for index, line in enumerate(block)
+                         if f'uses: {SETUP_PYTHON}' in line), None)
+        if setup_at is None:
+            fail(f'{context}: job {name!r} uses python3 without a pinned '
+                 'actions/setup-python step')
+        if setup_at > consumers[0]:
+            fail(f'{context}: job {name!r} must put actions/setup-python before its '
+                 f'first python3 step (line {consumers[0] + 1})')
+        version = None
+        for entry in block_after(block, setup_at, indent_of(block[setup_at])):
+            match = re.match(r"^\s*python-version:\s*['\"]?(\d+(?:\.\d+)*)", entry)
+            if match:
+                version = tuple(int(part) for part in match.group(1).split('.'))
+                break
+        if not version:
+            fail(f'{context}: job {name!r} actions/setup-python must select an '
+                 'explicit python-version')
+        if version < MIN_PYTHON:
+            selected = '.'.join(str(part) for part in version)
+            required = '.'.join(str(part) for part in MIN_PYTHON)
+            fail(f'{context}: job {name!r} selects Python {selected}, below the '
+                 f'required {required}')
+    if not found_consumer:
+        fail(f'{context}: no python3 consumer found to order against')
+
+
+def check_node_tooling(lines):
+    """Any JavaScript tooling must select an explicit Node 24 interpreter."""
+    text = '\n'.join(code_lines(lines))
+    if not any(token in text for token in NODE_TOOLING):
+        return
     setup_at = next((index for index, line in enumerate(lines)
-                     if f'uses: {SETUP_PYTHON}' in line), None)
+                     if 'uses: actions/setup-node@' in line), None)
     if setup_at is None:
-        fail('build workflow: missing pinned actions/setup-python step')
-    if setup_at > consumers[0]:
-        fail('build workflow: actions/setup-python must precede the first python3 '
-             f'step (line {consumers[0] + 1})')
+        fail('build workflow: JavaScript tooling needs a pinned '
+             'actions/setup-node step')
     version = None
     for entry in block_after(lines, setup_at, indent_of(lines[setup_at])):
-        match = re.match(r"^\s*python-version:\s*['\"]?(\d+(?:\.\d+)*)", entry)
+        match = re.match(r"^\s*node-version:\s*['\"]?(\d+(?:\.\d+)*)", entry)
         if match:
             version = tuple(int(part) for part in match.group(1).split('.'))
             break
-    if not version:
-        fail('build workflow: actions/setup-python must select an explicit '
-             'python-version')
-    if version < MIN_PYTHON:
-        selected = '.'.join(str(part) for part in version)
-        required = '.'.join(str(part) for part in MIN_PYTHON)
-        fail(f'build workflow: selected Python {selected} is below the required '
-             f'{required}')
+    if version != (24,):
+        fail('build workflow: JavaScript tooling must select Node 24 explicitly')
 
 
 def step_artifact_name(lines, action, context):
@@ -441,7 +503,7 @@ def step_artifact_name(lines, action, context):
         if f'uses: {action}' not in line:
             continue
         for candidate in lines[index + 1:]:
-            if candidate.strip() and indent_of(candidate) <= indent_of(line):
+            if candidate.strip() and indent_of(candidate) < indent_of(line):
                 break
             match = re.match(r'^\s*name:\s*(\S+)\s*$', candidate)
             if match:
@@ -450,8 +512,231 @@ def step_artifact_name(lines, action, context):
     fail(f'{context}: missing {action}')
 
 
+def workflow_jobs(lines):
+    """Split a workflow into ``{job name: body lines}`` at two-space indentation."""
+    try:
+        jobs_index = lines.index('jobs:')
+    except ValueError:
+        fail('build workflow: missing top-level `jobs:`')
+    jobs = {}
+    current = None
+    for line in lines[jobs_index + 1:]:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if indent_of(line) == 2 and line.rstrip().endswith(':'):
+            current = line.strip()[:-1]
+            jobs[current] = []
+        elif current is not None:
+            jobs[current].append(line)
+    if not jobs:
+        fail('build workflow: no jobs declared')
+    return jobs
+
+
+def job_step(block, needle, context):
+    """Return the step lines (six-space list items) containing ``needle``."""
+    for index, line in enumerate(block):
+        if needle in line and not line.lstrip().startswith('#'):
+            start = index
+            while start > 0 and not re.match(r'^      - ', block[start]):
+                start -= 1
+            if not re.match(r'^      - ', block[start]):
+                fail(f'{context}: {needle!r} is not inside a workflow step')
+            end = index + 1
+            while end < len(block) and not re.match(r'^      - ', block[end]):
+                end += 1
+            return block[start:end]
+    fail(f'{context}: missing {needle!r}')
+
+
+def step_environment(step, context):
+    """Return the ``env:`` mapping of one workflow step."""
+    for index, line in enumerate(step):
+        if line.strip() != 'env:':
+            continue
+        owner = indent_of(line)
+        environment = {}
+        for entry in step[index + 1:]:
+            if entry.strip() and indent_of(entry) <= owner:
+                break
+            match = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*):\s*(.+?)\s*$', entry)
+            if match:
+                environment[match.group(1)] = match.group(2)
+        return environment
+    fail(f'{context}: step has no `env:` handoff')
+
+
+def step_uploads(step, context):
+    """Return the artifact ``name:`` and explicit ``path:`` entries of a step."""
+    name = None
+    paths = []
+    for index, line in enumerate(step):
+        if line.strip().startswith('name:'):
+            name = line.split(':', 1)[1].strip()
+        if line.strip() == 'path: |':
+            owner = indent_of(line)
+            for entry in step[index + 1:]:
+                if entry.strip() and indent_of(entry) <= owner:
+                    break
+                if entry.strip():
+                    paths.append(entry.strip())
+        elif line.strip().startswith('path:'):
+            value = line.split(':', 1)[1].strip()
+            if value:
+                paths.append(value)
+    if name is None or not paths:
+        fail(f'{context}: upload-artifact needs an explicit name and path list')
+    return name, paths
+
+
+def upload_steps(block):
+    """Return every upload-artifact step in one job block."""
+    steps = []
+    for index, line in enumerate(block):
+        if 'uses: actions/upload-artifact@' not in line \
+                or line.lstrip().startswith('#'):
+            continue
+        start = index
+        while start > 0 and not re.match(r'^      - ', block[start]):
+            start -= 1
+        end = index + 1
+        while end < len(block) and not re.match(r'^      - ', block[end]):
+            end += 1
+        steps.append(block[start:end])
+    return steps
+
+
+def require_read_only(lines):
+    """Every code permission grant must be read-only; no write scope may appear."""
+    for line in code_lines(lines):
+        if re.search(r':\s*write\b', line):
+            fail(f'build workflow: permission {line.strip()!r} is not read-only')
+
+
+def require_pinned_builders(jobs):
+    """Reject mutable runner labels and require every job to select a builder."""
+    for name, block in jobs.items():
+        runner = next((line.split(':', 1)[1].strip() for line in block
+                       if line.strip().startswith('runs-on:')), None)
+        if runner is None:
+            fail(f'build workflow: job {name!r} has no runs-on builder')
+        if 'latest' in runner:
+            fail(f'build workflow: job {name!r} uses the mutable runner {runner!r}; '
+                 'pin an explicit runner version')
+
+
+def check_uploads(block, target, context, experimental):
+    """Require explicit candidate files plus immutable upload identity evidence."""
+    steps = upload_steps(block)
+    if len(steps) < 2:
+        fail(f'build workflow: {context} must upload the candidate files and their '
+             'immutable upload identity evidence')
+    name, paths = step_uploads(steps[0], context)
+    if name == '${{ matrix.artifact }}':
+        pass  # each matrix artifact name is checked with the matrix definition
+    elif experimental != ('experimental' in name):
+        claim = 'mark' if experimental else 'not claim'
+        fail(f'build workflow: {context} artifact {name!r} must {claim} an '
+             'experimental candidate')
+    joined = '\n'.join(paths)
+    if '*' in joined:
+        fail(f'build workflow: {context} must upload explicit files, never a glob')
+    if 'env.RELEASE_VERSION' not in joined:
+        fail(f'build workflow: {context} upload paths must bind the validated '
+             'RELEASE_VERSION')
+    if target == FALLBACK_TARGET:
+        if f'-{target}.tar.gz' not in joined:
+            fail(f'build workflow: {context} must upload the {target} archive')
+    elif '${{ matrix.target }}' not in joined:
+        fail(f'build workflow: {context} must upload the matrix target archive')
+    for suffix in ('.tar.gz', '.tar.gz.sha256', 'release-manifest.json',
+                   'release-manifest.json.sha256'):
+        if not any(path.endswith(suffix) for path in paths):
+            fail(f'build workflow: {context} must upload the explicit {suffix} file')
+    identity_uploads = [path for step in steps
+                        for path in step_uploads(step, context)[1]
+                        if path == UPLOAD_IDENTITY_FILE]
+    if not identity_uploads:
+        fail(f'build workflow: {context} must upload {UPLOAD_IDENTITY_FILE!r}')
+
+    identity_step = job_step(block, 'steps.upload.outputs.artifact-id', context)
+    identity_env = step_environment(identity_step, context)
+    expected_identity = {
+        'ARTIFACT_ID': '${{ steps.upload.outputs.artifact-id }}',
+        'ARTIFACT_DIGEST': '${{ steps.upload.outputs.artifact-digest }}',
+        'RUN_ID': '${{ github.run_id }}',
+        'RUN_ATTEMPT': '${{ github.run_attempt }}',
+    }
+    for key, expected in expected_identity.items():
+        if identity_env.get(key) != expected:
+            fail(f'build workflow: {context} upload evidence must bind {key} to '
+                 f'{expected!r}')
+    return name
+
+
+def check_producer_handoff(block, target, context, experimental):
+    """Require the run-bound identity handoff and the immutable upload evidence."""
+    step = job_step(block, PIPELINE_ARTIFACTS, context)
+    environment = step_environment(step, context)
+    for key, expected in IDENTITY_ENV:
+        if environment.get(key) != expected:
+            fail(f'build workflow: {context} packaging must bind {key} to '
+                 f'{expected!r} (run-bound provenance, not inferred)')
+    if environment.get('RELEASE_BUILD_TARGET') != target:
+        fail(f'build workflow: {context} packaging target is '
+             f'{environment.get("RELEASE_BUILD_TARGET")!r}, expected {target!r}')
+    return check_uploads(block, target, context, experimental)
+
+
+def check_native_candidates(block):
+    """Keep the native matrix an isolated, non-gating, locked experiment."""
+    code = '\n'.join(code_lines(block))
+    if not any(line.strip() == 'needs: source-checks' for line in block):
+        fail('build workflow: the native producers must need source-checks')
+    if not any(line.strip() == 'continue-on-error: true' for line in block):
+        fail('build workflow: experimental native candidates must stay non-gating '
+             'until NREL-17 promotes them')
+    matrix = {}
+    artifacts = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if not match:
+            continue
+        target = None
+        artifact = None
+        for entry in block[index + 1:]:
+            if entry.strip() and indent_of(entry) <= indent_of(line):
+                break
+            found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+            if found:
+                target = found.group(1)
+            found = re.match(r'^\s*artifact:\s*(\S+)\s*$', entry)
+            if found:
+                artifact = found.group(1)
+        matrix[match.group(1)] = target
+        artifacts[match.group(1)] = artifact
+    expected = dict(NATIVE_MATRIX)
+    if matrix != expected:
+        fail('build workflow: native builder matrix must be exactly '
+             + ', '.join(f'{os}/{target}' for os, target in NATIVE_MATRIX))
+    for os, artifact in artifacts.items():
+        if not artifact or 'experimental' not in artifact:
+            fail(f'build workflow: native matrix builder {os!r} must upload an '
+                 'explicitly experimental artifact')
+    if 'nix develop --no-update-lock-file .#release-native' not in code:
+        fail('build workflow: native candidates must build inside the locked '
+             '.#release-native shell')
+    if 'make release-native-build RELEASE_TARGET=${{ matrix.target }}' not in code:
+        fail('build workflow: native candidates must run the shared native build for '
+             'their matrix target')
+    if PIPELINE_ARTIFACTS not in code:
+        fail('build workflow: native candidates must package through the shared pipeline')
+    check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
+
+
 def check_build_workflow(path=BUILD_WORKFLOW):
-    """Structure-check the build workflow: dispatch/tag triggers, no publishing."""
+    """Structure-check the build workflow: locked builders, source checks,
+    run-bound explicit candidates and read-only, non-publishing scope."""
     lines = read_lines(path)
     text = '\n'.join(lines)
 
@@ -484,48 +769,91 @@ def check_build_workflow(path=BUILD_WORKFLOW):
         lines, find_line(lines, 'permissions:', 'build workflow') - 1, 0)
     if '  contents: read' not in top_permissions:
         fail('build workflow: top-level permissions must be `contents: read`')
-    if 'contents: write' in text:
-        fail('build workflow: must stay read-only (`contents: write` found)')
+    require_read_only(lines)
 
     check_pinned_actions(lines, 'build workflow')
     check_inline_scripts(lines, 'build workflow')
-    check_python_interpreter(lines)
 
-    # Release handoff: the fixed toolchain, the tag/version validator that
-    # produces RELEASE_VERSION in $GITHUB_ENV, and the shared pipeline script
-    # the local Make targets also run. An inline cargo/package command here
-    # would be a second correctness path that the local target could not share.
-    code = code_lines(lines)
-    pipeline_text = '\n'.join(code)
-    if f'rustup toolchain install {RELEASE_TOOLCHAIN} --profile minimal' not in pipeline_text:
+    jobs = workflow_jobs(lines)
+    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB):
+        if required not in jobs:
+            fail(f'build workflow: missing mandatory job {required!r}')
+    require_pinned_builders(jobs)
+
+    # Source checks reuse the CI Make targets in the locked dev shell; they never
+    # invoke the release producer or become a second build path.
+    source_text = '\n'.join(code_lines(jobs[SOURCE_CHECK_JOB]))
+    if 'nix develop --no-update-lock-file -c make' not in source_text:
+        fail('build workflow: source checks must run the shared Make targets '
+             'inside the locked Nix dev shell')
+    for target in SOURCE_CHECK_TARGETS:
+        if target not in source_text:
+            fail(f'build workflow: source checks must run `make {target}`')
+    for forbidden in ('check_release_pipeline.py', 'release-locked',
+                      'release-native-build', 'release-artifact-check'):
+        if forbidden in source_text:
+            fail('build workflow: source checks must not invoke the release '
+                 f'producer ({forbidden!r})')
+
+    # The strict Linux fallback is the established rustup build the publisher may
+    # consume; it keeps the pinned toolchain and the shared pipeline ordering.
+    fallback = jobs[FALLBACK_JOB]
+    fallback_code = code_lines(fallback)
+    fallback_text = '\n'.join(fallback_code)
+    if not any(line.strip() == 'needs: source-checks' for line in fallback):
+        fail('build workflow: the fallback producer must need source-checks')
+    runner = next((line.split(':', 1)[1].strip() for line in fallback
+                   if line.strip().startswith('runs-on:')), '')
+    if runner != 'ubuntu-22.04':
+        fail('build workflow: the strict Linux fallback must run on ubuntu-22.04')
+    if f'rustup toolchain install {RELEASE_TOOLCHAIN} --profile minimal' \
+            not in fallback_text:
         fail(f'build workflow: must install the pinned Rust {RELEASE_TOOLCHAIN} toolchain')
-    if '--validate-release-ref' not in pipeline_text:
+    if '--validate-release-ref' not in fallback_text:
         fail('build workflow: must validate the version/tag ref before building '
              '(it produces RELEASE_VERSION for $GITHUB_ENV)')
-    if PIPELINE_BUILD not in pipeline_text:
+    if PIPELINE_BUILD not in fallback_text:
         fail(f'build workflow: must run the shared pinned build {PIPELINE_BUILD!r}')
-    if PIPELINE_ARTIFACTS not in pipeline_text:
-        fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
-    if '--local' in pipeline_text:
+    if PIPELINE_BUILD_LOCAL in fallback_text:
         fail('build workflow: must use the pinned toolchain, never the local '
              'installed-compiler mode')
+    if PIPELINE_BUILD_NATIVE in fallback_text:
+        fail('build workflow: the strict fallback must not run the experimental '
+             'native-linker mode')
+    if PIPELINE_ARTIFACTS not in fallback_text:
+        fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
     for alternate in ('cargo build', 'package-release.sh', 'MAGIT_LSP_TEST_BINARY'):
-        if alternate in pipeline_text:
+        if alternate in fallback_text:
             fail(f'build workflow: {alternate!r} belongs to the shared pipeline script, '
                  'not a separate workflow path')
-    ref_at = next(i for i, line in enumerate(code) if '--validate-release-ref' in line)
-    build_at = next(i for i, line in enumerate(code) if PIPELINE_BUILD in line)
-    artifacts_at = next(i for i, line in enumerate(code) if PIPELINE_ARTIFACTS in line)
+    ref_at = next(i for i, line in enumerate(fallback_code) if '--validate-release-ref' in line)
+    build_at = next(i for i, line in enumerate(fallback_code) if PIPELINE_BUILD in line)
+    artifacts_at = next(i for i, line in enumerate(fallback_code)
+                        if PIPELINE_ARTIFACTS in line)
     if not ref_at < build_at < artifacts_at:
         fail('build workflow: version validation must precede the pinned build, '
              'and the build must precede artifact packaging')
+    fallback_name = check_producer_handoff(fallback, FALLBACK_TARGET, 'fallback', False)
+    if fallback_name != ARTIFACT_NAME:
+        fail(f'build workflow: uploads {fallback_name!r}, expected {ARTIFACT_NAME!r} '
+             'so the publisher consumes the strict fallback')
 
-    # Build-only: no publication step and no publishing credential.
+    check_native_candidates(jobs[NATIVE_JOB])
+    check_python_interpreter(lines)
+    check_node_tooling(lines)
+
+    # Build-only: no publication step, publishing credential, mutable-name
+    # download or operator-owned path.
     for command in PUBLISH_COMMANDS + ('gh release create',):
         if command in text:
             fail(f'build workflow: publication step {command!r} is not allowed')
     if re.search(r'\bsecrets\.', text):
         fail('build workflow: must not read publishing secrets')
+    if re.search(r'uses:\s*actions/download-artifact@', text):
+        fail('build workflow: candidates must not be consumed by mutable name '
+             'before the NREL-08 immutable-ID validation')
+    if 'dist/*' in text:
+        fail('build workflow: must never hand off a dist glob')
     for forbidden in RELEASE_FORBIDDEN_PATHS:
         if forbidden in text:
             fail(f'build workflow: references operator-owned path {forbidden!r}')
@@ -598,8 +926,8 @@ def pipeline_violations(module, environment):
             if forbidden in joined:
                 problems.append(f'artifact step must not run {forbidden}')
     for name in ('validate_identity', 'resolve_identity', 'verify_source',
-                 'package_plan', 'release_manifest', 'manifest_digest',
-                 'write_manifest'):
+                 'verify_native_evidence', 'package_plan', 'release_manifest',
+                 'manifest_digest', 'write_manifest'):
         if not callable(getattr(module, name, None)):
             problems.append(f'the pipeline is missing {name}')
     if getattr(module, 'NATIVE_CC', None) != '/usr/bin/cc':
@@ -1697,6 +2025,131 @@ def run_self_tests():
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
 
+        # The build workflow keeps the strict fallback, a mandatory shared
+        # source-check precondition, explicit run-bound handoffs and an isolated
+        # experimental native matrix. Each fixture below proves one guard still
+        # fails closed after the workflow reshape.
+        for label, mutations, expected in (
+            ('build workflow on a mutable runner',
+             (('runs-on: ubuntu-22.04', 'runs-on: ubuntu-latest', 1),),
+             'mutable runner'),
+            ('build workflow without the mandatory source-check job',
+             (('  source-checks:', '  source-checks-disabled:', 1),),
+             "missing mandatory job 'source-checks'"),
+            ('build workflow producer without the source-check dependency',
+             (('    needs: source-checks\n    runs-on: ubuntu-22.04',
+               '    runs-on: ubuntu-22.04', 1),),
+             'must need source-checks'),
+            ('build workflow granting a write permission',
+             (('    needs: source-checks\n    runs-on: ubuntu-22.04',
+               '    needs: source-checks\n    permissions:\n'
+               '      contents: write\n    runs-on: ubuntu-22.04', 1),),
+             'not read-only'),
+            ('build workflow with an unlocked source-check invocation',
+             (('make format-check hygiene test-rust test-lua V=1',
+               'make format-check hygiene test-rust V=1', 1),),
+             'make test-lua'),
+            ('build workflow source checks invoking the release producer',
+             (('make format-check hygiene test-rust test-lua V=1',
+               'make format-check hygiene test-rust test-lua V=1 release-locked', 1),),
+             'must not invoke the release producer'),
+            ('build workflow inferring the handoff source from another run',
+             (('          RELEASE_SOURCE_SHA: ${{ github.sha }}',
+               '          RELEASE_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}',
+               1),),
+             'RELEASE_SOURCE_SHA'),
+            ('build workflow packaging the fallback for another target',
+             (('          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu',
+               '          RELEASE_BUILD_TARGET: aarch64-apple-darwin', 1),),
+             'packaging target is'),
+            ('build workflow uploading a mutable archive glob',
+             (('            build/release/artifacts/magit-lsp-v${{ env.RELEASE_VERSION }}'
+               '-x86_64-unknown-linux-gnu.tar.gz\n',
+               '            build/release/artifacts/*\n', 1),),
+             'never a glob'),
+            ('build workflow omitting the run manifest upload',
+             (('            build/release/release-manifest.json\n',
+               '            build/release/provenance.json\n', 1),),
+             'release-manifest.json'),
+            ('build workflow omitting the immutable artifact id',
+             (('          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}',
+               '          ARTIFACT_ID: fixture-id', 1),),
+             'artifact-id'),
+            ('build workflow omitting the immutable artifact digest',
+             (('          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}',
+               '          ARTIFACT_DIGEST: fixture-digest', 1),),
+             'artifact-digest'),
+            ('build workflow omitting the run attempt evidence',
+             (('          RUN_ATTEMPT: ${{ github.run_attempt }}',
+               '          RUN_ATTEMPT: fixture-attempt', 1),),
+             'github.run_attempt'),
+            ('build workflow omitting the upload identity file',
+             (('          path: build/release/upload-identity.json',
+               '          path: build/release/provenance.json', 1),),
+             'upload-identity.json'),
+            ('build workflow renaming the fallback candidate the publisher consumes',
+             (('          name: linux-x86_64-gnu-release-candidate',
+               '          name: release-candidate', 1),),
+             'expected \'linux-x86_64-gnu-release-candidate\''),
+            ('build workflow consuming a candidate by mutable name',
+             (('    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n',
+               '    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n'
+               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
+               ' # v7.0.0\n        with:\n'
+               '          name: linux-x86_64-gnu-release-candidate\n', 1),),
+             'mutable name'),
+            ('build workflow without the tag-only trigger filter',
+             (("    tags: ['v*']", "    tags: ['release-*']", 1),),
+             'push trigger must filter'),
+            ('build workflow without the manual rehearsal trigger',
+             (('  workflow_dispatch:\n', '', 1),),
+             'workflow_dispatch plus push tags'),
+            ('build workflow trying to publish',
+             (('make format-check hygiene test-rust test-lua V=1',
+               'make format-check hygiene test-rust test-lua V=1 && cargo publish --locked',
+               1),),
+             'publication step'),
+            ('build workflow moving the fallback off the Ubuntu 22.04 baseline',
+             (('runs-on: ubuntu-22.04', 'runs-on: ubuntu-24.04', 1),),
+             'strict Linux fallback must run on ubuntu-22.04'),
+            ('build workflow consuming python3 before setup-python',
+             (('      # The release checker needs tomllib, so select a supported interpreter\n',
+               '      - run: python3 -V\n\n'
+               '      # The release checker needs tomllib, so select a supported interpreter\n',
+               1),),
+             'must put actions/setup-python before'),
+            ('build workflow selecting an old Python interpreter',
+             (("          python-version: '3.12'", "          python-version: '3.10'", 1),),
+             'below the required'),
+            ('build workflow with an incomplete native builder matrix',
+             (('          - os: macos-26-intel\n'
+               '            target: x86_64-apple-darwin\n'
+               '            artifact: native-macos-intel-experimental\n', '', 1),),
+             'native builder matrix'),
+            ('build workflow packaging a native target for the wrong target',
+             (('          RELEASE_BUILD_TARGET: ${{ matrix.target }}',
+               '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu', 1),),
+             'native candidates packaging target is'),
+            ('build workflow promoting an experimental native candidate',
+             (('    continue-on-error: true', '    continue-on-error: false', 1),),
+             'non-gating'),
+            ('build workflow naming a native candidate as production',
+             (('            artifact: native-macos-arm64-experimental',
+               '            artifact: macos-arm64-release-candidate', 1),),
+             'experimental artifact'),
+            ('build workflow building a native candidate outside its locked shell',
+             (('.#release-native', '.#release-naive', None),),
+             '.#release-native'),
+            ('build workflow native candidate skipping the shared pipeline',
+             (('nix develop --no-update-lock-file .#release-native -c python3 '
+               'scripts/check_release_pipeline.py artifacts',
+               'nix develop --no-update-lock-file .#release-native -c true', 1),),
+             'shared pipeline'),
+        ):
+            expect_check(label, check_build_workflow,
+                         mutated_file(BUILD_WORKFLOW, directory, label, mutations),
+                         expected=expected)
+
         # The shared Make targets must run that same script, must not offer a
         # local compiler alias and the automation unit must stay Cargo-free.
         for label, mutations in (
@@ -1735,6 +2188,24 @@ def run_self_tests():
         for removed in ('compiler_for', 'installed_compiler', 'installed_prefix'):
             if hasattr(pipeline, removed):
                 fail(f'self-test: the pipeline still exposes {removed}')
+
+        # Native-linker evidence must belong to the packaged source and target;
+        # a fallback candidate or another commit never adopts it.
+        evidence_path = directory / 'native-build.json'
+        evidence_path.write_text(json.dumps(
+            {'source_sha': SELF_TEST_SHA, 'target': ASSET}), encoding='utf-8')
+        evidence_identity = {'source_sha': SELF_TEST_SHA, 'target': ASSET}
+        pipeline.verify_native_evidence(evidence_identity, evidence_path)
+        expect_pipeline_error(
+            pipeline, 'native evidence for another source',
+            pipeline.verify_native_evidence,
+            {'source_sha': SELF_TEST_OTHER_SHA, 'target': ASSET}, evidence_path,
+            expected='does not match the package source')
+        expect_pipeline_error(
+            pipeline, 'native evidence for another target',
+            pipeline.verify_native_evidence,
+            {'source_sha': SELF_TEST_SHA, 'target': 'aarch64-apple-darwin'},
+            evidence_path, expected='does not match the package target')
 
         # The shared script keeps the locked flags and refuses a local alias.
         for label, mutations, expected in (
