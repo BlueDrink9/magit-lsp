@@ -7,6 +7,13 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **PERF-OPEN-LOADING-STATE — Represent status loading in the server tree.** Establish an explicit not-yet-loaded status lifecycle and generation-safe fresh-state installation without inventing empty/clean repository data or allowing unsafe file actions against incomplete state. Preserve ready-state rendering and live refresh. test: deterministic inline Rust coverage of loading tree, readiness, stale completion rejection and close-safe lifecycle. Verification: `make test-rust FILTER="--lib"`.
+  - Verified: `make test-rust FILTER="--lib"` → exit 0 (`ok: rust (warnings detected; check log: build/test-logs/rust.DFpSvy)`).
+
+- [ ] **PERF-OPEN-ASYNC — Open status before Git status completes.** After PERF-OPEN-LOADING-STATE, return the real descriptor and server-owned loading render before slow status acquisition completes, perform acquisition outside session/global locks and publish only to a still-live matching generation using existing version/ack machinery. Keep message handling responsive, coalesce overlapping refreshes, preserve readable Git errors, and do not resurrect closed views. test: deterministic delayed-Git stdio regressions for early open, final fresh contents, responsiveness, close and stale work. Verification: `make test-rust FILTER="--test server_async"`.
+
+- [ ] **PERF-OPEN-LOADING-UI — Verify early loading display in Neovim.** After PERF-OPEN-ASYNC, check: native text/structured evidence proves the public :Magit window displays the server-owned loading document while Git is held, remains responsive and replaces it with fresh status after release; distinguish window creation from content readiness. Document lifecycle and measurement limitations. Verification: `make ui-file FILE=tests/ui/scenarios/status-loading.scn`.
+
 - [x] **PERF-OPEN-REUSE — Reuse discovered Git repository on status opening.** Remove verified duplicate discovery from the server status-open path without skipping status/rebase reads or changing rendered output, refresh freshness, worktree roots or Git failure handling. test: Rust regression coverage directly exercises opening from an already discovered repository and existing root/status invariants. Verification: `make test-rust FILTER="--lib"`.
   - Done: `d5cf1ea`; hook formatting `30b69b5`.
   - Verified: `make test-rust FILTER="--lib"` → exit 0 (`ok: rust (warnings detected; check log: build/test-logs/rust.oIXKon)`).

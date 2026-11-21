@@ -766,7 +766,54 @@ fn prompt_busy() -> InvokeResult {
     }
 }
 
+fn loading_action_blocked(command: &str, ready: bool) -> bool {
+    !ready && !matches!(command, "common.refresh" | "common.help" | "common.close")
+}
+
+#[cfg(test)]
+mod loading_action_tests {
+    use super::loading_action_blocked;
+
+    #[test]
+    fn loading_blocks_state_dependent_actions_but_allows_safe_commands() {
+        assert!(loading_action_blocked("file.stage", false));
+        assert!(loading_action_blocked("rebase.continue", false));
+        assert!(!loading_action_blocked("common.refresh", false));
+        assert!(!loading_action_blocked("common.help", false));
+        assert!(!loading_action_blocked("common.close", false));
+        assert!(!loading_action_blocked("file.stage", true));
+    }
+}
+
 impl Session {
+    /// Install a status acquisition only into its still-live view generation.
+    pub fn install_fresh_status(
+        &mut self,
+        view_id: &str,
+        fresh: crate::status_view::FreshStatus,
+    ) -> Result<Option<ViewRender>> {
+        let Some(view) = self.views.get_mut(view_id) else {
+            return Ok(None);
+        };
+        let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        else {
+            return Ok(None);
+        };
+        if !status.install_fresh_state(fresh) {
+            return Ok(None);
+        }
+        let tree = view.render_tree();
+        Ok(Some(view.render_tree_with_delivery(
+            tree,
+            None,
+            None,
+            RenderDelivery::Acknowledged,
+        )?))
+    }
+
     /// Create a session for a repository root.
     pub fn new(repo_path: impl Into<String>) -> Self {
         Self {
@@ -1200,6 +1247,19 @@ impl Session {
         request: crate::dispatch::DispatchRequest,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
+        let ready = self
+            .views
+            .get(&request.target.view_id)
+            .is_some_and(|view| view.view.is_ready());
+        if loading_action_blocked(&request.command, ready) {
+            return Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    "Repository status is still loading",
+                )],
+                ..InvokeResult::empty()
+            });
+        }
         if self.pending_prompt.is_some() && request.command != "common.refresh" {
             return Ok(prompt_busy());
         }

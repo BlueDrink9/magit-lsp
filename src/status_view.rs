@@ -22,9 +22,8 @@ const LEVEL_DEFAULT: u8 = LEVEL_MAX;
 /// A live status view: the repository root plus the last read status.
 pub struct StatusView {
     repo: GitRepo,
-    /// The last listing: branch and file entries, without any hunks.
-    status: Status,
-    rebase: Option<RebaseState>,
+    state: StatusState,
+    generation: u64,
     /// Hunks loaded for visible files this refresh, keyed by `(path, staged)`.
     hunks: HashMap<(String, bool), Vec<Hunk>>,
     /// Per-view visibility, keyed by node id so it survives a refresh.
@@ -33,6 +32,21 @@ pub struct StatusView {
     level: u8,
     /// Optional maximum rendered line count for a section.
     section_line_limit: Option<usize>,
+}
+
+enum StatusState {
+    Loading,
+    Ready {
+        status: Status,
+        rebase: Option<RebaseState>,
+    },
+}
+
+/// Git state acquired for a particular status-view generation.
+pub struct FreshStatus {
+    generation: u64,
+    status: Status,
+    rebase: Option<RebaseState>,
 }
 
 impl StatusView {
@@ -44,31 +58,87 @@ impl StatusView {
 
     /// Read status from an already discovered repository.
     pub fn open_repo(repo: GitRepo) -> Result<Self> {
+        let mut view = Self::loading(repo);
+        let fresh = view.acquire_fresh_state()?;
+        view.install_fresh_state(fresh);
+        Ok(view)
+    }
+
+    /// Create a status view without acquiring repository status or rebase state.
+    pub fn loading(repo: GitRepo) -> Self {
+        Self {
+            repo,
+            state: StatusState::Loading,
+            generation: 0,
+            hunks: HashMap::new(),
+            visibility: Visibility::new(),
+            level: LEVEL_DEFAULT,
+            section_line_limit: None,
+        }
+    }
+
+    /// Acquire current Git state tagged with this view's lifecycle generation.
+    pub fn acquire_fresh_state(&self) -> Result<FreshStatus> {
         let status_started = std::time::Instant::now();
-        let status = repo.status_listing()?;
+        let status = self.repo.status_listing()?;
         crate::runner::trace_current(
             "phase_status_listing",
             serde_json::json!({ "duration_ms": status_started.elapsed().as_secs_f64() * 1000.0 }),
         );
         let rebase_started = std::time::Instant::now();
-        let rebase = repo.rebase_state()?;
+        let rebase = self.repo.rebase_state()?;
         crate::runner::trace_current(
             "phase_rebase_state",
             serde_json::json!({ "duration_ms": rebase_started.elapsed().as_secs_f64() * 1000.0 }),
         );
-        Ok(Self {
-            repo,
+        Ok(FreshStatus {
+            generation: self.generation,
             status,
             rebase,
-            hunks: HashMap::new(),
-            visibility: Visibility::new(),
-            level: LEVEL_DEFAULT,
-            section_line_limit: None,
         })
+    }
+
+    /// Install acquired state only if no refresh has superseded its generation.
+    pub fn install_fresh_state(&mut self, fresh: FreshStatus) -> bool {
+        if fresh.generation != self.generation {
+            return false;
+        }
+        self.state = StatusState::Ready {
+            status: fresh.status,
+            rebase: fresh.rebase,
+        };
+        self.hunks.clear();
+        true
+    }
+
+    /// Whether repository state has been acquired for this view.
+    pub fn is_ready(&self) -> bool {
+        matches!(self.state, StatusState::Ready { .. })
     }
 
     /// Render the visible tree, loading hunks only for expanded files.
     fn render_tree(&mut self) -> Tree {
+        let StatusState::Ready { status, rebase } = &self.state else {
+            let mut tree = Tree {
+                version: 0,
+                lines: Vec::new(),
+                nodes: Vec::new(),
+                line_nodes: Vec::new(),
+                tokens: Vec::new(),
+                symbols: Vec::new(),
+                links: Vec::new(),
+            };
+            tree.lines.push("Loading repository status…".to_string());
+            tree.line_nodes
+                .push(LineNode::new("status:loading", NodeKind::Message));
+            tree.nodes.push(Node::new(
+                "status:loading",
+                NodeKind::Message,
+                "Loading repository status…",
+                0,
+            ));
+            return tree;
+        };
         for (section, path) in self.file_keys() {
             if section == "untracked"
                 || !self.visibility.is_expanded(&format!("section:{section}"))
@@ -101,7 +171,7 @@ impl StatusView {
                 }
             }
         }
-        let status = &self.status;
+        let status = status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
         let mut tree = build_with_limit(
@@ -117,7 +187,7 @@ impl StatusView {
                 hunks.get(&key).cloned().unwrap_or_default()
             },
         );
-        add_rebase(&mut tree, self.rebase);
+        add_rebase(&mut tree, *rebase);
         tree
     }
 
@@ -134,10 +204,13 @@ impl StatusView {
     }
 
     fn entries(&self, section: &str) -> &[FileEntry] {
+        let StatusState::Ready { status, .. } = &self.state else {
+            return &[];
+        };
         match section {
-            "staged" => &self.status.staged,
-            "unstaged" => &self.status.unstaged,
-            _ => &self.status.untracked,
+            "staged" => &status.staged,
+            "unstaged" => &status.unstaged,
+            _ => &status.untracked,
         }
     }
 
@@ -284,6 +357,63 @@ mod reuse_tests {
     }
 
     #[test]
+    fn loading_render_is_structured_and_fresh_state_install_is_generation_bound() {
+        let dir = committed_repo();
+        std::fs::write(dir.path().join("dirty.txt"), "not clean\n").unwrap();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let mut view = StatusView::loading(repo);
+        assert!(!view.is_ready());
+        let loading = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert_eq!(loading.lines, ["Loading repository status…"]);
+        assert_eq!(loading.line_nodes[0].node, "status:loading");
+        assert!(loading.links.is_empty());
+
+        let stale = view.acquire_fresh_state().unwrap();
+        view.on_refresh().unwrap();
+        assert!(!view.install_fresh_state(stale));
+        assert!(view.is_ready());
+        let live = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        let mut authoritative = StatusView::open(view.repo.root().to_str().unwrap()).unwrap();
+        let expected = authoritative.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert_eq!(live.lines, expected.lines);
+        assert!(live.lines.iter().any(|line| line.contains("dirty.txt")));
+        std::fs::write(dir.path().join("later.txt"), "new change\n").unwrap();
+        view.on_refresh().unwrap();
+        let refreshed = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert!(refreshed
+            .lines
+            .iter()
+            .any(|line| line.contains("later.txt")));
+    }
+
+    #[test]
+    fn current_generation_fresh_state_installs_and_closed_view_is_not_reinstallable() {
+        let dir = committed_repo();
+        let view = StatusView::loading(GitRepo::open(dir.path()).unwrap());
+        let result = view.acquire_fresh_state().unwrap();
+        let mut live = Some(view);
+        assert!(live.as_mut().unwrap().install_fresh_state(result));
+        assert!(live.as_ref().unwrap().is_ready());
+        // Closing drops the only install destination; a delayed completion has no path back in.
+        let delayed = live.as_ref().unwrap().acquire_fresh_state().unwrap();
+        drop(live.take());
+        assert!(live.is_none());
+        drop(delayed);
+    }
+
+    #[test]
     fn open_repo_uses_discovered_root_and_refreshes_live_status_without_rediscovery() {
         let dir = committed_repo();
         let nested = dir.path().join("nested");
@@ -355,6 +485,18 @@ impl View for StatusView {
         ViewKind::Status
     }
 
+    fn is_ready(&self) -> bool {
+        StatusView::is_ready(self)
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn title(&self) -> String {
         "Status".to_string()
     }
@@ -373,10 +515,9 @@ impl View for StatusView {
     }
 
     fn on_refresh(&mut self) -> Result<()> {
-        self.status = self.repo.status_listing()?;
-        self.rebase = self.repo.rebase_state()?;
-        // Hunk bodies are reloaded lazily from the fresh listing.
-        self.hunks.clear();
+        self.generation = self.generation.wrapping_add(1);
+        let fresh = self.acquire_fresh_state()?;
+        self.install_fresh_state(fresh);
         Ok(())
     }
 
