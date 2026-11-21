@@ -63,7 +63,7 @@
               python3
               neovim
               tmux
-              nodejs
+              nodejs_24
               pnpm_10
             ];
           };
@@ -77,7 +77,7 @@
               gnumake
               lua5_4
               lua-language-server
-              nodejs
+              nodejs_24
               pnpm_10
               python3
               pyright
