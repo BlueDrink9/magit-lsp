@@ -303,11 +303,18 @@ registry-docs-generate:
 registry-docs-check:
 	$(call run,registry-docs-check,cargo run -q --bin generate-docs -- --check $(if $(ROOT),--output-root $(ROOT)))
 
-.PHONY: docs-generate docs-artifacts-check
+.PHONY: docs-generate docs-artifacts-check help-tags
 
 docs-generate: update-schema registry-docs-generate
 
 docs-artifacts-check: schema-check registry-docs-check
+
+# Generate doc/tags so an installed plugin resolves `:h magit`. Runs a
+# plugin-free Neovim so the index depends only on the shipped help file, and
+# fails when no index is produced. The help-tags name is fixed by the
+# NVIM-HELP-DISCOVERY ticket rather than the usual update-*/*-generate pattern.
+help-tags:
+	$(call run,help-tags,rm -f doc/tags && nvim --headless -u NONE --noplugin -c "lua local gen = function() return vim.cmd('helptags ' .. vim.fn.fnameescape('doc')) end; if not pcall(gen) or vim.fn.filereadable('doc/tags') == 0 then vim.api.nvim_err_writeln('help-tags: helptags failed or doc/tags was not generated'); vim.cmd('cquit 1') end" -c "qa!")
 
 ui-tour: build
 	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
