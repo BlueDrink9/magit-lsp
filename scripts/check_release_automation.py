@@ -90,7 +90,12 @@ UNTRACKED_PATHS = (
     '.envrc',
 )
 RELEASE_FORBIDDEN_PATHS = ('.envrc', 'scripts/ci-local.sh')
-SECRETS = ('VSCE_PAT', 'OVSX_PAT', 'CARGO_REGISTRY_TOKEN')
+# Only the crates.io lane takes a stored secret; the marketplace CLIs
+# authenticate with OIDC trusted publishing, so a PAT secret is forbidden.
+STORED_SECRETS = ('CARGO_REGISTRY_TOKEN',)
+FORBIDDEN_SECRETS = ('VSCE_PAT', 'OVSX_PAT')
+OIDC_PUBLISH_ARGS = {'vsce publish': '--oidc',
+                     'ovsx publish': '--trusted-publishing'}
 PUBLISH_COMMANDS = ('vsce publish', 'ovsx publish', 'cargo publish --locked')
 # The publish job resolves vsce/ovsx from the extension's locked dev
 # dependencies, so the frozen install must precede every publishing step.
@@ -318,14 +323,33 @@ def check_workflow(path=WORKFLOW):
         fail('workflow: artifact re-verification must precede release creation')
     if tag_target_at > release_at:
         fail('workflow: tag target resolution must precede release creation')
-    for secret in SECRETS:
-
+    for secret in STORED_SECRETS:
         if f'{secret}: ${{{{ secrets.{secret} }}}}' not in publish_text:
             fail(f'workflow: publish job must read secrets.{secret} into env')
         if f"env.{secret} != ''" not in publish_text:
             fail(f'workflow: {secret} lane must be gated on env.{secret} != empty')
         if f"env.{secret} == ''" not in publish_text:
             fail(f'workflow: {secret} lane must report a readable skip when unset')
+    for secret in FORBIDDEN_SECRETS:
+        if f'secrets.{secret}' in publish_text:
+            fail(f'workflow: publish job must not read secrets.{secret}; '
+                 'marketplace publication uses OIDC trusted publishing')
+    for command, oidc_arg in OIDC_PUBLISH_ARGS.items():
+        command_at = next((i for i, line in enumerate(publish)
+                           if command in line and not line.lstrip().startswith('#')),
+                          None)
+        if command_at is None:
+            continue  # reported by the publish-command loop below
+        command_indent = indent_of(publish[command_at])
+        step_lines = [publish[command_at]]
+        for line in publish[command_at + 1:]:
+            if line.strip() and line.lstrip().startswith('- ') \
+                    and indent_of(line) <= command_indent:
+                break
+            step_lines.append(line)
+        if oidc_arg not in '\n'.join(step_lines):
+            fail(f'workflow: {command!r} must authenticate with OIDC '
+                 f'({oidc_arg}) instead of a stored token')
     for command in PUBLISH_COMMANDS:
         if command not in publish_text:
             fail(f'workflow: missing publish command {command!r}')
@@ -1632,9 +1656,17 @@ def run_self_tests():
             ('publish workflow without artifact re-verification',
              (('--validate-artifacts release-assets/dist', '--print-version', None),),
              're-verify the handed-off artifact set'),
+            ('publish workflow reading a stored marketplace PAT',
+             (('      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n',
+               '      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n'
+               '      VSCE_PAT: ${{ secrets.VSCE_PAT }}\n', 1),),
+             'must not read secrets.VSCE_PAT'),
+            ('publish workflow publishing the marketplace VSIX with a stored token',
+             (('            --oidc\n', '', None),),
+             'must authenticate with OIDC'),
             ('publish workflow without frozen CLI dependencies',
              (('      - name: Install frozen VS Code CLI dependencies\n'
-               '        run: make vscode-deps\n', '', None),),
+               '        run: make vscode-deps V=1\n', '', None),),
              'frozen VSCode CLI dependencies'),
         ):
             expect_check(label, check_workflow,
