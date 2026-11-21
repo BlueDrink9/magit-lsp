@@ -59,8 +59,7 @@ The list is a starting point, not exhaustive.
 ## Working conventions
 
 - **No-vision policy (every agent, including subagents):** never use vision,
-  inspect or render images, or invoke image/screenshot tools; never capture
-  screenshots or add image-snapshot or capture paths. Native UI verification
+  inspect or render images, or invoke image/screenshot tools. Native UI verification
   stays real and interactive, but evidence and acceptance are text or structured
   state only (`.screen`, accessibility/DOM text, JSON, wire/API and Git state).
   Text snapshots are allowed. Never impose image-based acceptance.
@@ -79,8 +78,7 @@ The list is a starting point, not exhaustive.
   the nearest with matching fixture and setup (a distinct behavior gets its
   own). A test must exercise the stated requirement directly, not an adjacent path.
 - Executable code over ~10 lines lives in a maintained script under `scripts/`
-  that an existing make target exercises; Markdown shows an invocation. Historical
-  records are exempt but must be labeled with version/date.
+  that an existing make target exercises; Markdown shows an invocation.
 - Every external/public function and type needs a concise docstring (`///` in
   Rust; LuaLS `---` in Lua).
 - No backward-compatibility shims: reshape or remove obsolete protocol methods,
@@ -89,7 +87,7 @@ The list is a starting point, not exhaustive.
   content). Never parse rendered text to recover structure: resolve navigation,
   folding and cursor context through the server tree (`src/tree.rs`). Clients
   display document text verbatim; do not recompose it.
-- **Errors.** Never show raw JSON or Lua tables to users. Git failures are
+- **Errors.** Avoid showing JSON or Lua tables to users, except behind dedicated debug or log views and flags. Git failures are
   user-facing `Effect::Message`s with a readable summary (optional hint/detail),
   not JSON-RPC errors. See
   [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md#35-commands-and-effects) and
@@ -119,8 +117,8 @@ regenerate just to silence a failing behavior test. Details:
 ### Make targets
 
 Targets log to `build/test-logs/` and print a short digest (`ok:` or the failure
-tail plus the log path). Use `V=1` only when the digest is insufficient and
-`LOG_TAIL=n` for more of a failure.
+tail plus the log path, and may alert you to warnings. ). Use `V=1` sparingly, only when the digest is insufficient and
+`LOG_TAIL=n` for more of a failure. If warnings were noted as present, only inspect the tail of the warning log
 
 - `make test`: Rust, Neovim and VSCode suites. Narrower:
   `make test-rust FILTER="--test menu"`, `make test-file FILE=tests/<file>.lua`,
