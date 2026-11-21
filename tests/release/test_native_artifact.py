@@ -179,7 +179,7 @@ class NativeArtifactTests(unittest.TestCase):
     def test_rpc_acknowledges_structured_render_before_matching_response(self):
         render = {'jsonrpc': '2.0', 'method': 'view/render',
                   'params': {'viewId': 'status-1', 'version': 7,
-                             'text': 'Unstaged changes', 'structure': {'kind': 'status'}}}
+                             'text': ['Unstaged changes'], 'mode': 'interactive'}}
         response = {'jsonrpc': '2.0', 'id': 8, 'result': {'effects': []}}
         stream = b''.join(b'Content-Length: %d\r\n\r\n' % len(payload) + payload
                           for payload in (json.dumps(render).encode(), json.dumps(response).encode()))
@@ -192,6 +192,8 @@ class NativeArtifactTests(unittest.TestCase):
             process.stdout = os.fdopen(read_fd, 'rb', buffering=0)
             result = inspector._rpc(process, 'view/invoke', {'command': 'status.stage-all'}, 8)
             self.assertEqual(result, {'effects': []})
+            process._native_status_view = {'id': 'status-1', 'mode': 'interactive'}
+            self.assertTrue(inspector._ack_status_render(process, render['params']))
             self.assertEqual(process._native_render_count, 1)
             self.assertEqual(process._native_render_version, 7)
             ack_frame = process.stdin.getvalue()
@@ -218,12 +220,14 @@ class NativeArtifactTests(unittest.TestCase):
             return b'Content-Length: %d\r\n\r\n' % len(payload) + payload
 
         messages = [
-            {'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {}}},
+            {'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {'experimental': {
+                'magit': {'protocolVersion': 1}}}}},
             {'jsonrpc': '2.0', 'method': 'view/keymap', 'params': {'viewId': 's'}},
             {'jsonrpc': '2.0', 'method': 'view/render', 'params': {
-                'viewId': 's', 'version': 1, 'text': 'Unstaged changes',
-                'structure': {'kind': 'status'}}},
-            {'jsonrpc': '2.0', 'id': 2, 'result': {'viewId': 's'}},
+                'viewId': 's', 'version': 1, 'text': ['Unstaged changes'],
+                'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'id': 2, 'result': {'id': 's', 'kind': 'status',
+                                                    'mode': 'interactive'}},
             {'jsonrpc': '2.0', 'id': 3, 'result': {'effects': []}},
             {'jsonrpc': '2.0', 'id': 4, 'result': None},
         ]
@@ -281,6 +285,64 @@ class NativeArtifactTests(unittest.TestCase):
             self.assertEqual(evidence['teardown'], 'complete')
         finally:
             child.stdout.close()
+
+    def test_functional_rejects_invalid_negotiation_descriptor_and_render_before_mutation(self):
+        def frame(message):
+            payload = json.dumps(message).encode()
+            return b'Content-Length: %d\r\n\r\n' % len(payload) + payload
+
+        class Child:
+            def __init__(self, messages):
+                self.stdin = io.BytesIO()
+                read_fd, write_fd = os.pipe()
+                os.write(write_fd, b''.join(map(frame, messages)))
+                os.close(write_fd)
+                self.stdout = os.fdopen(read_fd, 'rb', buffering=0)
+            def poll(self): return 0
+            def terminate(self): pass
+            def wait(self, timeout=None): pass
+            def kill(self): pass
+
+        base = [
+            {'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {'experimental': {
+                'magit': {'protocolVersion': 1}}}}},
+            {'jsonrpc': '2.0', 'method': 'view/render', 'params': {
+                'viewId': 's', 'version': 1, 'text': ['status'], 'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'id': 2, 'result': {'id': 's', 'kind': 'status',
+                                                    'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'id': 3, 'result': {'effects': []}},
+            {'jsonrpc': '2.0', 'id': 4, 'result': None},
+        ]
+        cases = [
+            ('version', lambda msgs: msgs[0]['result']['capabilities']['experimental']['magit']
+             .update(protocolVersion=2), 'protocol version 1'),
+            ('kind', lambda msgs: msgs[2]['result'].update(kind='log'), 'invalid status descriptor'),
+            ('view', lambda msgs: msgs[1]['params'].update(viewId='other'),
+             'no valid matching full render'),
+            ('payload', lambda msgs: msgs[1]['params'].update(text=None),
+             'no valid matching full render'),
+        ]
+        for _, alter, error in cases:
+            messages = json.loads(json.dumps(base))
+            alter(messages)
+            child = Child(messages)
+            calls = []
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                output = 'magit-lsp 1.2.3\n' if args[-1:] == ['--version'] else ''
+                return subprocess.CompletedProcess(args, 0, stdout=output, stderr='')
+            try:
+                with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
+                        mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                        mock.patch.object(inspector.subprocess, 'run', side_effect=fake_run), \
+                        mock.patch.object(inspector.subprocess, 'Popen', return_value=child):
+                    with self.assertRaisesRegex(inspector.InspectionError, error):
+                        inspector._functional(Path('/tmp/extracted'),
+                                              'x86_64-unknown-linux-gnu', '1.2.3', {})
+                self.assertFalse(any(args[-3:] == ['diff', '--cached', '--name-only']
+                                     for args in calls))
+            finally:
+                child.stdout.close()
 
     def test_shutdown_failure_still_reaps_child_and_records_evidence(self):
         class Child:

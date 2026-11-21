@@ -62,11 +62,12 @@ def _rpc(process, method, params, request_id):
         process._native_rpc_buffer = body[length:]
         if message.get('method') == 'view/render':
             params = message.get('params', {})
-            if params.get('viewId'):
-                _notify(process, 'view/rendered', {'viewId': params['viewId'],
-                                                   'version': params['version']})
-                process._native_render_count = getattr(process, '_native_render_count', 0) + 1
-                process._native_render_version = params['version']
+            renders = getattr(process, '_native_renders', [])
+            renders.append(params)
+            process._native_renders = renders
+            expected = getattr(process, '_native_status_view', None)
+            if expected and params.get('viewId') == expected['id']:
+                _ack_status_render(process, params)
             continue
         if 'method' in message and 'id' not in message:
             continue
@@ -82,6 +83,19 @@ def _notify(process, method, params):
     payload = json.dumps({'jsonrpc': '2.0', 'method': method, 'params': params}).encode()
     process.stdin.write(f'Content-Length: {len(payload)}\r\n\r\n'.encode() + payload)
     process.stdin.flush()
+
+
+def _ack_status_render(process, params):
+    expected = process._native_status_view
+    if (not isinstance(params.get('version'), int) or isinstance(params.get('version'), bool)
+            or params.get('mode') != expected['mode']
+            or not isinstance(params.get('text'), list)
+            or not all(isinstance(line, str) for line in params['text'])):
+        return False
+    _notify(process, 'view/rendered', {'viewId': expected['id'], 'version': params['version']})
+    process._native_render_count = getattr(process, '_native_render_count', 0) + 1
+    process._native_render_version = params['version']
+    return True
 
 
 def _stop_process(process, evidence):
@@ -129,26 +143,37 @@ def _functional(binary, target, version_expected, evidence):
                                    stderr=subprocess.DEVNULL, cwd=repo, bufsize=0)
         evidence['teardown'] = 'incomplete'
         try:
-            _rpc(process, 'initialize', {'processId': None, 'rootUri': Path(repo).as_uri(),
+            initialized = _rpc(process, 'initialize', {'processId': None, 'rootUri': Path(repo).as_uri(),
                  'capabilities': {'experimental': {'magit': {
                      'v': 1, 'keys': 'dynamic', 'modifiers': 'full',
                      'layout': ['main', 'side', 'bottom', 'float'],
                      'effects': ['visitFile', 'editDocument', 'clipboard'],
                      'prompts': ['confirm', 'text', 'choice', 'multiChoice', 'secret']}}}}, 1)
+            protocol_version = (initialized or {}).get('capabilities', {}).get('experimental', {}).get(
+                'magit', {}).get('protocolVersion')
+            if protocol_version != 1 or isinstance(protocol_version, bool):
+                raise InspectionError('server did not negotiate Magit protocol version 1')
             _notify(process, 'initialized', {})
             opened = _rpc(process, 'view/open', {'kind': 'status', 'args': {'repo_path': repo},
                                 'viewport': {'width': 80, 'height': 24}}, 2)
-            view_id = opened.get('viewId') if isinstance(opened, dict) else None
-            if not view_id:
-                raise InspectionError('status view/open returned no viewId')
+            view_id = opened.get('id') if isinstance(opened, dict) else None
+            view_kind = opened.get('kind') if isinstance(opened, dict) else None
+            view_mode = opened.get('mode') if isinstance(opened, dict) else None
+            if not view_id or view_kind != 'status' or not isinstance(view_mode, str):
+                raise InspectionError('status view/open returned an invalid status descriptor')
+            process._native_status_view = {'id': view_id, 'mode': view_mode}
+            for render in getattr(process, '_native_renders', []):
+                if render.get('viewId') == view_id:
+                    _ack_status_render(process, render)
+            if not getattr(process, '_native_render_count', 0):
+                raise InspectionError('status view emitted no valid matching full render')
             _rpc(process, 'view/invoke', {'viewId': view_id, 'command': 'status.stage-all'}, 3)
-            if getattr(process, '_native_render_count', 0) < 1:
-                raise InspectionError('status view emitted no structured render to acknowledge')
             staged = subprocess.run(['git', '-C', repo, 'diff', '--cached', '--name-only'],
                                     check=True, capture_output=True, text=True, timeout=15).stdout.splitlines()
             if staged != ['tracked.txt']:
                 raise InspectionError(f'Git index mutation mismatch: {staged}')
-            evidence.update(lsp={'initialize': True, 'status_render_acks': process._native_render_count,
+            evidence.update(lsp={'initialize': True, 'protocol_version': protocol_version,
+                                 'status_render_acks': process._native_render_count,
                                  'last_render_version': process._native_render_version},
                             git={'staged': staged})
             evidence['functional'] = {'outcome': 'success'}
