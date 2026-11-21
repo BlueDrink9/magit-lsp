@@ -320,12 +320,14 @@ Inventory VERIFIED: reuse `scripts/check_release_pipeline.py:42-97` locked comma
   - Verified: `nix develop -c make vscode-download-unit` → `ok: vscode-download-unit` (covers `approved extension-host targets use exact archive and cache identities`, unsupported-host and source-resolution checks).
   - **Constraints:** Three files; no Windows support, new dependencies, network, flake edits or published-platform claim before hosted acceptance.
 
-- [ ] **[P1] NREL-13B — Seed native acquisition from the unchanged candidate archive** (`clients/vscode/test/e2e/download-startup.js:44-119`, `packagedArchive`, `releasePayload`, `prepareDownloadCache`; `clients/vscode/test/e2e/run.mjs:203-212`, cache setup; `clients/vscode/test/server-download.test.js`, acquisition fixtures)
+- [x] **[P1] NREL-13B — Seed native acquisition from the unchanged candidate archive** (`clients/vscode/test/e2e/download-startup.js:44-119`, `packagedArchive`, `releasePayload`, `prepareDownloadCache`; `clients/vscode/test/e2e/run.mjs:203-212`, cache setup; `clients/vscode/test/server-download.test.js`, acquisition fixtures)
   - **Problem:** The existing helper rebuilds an archive around a binary and hardcodes Linux/glibc 2.36. That cannot prove acquisition of the approved Darwin/Linux archive or immutable archive identity.
   - **Why it matters:** Test validity: repackaging adjacent bytes is not the exact-artifact requirement.
   - **Change:** Do after: NREL-13A — Match managed downloads to approved Darwin archive targets. Add explicit artifact-mode inputs for the original archive, sidecar and verified manifest; reuse production resolver with a transport serving those unchanged bytes. Validate target/version/hash against manifest and actual extension-host runtime, with no forged Linux runtime. Propagate `RELEASE_ARTIFACT`/manifest paths through run.mjs and preserve hashes before/after extraction/cache seed. Ordinary source fixtures may still construct archives, but artifact mode must never call packagedArchive or fall back. Extend the existing downloader test module to exercise this helper boundary with fixture archives.
   - **Done when:** test: permanent local `make vscode-download-unit` rejects missing/changed archive, wrong target/hash and forged runtime; identical input archive reaches the resolver byte-for-byte with matching extracted hash. check: one-off hosted NREL-14 evidence records original archive as well as cache executable hash; no native run locally.
   - **Constraints:** Three files; no repack or server execution in unit tests, no production download/network, no replacement of native installation acceptance by fixtures.
+  - Verified: `nix develop -c make vscode-download-unit` → ok; native hosted NREL-14 evidence remains pending, no native proof claimed.
+  - Done: 9941963
 
 - [ ] **[P1] NREL-14 — Wire the existing native VSCode smoke to artifact consumers** (`Makefile:258-275`, focused native targets; `clients/vscode/test/e2e/run.mjs`, focused startup/VSIX mode; `.github/workflows/release.yml`, native consumers)
   - **Problem:** VERIFIED: focused native VSCode targets depend on `build`; no downloaded-artifact native host gate exists.
