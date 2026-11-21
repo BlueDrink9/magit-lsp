@@ -26,8 +26,8 @@ SKIP_PARTS = {"node_modules", "target", "vendor", "fixtures", "generated"}
 # generator look stale, so exclude these exact paths from every source mode.
 GENERATOR_OWNED = frozenset(
     {
-        "lua/magit-lsp/types.lua",
-        "lua/magit-lsp/shared.lua",
+        "clients/neovim/lua/magit-lsp/types.lua",
+        "clients/neovim/lua/magit-lsp/shared.lua",
         "clients/vscode/types/protocol.d.ts",
         "clients/vscode/types/shared-lists.js",
     }
@@ -104,9 +104,9 @@ def eligible(path: str) -> bool:
         return False
     suffix = Path(path).suffix.lower()
     if suffix in LUA:
-        return path.startswith(("lua/", "scripts/", "tests/"))
+        return path.startswith(("clients/neovim/lua/", "scripts/", "tests/"))
     if suffix in WEB:
-        return path.startswith(("lua/", "scripts/", "clients/", "tests/"))
+        return path.startswith(("clients/neovim/lua/", "scripts/", "clients/", "tests/"))
     return suffix in RUST
 
 

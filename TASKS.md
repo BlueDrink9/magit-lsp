@@ -15,7 +15,9 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - Done: `936aab6`.
 - [x] **NVIM-MOVE-RUST — Retarget Rust client-version coverage.** Update compile-time Neovim version references for the moved client. test: `make test-rust FILTER="--test client_versions"`.
   - Verified: `make test-rust FILTER="--test client_versions"` → exit 0; `tests/client_versions.rs` includes `clients/neovim/lua/magit-lsp/version.lua` and asserts its declaration matches the Cargo package version, with no `lua/magit-lsp/version.lua` compile-time path remaining.
-- [ ] **NVIM-MOVE-FORMAT — Retarget Neovim formatting coverage.** Update production formatter path rules and matching fixture tests. test: `make format-test` exercises the nested Neovim layout.
+  - Done: `4bf130a` (empty hook follow-up `638fccb`).
+- [x] **NVIM-MOVE-FORMAT — Retarget Neovim formatting coverage.** Update production formatter path rules and matching fixture tests. test: `make format-test` exercises the nested Neovim layout.
+  - Verified: `make format-test` → exit 0 (21 tests). `make format-all-list` lists 16 `clients/neovim/lua/` StyLua sources and no old-root `lua/magit-lsp/` path; generator-owned exclusions now name `clients/neovim/lua/magit-lsp/{types,shared}.lua`.
 - [ ] **NVIM-MOVE-UI — Retarget native harness consumers.** Mechanically update native harness/scenario paths to the new Neovim runtime. test: `make ui-unit` verifies harness path selection. No direct native launch or images.
 - [ ] **NVIM-MOVE-NATIVE — Verify moved client in real Neovim.** test: `make ui-file FILE=tests/ui/scenarios/magit-command.scn` still executes bare :Magit and renders fresh Git state with the moved adapter.
 - [ ] **NVIM-MOVE-INSTALL — Update native and lazy Neovim installation.** Update install snippets and real-manager harnesses for the subdirectory runtime without eagerly opening status or reintroducing root Lua/plugin shims. test: `make lazy-install-check` proves documented real lazy.nvim loading. Update README/help and maintained architecture/testing path references where relevant.
