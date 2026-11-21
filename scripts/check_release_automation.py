@@ -126,6 +126,20 @@ NATIVE_MATRIX = (
     ('macos-26', 'aarch64-apple-darwin'),
     ('macos-26-intel', 'x86_64-apple-darwin'),
 )
+# Each required build job runs exactly two server suites on one source, toolchain
+# and workspace cache: debug before the release build, release against the exact
+# packaged executable. Every other acceptance suite runs once per platform.
+SERVER_DEBUG_STEP = 'Debug server tests'
+SERVER_RELEASE_STEP = 'Release server tests against the exact release executable'
+SERVER_SUITE = 'server_async'
+NATIVE_SHELL = 'nix develop --no-update-lock-file .#release-native -c'
+COVERAGE_TOKENS = ('cargo llvm-cov', 'coverage-rust', '--instrument-coverage',
+                   'LLVM_PROFILE_FILE')
+# Client/ABI/package acceptance runs once in the consumer jobs, never alongside
+# the duplicated server suites.
+ACCEPTANCE_COMMANDS = ('check_native_artifact.py', 'native-vscode-artifact-check',
+                       'native-neovim-artifact-check')
+RELEASE_MANIFEST = 'build/release/release-manifest.json'
 # Every producer packages the exact source/ref/event/run identity it was
 # triggered from; an inferred head_branch or workflow_run SHA is never accepted.
 IDENTITY_ENV = (
@@ -260,9 +274,19 @@ def check_workflow(path=WORKFLOW):
         fail('workflow: validate must check out the protected default branch')
     if '--prepare-publication-runtime' not in validate_text:
         fail('workflow: validate must invoke the fail-closed runtime collector')
-    publish_text = '\n'.join(publish)
-    if '    needs: validate' not in publish or '    if: ${{ false }}' not in publish:
-        fail('workflow: publish must remain ineligible pending immutable asset handoff')
+    if '    needs: validate' not in publish:
+        fail('workflow: publish must run only after the validate job')
+    guard = next((line.strip() for line in publish
+                  if line.strip().startswith('if:')), None)
+    if guard is None or '${{ false }}' in guard:
+        fail('workflow: publish must gate on a successful push-tag build of this '
+             'repository, not a disabled or unconditional job')
+    for requirement in (
+            "github.event.workflow_run.event == 'push'",
+            "github.event.workflow_run.conclusion == 'success'",
+            'github.event.workflow_run.head_repository.full_name == github.repository'):
+        if requirement not in guard:
+            fail(f'workflow: publish guard must require {requirement!r}')
     if '    environment: release-publish' not in publish:
         fail('workflow: publish job must require release-publish environment')
 
@@ -792,6 +816,104 @@ def check_native_vscode_consumers(block):
         fail('build workflow: editor setup must cover Linux and macOS hosted runners')
 
 
+def job_steps(block):
+    """Split a job block into its steps, each as ``(name, lines)``.
+
+    Steps are the entries at the job's six-space sequence indent; the name is
+    the step's ``- name:`` value or ``''`` for an unnamed ``uses`` step.
+    """
+    steps = []
+    for line in block:
+        if re.match(r'^      - ', line):
+            name = re.search(r'^      - name:\s*(.+?)\s*$', line)
+            steps.append([name.group(1) if name else '', [line]])
+        elif steps:
+            steps[-1][1].append(line)
+    return [(name, lines) for name, lines in steps]
+
+
+def single_step(steps, predicate, label, context):
+    """Return the index of the one step whose content matches ``predicate``."""
+    matches = [index for index, (_, lines) in enumerate(steps)
+               if predicate('\n'.join(lines))]
+    if len(matches) != 1:
+        fail(f'build workflow: {context} must run exactly one {label} step in the '
+             f'same job, found {len(matches)}')
+    return matches[0]
+
+
+def check_server_test_graph(context, block, target, native):
+    """Require one same-job debug-before-build and release-after-package pair.
+
+    The server suite is the only suite repeated, it runs against the exact
+    packaged executable recorded by the run-bound manifest, and no instrumented
+    coverage or consumer acceptance may mix into either run.
+    """
+    steps = job_steps(block)
+    for token in ACCEPTANCE_COMMANDS:
+        if token in '\n'.join(code_lines(block)):
+            fail(f'build workflow: {context} must not repeat client/ABI/package '
+                 'acceptance in the build job')
+    debug = single_step(steps, lambda text: 'make test-rust FILTER' in text,
+                        'debug server test', context)
+    build = single_step(
+        steps, lambda text: PIPELINE_BUILD in text or 'make release-native-build' in text,
+        'release build', context)
+    package = single_step(steps, lambda text: PIPELINE_ARTIFACTS in text,
+                          'packaging', context)
+    release = single_step(steps, lambda text: 'make test-rust-artifact' in text,
+                          'release server test', context)
+    if not debug < build < package < release:
+        fail(f'build workflow: {context} must run debug server tests before the '
+             'release build and release server tests after packaging')
+    if steps[debug][0] != SERVER_DEBUG_STEP:
+        fail(f'build workflow: {context} debug server tests must run in the '
+             f'{SERVER_DEBUG_STEP!r} step')
+    if steps[release][0] != SERVER_RELEASE_STEP:
+        fail(f'build workflow: {context} release server tests must run in the '
+             f'{SERVER_RELEASE_STEP!r} step')
+    debug_text = '\n'.join(steps[debug][1])
+    release_text = '\n'.join(steps[release][1])
+    if 'MAGIT_LSP_TEST_BINARY' in debug_text:
+        fail(f'build workflow: {context} debug server tests must not target the '
+             'release executable')
+    acceptance = ACCEPTANCE_COMMANDS + ('--test editor_bridge',
+                                        '--test rebase_interactive')
+    for token in acceptance + COVERAGE_TOKENS:
+        if token in debug_text or token in release_text:
+            fail(f'build workflow: {context} server tests must not repeat client/ABI/'
+                 f'package acceptance or mix coverage ({token!r})')
+    if 'cargo build' in release_text or 'release-native-build' in release_text:
+        fail(f'build workflow: {context} release server tests must run the packaged '
+             'executable, not rebuild the server')
+    for label, text in (('debug', debug_text), ('release', release_text)):
+        suites = re.findall(r'--test\s+([\w-]+)', text)
+        if suites != [SERVER_SUITE]:
+            fail(f'build workflow: {context} {label} server tests may run only '
+                 f'{SERVER_SUITE!r}, found {suites}')
+        if native and NATIVE_SHELL not in text:
+            fail(f'build workflow: {context} {label} server tests must use the same '
+                 'locked .#release-native shell as the build')
+        if not native and 'nix develop' in text:
+            fail(f'build workflow: {context} {label} server tests must use the '
+                 'same pinned rustup toolchain as the build')
+    if '--locked' not in debug_text:
+        fail(f'build workflow: {context} debug server tests must run the locked '
+             'server suite before the build')
+    expected_binary = f'target/{target}/release/magit-lsp'
+    if 'realpath' not in release_text or expected_binary not in release_text:
+        fail(f'build workflow: {context} release server tests must run the exact '
+             f'packaged executable {expected_binary!r}')
+    if RELEASE_MANIFEST not in release_text or 'executable_sha256' not in release_text:
+        fail(f'build workflow: {context} release server tests must bind '
+             f'{RELEASE_MANIFEST} executable_sha256')
+    digest = 'shasum -a 256' if native else 'sha256sum'
+    if digest not in release_text or '= "$expected"' not in release_text \
+            or 'MAGIT_LSP_TEST_BINARY="$binary"' not in release_text:
+        fail(f'build workflow: {context} release server tests must compare the '
+             f'packaged binary hash before running it')
+
+
 def check_build_workflow(path=BUILD_WORKFLOW):
     """Structure-check the build workflow: locked builders, source checks,
     run-bound explicit candidates and read-only, non-publishing scope."""
@@ -883,7 +1005,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
              'native-linker mode')
     if PIPELINE_ARTIFACTS not in fallback_text:
         fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
-    for alternate in ('cargo build', 'package-release.sh', 'MAGIT_LSP_TEST_BINARY'):
+    for alternate in ('cargo build', 'package-release.sh'):
         if alternate in fallback_text:
             fail(f'build workflow: {alternate!r} belongs to the shared pipeline script, '
                  'not a separate workflow path')
@@ -904,8 +1026,32 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     if fallback_name != ARTIFACT_NAME:
         fail(f'build workflow: uploads {fallback_name!r}, expected {ARTIFACT_NAME!r} '
              'so the publisher consumes the strict fallback')
+    check_server_test_graph(FALLBACK_JOB, fallback, FALLBACK_TARGET, False)
+    if any(line.strip() == 'continue-on-error: true' for line in fallback):
+        fail('build workflow: the strict Linux GNU fallback must remain mandatory')
+
+    # Windows may stay informational in this repository, but it can never gate a
+    # required release build or acceptance job.
+    required_jobs = (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB,
+                     NATIVE_FUNCTIONAL_JOB, NATIVE_VSCODE_JOB, VSIX_JOB)
+    for job_name, block in jobs.items():
+        windows = [line.strip() for line in code_lines(block)
+                   if re.match(r'^\s*(?:-\s*)?(?:os|runs-on):\s*windows', line,
+                               re.IGNORECASE)]
+        if not windows:
+            continue
+        if job_name in required_jobs or 'continue-on-error: true' not in \
+                '\n'.join(code_lines(block)):
+            fail('build workflow: Windows cannot gate the required release graph '
+                 f'({windows[0]!r} in {job_name!r})')
+    for token in COVERAGE_TOKENS:
+        if token in text:
+            fail('build workflow: instrumented coverage belongs in the separate '
+                 f'read-only CI coverage job ({token!r})')
 
     check_native_candidates(jobs[NATIVE_JOB])
+    check_server_test_graph(NATIVE_JOB, jobs[NATIVE_JOB], '${{ matrix.target }}',
+                            True)
     check_native_consumers(jobs[NATIVE_CONSUMER_JOB])
     check_native_functional_consumers(jobs[NATIVE_FUNCTIONAL_JOB])
     check_native_vscode_consumers(jobs[NATIVE_VSCODE_JOB])
@@ -3509,8 +3655,24 @@ def run_self_tests():
              'must require release-publish environment'),
             ('PAT fallback', (('    steps:', '    env: { VSCE_PAT: ${{ secrets.VSCE_PAT }} }\n    steps:', 1),),
              'forbidden legacy/bypass path'),
-            ('publish bypass without handoff revalidation', (('    if: ${{ false }}', '    if: ${{ true }}', 1),),
-             'publish must remain ineligible'),
+            ('publish disabled by a literal false', (('    if: ${{ github.event.workflow_run.event', '    if: ${{ false }} && github.event.workflow_run.event', 1),),
+             'publish must gate on a successful push-tag build'),
+            ('publish without a validate dependency', (('    needs: validate\n', '', 1),),
+             'publish must run only after the validate job'),
+            ('publish without the push-origin guard',
+             (("github.event.workflow_run.event == 'push'",
+               "github.event.workflow_run.event == 'schedule'", 1),),
+             "publish guard must require \"github.event.workflow_run.event == 'push'\""),
+            ('publish without the success guard',
+             (('github.event.workflow_run.conclusion == \'success\'',
+               'github.event.workflow_run.conclusion != \'failure\'', 1),),
+             'publish guard must require "github.event.workflow_run.conclusion == \'success\'"'),
+            ('publish without the same-repository guard',
+             ((' && github.event.workflow_run.head_repository.full_name == github.repository', '', 1),),
+             'publish guard must require \'github.event.workflow_run.head_repository.full_name == github.repository\''),
+            ('publish with an unconditional guard',
+             (('    if: ${{ github.event.workflow_run.event', '    if: ${{ true }}\n    # github.event.workflow_run.event', 1),),
+             'publish guard must require'),
             ('untrusted producer identity', (('Release artifact build (no publication)', 'Untrusted producer', 1),),
              'missing trusted collector contract'),
             ('untrusted producer checkout', (('ref: ${{ github.event.repository.default_branch }}',
@@ -3761,6 +3923,59 @@ def run_self_tests():
               (('test "$vsix_before" = "$vsix_after"', 'true', 1),),
               "must include 'test \"$vsix_before\" = \"$vsix_after\"'"),
            ):
+            expect_check(label, check_build_workflow,
+                         mutated_file(BUILD_WORKFLOW, directory, label, mutations),
+                         expected=expected)
+
+        # The same-job server graph: real command ordering, the exact packaged
+        # release selector/hash, server-only duplication, coverage separation,
+        # one-time consumer acceptance and mandatory GNU/macOS-only gating.
+        debug_run = '        run: make test-rust FILTER="--locked --test server_async"\n'
+        build_run = f'        run: {PIPELINE_BUILD}\n'
+        release_make = ('          make test-rust-artifact '
+                        'MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"\n')
+        package_run = f'        run: {PIPELINE_ARTIFACTS}\n'
+        for label, mutations, expected in (
+            ('build workflow after swapping the debug and build commands',
+             ((debug_run, '        run: __TMP_DEBUG_RUN__\n', 1),
+              (build_run, debug_run, 1),
+              ('        run: __TMP_DEBUG_RUN__\n', build_run, 1)),
+             'must run debug server tests before the release build'),
+            ('build workflow testing the release inside the packaging step',
+             ((release_make, '', 1),
+              (package_run, package_run + release_make, 1)),
+             'release server tests after packaging'),
+            ('build workflow testing an unselected release target',
+             (('target/x86_64-unknown-linux-gnu/release/magit-lsp',
+               'target/aarch64-apple-darwin/release/magit-lsp', 1),),
+             'exact packaged executable'),
+            ('build workflow without the exact executable hash',
+             (('["executable_sha256"])', '["archive_sha256"])', 1),),
+             'executable_sha256'),
+            ('build workflow repeating a nonserver suite in the debug step',
+             (('FILTER="--locked --test server_async"',
+               'FILTER="--locked --test server_async --test editor_bridge"', 1),),
+             'must not repeat client/ABI/package acceptance'),
+            ('build workflow mixing coverage into the server step',
+             ((debug_run, debug_run.rstrip('\n') + ' LLVM_PROFILE_FILE=coverage.profraw\n', 1),),
+             'mix coverage'),
+            ('build workflow repeating ABI acceptance in the build job',
+             (('      - id: upload\n',
+               '      - run: python3 scripts/check_native_artifact.py --functional candidate.tar.gz\n'
+               '      - id: upload\n', 1),),
+             'must not repeat client/ABI/package acceptance'),
+            ('build workflow gating on a Windows matrix row',
+             (('          - os: macos-26\n'
+               '            target: aarch64-apple-darwin\n'
+               '            artifact: native-macos-arm64-experimental',
+               '          - os: windows-latest\n'
+               '            target: x86_64-pc-windows-msvc\n'
+               '            artifact: native-windows-experimental\n'
+               '          - os: macos-26\n'
+               '            target: aarch64-apple-darwin\n'
+               '            artifact: native-macos-arm64-experimental', 1),),
+             'Windows cannot gate'),
+        ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
