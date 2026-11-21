@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit native-artifact-unit native-artifact-inspect test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -281,6 +281,13 @@ release-automation-unit:
 # real-binary install/launch smoke is only for an actual artifact.
 release-contract-unit:
 	$(call run,release-contract-unit,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-unit: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_release.ReleaseTests.test_latest_and_pinned tests.release.test_release.ReleaseTests.test_default_directory tests.release.test_release.ReleaseTests.test_download_failures tests.release.test_release.ReleaseTests.test_missing_asset tests.release.test_release.ReleaseTests.test_bad_metadata_and_versions tests.release.test_release.ReleaseTests.test_destination_failure_preserves_binary tests.release.test_release.ReleaseTests.test_checksum_failures tests.release.test_release.ReleaseTests.test_platform_failures tests.release.test_release.ReleaseTests.test_archive_structure tests.release.test_release.ReleaseTests.test_package_install_contract tests.release.test_release.ReleaseTests.test_package_rejects_version_mismatch)
+
+# Synthetic archive/tool fixtures only; never executes or builds a candidate.
+native-artifact-unit:
+	$(call run,native-artifact-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_native_artifact)
+
+native-artifact-inspect:
+	$(call run,native-artifact-inspect,test -n "$(RELEASE_ARTIFACT)" && python3 scripts/check_native_artifact.py "$(RELEASE_ARTIFACT)")
 
 # Shellcheck plus the offline release contract suite for the download/packaging
 # scripts the release workflow and installer path depend on. The flake dev shell
