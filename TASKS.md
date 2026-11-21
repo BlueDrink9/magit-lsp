@@ -298,7 +298,7 @@ Inventory VERIFIED: reuse `scripts/check_release_pipeline.py:42-97` locked comma
   - **Done when:** `native-artifact-inspect` and `native-artifact-check` fail readably on unsupported Python before extraction, or safely extract under all Python versions present on the planned runners; traversal and link fixtures continue to fail.
   - **Constraints:** Do not use unsafe `extractall` as a compatibility fallback; do not claim or require hosted execution in this local review task.
   - Verified: `nix develop -c make native-artifact-unit` → exit 0 (`ok: native-artifact-unit`). `test_safe_extract_works_without_tarfile_filter_api_and_preserves_executable` simulates unavailable `extractall(filter=...)` and asserts valid executable extraction/mode; `test_safe_extract_rejects_traversal_and_links` and the unexpected-member fixture assert refusal. Fixture-only; parent NREL-12 remains open hosted-pending.
-  - Done: pending commit.
+  - Done: `d31c050`.
 
 - [ ] **[P1] NREL-13 — Remove VSCode debug-path assumptions from native artifact tests** (`clients/vscode/test/e2e/run.mjs:96-98,143,209`, launcher; `clients/vscode/test/e2e/suite.js:373,518,640`, fixture server source; `clients/vscode/test/integration.js:365-368`, existing selector)
   - **Problem:** VERIFIED: integration supports `MAGIT_LSP_SERVER_PATH`, while native launcher/suite hardcode debug paths. Native artifact testing would otherwise rebuild or seed downloads from the wrong server.
