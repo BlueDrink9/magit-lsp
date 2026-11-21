@@ -11,7 +11,7 @@ wait
 expect screen not-contains "Unstaged changes"
 sh: printf 'command-visible\n' > command-visible.txt
 expect screen not-contains "command-visible.txt"
-keys: ":execute 'Magit ' .. getcwd()" Enter
+keys: ":Magit" Enter
 wait
 expect screen contains "Unstaged changes (2)"
 expect screen contains "f.txt"

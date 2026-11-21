@@ -7,7 +7,11 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **NVIM-CMD-CWD-NATIVE — Verify bare :Magit reopens from cwd.** Extend the command scenario so its substantive reopen uses bare `:Magit`, retaining the fresh-file render and Git-state assertions. test: `make ui-file FILE=tests/ui/scenarios/magit-command.scn` passes with no explicit-root workaround.
+  - Verified: `make ui-file FILE=tests/ui/scenarios/magit-command.scn` → exit 0 (`ok: build`, `ok: ui-file`). After the native `:bwipeout!`, the scenario runs bare `:Magit`, then asserts `Unstaged changes (2)` with `f.txt`, `Untracked files (1)` with `command-visible.txt`, `view_stack.count == 1`, and the unchanged Git status ` M f.txt| M g.txt|?? command-visible.txt`. No scenario-owned `magit-lsp` server remained.
+
 - [x] **NVIM-CMD-START — Make :Magit open without a live status view.** VERIFIED `lua/magit-lsp/init.lua:162-174` contradicts its documented cwd/start semantics: without an existing view/root session open returns an error which the command drops. test: real public open path starts at cwd when needed, reopens after wipe, honors explicit directory and preserves configured sessions. Verify: `make test-file FILE=tests/test_magit_lsp.lua`.
+  - Done: `ece8aa3`.
   - Verified: `make test-file FILE=tests/test_magit_lsp.lua` → exit 0 (`ok: build`, `ok: lua`); new cases "bare :Magit starts a session for the current directory without setup", "bare :Magit reopens a wiped status without a second server" and ":Magit starts an explicit repository directory" pass with the unchanged existing session/escaped-directory cases.
 
 - [x] **NVIM-CMD — Add the :Magit entry command.** Register an automatically available Neovim command using the existing public open path, with optional repository directory and directory completion; preserve setup/configuration behavior. test: focused Lua regression exercises actual registration, default open and explicit directory. Verify: `make test-file FILE=tests/test_magit_lsp.lua`. Preserve concurrent work and protected untracked files.
