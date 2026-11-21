@@ -1,41 +1,18 @@
 name: Publish release artifacts
 
-# Manual-only publication. There is no push, tag or pull request trigger, so no
-# commit can publish on its own. Precondition: the tracked build workflow
-# `.github/workflows/release.yml` ("Release artifact build (no publication)")
-# has already produced the checksummed archive and sidecar as the Actions
-# artifact named linux-x86_64-gnu-release-candidate; pass that completed run's
-# id to this dispatch. Nothing is rebuilt here.
-#
-# The selected run must be a successful run of that workflow in this repository
-# whose head SHA is this dispatch's source commit (`github.sha`); the VSIX,
-# crate, tag and every uploaded asset are taken from that one verified commit.
-
 on:
-  workflow_dispatch:
-    inputs:
-      build_run_id:
-        description: Run id of the completed release-artifact build
-        required: true
-        type: string
-      mode:
-        description: dry-run validates only; publish creates the release and uploads
-        required: true
-        default: dry-run
-        type: choice
-        options:
-          - dry-run
-          - publish
+  workflow_run:
+    workflows:
+      - Release artifact build (no publication)
+    types: [completed]
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: Validate release artifacts
+    name: Validate publication eligibility
     runs-on: ubuntu-24.04
-    # `actions: read` is only needed here: this job reads the selected run's
-    # metadata and downloads its artifact, both of which require reading that run.
     permissions:
       contents: read
       actions: read
@@ -43,130 +20,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
-
-      # Fail closed before any of the selected run's bytes are downloaded: the
-      # run must be this repository's successful release build of this commit.
-      - name: Verify the build run provenance
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Validate workflow_run provenance and publication readiness
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_RUN_ID: ${{ inputs.build_run_id }}
-        run: python3 scripts/check_release_automation.py --validate-run-metadata
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: linux-x86_64-gnu-release-candidate
-          path: dist
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-        with:
-          version: 10.13.1
-
-      - name: Verify archive checksum, version triple and artifact set
-        run: python3 scripts/check_release_automation.py --validate-artifacts dist
-
-      - name: Resolve the release version
-        run: python3 scripts/check_release_automation.py --print-version >> "$GITHUB_ENV"
-
-      - name: Build the offline VSIX
-        run: make vscode-package V=1
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: validated-release-assets
-          # Explicit names: the artifact set is validated above, so a stray file
-          # can never ride along into the published release.
-          path: |
-            dist/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu.tar.gz
-            dist/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu.tar.gz.sha256
-            build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix
-          if-no-files-found: error
-          retention-days: 7
+        run: python3 scripts/check_release_automation.py --prepare-publication-runtime "$GITHUB_EVENT_PATH"
 
   publish:
-    name: Publish (${{ inputs.mode }})
+    name: Publish (ineligible pending asset handoff)
     needs: validate
-    if: ${{ inputs.mode == 'publish' }}
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     environment: release-publish
     permissions:
       contents: write
       id-token: write
-    env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
-
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: validated-release-assets
-          path: release-assets
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-        with:
-          version: 10.13.1
-
-      # The registry CLIs (vsce, ovsx) come from the extension's locked dev
-      # dependencies; installing them here, before the release exists, keeps a
-      # missing local CLI from leaving a partially published release behind.
-      - name: Install frozen VS Code CLI dependencies
-        run: make vscode-deps V=1
-
-      # Re-check the handed-off archive set and checksum: the publish job trusts
-      # only bytes that still match the validated artifact names.
-      - name: Re-verify the validated artifacts
-        run: python3 scripts/check_release_automation.py --validate-artifacts release-assets/dist
-
-      - name: Resolve the release version
-        run: python3 scripts/check_release_automation.py --print-version >> "$GITHUB_ENV"
-
-      # Rejects a version tag that already resolves to another commit and prints
-      # RELEASE_TARGET=<verified source sha> for the release step.
-      - name: Resolve the release tag target
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_release_automation.py --check-release-target >> "$GITHUB_ENV"
-
-      - name: Create GitHub Release with the validated assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="v${RELEASE_VERSION}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::release $tag already exists; refusing to overwrite" >&2
-            exit 1
-          fi
-          stem="release-assets/dist/magit-lsp-v${RELEASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          gh release create "$tag" "$stem" "$stem.sha256" --target "$RELEASE_TARGET" \
-            --title "magit-lsp $tag" --generate-notes
-
-      - name: Publish to the VS Code Marketplace
-        run: |
-          pnpm --dir clients/vscode exec vsce publish \
-            --packagePath "../../release-assets/build/vscode/magit-lsp-${RELEASE_VERSION}.vsix" \
-            --oidc
-
-      - name: Publish to Open VSX
-        run: pnpm --dir clients/vscode exec ovsx publish "../../release-assets/build/vscode/magit-lsp-${RELEASE_VERSION}.vsix" --trusted-publishing
-
-      - name: Note skipped crates.io publication
-        if: ${{ env.CARGO_REGISTRY_TOKEN == '' }}
-        run: echo "::notice::CARGO_REGISTRY_TOKEN is not set; skipping crates.io publication"
-
-      - name: Publish to crates.io
-        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
-        run: cargo publish --locked --token "$CARGO_REGISTRY_TOKEN"
+          ref: ${{ github.event.repository.default_branch }}
+      # This job remains unreachable until the collector can hand off validated
+      # immutable assets. No external mutation or executable artifact is allowed.

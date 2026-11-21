@@ -212,14 +212,12 @@ def cargo_versions():
 
 
 def check_workflow(path=WORKFLOW):
+    """Require the fail-closed workflow_run publication boundary."""
     lines = read_lines(path)
     text = '\n'.join(lines)
     code = code_lines(lines)
-
     if not lines or lines[0].strip() != 'name: Publish release artifacts':
         fail('workflow: expected the publish workflow name on the first line')
-
-    # Triggers: workflow_dispatch only; nothing may run on push, tag or PR.
     try:
         on_index = lines.index('on:')
     except ValueError:
@@ -227,201 +225,47 @@ def check_workflow(path=WORKFLOW):
     trigger_block = block_after(lines, on_index, 0)
     triggers = [line.strip()[:-1] for line in trigger_block
                 if indent_of(line) == 2 and line.strip().endswith(':')]
-    if triggers != ['workflow_dispatch']:
-        fail(f'workflow: triggers must be exactly workflow_dispatch, found {triggers}')
-    for line in lines:
-        if line.lstrip().startswith('#'):
-            continue
-        if re.match(r'^\s*(push|pull_request|pull_request_target|release|schedule|workflow_run):',
-                    line):
-            fail(f'workflow: forbidden automatic trigger {line.strip()!r}')
-
-    dispatch_index = next(i for i, line in enumerate(lines) if line == '  workflow_dispatch:')
-    dispatch_block = block_after(lines, dispatch_index, 2)
-    if '    inputs:' not in dispatch_block:
-        fail('workflow: workflow_dispatch has no `inputs:`')
-    for name, required_lines in (
-        ('build_run_id', ('        required: true', '        type: string')),
-        ('mode', ('        default: dry-run', '        type: choice',
-                  '          - dry-run', '          - publish')),
-    ):
-        try:
-            offset = dispatch_block.index(f'      {name}:')
-        except ValueError:
-            fail(f'workflow: missing workflow_dispatch input {name!r}')
-        input_block = block_after(dispatch_block, offset, 6)
-        for expected in required_lines:
-            if expected not in input_block:
-                fail(f'workflow: input {name!r} is missing {expected.strip()!r}')
-
+    if triggers != ['workflow_run'] or 'workflow_dispatch' in text:
+        fail(f'workflow: trigger must be workflow_run only, found {triggers}')
+    for required in ('      - Release artifact build (no publication)',
+                     '    types: [completed]',
+                     'python3 scripts/check_release_automation.py --prepare-publication-runtime "$GITHUB_EVENT_PATH"'):
+        if required not in text:
+            fail(f'workflow: missing trusted collector contract {required!r}')
+    for forbidden in ('build_run_id', 'inputs.mode', 'github.sha', 'make vscode-package',
+                      'vscode-deps', 'CARGO_REGISTRY_TOKEN', 'secrets.',
+                      'gh release create', 'vsce publish', 'ovsx publish',
+                      'cargo publish', 'actions/download-artifact'):
+        if forbidden in text:
+            fail(f'workflow: forbidden legacy/bypass path {forbidden!r}')
     top_permissions = block_after(lines, find_line(lines, 'permissions:', 'workflow') - 1, 0)
     if '  contents: read' not in top_permissions:
         fail('workflow: top-level permissions must be `contents: read`')
-
-    # Pinned actions: every `uses:` needs a full sha and a version comment.
     check_pinned_actions(lines, 'workflow')
-
-    # No inline step may carry more than ten lines of script.
     check_inline_scripts(lines, 'workflow')
-
-    # Untracked operator files must never be referenced.
     for forbidden in UNTRACKED_PATHS:
         if forbidden in text:
             fail(f'workflow: references operator-owned path {forbidden!r}')
-
     validate = require_job(lines, 'validate')
     publish = require_job(lines, 'publish')
-
-    validate_permissions = block_after(
-        validate, validate.index('    permissions:'), 4)
-    if '      contents: read' not in validate_permissions:
-        fail('workflow: validate job must have `contents: read`')
-    publish_permissions = block_after(
-        publish, publish.index('    permissions:'), 4)
-    if '      contents: write' not in publish_permissions:
-        fail('workflow: publish job must have `contents: write`')
-    if text.count('contents: write') != 1:
-        fail('workflow: `contents: write` must appear exactly once (publish job)')
-
-    # `actions: read` is only for the cross-run artifact download in validate;
-    # keep it least-privilege by refusing it anywhere else.
-    if '      actions: read' not in validate_permissions:
-        fail('workflow: validate job must grant `actions: read` for the cross-run download')
-    if '      actions: read' in publish_permissions:
-        fail('workflow: publish job must not grant `actions: read`')
-    if sum(line.count('actions: read') for line in code) != 1:
-        fail('workflow: `actions: read` must appear exactly once (validate job)')
-
-    if '    needs: validate' not in publish:
-        fail('workflow: publish job must declare `needs: validate`')
-    if not any(re.match(r"^\s*if:\s*\$\{\{\s*inputs\.mode\s*==\s*'publish'\s*\}\}", line)
-               for line in publish):
-        fail("workflow: publish job must be gated on `inputs.mode == 'publish'`")
-
-    # Validate lane consumes the build artifact and verifies it without rebuilding.
+    validate_permissions = block_after(validate, validate.index('    permissions:'), 4)
+    if '      contents: read' not in validate_permissions or '      actions: read' not in validate_permissions:
+        fail('workflow: validate must be read-only with actions: read')
+    publish_permissions = block_after(publish, publish.index('    permissions:'), 4)
+    if '      contents: write' not in publish_permissions or '      id-token: write' not in publish_permissions:
+        fail('workflow: publish must scope contents/id-token write to its job')
+    if text.count('contents: write') != 1 or text.count('id-token: write') != 1:
+        fail('workflow: write permissions must occur only in publish')
     validate_text = '\n'.join(validate)
-    if f'name: {ARTIFACT_NAME}' not in validate_text:
-        fail(f'workflow: validate job must download {ARTIFACT_NAME!r}')
-    if 'run-id: ${{ inputs.build_run_id }}' not in validate_text:
-        fail('workflow: validate job must download from `inputs.build_run_id`')
-    if 'actions/download-artifact@' not in validate_text:
-        fail('workflow: validate job must use actions/download-artifact')
-
-    # Provenance: the selected run is verified before any of its bytes are used,
-    # so a same-version run from another workflow, repository or commit cannot
-    # supply the assets. The checkout is pinned to the dispatch source commit.
-    if 'ref: ${{ github.sha }}' not in validate_text:
-        fail('workflow: validate job must check out the dispatch source commit')
-    if RUN_PROVENANCE not in validate_text:
-        fail('workflow: validate job must verify the selected build run provenance')
-    if 'BUILD_RUN_ID: ${{ inputs.build_run_id }}' not in validate_text:
-        fail('workflow: provenance check must receive `inputs.build_run_id`')
-    provenance_at = next(i for i, line in enumerate(validate) if RUN_PROVENANCE in line)
-    for later in ('actions/download-artifact@', '--validate-artifacts',
-                  'make vscode-package', 'name: validated-release-assets'):
-        later_at = next(i for i, line in enumerate(validate) if later in line)
-        if provenance_at > later_at:
-            fail(f'workflow: provenance verification must precede {later!r} '
-                 'in the validate job')
-
-    if 'python3 scripts/check_release_automation.py --validate-artifacts' not in validate_text:
-        fail('workflow: validate job must verify the archive and version triple')
-    if 'make vscode-package' not in validate_text:
-        fail('workflow: validate job must build the offline VSIX')
-    if 'name: validated-release-assets' not in validate_text:
-        fail('workflow: validate job must hand off validated assets to publish')
-    # Exactly the validated names are handed off; a glob or an unlisted path
-    # would let an unexpected file ride into the published release.
-    if '--print-version >> "$GITHUB_ENV"' not in validate_text:
-        fail('workflow: validate job must resolve RELEASE_VERSION for the handoff')
-    for glob in ('dist/*', 'build/vscode/*'):
-        if glob in validate_text:
-            fail(f'workflow: validated handoff must not upload {glob!r}')
-    for asset in (f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz',
-                  f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz.sha256',
-                  'build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix'):
-        if asset not in validate_text:
-            fail(f'workflow: validated handoff must list {asset!r}')
-    version_at = next(i for i, line in enumerate(validate)
-                      if '--print-version >> "$GITHUB_ENV"' in line)
-    handoff_at = next(i for i, line in enumerate(validate)
-                      if 'name: validated-release-assets' in line)
-    if version_at > handoff_at:
-        fail('workflow: RELEASE_VERSION must be resolved before the asset handoff')
-
-    # Publish lanes: mode gate plus credential presence, one readable skip per lane.
+    if 'ref: ${{ github.event.repository.default_branch }}' not in validate_text:
+        fail('workflow: validate must check out the protected default branch')
+    if '--prepare-publication-runtime' not in validate_text:
+        fail('workflow: validate must invoke the fail-closed runtime collector')
     publish_text = '\n'.join(publish)
-    if 'ref: ${{ github.sha }}' not in publish_text:
-        fail('workflow: publish job must check out the dispatch source commit')
-    if '--validate-artifacts release-assets/dist' not in publish_text:
-        fail('workflow: publish job must re-verify the handed-off artifact set')
-    if 'release-assets/dist/*' in publish_text:
-        fail('workflow: release creation must upload exactly the validated assets')
-    if TAG_TARGET_CHECK not in publish_text:
-        fail('workflow: publish job must resolve the version tag target')
-    if '--target "$RELEASE_TARGET"' not in publish_text:
-        fail('workflow: release creation must target the verified source commit')
-    if f'stem="release-assets/dist/magit-lsp-v${{RELEASE_VERSION}}-{ASSET}.tar.gz"' \
-            not in publish_text:
-        fail('workflow: release creation must name the validated archive path')
-    if '"$stem" "$stem.sha256"' not in publish_text:
-        fail('workflow: release creation must upload the archive and its sidecar')
-    revalidate_at = next(i for i, line in enumerate(publish)
-                         if '--validate-artifacts release-assets/dist' in line)
-    tag_target_at = next(i for i, line in enumerate(publish) if TAG_TARGET_CHECK in line)
-    release_at = next(i for i, line in enumerate(publish)
-                      if 'gh release create' in line and not line.lstrip().startswith('#'))
-    if revalidate_at > release_at:
-        fail('workflow: artifact re-verification must precede release creation')
-    if tag_target_at > release_at:
-        fail('workflow: tag target resolution must precede release creation')
-    for secret in STORED_SECRETS:
-        if f'{secret}: ${{{{ secrets.{secret} }}}}' not in publish_text:
-            fail(f'workflow: publish job must read secrets.{secret} into env')
-        if f"env.{secret} != ''" not in publish_text:
-            fail(f'workflow: {secret} lane must be gated on env.{secret} != empty')
-        if f"env.{secret} == ''" not in publish_text:
-            fail(f'workflow: {secret} lane must report a readable skip when unset')
-    for secret in FORBIDDEN_SECRETS:
-        if f'secrets.{secret}' in publish_text:
-            fail(f'workflow: publish job must not read secrets.{secret}; '
-                 'marketplace publication uses OIDC trusted publishing')
-    for command, oidc_arg in OIDC_PUBLISH_ARGS.items():
-        command_at = next((i for i, line in enumerate(publish)
-                           if command in line and not line.lstrip().startswith('#')),
-                          None)
-        if command_at is None:
-            continue  # reported by the publish-command loop below
-        command_indent = indent_of(publish[command_at])
-        step_lines = [publish[command_at]]
-        for line in publish[command_at + 1:]:
-            if line.strip() and line.lstrip().startswith('- ') \
-                    and indent_of(line) <= command_indent:
-                break
-            step_lines.append(line)
-        if oidc_arg not in '\n'.join(step_lines):
-            fail(f'workflow: {command!r} must authenticate with OIDC '
-                 f'({oidc_arg}) instead of a stored token')
-    for command in PUBLISH_COMMANDS:
-        if command not in publish_text:
-            fail(f'workflow: missing publish command {command!r}')
-    if 'gh release create' not in publish_text:
-        fail('workflow: publish job must create the GitHub Release')
-    if DEPENDENCY_INSTALL not in publish_text:
-        fail('workflow: publish job must install the frozen VSCode CLI dependencies '
-             f'with {DEPENDENCY_INSTALL!r} before publishing')
-    install_at = next(i for i, line in enumerate(publish)
-                      if DEPENDENCY_INSTALL in line and not line.lstrip().startswith('#'))
-    for step in PUBLISHING_STEPS:
-        step_at = next(i for i, line in enumerate(publish)
-                       if step in line and not line.lstrip().startswith('#'))
-        if install_at > step_at:
-            fail(f'workflow: {DEPENDENCY_INSTALL!r} must run before {step!r} '
-                 'in the publish job')
-    if 'release-assets/dist/' not in publish_text:
-        fail('workflow: release creation must upload the validated dist assets')
-    if 'python3 scripts/check_release_automation.py --print-version' not in publish_text:
-        fail('workflow: publish job must resolve the release version from the manifests')
+    if '    needs: validate' not in publish or '    if: ${{ false }}' not in publish:
+        fail('workflow: publish must remain ineligible pending immutable asset handoff')
+    if '    environment: release-publish' not in publish:
+        fail('workflow: publish job must require release-publish environment')
 
 
 def require_job(lines, name):
@@ -1373,19 +1217,14 @@ def check_contract_unit(path=MAKEFILE):
 
 
 def check_artifact_consistency():
-    """The build workflow must upload exactly the artifact the publish workflow downloads."""
+    """The producer publishes candidate assets; publisher currently stays ineligible."""
     build_jobs = workflow_jobs(read_lines(BUILD_WORKFLOW))
     uploaded = step_artifact_name(
         build_jobs[FALLBACK_JOB], 'actions/upload-artifact@', 'build workflow')
-    downloaded = step_artifact_name(
-        read_lines(WORKFLOW), 'actions/download-artifact@', 'publish workflow')
     if uploaded != ARTIFACT_NAME:
         fail(f'build workflow: uploads {uploaded!r}, expected {ARTIFACT_NAME!r}')
-    if downloaded != ARTIFACT_NAME:
-        fail(f'publish workflow: downloads {downloaded!r}, expected {ARTIFACT_NAME!r}')
-    if uploaded != downloaded:
-        fail(f'artifact name mismatch: release.yml uploads {uploaded!r} but '
-             f'publish.yml downloads {downloaded!r}')
+    if 'actions/download-artifact@' in '\n'.join(read_lines(WORKFLOW)):
+        fail('publish workflow: candidate download is forbidden before immutable asset handoff')
 
 
 def check_metadata():
@@ -3635,54 +3474,23 @@ def run_self_tests():
 
         check_workflow()
         for label, mutations, expected in (
-            ('publish workflow without a pinned validate checkout',
-             (('          ref: ${{ github.sha }}\n', '', 1),),
-             'validate job must check out the dispatch source commit'),
-            ('publish workflow without a pinned publish checkout',
-             (('          ref: ${{ github.sha }}\n\n'
-               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
-               ' # v7.0.0\n        with:\n'
-               '          name: validated-release-assets\n',
-               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
-               ' # v7.0.0\n        with:\n'
-               '          name: validated-release-assets\n', None),),
-             'publish job must check out the dispatch source commit'),
-            ('publish workflow without run provenance',
-             ((RUN_PROVENANCE, 'python3 scripts/other.py', None),),
-             'verify the selected build run provenance'),
-            ('publish workflow using the VSIX before provenance',
-             (('      # Fail closed before any of the selected run',
-               '      - run: make vscode-package\n'
-               '      # Fail closed before any of the selected run', None),),
-             'provenance verification must precede'),
-            ('publish workflow handing off a dist glob',
-             (('            dist/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu'
-               '.tar.gz\n', '            dist/*\n', None),),
-             'must not upload'),
-            ('publish workflow uploading arbitrary release assets',
-             (('"$stem" "$stem.sha256"', 'release-assets/dist/*', None),),
-             'upload exactly the validated assets'),
-            ('publish workflow releasing without a target',
-             ((' --target "$RELEASE_TARGET"', '', None),),
-             'must target the verified source commit'),
-            ('publish workflow without a tag target check',
-             ((TAG_TARGET_CHECK, 'python3 scripts/other.py', None),),
-             'resolve the version tag target'),
-            ('publish workflow without artifact re-verification',
-             (('--validate-artifacts release-assets/dist', '--print-version', None),),
-             're-verify the handed-off artifact set'),
-            ('publish workflow reading a stored marketplace PAT',
-             (('      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n',
-               '      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n'
-               '      VSCE_PAT: ${{ secrets.VSCE_PAT }}\n', 1),),
-             'must not read secrets.VSCE_PAT'),
-            ('publish workflow publishing the marketplace VSIX with a stored token',
-             (('            --oidc\n', '', None),),
-             'must authenticate with OIDC'),
-            ('publish workflow without frozen CLI dependencies',
-             (('      - name: Install frozen VS Code CLI dependencies\n'
-               '        run: make vscode-deps V=1\n', '', None),),
-             'frozen VSCode CLI dependencies'),
+            ('manual trigger bypass', (('  workflow_run:', '  workflow_dispatch:', 1),),
+             'trigger must be workflow_run only'),
+            ('default SHA as release source', (('github.event.repository.default_branch', 'github.sha', 1),),
+             'forbidden legacy/bypass path'),
+            ('write validation permission', (('      contents: read', '      contents: write', 1),),
+             'validate must be read-only'),
+            ('missing protected environment', (('    environment: release-publish\n', '', 1),),
+             'must require release-publish environment'),
+            ('PAT fallback', (('    steps:', '    env: { VSCE_PAT: ${{ secrets.VSCE_PAT }} }\n    steps:', 1),),
+             'forbidden legacy/bypass path'),
+            ('publish bypass without handoff revalidation', (('    if: ${{ false }}', '    if: ${{ true }}', 1),),
+             'publish must remain ineligible'),
+            ('untrusted producer identity', (('Release artifact build (no publication)', 'Untrusted producer', 1),),
+             'missing trusted collector contract'),
+            ('untrusted producer checkout', (('ref: ${{ github.event.repository.default_branch }}',
+                                                'ref: ${{ github.event.workflow_run.head_sha }}', 1),),
+             'validate must check out the protected default branch'),
         ):
             expect_check(label, check_workflow,
                          mutated_workflow(directory, label, mutations),
