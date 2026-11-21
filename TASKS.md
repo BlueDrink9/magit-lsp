@@ -25,8 +25,10 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - Verified: `make ui-unit` → exit 0 (`ok: ui-unit`).
   - Done: `5544db4`.
 
-- [ ] **PERF-OPEN-LOADING-UI — Verify early loading display in Neovim.** After PERF-OPEN-ASYNC and PERF-OPEN-UI-GATE, test: a permanent deterministic native text/structured scenario proves the public :Magit window displays the server-owned loading document while Git is held, remains responsive and replaces it with fresh status after release; distinguish window creation from content readiness. check: document lifecycle, measured evidence and measurement limitations. Verification: `make ui-file FILE=tests/ui/scenarios/status-loading.scn`.
+- [x] **PERF-OPEN-LOADING-UI — Verify early loading display in Neovim.** After PERF-OPEN-ASYNC and PERF-OPEN-UI-GATE, test: a permanent deterministic native text/structured scenario proves the public :Magit window displays the server-owned loading document while Git is held, remains responsive and replaces it with fresh status after release; distinguish window creation from content readiness. check: document lifecycle, measured evidence and measurement limitations. Verification: `make ui-file FILE=tests/ui/scenarios/status-loading.scn`.
   - Recipe: `fixture: modified-two-files` plus `startup: held`; `wait status entered`; capture/assert the displayed server loading text before any release; send the registered `common.toggle-text-mode` key and wait for the client to stay responsive; `release status`; `wait`; assert the fresh fixture branch, files and hunks replaced the loading text.
+  - Verified: `make ui-file FILE=tests/ui/scenarios/status-loading.scn` → exit 0 (`ok: ui-file`); text lifecycle artifacts in `build/ui/status-loading/` (`loading.screen`, `responsive.screen`, `fresh.screen`).
+  - Done: `6c43d20`.
 
 - [x] **PERF-OPEN-REUSE — Reuse discovered Git repository on status opening.** Remove verified duplicate discovery from the server status-open path without skipping status/rebase reads or changing rendered output, refresh freshness, worktree roots or Git failure handling. test: Rust regression coverage directly exercises opening from an already discovered repository and existing root/status invariants. Verification: `make test-rust FILTER="--lib"`.
   - Done: `d5cf1ea`; hook formatting `30b69b5`.
