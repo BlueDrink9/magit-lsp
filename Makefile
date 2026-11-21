@@ -192,6 +192,8 @@ vscode-prereqs:
 	[ -z "$$missing" ] || { printf 'MISSING:%s\n' "$$missing"; exit 1; }
 
 vscode-test: build vscode-deps
+	$(MAKE) vscode-semantic-test
+	$(MAKE) vscode-semantic-check
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode,pnpm --dir clients/vscode test)
 	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)

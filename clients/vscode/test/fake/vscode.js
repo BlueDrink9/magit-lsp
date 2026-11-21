@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * The scripted `vscode` module used by the node integration test.
@@ -8,7 +8,7 @@
  * QuickPick and input prompts. Nothing here parses server text or structure.
  */
 
-const fs = require('node:fs');
+const fs = require("node:fs");
 
 /** All observable fake-window state, reset between test cases. */
 const state = {
@@ -41,7 +41,7 @@ class Uri {
   /**
    * @param {{scheme: string, authority?: string, path?: string}} parts
    */
-  constructor({ scheme, authority = '', path = '' }) {
+  constructor({ scheme, authority = "", path = "" }) {
     Object.assign(this, { scheme, authority, path });
   }
 
@@ -54,14 +54,14 @@ class Uri {
   static parse(value) {
     const match = /^([^:]+):\/\/([^/]*)(\/.*)$/.exec(value);
     if (!match) {
-      return new Uri({ scheme: 'file', path: value });
+      return new Uri({ scheme: "file", path: value });
     }
     return new Uri({ scheme: match[1], authority: match[2], path: match[3] });
   }
 
   /** @param {string} file */
   static file(file) {
-    return new Uri({ scheme: 'file', path: file });
+    return new Uri({ scheme: "file", path: file });
   }
 
   /** The local filesystem path of a `file` URI. */
@@ -109,8 +109,8 @@ class Selection {
   constructor(anchor, active) {
     this.anchor = anchor;
     this.active = active;
-    const ordered = (left, right) => left.line < right.line
-      || (left.line === right.line && left.character <= right.character);
+    const ordered = (left, right) =>
+      left.line < right.line || (left.line === right.line && left.character <= right.character);
     this.start = ordered(anchor, active) ? anchor : active;
     this.end = ordered(anchor, active) ? active : anchor;
     this.isEmpty = anchor.line === active.line && anchor.character === active.character;
@@ -128,9 +128,13 @@ class Range {
 
 /** Whole-document edits used by managed-draft history. */
 class WorkspaceEdit {
-  constructor() { this.edits = []; }
+  constructor() {
+    this.edits = [];
+  }
   /** Record a native replacement. */
-  replace(uri, range, text) { this.edits.push({ uri, range, text }); }
+  replace(uri, range, text) {
+    this.edits.push({ uri, range, text });
+  }
 }
 
 /** The semantic-token legend the server declares. */
@@ -159,7 +163,7 @@ class SemanticTokens {
  */
 function providerText(uri) {
   const provider = state.providers.get(uri.scheme);
-  return provider ? provider.provideTextDocumentContent(uri) : '';
+  return provider ? provider.provideTextDocumentContent(uri) : "";
 }
 
 /**
@@ -170,19 +174,19 @@ function providerText(uri) {
  * @returns {object}
  */
 function makeDocument(uri, content) {
-  const lines = () => content.split('\n');
+  const lines = () => content.split("\n");
   const document = {
     uri,
     version: 1,
     isDirty: false,
     isClosed: false,
-    languageId: 'plaintext',
+    languageId: "plaintext",
     getText: () => content,
     get lineCount() {
       return lines().length;
     },
     lineAt(line) {
-      return { text: lines()[line] || '' };
+      return { text: lines()[line] || "" };
     },
     async save() {
       const provider = state.fileProviders.get(uri.scheme);
@@ -217,24 +221,32 @@ function openDocument(uri, content) {
   if (state.fileProviders.has(uri.scheme)) {
     const existing = state.documents.get(key);
     if (existing && !existing.isClosed) return existing;
-    const document = makeDocument(uri, Buffer.from(state.fileProviders.get(uri.scheme).readFile(uri)).toString());
+    const document = makeDocument(
+      uri,
+      Buffer.from(state.fileProviders.get(uri.scheme).readFile(uri)).toString(),
+    );
     state.documents.set(key, document);
     return document;
   }
   if (state.providers.has(uri.scheme)) {
     const text = providerText(uri);
     const document = makeDocument(uri, text);
-    Object.defineProperty(document, 'getText', { value: () => providerText(uri) });
-    Object.defineProperty(document, 'lineCount', {
-      get: () => providerText(uri).split('\n').length,
+    Object.defineProperty(document, "getText", { value: () => providerText(uri) });
+    Object.defineProperty(document, "lineCount", {
+      get: () => providerText(uri).split("\n").length,
     });
-    Object.defineProperty(document, 'lineAt', {
-      value: (line) => ({ text: providerText(uri).split('\n')[line] || '' }),
+    Object.defineProperty(document, "lineAt", {
+      value: (line) => ({ text: providerText(uri).split("\n")[line] || "" }),
     });
     state.documents.set(key, document);
     return document;
   }
-  const body = content !== undefined ? content : (fs.existsSync(uri.path) ? fs.readFileSync(uri.path, 'utf8') : '');
+  const body =
+    content !== undefined
+      ? content
+      : fs.existsSync(uri.path)
+        ? fs.readFileSync(uri.path, "utf8")
+        : "";
   const document = makeDocument(uri, body);
   state.documents.set(key, document);
   return document;
@@ -248,7 +260,7 @@ function openDocument(uri, content) {
  */
 function editorFor(document) {
   let editor = state.editors.find(
-    (candidate) => candidate.document.uri.toString() === document.uri.toString()
+    (candidate) => candidate.document.uri.toString() === document.uri.toString(),
   );
   if (!editor) {
     const position = new Position(0, 0);
@@ -258,7 +270,11 @@ function editorFor(document) {
       revealRange() {},
       async edit(callback) {
         let text;
-        callback({ replace(range, replacement) { text = replacement; } });
+        callback({
+          replace(range, replacement) {
+            text = replacement;
+          },
+        });
         return document.replaceText(text);
       },
     };
@@ -274,11 +290,11 @@ function editorFor(document) {
  */
 function createQuickPick() {
   const quickPick = {
-    title: '',
-    placeholder: '',
+    title: "",
+    placeholder: "",
     items: [],
     selectedItems: [],
-    value: '',
+    value: "",
     visible: false,
     acceptHandler: undefined,
     changeHandler: undefined,
@@ -303,9 +319,9 @@ function createQuickPick() {
       this.hideHandler = handler;
     },
   };
-  Object.defineProperty(quickPick, 'value', {
+  Object.defineProperty(quickPick, "value", {
     get() {
-      return this._value || '';
+      return this._value || "";
     },
     set(next) {
       this._value = next;
@@ -336,15 +352,13 @@ const vscode = {
   FileType: { File: 1 },
   FileChangeType: { Changed: 1 },
   FileSystemError: {
-    FileNotFound: () => new Error('Draft not found'),
+    FileNotFound: () => new Error("Draft not found"),
     NoPermissions: (text) => new Error(text),
   },
 
   workspace: {
     get workspaceFolders() {
-      return state.workspaceFolder
-        ? [{ uri: Uri.file(state.workspaceFolder) }]
-        : undefined;
+      return state.workspaceFolder ? [{ uri: Uri.file(state.workspaceFolder) }] : undefined;
     },
     getConfiguration(section) {
       return {
@@ -385,7 +399,7 @@ const vscode = {
       if (input instanceof Uri) {
         return openDocument(input);
       }
-      return openDocument(Uri.from({ scheme: 'untitled', path: '/untitled' }), input.content || '');
+      return openDocument(Uri.from({ scheme: "untitled", path: "/untitled" }), input.content || "");
     },
   },
 
@@ -409,10 +423,10 @@ const vscode = {
     },
     async executeCommand(name, ...args) {
       state.executed.push({ name, args });
-      if (name === 'setContext') {
+      if (name === "setContext") {
         state.contextValues.set(args[0], args[1]);
       }
-      if (name === 'workbench.action.files.revert') {
+      if (name === "workbench.action.files.revert") {
         const uri = args[0] || state.activeEditor?.document.uri;
         const document = state.documents.get(uri.toString());
         const provider = state.fileProviders.get(uri.scheme);
@@ -478,13 +492,13 @@ const vscode = {
       return state.inputAnswers.shift();
     },
     showErrorMessage(text) {
-      state.messages.push({ level: 'error', text });
+      state.messages.push({ level: "error", text });
     },
     showWarningMessage(text) {
-      state.messages.push({ level: 'warn', text });
+      state.messages.push({ level: "warn", text });
     },
     showInformationMessage(text) {
-      state.messages.push({ level: 'info', text });
+      state.messages.push({ level: "info", text });
       if (state.informationAnswer) return state.informationAnswer;
       return undefined;
     },
@@ -552,6 +566,9 @@ const vscode = {
     },
     get clipboard() {
       return state.clipboard;
+    },
+    get semanticProviders() {
+      return state.semanticProviders;
     },
     get activeEditor() {
       return state.activeEditor;
