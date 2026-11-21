@@ -1339,6 +1339,22 @@ impl HashNormalizer {
     }
 }
 
+/// Replace this run's repository root and binary path with the recording's
+/// placeholders.
+///
+/// This is the repository-root/binary half of [`canonical_frame`]'s contract,
+/// shared so a persisted client echo uses the same placeholders as a captured
+/// server frame. Replaying a recorded frame expands them back to the live
+/// values.
+fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
+    text.replace(
+        &format!("file://{root}"),
+        &format!("file://{RECORDED_ROOT}"),
+    )
+    .replace(root, RECORDED_ROOT)
+    .replace(binary, RECORDED_BINARY)
+}
+
 /// The recorded comparison form of a frame.
 ///
 /// The current server omits `jsonrpc` on outbound frames, recorded runs used a
@@ -1367,13 +1383,7 @@ fn canonical_frame(
     });
     hashes.normalize_frame(&mut value);
     let text = serde_json::to_string(&value).expect("serialise observed frame");
-    let text = text
-        .replace(
-            &format!("file://{root}"),
-            &format!("file://{RECORDED_ROOT}"),
-        )
-        .replace(root, RECORDED_ROOT)
-        .replace(binary, RECORDED_BINARY);
+    let text = canonical_paths(&text, root, binary);
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
@@ -1603,7 +1613,14 @@ fn replay_example_mode(
                             if let Some(refreshed) = &refreshed {
                                 message["params"]["contentChanges"][0]["text"] =
                                     Value::String(refreshed.clone());
-                                regenerated[index] = captured_line(line, &message)
+                                // The live server receives the refreshed text with
+                                // this run's real paths, but the artifact must keep
+                                // the recording's placeholders like every captured
+                                // server frame; strict replay expands them again.
+                                let mut persisted = message.clone();
+                                persisted["params"]["contentChanges"][0]["text"] =
+                                    Value::String(canonical_paths(refreshed, &root, binary));
+                                regenerated[index] = captured_line(line, &persisted)
                                     .map_err(|error| format!("{where_}: {error}"))?;
                             }
                             let sent_text = refreshed.unwrap_or_else(|| update.text.clone());
@@ -2205,6 +2222,40 @@ fn regeneration_echo_leaves_authored_client_edits_unchanged() {
         .collect();
     replay_example_mode(name, &reparsed, false)
         .expect("the captured commit example replays strictly");
+    // The captured echo of the pending-draft row must persist the recording's
+    // root placeholder, never this run's temporary repository root; a stale
+    // run root makes the strict replay above fail on the next run.
+    let pending_echo = reparsed
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
+                && line.message["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .is_some_and(|uri| uri.ends_with(".magit"))
+                && line.message["params"]["contentChanges"][0]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("/.git/COMMIT_EDITMSG"))
+        })
+        .map(|line| {
+            line.message["params"]["contentChanges"][0]["text"]
+                .as_str()
+                .unwrap()
+        })
+        .expect("the captured pending-draft echo");
+    let pending_uri = format!("file://{RECORDED_ROOT}/.git/COMMIT_EDITMSG");
+    assert!(
+        pending_echo.contains(&pending_uri),
+        "the captured echo keeps the recording's repository placeholder: {pending_echo}"
+    );
+    let placeholder_prefix = format!("file://{RECORDED_ROOT}/");
+    for (start, _) in pending_echo.match_indices("file://") {
+        assert!(
+            pending_echo[start..].starts_with(&placeholder_prefix),
+            "a captured echo must not retain a run-specific root: {pending_echo}"
+        );
+    }
     let authored = reparsed
         .iter()
         .find_map(|line| {
