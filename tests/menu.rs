@@ -216,7 +216,7 @@ fn the_commit_menu_reflows_its_action_columns() {
     assert!(tree.tokens.iter().any(|token| token.line == label_line
         && token.start == start
         && token.length == label.len()
-        && token.token_type == "magit.menu.label"));
+        && token.token_type == "heading"));
     let flag_line = label_line + 1;
     assert_eq!(
         tree.lines[flag_line].trim(),
@@ -224,12 +224,8 @@ fn the_commit_menu_reflows_its_action_columns() {
         "the flag and marker continue on the next line"
     );
     for (text, length, token_type) in [
-        (
-            "--reset-author",
-            "--reset-author".len(),
-            "magit.menu.flag.off",
-        ),
-        ("[ ]", 3, "magit.menu.switch.off"),
+        ("--reset-author", "--reset-author".len(), "removed"),
+        ("[ ]", 3, "removed"),
     ] {
         let start = tree.lines[flag_line].find(text).expect("continuation text");
         assert!(
@@ -740,22 +736,14 @@ fn menu_tokens_decode_to_the_documented_types() {
             rows: 30,
         });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
-    let types = semantic_tokens::TOKEN_TYPES;
+    let roles = semantic_tokens::roles();
     let mut seen = Vec::new();
     for token in &data {
-        seen.push(types[token.token_type as usize]);
+        seen.push(roles[token.token_type as usize].name);
     }
     for expected in [
-        "magit.menu.title",
-        "magit.menu.group",
-        "magit.menu.key",
-        "magit.menu.label",
-        "magit.menu.flag",
-        "magit.menu.flag.off",
-        "magit.menu.switch.off",
-        "magit.menu.option",
-        "magit.menu.preview",
-        "magit.menu.planned",
+        "heading", "heading", "key", "heading", "muted", "removed", "removed", "muted", "heading",
+        "muted",
     ] {
         assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
@@ -780,7 +768,7 @@ fn menu_tokens_decode_to_the_documented_types() {
             .token_type
             .clone()
     };
-    assert_eq!(flag_token(&menu), "magit.menu.flag.off");
+    assert_eq!(flag_token(&menu), "removed");
 
     menu.toggle_switch("-a");
     let tree = menu.render(Viewport {
@@ -790,11 +778,11 @@ fn menu_tokens_decode_to_the_documented_types() {
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
     let seen: Vec<&str> = data
         .iter()
-        .map(|token| types[token.token_type as usize])
+        .map(|token| roles[token.token_type as usize].name)
         .collect();
-    assert!(seen.contains(&"magit.menu.switch.on"), "{seen:?}");
-    assert!(seen.contains(&"magit.menu.flag.on"), "{seen:?}");
-    assert_eq!(flag_token(&menu), "magit.menu.flag.on");
+    assert!(seen.contains(&"added"), "{seen:?}");
+    assert!(seen.contains(&"added"), "{seen:?}");
+    assert_eq!(flag_token(&menu), "added");
 }
 
 /// The token type covering `offset` bytes into the first line containing `text`.
@@ -819,31 +807,19 @@ fn a_pending_prefix_dims_items_that_cannot_complete_it() {
     );
 
     // An option cannot follow `-`, so its whole key is disabled.
-    assert_eq!(
-        token_at(&tree, "=A", 0).as_deref(),
-        Some("magit.menu.disabled")
-    );
+    assert_eq!(token_at(&tree, "=A", 0).as_deref(), Some("muted"));
     // A switch can: its `-` is the pending prefix and `a` is the ordinary key.
-    assert_eq!(
-        token_at(&tree, "-a", 0).as_deref(),
-        Some("magit.menu.pending")
-    );
-    assert_eq!(token_at(&tree, "-a", 1).as_deref(), Some("magit.menu.key"));
+    assert_eq!(token_at(&tree, "-a", 0).as_deref(), Some("muted"));
+    assert_eq!(token_at(&tree, "-a", 1).as_deref(), Some("key"));
     // An action cannot follow `-` either.
-    assert_eq!(
-        token_at(&tree, "  c  Commit", 2).as_deref(),
-        Some("magit.menu.disabled")
-    );
+    assert_eq!(token_at(&tree, "  c  Commit", 2).as_deref(), Some("muted"));
 
     // With no pending steps every item is normal again.
     let normal = menu.render(Viewport {
         cols: 100,
         rows: 30,
     });
-    assert_eq!(
-        token_at(&normal, "=A", 0).as_deref(),
-        Some("magit.menu.option")
-    );
+    assert_eq!(token_at(&normal, "=A", 0).as_deref(), Some("muted"));
 }
 
 #[test]
@@ -897,7 +873,7 @@ fn backspace_pops_one_pending_step() {
         .tree();
     assert_eq!(
         token_at(tree, "=A", 0).as_deref(),
-        Some("magit.menu.option"),
+        Some("muted"),
         "items are normal again"
     );
 }

@@ -31,7 +31,7 @@ fn emitted_roles(tree: &Tree) -> std::collections::HashSet<&'static str> {
     magit_lsp::semantic_tokens::encode(tree)
         .data
         .iter()
-        .map(|token| magit_lsp::semantic_tokens::TOKEN_TYPES[token.token_type as usize])
+        .map(|token| magit_lsp::semantic_tokens::roles()[token.token_type as usize].name)
         .collect()
 }
 
@@ -234,7 +234,8 @@ fn response_tokens(tree: &Tree) -> Vec<DecodedToken> {
                 line,
                 start,
                 length: token.length,
-                token_type: magit_lsp::semantic_tokens::TOKEN_TYPES[token.token_type as usize]
+                token_type: magit_lsp::semantic_tokens::roles()[token.token_type as usize]
+                    .name
                     .to_string(),
                 modifiers: magit_lsp::semantic_tokens::TOKEN_MODIFIERS
                     .iter()
@@ -250,9 +251,9 @@ fn response_tokens(tree: &Tree) -> Vec<DecodedToken> {
 /// The advertised legend names, as the decode helpers consume them.
 fn legend_names() -> (Vec<String>, Vec<String>) {
     (
-        magit_lsp::semantic_tokens::TOKEN_TYPES
+        magit_lsp::semantic_tokens::roles()
             .iter()
-            .map(|name| name.to_string())
+            .map(|role| role.name.to_string())
             .collect(),
         magit_lsp::semantic_tokens::TOKEN_MODIFIERS
             .iter()

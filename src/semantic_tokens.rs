@@ -28,44 +28,9 @@ pub fn roles() -> &'static [SemanticRole] {
     })
 }
 
-/// Token types in role-table order.
-pub const TOKEN_TYPES: &[&str] = &[
-    "heading",
-    "muted",
-    "added",
-    "removed",
-    "changed",
-    "path",
-    "identifier",
-    "ref",
-    "key",
-    "warning",
-    "error",
-];
-
 /// Token modifiers, in legend bit order.
 /// keep-for: TASKS §3.15; selected is produced by log selection, while planned/disabled and bold retain recorded presentation uses (R-5.3).
 pub const TOKEN_MODIFIERS: &[&str] = &["staged", "selected", "planned", "disabled", "bold"];
-
-/// Suggested theme group per token type, in [`TOKEN_TYPES`] order.
-/// keep-for: TASKS §3.15 recorded type-to-theme contract; Lua consumes these suggestions dynamically.
-///
-/// Clients link `@lsp.type.<token_type>.<filetype>` to these groups, so a new
-/// token type needs no client change. The names are colourscheme groups except
-/// the `Magit*` intermediates the Neovim client defines locally.
-pub const TOKEN_GROUPS: &[&str] = &[
-    "Title",
-    "Comment",
-    "Added",
-    "Removed",
-    "Changed",
-    "Directory",
-    "Identifier",
-    "Constant",
-    "Keyword",
-    "WarningMsg",
-    "ErrorMsg",
-];
 
 /// The legend advertised in `semanticTokensProvider`.
 pub fn legend() -> SemanticTokensLegend {
@@ -274,15 +239,15 @@ mod tests {
 
     #[test]
     fn every_token_type_has_a_suggested_group() {
-        assert_eq!(TOKEN_TYPES.len(), TOKEN_GROUPS.len());
         let groups = token_groups();
-        for token_type in TOKEN_TYPES {
+        for role in roles() {
             assert!(
                 groups
-                    .get(*token_type)
+                    .get(role.name)
                     .and_then(serde_json::Value::as_str)
                     .is_some(),
-                "{token_type} has no suggested group"
+                "{} has no suggested group",
+                role.name
             );
         }
     }

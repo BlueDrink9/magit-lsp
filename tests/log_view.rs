@@ -128,23 +128,23 @@ fn assert_log_tokens(tree: &Tree) {
     let ref_token = tree
         .tokens
         .iter()
-        .find(|token| token.line == line && token.token_type == "magit.ref")
+        .find(|token| token.line == line && token.token_type == "ref")
         .unwrap();
     let ref_start = text.find("référence").unwrap();
     assert!(text[..ref_start].ends_with(" "));
     let expected = [
         (
-            "magit.hash",
+            "identifier",
             tree.tokens
                 .iter()
-                .find(|token| token.line == line && token.token_type == "magit.hash")
+                .find(|token| token.line == line && token.token_type == "identifier")
                 .unwrap()
                 .start,
             8,
         ),
-        ("magit.ref", ref_token.start, ref_token.length),
+        ("ref", ref_token.start, ref_token.length),
         (
-            "magit.author",
+            "muted",
             text.find("Élodie <elodie@example.com>").unwrap(),
             "Élodie <elodie@example.com>".len(),
         ),
@@ -160,30 +160,29 @@ fn assert_log_tokens(tree: &Tree) {
         );
         let selected = text.get(start..start + length).unwrap();
         match kind {
-            "magit.hash" => assert_eq!(selected.len(), 8),
-            "magit.ref" => assert!(selected.starts_with(" (") && selected.contains("référence")),
+            "identifier" => assert_eq!(selected.len(), 8),
+            "ref" => assert!(selected.starts_with(" (") && selected.contains("référence")),
             _ => assert_eq!(selected, "Élodie <elodie@example.com>"),
         }
     }
-    let date = tree
+    let muted_fields: Vec<_> = tree
         .tokens
         .iter()
-        .find(|token| token.line == line && token.token_type == "magit.date")
-        .unwrap();
-    assert_eq!(
-        text.get(date.start..date.start + date.length).unwrap(),
-        text.rsplit("  ").next().unwrap()
-    );
+        .filter(|token| token.line == line && token.token_type == "muted")
+        .map(|token| text.get(token.start..token.start + token.length).unwrap())
+        .collect();
+    assert!(muted_fields.contains(&"Élodie <elodie@example.com>"));
+    assert!(muted_fields.contains(&text.rsplit("  ").next().unwrap()));
 
-    // The encoder's shared legend does not yet advertise log-specific types;
-    // map copies to an existing legend type while exercising its real offset conversion.
+    // Map copies to a canonical role type while exercising the encoder's real
+    // offset conversion.
     let encoder_tokens: Vec<_> = tree
         .tokens
         .iter()
         .filter(|token| token.line == line)
         .cloned()
         .map(|mut token| {
-            token.token_type = "magit.file".into();
+            token.token_type = "path".into();
             token
         })
         .collect();
@@ -203,9 +202,9 @@ fn assert_log_tokens(tree: &Tree) {
         let expected_len = text[token.start..token.start + token.length]
             .encode_utf16()
             .count() as u32;
-        let index = semantic_tokens::TOKEN_TYPES
+        let index = semantic_tokens::roles()
             .iter()
-            .position(|kind| *kind == token.token_type)
+            .position(|role| role.name == token.token_type)
             .unwrap();
         assert!(
             decoded.contains(&(index, expected_start, expected_len)),

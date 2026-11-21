@@ -54,19 +54,16 @@ fn stderr_tokens_survive_semantic_token_encoding() {
                 line,
                 start,
                 token.length,
-                semantic_tokens::TOKEN_TYPES[token.token_type as usize],
+                semantic_tokens::roles()[token.token_type as usize].name,
             )
         })
         .collect();
     let stderr: Vec<_> = decoded
         .into_iter()
-        .filter(|token| matches!(token.3, "magit.message.error" | "magit.message.warn"))
+        .filter(|token| matches!(token.3, "error" | "warning"))
         .collect();
     assert_eq!(stderr.len(), 2, "encoded stderr tokens: {stderr:?}");
-    for (message, token_type) in [
-        ("failure text", "magit.message.error"),
-        ("warning text", "magit.message.warn"),
-    ] {
+    for (message, token_type) in [("failure text", "error"), ("warning text", "warning")] {
         let expected_line = tree
             .lines
             .iter()
@@ -80,17 +77,19 @@ fn stderr_tokens_survive_semantic_token_encoding() {
         )));
     }
     assert_eq!(
-        semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES
+        semantic_tokens::roles()
             .iter()
-            .position(|t| *t == "magit.message.error")
-            .unwrap()],
+            .find(|role| role.name == "error")
+            .unwrap()
+            .group,
         "ErrorMsg"
     );
     assert_eq!(
-        semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES
+        semantic_tokens::roles()
             .iter()
-            .position(|t| *t == "magit.message.warn")
-            .unwrap()],
+            .find(|role| role.name == "warning")
+            .unwrap()
+            .group,
         "WarningMsg"
     );
 }
@@ -219,9 +218,7 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
     assert_eq!(tree.lines[0], "Process log (1)");
     assert!(tree.node(&node_id).is_some(), "record node missing");
     assert!(
-        tree.tokens
-            .iter()
-            .any(|token| token.token_type == "magit.message.error"),
+        tree.tokens.iter().any(|token| token.token_type == "error"),
         "failed stderr has no error token"
     );
     let record_line = tree.node(&node_id).expect("record node").start_line;
