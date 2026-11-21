@@ -765,6 +765,14 @@
         "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
       },
       {
+        "key": "shift+n",
+        "command": "magit.invoke",
+        "args": {
+          "command": "open.notes"
+        },
+        "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
+      },
+      {
         "key": "w",
         "command": "magit.invoke",
         "args": {
