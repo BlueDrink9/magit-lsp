@@ -153,6 +153,10 @@ MANIFEST_FIELDS = frozenset({
     'executable_sha256',
 })
 ARTIFACT_DIGEST_PATTERN = re.compile(r'sha256:[0-9a-f]{64}')
+VSIX_JOB = 'vsix'
+VSIX_ARTIFACT = 'vscode-vsix-candidate'
+VSIX_PATH = 'build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix'
+VSIX_MANIFEST = 'build/vscode/vsix-manifest.json'
 
 
 class CheckError(Exception):
@@ -912,6 +916,8 @@ def check_build_workflow(path=BUILD_WORKFLOW):
             fail(f'build workflow: missing mandatory job {required!r}')
     require_pinned_builders(jobs)
 
+    check_vsix_producer(jobs.get(VSIX_JOB, []))
+
     # Source checks reuse the CI Make targets in the locked dev shell; they never
     # invoke the release producer or become a second build path.
     source_text = '\n'.join(code_lines(jobs[SOURCE_CHECK_JOB]))
@@ -991,6 +997,97 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     for forbidden in RELEASE_FORBIDDEN_PATHS:
         if forbidden in text:
             fail(f'build workflow: references operator-owned path {forbidden!r}')
+
+
+def check_vsix_producer(block):
+    """Require one platform-independent, run-bound VSIX producer and upload."""
+    if not block:
+        fail('build workflow: missing VSIX producer job')
+    code = '\n'.join(code_lines(block))
+    runner = next((line.split(':', 1)[1].strip() for line in block
+                   if line.strip().startswith('runs-on:')), '')
+    if runner != 'ubuntu-24.04' or 'matrix:' in code:
+        fail('build workflow: VSIX producer must be platform-independent')
+    if 'needs: source-checks' not in code:
+        fail('build workflow: VSIX producer must need source-checks')
+    if "node-version: '24'" not in code or 'pnpm@10.13.1' not in code:
+        fail('build workflow: VSIX producer must use Node 24 and pinned pnpm')
+    makefile = '\n'.join(read_lines(MAKEFILE))
+    if 'make vscode-package' not in code or 'vscode-package:' not in makefile \
+            or '--frozen-lockfile' not in makefile:
+        fail('build workflow: VSIX producer must use the frozen existing package target')
+    if sum(1 for step in upload_steps(block)
+           if VSIX_PATH in '\n'.join(step_uploads(step, 'VSIX producer')[1])) != 1:
+        fail('build workflow: VSIX producer must upload exactly one VSIX')
+    if 'make vscode-package' not in code:
+        fail('build workflow: VSIX producer must package the VSIX')
+    if 'cargo build' in code or 'release-native-build' in code:
+        fail('build workflow: VSIX producer must not rebuild the native server')
+    if VSIX_MANIFEST not in code or 'artifact-digest' not in code \
+            or 'artifact-id' not in code:
+        fail('build workflow: VSIX producer must hand off manifest and immutable artifact identity')
+    provenance = job_step(block, '--write-vsix-binding', 'VSIX producer')
+    environment = step_environment(provenance, 'VSIX producer')
+    expected_identity = {
+        'RELEASE_SOURCE_SHA': '${{ github.sha }}',
+        'RELEASE_REF': '${{ github.ref }}',
+        'RELEASE_EVENT': '${{ github.event_name }}',
+        'RELEASE_RUN_ID': '${{ github.run_id }}',
+        'RELEASE_RUN_ATTEMPT': '${{ github.run_attempt }}',
+    }
+    if any(environment.get(key) != value for key, value in expected_identity.items()):
+        fail('build workflow: VSIX producer must bind source/ref/event/run/attempt')
+    if 'contents: write' in code or 'secrets.' in code:
+        fail('build workflow: VSIX producer must have no publication rights')
+
+
+def write_vsix_binding():
+    """Write hash and run identity for the exact VSIX produced by vscode-package."""
+    version = os.environ.get('RELEASE_VERSION', '')
+    if VERSION_PATTERN.fullmatch(version) is None:
+        fail('VSIX provenance: invalid RELEASE_VERSION')
+    package = json.loads(EXTENSION_MANIFEST.read_text(encoding='utf-8'))
+    if package.get('version') != version:
+        fail('VSIX provenance: package version drift')
+    artifact = Path(f'build/vscode/magit-lsp-{version}.vsix')
+    if not artifact.is_file():
+        fail('VSIX provenance: expected exactly one versioned VSIX')
+    if list(Path('build/vscode').glob('*.vsix')) != [artifact]:
+        fail('VSIX provenance: missing or extra VSIX package')
+    locks = ('Cargo.lock', 'flake.lock', 'clients/vscode/pnpm-lock.yaml')
+    payload = {
+        'source_sha': os.environ.get('RELEASE_SOURCE_SHA'),
+        'original_ref': os.environ.get('RELEASE_REF'),
+        'event': os.environ.get('RELEASE_EVENT'),
+        'run_id': os.environ.get('RELEASE_RUN_ID'),
+        'run_attempt': os.environ.get('RELEASE_RUN_ATTEMPT'),
+        'version': version,
+        'vsix_sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        'lock_hashes': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                        for name in locks},
+        'pnpm_version': '10.13.1',
+    }
+    if not all(payload[key] for key in ('source_sha', 'original_ref', 'event',
+                                        'run_id', 'run_attempt')):
+        fail('VSIX provenance: missing run identity')
+    if payload['source_sha'] != os.environ.get('GITHUB_SHA'):
+        fail('VSIX provenance: source SHA does not match the workflow run')
+    if payload['run_id'] != os.environ.get('GITHUB_RUN_ID') or \
+            payload['run_attempt'] != os.environ.get('GITHUB_RUN_ATTEMPT'):
+        fail('VSIX provenance: run ID or attempt does not match the workflow run')
+    Path('build/vscode/vsix-manifest.json').write_text(
+        json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
+
+
+def write_vsix_upload_identity():
+    """Record the immutable upload ID and digest for the VSIX handoff."""
+    fields = ('ARTIFACT_ID', 'ARTIFACT_DIGEST', 'RUN_ID', 'RUN_ATTEMPT')
+    payload = {key.lower(): os.environ.get(key, '') for key in fields}
+    if not all(payload.values()) or not ARTIFACT_DIGEST_PATTERN.fullmatch(
+            payload['artifact_digest']):
+        fail('VSIX upload identity: missing or invalid immutable upload identity')
+    Path('build/vscode/vsix-upload-identity.json').write_text(
+        json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
 
 
 def load_pipeline(path=PIPELINE):
@@ -1190,8 +1287,9 @@ def check_contract_unit(path=MAKEFILE):
 
 def check_artifact_consistency():
     """The build workflow must upload exactly the artifact the publish workflow downloads."""
+    build_jobs = workflow_jobs(read_lines(BUILD_WORKFLOW))
     uploaded = step_artifact_name(
-        read_lines(BUILD_WORKFLOW), 'actions/upload-artifact@', 'build workflow')
+        build_jobs[FALLBACK_JOB], 'actions/upload-artifact@', 'build workflow')
     downloaded = step_artifact_name(
         read_lines(WORKFLOW), 'actions/download-artifact@', 'publish workflow')
     if uploaded != ARTIFACT_NAME:
@@ -1828,6 +1926,57 @@ def expect_check(label, function, *args, expected=None):
             fail(f'self-test: {label} failed for another reason: {error}')
         return
     fail(f'self-test: {label} was accepted')
+
+
+def test_vsix_binding_fixtures(directory):
+    """Exercise VSIX provenance generation and rejection paths offline."""
+    root = Path(directory)
+    (root / 'clients/vscode').mkdir(parents=True)
+    (root / 'build/vscode').mkdir(parents=True)
+    (root / 'clients/vscode/package.json').write_text(
+        '{"version":"1.2.3"}', encoding='utf-8')
+    for lock in ('Cargo.lock', 'flake.lock', 'clients/vscode/pnpm-lock.yaml'):
+        (root / lock).write_text('fixture lock', encoding='utf-8')
+    artifact = root / 'build/vscode/magit-lsp-1.2.3.vsix'
+    artifact.write_bytes(b'fixture VSIX bytes')
+    env = {
+        'RELEASE_VERSION': '1.2.3', 'RELEASE_SOURCE_SHA': SELF_TEST_SHA,
+        'GITHUB_SHA': SELF_TEST_SHA, 'RELEASE_REF': 'refs/tags/v1.2.3',
+        'RELEASE_EVENT': 'push', 'RELEASE_RUN_ID': '1234',
+        'GITHUB_RUN_ID': '1234', 'RELEASE_RUN_ATTEMPT': '2',
+        'GITHUB_RUN_ATTEMPT': '2',
+    }
+    saved = {key: os.environ.get(key) for key in env}
+    cwd = Path.cwd()
+    try:
+        os.environ.update(env)
+        os.chdir(root)
+        write_vsix_binding()
+        manifest = json.loads(Path('build/vscode/vsix-manifest.json').read_text())
+        if manifest['vsix_sha256'] != hashlib.sha256(artifact.read_bytes()).hexdigest():
+            fail('self-test: VSIX provenance did not hash the exact fixture bytes')
+        os.environ['RELEASE_SOURCE_SHA'] = SELF_TEST_OTHER_SHA
+        expect_check('VSIX provenance with wrong source', write_vsix_binding,
+                     expected='source SHA does not match')
+        os.environ['RELEASE_SOURCE_SHA'] = SELF_TEST_SHA
+        os.environ['RELEASE_RUN_ATTEMPT'] = '1'
+        expect_check('VSIX provenance with wrong run attempt', write_vsix_binding,
+                     expected='run ID or attempt does not match')
+        os.environ['RELEASE_RUN_ATTEMPT'] = '2'
+        os.environ['RELEASE_VERSION'] = '1.2.4'
+        expect_check('VSIX provenance with version drift', write_vsix_binding,
+                     expected='package version drift')
+        os.environ['RELEASE_VERSION'] = '1.2.3'
+        (Path('build/vscode') / 'unexpected.vsix').write_bytes(b'extra')
+        expect_check('VSIX provenance with extra package', write_vsix_binding,
+                     expected='missing or extra VSIX')
+    finally:
+        os.chdir(cwd)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def expect_pipeline_error(module, label, function, *args, expected=None):
@@ -2900,6 +3049,8 @@ def run_self_tests():
 
     with tempfile.TemporaryDirectory(prefix='magit-lsp-release-self-test-') as temporary:
         directory = Path(temporary)
+        with tempfile.TemporaryDirectory(prefix='magit-lsp-vsix-self-test-') as fixture:
+            test_vsix_binding_fixtures(fixture)
         artifacts = directory / 'dist'
         write_artifacts(artifacts)
         validate_artifacts(artifacts, '1.2.3')
@@ -2986,7 +3137,36 @@ def run_self_tests():
         # The build workflow keeps one pinned pipeline handoff: fixed
         # toolchain, version producer, shared build and shared artifact check.
         for label, mutations, expected in (
-            ('build workflow with an unpinned build',
+             ('build workflow without the VSIX producer',
+              (('  vsix:\n', '  vsix-disabled:\n', 1),),
+              'missing VSIX producer job'),
+             ('VSIX producer using multiple platform builds',
+              (('  vsix:\n    needs: source-checks\n    runs-on: ubuntu-24.04\n',
+                '  vsix:\n    needs: source-checks\n    runs-on: ubuntu-24.04\n'
+                '    strategy:\n      matrix:\n        os: [ubuntu-24.04, macos-26]\n', 1),),
+              'platform-independent'),
+             ('VSIX producer without Node 24',
+              (("          node-version: '24'", "          node-version: '20'", 1),),
+              'Node 24'),
+             ('VSIX producer rebuilding native binary',
+              (('      - name: Validate version and package the VSIX\n',
+                '      - run: cargo build\n      - name: Validate version and package the VSIX\n', 1),),
+              'must not rebuild the native server'),
+             ('VSIX producer without run-attempt binding',
+              (('          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}\n'
+                '          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}',
+                '          RELEASE_RUN_ATTEMPT: fixture-attempt\n'
+                '          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}', 1),),
+              'VSIX producer must bind source/ref/event/run/attempt'),
+             ('VSIX producer without provenance generation',
+              (('--write-vsix-binding', '--write-other-binding', 1),),
+              "missing '--write-vsix-binding'"),
+             ('VSIX producer granted publication rights',
+              (('  vsix:\n    needs: source-checks\n',
+                '  vsix:\n    needs: source-checks\n    permissions:\n'
+                '      contents: write\n', 1),),
+              'not read-only'),
+             ('build workflow with an unpinned build',
              ((PIPELINE_BUILD, 'cargo build --release', None),),
              'shared pinned build'),
             ('build workflow without the artifact pipeline',
@@ -3035,11 +3215,12 @@ def run_self_tests():
              (('make format-check hygiene test-rust test-lua V=1',
                'make format-check hygiene test-rust test-lua V=1 release-locked', 1),),
              'must not invoke the release producer'),
-            ('build workflow inferring the handoff source from another run',
-             (('          RELEASE_SOURCE_SHA: ${{ github.sha }}',
-               '          RELEASE_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}',
-               1),),
-             'RELEASE_SOURCE_SHA'),
+             ('VSIX provenance inferring source from another run',
+              (('          RELEASE_SOURCE_SHA: ${{ github.sha }}\n'
+                '          RELEASE_EVENT: ${{ github.event_name }}',
+                '          RELEASE_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}\n'
+                '          RELEASE_EVENT: ${{ github.event_name }}', 1),),
+              'VSIX producer must bind source/ref/event/run/attempt'),
             ('build workflow packaging the fallback for another target',
              (('          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu',
                '          RELEASE_BUILD_TARGET: aarch64-apple-darwin', 1),),
@@ -3061,10 +3242,12 @@ def run_self_tests():
              (('          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}',
                '          ARTIFACT_DIGEST: fixture-digest', 1),),
              'artifact-digest'),
-            ('build workflow omitting the run attempt evidence',
-             (('          RUN_ATTEMPT: ${{ github.run_attempt }}',
-               '          RUN_ATTEMPT: fixture-attempt', 1),),
-             'github.run_attempt'),
+             ('build workflow omitting fallback run attempt evidence',
+              (('          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}\n'
+                '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu',
+                '          RELEASE_RUN_ATTEMPT: fixture-attempt\n'
+                '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu', 1),),
+              'github.run_attempt'),
             ('build workflow omitting the upload identity file',
              (('          path: build/release/upload-identity.json',
                '          path: build/release/provenance.json', 1),),
@@ -3292,6 +3475,10 @@ def main():
                         help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
                         help='print RELEASE_VERSION=<X.Y.Z> for $GITHUB_ENV')
+    parser.add_argument('--write-vsix-binding', action='store_true',
+                        help='write exact VSIX hash and run provenance')
+    parser.add_argument('--write-vsix-upload-identity', action='store_true',
+                        help='write immutable VSIX artifact upload identity')
     parser.add_argument('--pipeline-self-tests', action='store_true',
                         help='run only the release pipeline adapter self-tests '
                              '(fake processes; no Cargo, build or metadata)')
@@ -3308,6 +3495,12 @@ def main():
             return 0
         if args.automation_unit:
             run_automation_unit()
+            return 0
+        if args.write_vsix_binding:
+            write_vsix_binding()
+            return 0
+        if args.write_vsix_upload_identity:
+            write_vsix_upload_identity()
             return 0
         if args.validate_publication_binding:
             validate_publication_binding_bundle(args.validate_publication_binding)
