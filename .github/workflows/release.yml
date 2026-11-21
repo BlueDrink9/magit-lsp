@@ -363,7 +363,7 @@ jobs:
           make_bin=$(command -v make)
           nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
           nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_TEST_BINARY="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
-          after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; ! grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"
+          after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; if grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"; then exit 1; fi
           printf '{"ok":true,"target":"%s","executable_sha256":"%s","before_sha256":"%s","after_sha256":"%s","rust_suites":["server_async","editor_bridge","rebase_interactive"],"neovim_scenarios":["status-basics.scn","commit-message-editor.scn"],"cleanup":"make targets completed"}\n' "$name" "$expected" "$before" "$after" > "$RUNNER_TEMP/native-functional-evidence.json"
 
       - name: Upload functional evidence
