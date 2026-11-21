@@ -107,7 +107,8 @@ class NativeArtifactTests(unittest.TestCase):
         self.fake('readelf', 'unused')
         with mock.patch.object(inspector, 'run_tool', side_effect=[
                 'Advanced Micro Devices X86-64', 'Requesting program interpreter: /lib64/ld.so',
-                'Shared library: [libc.so.6]', 'GLIBC_2.35']):
+                'Shared library: [libc.so.6]', 'GLIBC_2.35']), \
+                mock.patch.object(inspector.subprocess, 'Popen', side_effect=AssertionError('static inspector executed')):
             result = inspector.inspect(self.candidate())
         self.assertTrue(result['ok'], result)
         self.assertFalse(inspector.inspect(str(self.root / 'absent'))['ok'])
@@ -149,6 +150,204 @@ class NativeArtifactTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'PATH': str(self.tools)}):
             with self.assertRaisesRegex(inspector.InspectionError, 'inspection tool failed'):
                 inspector.run_tool(['native-inspector-tool-that-does-not-exist'])
+
+    def test_relative_candidate_is_refused_before_path_resolution_or_execution(self):
+        with mock.patch.object(Path, 'resolve', side_effect=AssertionError('resolved relative input')), \
+                mock.patch.object(inspector.subprocess, 'Popen', side_effect=AssertionError('executed')):
+            result = inspector.inspect('relative-candidate.tar.gz', functional=True)
+        self.assertFalse(result['ok'])
+        self.assertIn('not absolute', result['error'])
+
+    def test_functional_host_mismatch_precedes_binary_launch(self):
+        with mock.patch.object(inspector.platform, 'system', return_value='Darwin'), \
+                mock.patch.object(inspector.platform, 'machine', return_value='arm64'), \
+                mock.patch.object(inspector.subprocess, 'run', side_effect=AssertionError('launched')):
+            with self.assertRaisesRegex(inspector.InspectionError, 'does not match target'):
+                inspector._functional(Path('/exact/extracted/binary'),
+                                      'x86_64-unknown-linux-gnu', '1.2.3', {})
+
+    def test_functional_rejects_manifest_version_mismatch_before_server_launch(self):
+        result = subprocess.CompletedProcess([], 0, stdout='magit-lsp 9.9.9\n', stderr='')
+        with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
+                mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                mock.patch.object(inspector.subprocess, 'run', return_value=result), \
+                mock.patch.object(inspector.subprocess, 'Popen', side_effect=AssertionError('launched')):
+            with self.assertRaisesRegex(inspector.InspectionError, 'does not match manifest version'):
+                inspector._functional(Path('/exact/extracted/binary'),
+                                      'x86_64-unknown-linux-gnu', '1.2.3', {})
+
+    def test_rpc_acknowledges_structured_render_before_matching_response(self):
+        render = {'jsonrpc': '2.0', 'method': 'view/render',
+                  'params': {'viewId': 'status-1', 'version': 7,
+                             'text': 'Unstaged changes', 'structure': {'kind': 'status'}}}
+        response = {'jsonrpc': '2.0', 'id': 8, 'result': {'effects': []}}
+        stream = b''.join(b'Content-Length: %d\r\n\r\n' % len(payload) + payload
+                          for payload in (json.dumps(render).encode(), json.dumps(response).encode()))
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, stream)
+            os.close(write_fd)
+            process = type('FakeProcess', (), {})()
+            process.stdin = io.BytesIO()
+            process.stdout = os.fdopen(read_fd, 'rb', buffering=0)
+            result = inspector._rpc(process, 'view/invoke', {'command': 'status.stage-all'}, 8)
+            self.assertEqual(result, {'effects': []})
+            self.assertEqual(process._native_render_count, 1)
+            self.assertEqual(process._native_render_version, 7)
+            ack_frame = process.stdin.getvalue()
+            ack = ack_frame.split(b'\r\n\r\n', 1)[1]
+            ack = ack[:int(ack_frame.split(b'\r\n', 1)[0].split(b':', 1)[1])]
+            outgoing = []
+            while ack_frame:
+                head, rest = ack_frame.split(b'\r\n\r\n', 1)
+                size = int(head.split(b':', 1)[1])
+                outgoing.append(json.loads(rest[:size]))
+                ack_frame = rest[size:]
+            ack = next(message for message in outgoing if message.get('method') == 'view/rendered')
+            self.assertEqual(ack['params'], {'viewId': 'status-1', 'version': 7})
+        finally:
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+            process.stdout.close()
+
+    def test_functional_probe_launches_exact_binary_and_asserts_git_index(self):
+        def frame(message):
+            payload = json.dumps(message).encode()
+            return b'Content-Length: %d\r\n\r\n' % len(payload) + payload
+
+        messages = [
+            {'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {}}},
+            {'jsonrpc': '2.0', 'method': 'view/keymap', 'params': {'viewId': 's'}},
+            {'jsonrpc': '2.0', 'method': 'view/render', 'params': {
+                'viewId': 's', 'version': 1, 'text': 'Unstaged changes',
+                'structure': {'kind': 'status'}}},
+            {'jsonrpc': '2.0', 'id': 2, 'result': {'viewId': 's'}},
+            {'jsonrpc': '2.0', 'id': 3, 'result': {'effects': []}},
+            {'jsonrpc': '2.0', 'id': 4, 'result': None},
+        ]
+
+        class Capture(io.BytesIO):
+            def close(self):
+                pass
+
+        class Child:
+            def __init__(self):
+                self.stdin = Capture()
+                self.read_fd, self.write_fd = os.pipe()
+                os.write(self.write_fd, b''.join(map(frame, messages)))
+                os.close(self.write_fd)
+                self.stdout = os.fdopen(self.read_fd, 'rb', buffering=0)
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                self.alive = False
+
+            def wait(self, timeout=None):
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        child = Child()
+        calls = []
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            output = 'magit-lsp 1.2.3\n' if args == ['/tmp/extracted exact/magit-lsp', '--version'] else (
+                'tracked.txt\n' if args[-3:] == ['diff', '--cached', '--name-only'] else '')
+            return subprocess.CompletedProcess(args, 0, stdout=output, stderr='')
+
+        evidence = {}
+        try:
+            with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
+                    mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                    mock.patch.object(inspector.subprocess, 'run', side_effect=fake_run), \
+                    mock.patch.object(inspector.subprocess, 'Popen', return_value=child) as popen:
+                inspector._functional(Path('/tmp/extracted exact/magit-lsp'),
+                                      'x86_64-unknown-linux-gnu', '1.2.3', evidence)
+            self.assertEqual(popen.call_args.args[0], ['/tmp/extracted exact/magit-lsp'])
+            sent = child.stdin.getvalue()
+            self.assertIn(b'"v": 1', sent)
+            self.assertIn(b'"method": "view/rendered"', sent)
+            self.assertIn(b'"method": "view/invoke"', sent)
+            self.assertIn(b'"command": "status.stage-all"', sent)
+            self.assertIn(['/tmp/extracted exact/magit-lsp', '--version'], calls)
+            self.assertEqual(evidence['git']['staged'], ['tracked.txt'])
+            self.assertEqual(evidence['lsp']['status_render_acks'], 1)
+            self.assertEqual(evidence['teardown'], 'complete')
+        finally:
+            child.stdout.close()
+
+    def test_shutdown_failure_still_reaps_child_and_records_evidence(self):
+        class Child:
+            def __init__(self):
+                self.alive = True
+                self.killed = False
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                if not self.killed:
+                    raise subprocess.TimeoutExpired('server', timeout)
+                self.alive = False
+
+            def kill(self):
+                self.killed = True
+
+        child = Child()
+        evidence = {}
+        with mock.patch.object(inspector, '_rpc', side_effect=inspector.InspectionError('timeout')):
+            inspector._stop_process(child, evidence)
+        self.assertEqual(evidence['shutdown_error'], 'timeout')
+        self.assertFalse(evidence['children_remaining'])
+        self.assertTrue(child.killed)
+
+    def test_functional_rpc_timeout_still_tears_down_owned_child(self):
+        class Child:
+            def __init__(self):
+                self.stdin = io.BytesIO()
+                self.stdout = io.BytesIO()
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                self.alive = False
+
+            def wait(self, timeout):
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        child = Child()
+        run_calls = []
+        def fake_run(args, **kwargs):
+            run_calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout='magit-lsp 1.2.3\n', stderr='')
+
+        evidence = {}
+        with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
+                mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                mock.patch.object(inspector.subprocess, 'run', side_effect=fake_run), \
+                mock.patch.object(inspector.subprocess, 'Popen', return_value=child), \
+                mock.patch.object(inspector, '_rpc', side_effect=inspector.InspectionError('timed out')):
+            with self.assertRaisesRegex(inspector.InspectionError, 'timed out'):
+                inspector._functional(Path('/tmp/extracted/magit-lsp'),
+                                      'x86_64-unknown-linux-gnu', '1.2.3', evidence)
+        self.assertTrue(any(args[-1:] == ['--version'] for args in run_calls))
+        self.assertFalse(child.alive)
+        self.assertFalse(evidence['children_remaining'])
+        self.assertEqual(evidence['teardown'], 'complete')
 
 
 if __name__ == '__main__':
