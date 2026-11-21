@@ -1018,6 +1018,8 @@ def check_build_workflow(path=BUILD_WORKFLOW):
         fail('build workflow: version validation must precede the pinned build, '
              'and the build must precede artifact packaging')
     fallback_name = check_producer_handoff(fallback, FALLBACK_TARGET, 'fallback', False)
+    if 'experimental' in fallback_name:
+        fail('build workflow: experimental native artifacts cannot be selected as production')
     if fallback_name != ARTIFACT_NAME:
         fail(f'build workflow: uploads {fallback_name!r}, expected {ARTIFACT_NAME!r} '
              'so the publisher consumes the strict fallback')
@@ -3299,10 +3301,14 @@ def run_self_tests():
              (('          path: build/release/upload-identity.json',
                '          path: build/release/provenance.json', 1),),
              'upload-identity.json'),
-            ('build workflow renaming the fallback candidate the publisher consumes',
-             (('          name: linux-x86_64-gnu-release-candidate',
-               '          name: release-candidate', 1),),
-             'expected \'linux-x86_64-gnu-release-candidate\''),
+             ('build workflow renaming the fallback candidate the publisher consumes',
+              (('          name: linux-x86_64-gnu-release-candidate',
+                '          name: release-candidate', 1),),
+              'expected \'linux-x86_64-gnu-release-candidate\''),
+             ('build workflow selecting an experimental artifact for production',
+              (('          name: linux-x86_64-gnu-release-candidate',
+                '          name: native-linux-x86_64-gnu-experimental', 1),),
+              'must not claim an experimental candidate'),
             ('build workflow consuming a candidate by mutable name',
              (('    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n',
                '    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n'

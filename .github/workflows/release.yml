@@ -159,8 +159,10 @@ jobs:
 
   native-candidates:
     # Isolated, non-publishing native-linker experiments. They are not a
-    # production promotion and never gate the fallback: NREL-17 owns the hosted
-    # proof that would justify promotion. Each matrix row uses the same shared
+    # production promotion and never gate the fallback: no hosted proof is
+    # recorded yet. Promotion requires NREL-12's three-host ABI/LSP/Git and
+    # functional gates plus NREL-14's installed-VSIX gate bound to one source,
+    # run, attempt and immutable artifact/hash set. Each matrix row uses the same shared
     # pipeline to build and package its own explicitly named candidate.
     needs: source-checks
     strategy:

@@ -227,6 +227,18 @@ Ubuntu 22.04 baseline, packages and smoke-tests the binary, and uploads the
 `linux-x86_64-gnu-release-candidate` artifact (14-day retention). It publishes
 nothing and holds no credentials.
 
+The native-linker lane is an explicit, nonpublishing experiment in a separate
+`*-experimental` artifact namespace; it does not replace or gate the established
+Ubuntu 22.04/Rust 1.94.1 fallback. Its workflow wiring and local checker tests
+show implementation only, not experimental success or promotion eligibility.
+Promotion remains pending until hosted evidence records the source SHA, workflow
+run URL and attempt, immutable artifact IDs and SHA-256 hashes, and successful
+NREL-12 ABI/LSP/Git plus functional outcomes on all three hosts and the NREL-14
+installed-VSIX outcome for the same source/run/attempt/hash set. Missing evidence
+or any failed, skipped, or inconclusive mandatory gate cannot establish proof.
+The authoritative completion record is NREL-17 in `TASKS.md`; this document
+does not claim that hosted proof exists.
+
 `.github/workflows/publish.yml` is `workflow_dispatch`-only, so no push or tag
 can publish on its own. Its inputs are a required `build_run_id` naming a
 completed build-workflow run and a `mode` choice defaulting to `dry-run`. The
