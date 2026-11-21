@@ -15,6 +15,7 @@ local function required_env(name)
 end
 
 local checkout = required_env("MAGIT_LAZY_CHECKOUT")
+local runtime = checkout .. "/clients/neovim"
 local spec_path = required_env("MAGIT_LAZY_SPEC")
 local manager_path = required_env("MAGIT_LAZY_MANAGER")
 local evidence_path = required_env("MAGIT_LAZY_EVIDENCE")
@@ -61,7 +62,10 @@ local function pre_key_audit(spec)
   check(vim.fn.has("nvim-0.11") == 1, "pre-key oracle: Neovim 0.11+ required")
   check(spec.lazy == true, "pre-key oracle: documented spec is not lazy")
   check(spec.opts == nil, "pre-key oracle: documented spec sets opts")
-  check(spec.config == nil, "pre-key oracle: documented spec sets config")
+  check(
+    type(spec.config) == "function",
+    "pre-key oracle: documented spec has no config(plugin) runtime hook"
+  )
   check(spec.build == nil, "pre-key oracle: documented spec sets build")
   check(
     spec.dir == checkout,
@@ -98,14 +102,21 @@ local function pre_key_audit(spec)
     "pre-key oracle: lazy.nvim did not install the documented <leader>gs mapping"
   )
   check(
-    not on_runtimepath(checkout),
-    "pre-key oracle: the checkout is on runtimepath before the mapping was pressed"
+    not on_runtimepath(runtime),
+    "pre-key oracle: the client runtime is on runtimepath before the mapping was pressed"
+  )
+  local root_runtime = vim.fn.isdirectory(checkout .. "/lua") == 1
+    or vim.fn.isdirectory(checkout .. "/plugin") == 1
+  check(
+    not root_runtime,
+    "pre-key oracle: the checkout root ships a Neovim runtime instead of clients/neovim"
   )
   return {
     plugin_loaded = package.loaded["magit-lsp"] ~= nil,
     lsp_clients = #vim.lsp.get_clients(),
     lazy_loaded = plugin._.loaded ~= nil,
-    checkout_on_runtimepath = on_runtimepath(checkout),
+    runtime_on_runtimepath = on_runtimepath(runtime),
+    root_runtime_present = root_runtime,
     mapping = {
       lhs = mapping.lhs,
       mode = mapping.mode,
@@ -161,10 +172,13 @@ local function exercise(spec, pre_key)
 
   check(plugin._.loaded ~= nil, "post-key oracle: lazy.nvim did not mark the plugin loaded")
   check(
-    source == checkout .. "/lua/magit-lsp/init.lua",
-    "post-key oracle: module loaded outside the checkout: " .. source
+    source == checkout .. "/clients/neovim/lua/magit-lsp/init.lua",
+    "post-key oracle: module loaded outside the client runtime: " .. source
   )
-  check(on_runtimepath(checkout), "post-key oracle: checkout is not on runtimepath after loading")
+  check(
+    on_runtimepath(runtime),
+    "post-key oracle: the client runtime is not on runtimepath after loading"
+  )
   check(vim.bo.filetype == "magit-lsp", "post-key oracle: status buffer filetype changed")
   check(
     text:find("Untracked files", 1, true) ~= nil,
@@ -185,10 +199,11 @@ local function exercise(spec, pre_key)
       plugin_dir = plugin.dir,
       plugin_source = source,
       module_loaded = package.loaded["magit-lsp"] ~= nil,
-      checkout_on_runtimepath = on_runtimepath(checkout),
+      runtime_on_runtimepath = on_runtimepath(runtime),
       buffer = vim.api.nvim_get_current_buf(),
       buffer_name = vim.api.nvim_buf_get_name(0),
       filetype = vim.bo.filetype,
+      magit_command_available = vim.fn.exists(":Magit") == 2,
       text = text,
       client = client_state,
     },
@@ -208,7 +223,7 @@ local function main()
   -- A negative control deliberately bypasses the manager; the pre-key oracle
   -- must reject the same preloaded state the positive run proves absent.
   if vim.env.MAGIT_LAZY_FORCE_PRELOAD == "1" then
-    vim.opt.rtp:append(checkout)
+    vim.opt.rtp:append(runtime)
     local ok, error_message = pcall(require, "magit-lsp")
     check(ok, "negative-control preload failed: " .. tostring(error_message))
   end

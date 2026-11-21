@@ -90,19 +90,26 @@ cargo build --release --locked
 
 ### Neovim (0.11+)
 
-Run Neovim inside a Git repository and start the client from the same checkout;
-server discovery finds `target/release/magit-lsp`:
+The Neovim client is the `clients/neovim` subdirectory of this checkout; the
+repository root is not a Neovim runtime. Add that client directory to
+`'runtimepath'`, run Neovim inside a Git repository, and start the client;
+server discovery finds `target/release/magit-lsp` in the checkout:
 
 ```vim
+:set runtimepath+=/path/to/magit-lsp/clients/neovim
 :lua require('magit-lsp').setup()
 ```
 
 `status` opens in place and `g r` refreshes it in the default `vim` profile.
 For a native package or lazy.nvim install (a clone under your Neovim data
 directory, with `cmd` pointing at the installed binary), copy the tested snippets
-in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages).
-Once the plugin is installed, `:h magit` documents `:Magit [directory]`,
-setup/server discovery and protocol-version troubleshooting.
+in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages): a
+native package adds `clients/neovim` from `init.lua`, and a lazy spec appends
+`plugin.dir .. '/clients/neovim'` in its `config(plugin)` hook without opening
+status eagerly. Once the client is loaded, `:h magit` documents
+`:Magit [directory]`, setup/server discovery and protocol-version
+troubleshooting; run `:helptags ALL` if your installation does not generate
+help tags for the client's `doc` directory.
 
 ### VS Code (1.85+)
 

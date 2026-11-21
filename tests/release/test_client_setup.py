@@ -57,7 +57,7 @@ class ClientSetupTests(unittest.TestCase):
   local spec
   if vim.env.SETUP_MODE == 'lazy-spec-callback' then
     spec = dofile(vim.env.SETUP_SPEC)
-    assert(spec.lazy and spec.opts == nil and spec.config == nil)
+    assert(spec.lazy and spec.opts == nil and type(spec.config) == 'function')
     assert(package.loaded['magit-lsp'] == nil, 'spec opened status during loading')
   end
   assert(#vim.lsp.get_clients() == 0, 'startup spawned a server')
@@ -93,14 +93,14 @@ end
                 self.assertIn('setup smoke: ' + mode, result.stdout + result.stderr)
 
     def test_documented_lazy_spec_contract(self):
-        """The documented lazy spec is valid Lua with no opts/config/build hooks."""
+        """The documented lazy spec is valid Lua with no opts/build and a runtime hook."""
         document = (ROOT / 'docs/CLIENT_INSTALL.md').read_text()
         match = re.search(
             r'```lua\n(-- lazy\.nvim plugin spec\n.*?)\n```', document, re.S)
         self.assertIsNotNone(
             match, 'docs/CLIENT_INSTALL.md has no lazy.nvim plugin spec block')
         snippet = match.group(1)
-        for key in ('opts', 'config', 'build'):
+        for key in ('opts', 'build'):
             self.assertNotRegex(
                 snippet, rf'\b{key}\s*=',
                 f'documented lazy spec must not set {key}')
@@ -117,7 +117,7 @@ end
   local spec = chunk()
   assert(spec.lazy, 'documented lazy spec must be lazy')
   assert(spec.opts == nil, 'documented lazy spec must not set opts')
-  assert(spec.config == nil, 'documented lazy spec must not set config')
+  assert(type(spec.config) == 'function', 'documented lazy spec must add the client runtime')
   assert(spec.build == nil, 'documented lazy spec must not set build')
 end, debug.traceback)
 if not ok then
