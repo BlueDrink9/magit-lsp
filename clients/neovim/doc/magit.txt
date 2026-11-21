@@ -7,7 +7,7 @@ commands.  The server is an external executable: the Neovim client never
 downloads or builds it.
 
 Requires Neovim 0.11+ and an installed `magit-lsp` server.  Client
-installation is documented in ../docs/CLIENT_INSTALL.md
+installation is documented in ../../../docs/CLIENT_INSTALL.md
 
 ==============================================================================
 COMMANDS                                                     *magit-commands*
@@ -71,7 +71,7 @@ The default profile is `vim`; select `standard` with
     `ctrl+t`           Toggle plain editable text mode
     `q`                Close the view
 
-Full tables: ../docs/KEYMAPS.md
+Full tables: ../../../docs/KEYMAPS.md
 
 ==============================================================================
 DOCUMENTATION                                                *magit-docs*
@@ -82,13 +82,13 @@ paths are relative to the directory of this help file, so no browser or
 network access is involved.
 
     Overview:
-        ../README.md
+        ../../../README.md
     Client installation and tested snippets:
-        ../docs/CLIENT_INSTALL.md
+        ../../../docs/CLIENT_INSTALL.md
     Keymaps and profiles:
-        ../docs/KEYMAPS.md
+        ../../../docs/KEYMAPS.md
     Protocol and capabilities:
-        ../docs/PROTOCOL.md
+        ../../../docs/PROTOCOL.md
 
 Upstream repository (not shipped locally):
     https://github.com/BlueDrink9/magit-lsp

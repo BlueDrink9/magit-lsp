@@ -13,6 +13,16 @@ local SHIPPED = {
   "docs/PROTOCOL.md",
 }
 
+--- The help file inside the Neovim client runtime.
+local HELP_DOC = "clients/neovim/doc/magit.txt"
+--- How the help text refers from its own directory to the repository root.
+local REF_PREFIX = "../../../"
+
+--- Resolve a reference in the help text to a repository-relative path.
+local function repo_path(ref)
+  return vim.fs.normalize(vim.fs.dirname(HELP_DOC) .. "/" .. ref)
+end
+
 local T = MiniTest.new_set({
   hooks = {
     pre_case = function()
@@ -26,7 +36,7 @@ local T = MiniTest.new_set({
 
 --- Every relative Markdown path the help text mentions, in order of appearance.
 local function help_references()
-  local text = table.concat(vim.fn.readfile(project .. "/doc/magit.txt"), "\n")
+  local text = table.concat(vim.fn.readfile(project .. "/" .. HELP_DOC), "\n")
   local refs, seen = {}, {}
   for token in text:gmatch("[^%s`|]+") do
     local ref = token:match("^(%.%./[%w%./_-]+%.md)")
@@ -39,12 +49,12 @@ local function help_references()
 end
 
 T["help points at shipped documents by relative local path"] = function()
-  local text = table.concat(vim.fn.readfile(project .. "/doc/magit.txt"), "\n")
+  local text = table.concat(vim.fn.readfile(project .. "/" .. HELP_DOC), "\n")
   for _, rel in ipairs(SHIPPED) do
     MiniTest.expect.equality(
-      text:find("../" .. rel, 1, true) ~= nil,
+      text:find(REF_PREFIX .. rel, 1, true) ~= nil,
       true,
-      "doc/magit.txt refers to ../" .. rel
+      HELP_DOC .. " refers to " .. REF_PREFIX .. rel
     )
     MiniTest.expect.equality(
       vim.fn.filereadable(project .. "/" .. rel),
@@ -70,9 +80,9 @@ end
 
 T["gf opens every shipped document from the help buffer in an unrelated cwd"] = function()
   local refs = help_references()
-  MiniTest.expect.equality(#refs > 0, true, "doc/magit.txt references local documents")
+  MiniTest.expect.equality(#refs > 0, true, HELP_DOC .. " references local documents")
   for _, ref in ipairs(refs) do
-    local rel = ref:sub(4)
+    local rel = repo_path(ref)
     MiniTest.expect.equality(
       vim.fn.filereadable(project .. "/" .. rel),
       1,
@@ -84,25 +94,28 @@ T["gf opens every shipped document from the help buffer in an unrelated cwd"] = 
   local other_cwd = vim.fn.tempname() .. "-help-links-cwd"
   child.lua(string.format(
     [[
-    local project, help_root, other_cwd = %q, %q, %q
+    local project, help_root, other_cwd, help_doc = %q, %q, %q, %q
     local refs = %s
+    local function repo_path(ref)
+      return vim.fs.normalize(vim.fs.dirname(help_doc) .. '/' .. ref)
+    end
     vim.fn.delete(help_root, 'rf')
     vim.fn.delete(other_cwd, 'rf')
-    vim.fn.mkdir(help_root .. '/doc', 'p')
+    vim.fn.mkdir(vim.fs.dirname(help_root .. '/' .. help_doc), 'p')
     vim.fn.mkdir(other_cwd, 'p')
     local function copy(rel)
       local dst = help_root .. '/' .. rel
       vim.fn.mkdir(vim.fs.dirname(dst), 'p')
       assert(vim.uv.fs_copyfile(project .. '/' .. rel, dst), 'copy ' .. rel)
     end
-    copy('doc/magit.txt')
+    copy(help_doc)
     for _, ref in ipairs(refs) do
-      copy(ref:sub(4))
+      copy(repo_path(ref))
     end
     vim.cmd('cd ' .. vim.fn.fnameescape(other_cwd))
     local results = {}
     for _, ref in ipairs(refs) do
-      vim.cmd('edit ' .. vim.fn.fnameescape(help_root .. '/doc/magit.txt'))
+      vim.cmd('edit ' .. vim.fn.fnameescape(help_root .. '/' .. help_doc))
       local lnum, col
       for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
         local s = line:find(ref, 1, true)
@@ -137,6 +150,7 @@ T["gf opens every shipped document from the help buffer in an unrelated cwd"] = 
     project,
     help_root,
     other_cwd,
+    HELP_DOC,
     vim.inspect(refs)
   ))
 
@@ -147,7 +161,7 @@ T["gf opens every shipped document from the help buffer in an unrelated cwd"] = 
     MiniTest.expect.equality(result.cwd, other_cwd, ref .. ": gf runs from an unrelated cwd")
     MiniTest.expect.equality(
       result.source,
-      help_root .. "/doc/magit.txt",
+      help_root .. "/" .. HELP_DOC,
       ref .. ": navigating from the shipped help file"
     )
     MiniTest.expect.equality(result.source_filetype, "help", ref .. ": source is a help buffer")
@@ -159,7 +173,7 @@ T["gf opens every shipped document from the help buffer in an unrelated cwd"] = 
       nil,
       ref .. ": no URL handler ran"
     )
-    local rel = ref:sub(4)
+    local rel = repo_path(ref)
     MiniTest.expect.equality(
       vim.uv.fs_realpath(result.bufname),
       vim.uv.fs_realpath(help_root .. "/" .. rel),

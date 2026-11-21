@@ -7,7 +7,9 @@ local function add_path(path)
   end
 end
 
-add_path(project_root)
+-- The Neovim runtime (lua/, plugin/, doc/) lives in the client directory, so
+-- `require('magit-lsp')` and the plugin file resolve only from there.
+add_path(project_root .. "/clients/neovim")
 
 local mini_path = project_root .. "/build/deps/mini.nvim"
 if vim.fn.isdirectory(mini_path) ~= 1 then
