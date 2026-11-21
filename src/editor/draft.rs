@@ -88,10 +88,14 @@ impl Draft {
             DraftKind::RebaseTodo => repo.rebase_todo_path()?,
         };
         let run_id = opaque_id()?;
+        let uri = crate::file_uri::uri_from_path(&expected)
+            .ok_or_else(|| Error::new("Commit draft target has no file URI"))?
+            .as_str()
+            .to_owned();
         Ok(Self {
             owner: owner.into(),
             repository: std::fs::canonicalize(repo.root())?,
-            uri: file_uri(&expected),
+            uri,
             run_id,
             helper_token: opaque_id()?,
             expected,
@@ -333,20 +337,6 @@ fn opaque_id() -> Result<String> {
     let mut bytes = [0u8; 32];
     File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-fn file_uri(path: &Path) -> String {
-    use std::os::unix::ffi::OsStrExt;
-    let mut uri = String::from("file://");
-    for byte in path.as_os_str().as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'.' | b'_' | b'~' => {
-                uri.push(*byte as char)
-            }
-            _ => uri.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    uri
 }
 
 // Pin the validated directory and owner. openat + NOFOLLOW avoid final-component

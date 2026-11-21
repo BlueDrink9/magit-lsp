@@ -11,7 +11,7 @@ pub(super) fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(Strin
         };
         DocumentFormat::from_text(&document.text)
     };
-    let Some(path) = file_uri_path(&uri) else {
+    let Some(path) = crate::file_uri::path_from_uri(&uri) else {
         return None;
     };
     if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) {
@@ -53,7 +53,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
         )
     };
     let config = shared.config.config();
-    let Some(path) = file_uri_path(&uri) else {
+    let Some(path) = crate::file_uri::path_from_uri(&uri) else {
         return;
     };
     if !crate::config::is_presentation_file(&path, &config.presentation_files) {

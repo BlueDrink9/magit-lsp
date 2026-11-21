@@ -117,7 +117,7 @@ fn draft_document_is_owned(shared: &Shared, uri: &str) -> bool {
 /// Whether the URI addresses a workspace repository's commit message file, which
 /// a Plain client may open before a draft run claims it.
 fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
-    let Some(path) = file_uri_path(uri) else {
+    let Some(path) = crate::file_uri::path_from_uri(uri) else {
         return false;
     };
     if !path
