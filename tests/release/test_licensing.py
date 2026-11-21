@@ -17,7 +17,8 @@ class LicensingTests(unittest.TestCase):
 
     def test_apache_notice_copies_and_protocol_boundary(self):
         canonical = (ROOT / 'LICENCES/Apache-2.0').read_bytes()
-        for name in ('lua/LICENSE', 'clients/LICENSE', 'clients/vscode/LICENSE', 'docs/LICENSE'):
+        for name in ('clients/neovim/lua/LICENSE', 'clients/LICENSE', 'clients/vscode/LICENSE',
+                     'docs/LICENSE'):
             self.assertEqual((ROOT / name).read_bytes(), canonical)
         licensing = (ROOT / 'LICENSING.md').read_text()
         for component in ('lua/', 'clients/', 'src/protocol.rs', 'docs/', 'README.md',
