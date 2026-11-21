@@ -23,6 +23,7 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 - [x] **PERF-OPEN-TRACE-CONTEXT — Preserve request tracing across deferred status work.** Confirmed at `92aaa96`: the request thread's scoped trace id is lost in deferred `spawn_blocking`, so real status/rebase phases disappear and the unchanged startup check fails. test: existing cold/reopen phase assertions pass with request-correlated Git/status/rebase work after async dispatch; retain generation/coalescing/publication behavior and inert tracing when disabled. check: record evidence and commit. Verification: `make nvim-startup-check`.
   - Verified: `make nvim-startup-check` → exit 0 (`ok: build`; `ok: nvim-startup-check`); raw traces in `build/startup-diagnosis/20261121T231516Z/*.trace.jsonl` show cold (id 1) and reopen (id 2) opens sharing `phase_status_listing`, `phase_rebase_state` and all `git_call` spans under the originating request id in every fixture and worktree sample.
+  - Done: `d939548`.
 
 - [ ] **PERF-OPEN-STRACE — Attribute startup subprocess and filesystem waits.** User installed strace/perf. check: a maintained Make entry reuses the public-command startup harness and captures unique server/child-Git syscall artifacts without changing product code or the protected Lua helper; fails on unavailable tracing, incomplete samples or missing trace artifacts. check: run it and document observed subprocess/wait costs with overhead and endpoint limitations. Verification: `make nvim-startup-strace` (add target).
 
