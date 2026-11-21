@@ -605,18 +605,52 @@ def validate_release_readiness(bundle):
     for family, results in outcomes.items():
         if not isinstance(results, dict) or set(results) != set(READINESS_TARGETS):
             fail(f'readiness: {family} target set must match all expected targets')
-        for target, outcome in results.items():
-            if outcome != 'success':
+        for target, record in results.items():
+            if not isinstance(record, dict) or record.get('result') != 'success':
                 fail(f'readiness: {family} outcome for {target} must be success')
+            if record.get('identity') != identity:
+                fail(f'readiness: {family} evidence identity mismatch for {target}')
+            expected_artifact = vsix if family == 'vsix' else candidates[target]
+            artifact_id_key = 'immutable_id'
+            digest_key = 'sha256' if family == 'vsix' else 'archive_sha256'
+            if record.get('artifact_id') != expected_artifact[artifact_id_key] or \
+                    record.get('artifact_sha256') != expected_artifact[digest_key]:
+                fail(f'readiness: {family} evidence artifact mismatch for {target}')
+            if record.get('executable_sha256') != candidates[target]['executable_sha256']:
+                fail(f'readiness: {family} executable hash mismatch for {target}')
+            counts = record.get('tests')
+            if not isinstance(counts, dict) or not isinstance(counts.get('executed'), int) or \
+                    counts['executed'] <= 0 or counts.get('skipped') != 0 or \
+                    counts.get('ignored') != 0:
+                fail(f'readiness: {family} tests need execution and zero skipped/ignored for {target}')
+            if record.get('lifecycle') != 'success' or record.get('cleanup') != 'success':
+                fail(f'readiness: {family} lifecycle/cleanup must succeed for {target}')
     if bundle.get('experimental_complete') is not True:
         fail('readiness: experimental checks are incomplete')
     promotion = bundle.get('promotion')
-    publishable = (identity['event'] == 'push' and isinstance(promotion, dict) and
-                   promotion.get('status') == 'success' and
-                   promotion.get('source_sha') == identity['source_sha'] and
-                   promotion.get('run_id') == identity['run_id'] and
-                   promotion.get('run_attempt') == identity['run_attempt'] and
-                   bundle.get('fallback_only') is not True)
+    publishable = False
+    if isinstance(promotion, dict) and bundle.get('fallback_only') is not True:
+        proof = promotion.get('evidence')
+        if isinstance(proof, dict):
+            proof_identity = proof.get('identity')
+            expected_identity = {'source_sha': identity['source_sha'],
+                                 'run_url': identity.get('run_url'),
+                                 'run_attempt': identity['run_attempt']}
+            artifacts = proof.get('artifacts')
+            if proof_identity == expected_identity and isinstance(artifacts, dict):
+                for target in READINESS_TARGETS:
+                    artifact = artifacts.get(target)
+                    candidate = candidates[target]
+                    if not isinstance(artifact, dict) or \
+                            artifact.get('immutable_id') != candidate['immutable_id'] or \
+                            artifact.get('sha256') != candidate['archive_sha256'] or \
+                            any(artifact.get(key) != proof_identity.get(key)
+                                for key in ('source_sha', 'run_url', 'run_attempt')):
+                        break
+                else:
+                    check_native_promotion_evidence('native-experimental', proof)
+                    publishable = identity['event'] == 'push' and \
+                        str(identity['ref']).startswith('refs/tags/')
     return {'experimental_ready': True, 'publishable': publishable}
 
 
@@ -2844,7 +2878,8 @@ def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
     readiness_identity = {'source_sha': SELF_TEST_SHA, 'ref': 'refs/tags/v1.2.3',
                           'event': 'push', 'run_id': '42', 'run_attempt': '1',
-                          'workflow_id': '7'}
+                          'workflow_id': '7',
+                          'run_url': 'https://github.com/example/magit-lsp/actions/runs/42'}
     readiness_bundle = {
         'identity': readiness_identity,
         'candidates': {target: {**readiness_identity, 'immutable_id': f'artifact-{i}',
@@ -2855,16 +2890,35 @@ def run_self_tests():
                        for i, target in enumerate(READINESS_TARGETS)},
         'vsix': {**readiness_identity, 'immutable_id': 'vsix-artifact',
                  'sha256': 'c' * 64},
-        'outcomes': {family: {target: 'success' for target in READINESS_TARGETS}
-                     for family in READINESS_OUTCOMES},
+        'outcomes': {},
         'experimental_complete': True, 'fallback_only': False,
     }
+    for family in READINESS_OUTCOMES:
+        readiness_bundle['outcomes'][family] = {}
+        for target in READINESS_TARGETS:
+            artifact = readiness_bundle['vsix'] if family == 'vsix' else \
+                readiness_bundle['candidates'][target]
+            readiness_bundle['outcomes'][family][target] = {
+                'result': 'success', 'identity': readiness_identity,
+                'artifact_id': artifact['immutable_id'],
+                'artifact_sha256': artifact.get('sha256', artifact.get('archive_sha256')),
+                'executable_sha256': readiness_bundle['candidates'][target]['executable_sha256'],
+                'tests': {'executed': 1, 'skipped': 0, 'ignored': 0},
+                'lifecycle': 'success', 'cleanup': 'success'}
     result = validate_release_readiness(readiness_bundle)
     if result != {'experimental_ready': True, 'publishable': False}:
         fail('self-test: complete experimental readiness must not imply publication')
-    promoted = {**readiness_bundle, 'promotion': {
-        'status': 'success', 'source_sha': SELF_TEST_SHA, 'run_id': '42',
-        'run_attempt': '1'}}
+    promotion_proof = {
+        'identity': {'source_sha': SELF_TEST_SHA, 'run_url': readiness_identity['run_url'],
+                     'run_attempt': '1'},
+        'artifacts': {target: {'immutable_id': readiness_bundle['candidates'][target]['immutable_id'],
+                               'sha256': readiness_bundle['candidates'][target]['archive_sha256'],
+                               'source_sha': SELF_TEST_SHA,
+                               'run_url': readiness_identity['run_url'], 'run_attempt': '1'}
+                      for target in READINESS_TARGETS},
+        'outcomes': {gate: {target: 'success' for target in READINESS_TARGETS}
+                     for gate in ('abi', 'functional', 'vsix')}}
+    promoted = {**readiness_bundle, 'promotion': {'evidence': promotion_proof}}
     if validate_release_readiness(promoted)['publishable'] is not True:
         fail('self-test: matching recorded promotion must enable publication eligibility')
     for event in ('workflow_dispatch', 'push'):
@@ -2880,7 +2934,8 @@ def run_self_tests():
             if outcome == 'missing':
                 del invalid['outcomes'][family][READINESS_TARGETS[0]]
             else:
-                invalid['outcomes'][family][READINESS_TARGETS[0]] = outcome
+                invalid['outcomes'][family][READINESS_TARGETS[0]] = {
+                    **invalid['outcomes'][family][READINESS_TARGETS[0]], 'result': outcome}
             expect_check(f'readiness {family} {outcome}', validate_release_readiness,
                          invalid, expected=('target set' if outcome == 'missing'
                                             else 'must be success'))
@@ -2902,7 +2957,36 @@ def run_self_tests():
     invalid_vsix = {**readiness_bundle, 'vsix': {**readiness_bundle['vsix'], 'sha256': 'bad'}}
     expect_check('readiness VSIX hash mismatch', validate_release_readiness, invalid_vsix,
                  expected='invalid VSIX identity/hash')
-    invalid_promotion = {**promoted, 'promotion': {**promoted['promotion'], 'run_attempt': '2'}}
+    for field, value, expected in (
+            ('executed', 0, 'need execution'), ('skipped', 1, 'zero skipped/ignored'),
+            ('ignored', 1, 'zero skipped/ignored')):
+        invalid = {**readiness_bundle, 'outcomes': {
+            family: dict(records) for family, records in readiness_bundle['outcomes'].items()}}
+        family = READINESS_OUTCOMES[0]
+        target = READINESS_TARGETS[0]
+        record = {**invalid['outcomes'][family][target],
+                  'tests': {**invalid['outcomes'][family][target]['tests'], field: value}}
+        invalid['outcomes'][family][target] = record
+        expect_check(f'readiness measured test count {field}', validate_release_readiness,
+                     invalid, expected=expected)
+    for field, value, expected in (
+            ('identity', {**readiness_identity, 'run_attempt': '2'}, 'evidence identity mismatch'),
+            ('artifact_id', 'other-artifact', 'evidence artifact mismatch'),
+            ('lifecycle', 'failure', 'lifecycle/cleanup'),
+            ('cleanup', 'missing', 'lifecycle/cleanup')):
+        invalid = {**readiness_bundle, 'outcomes': {
+            family: dict(records) for family, records in readiness_bundle['outcomes'].items()}}
+        family = READINESS_OUTCOMES[0]
+        target = READINESS_TARGETS[0]
+        invalid['outcomes'][family][target] = {
+            **invalid['outcomes'][family][target], field: value}
+        expect_check(f'readiness evidence {field}', validate_release_readiness,
+                     invalid, expected=expected)
+    invalid_proof = {**promotion_proof, 'artifacts': dict(promotion_proof['artifacts'])}
+    invalid_proof['artifacts'] = {**invalid_proof['artifacts'], READINESS_TARGETS[0]:
+                                  {**invalid_proof['artifacts'][READINESS_TARGETS[0]],
+                                   'sha256': 'd' * 64}}
+    invalid_promotion = {**promoted, 'promotion': {'evidence': invalid_proof}}
     if validate_release_readiness(invalid_promotion)['publishable']:
         fail('self-test: mismatched promotion attempt must not be publishable')
     windows_failure = {**readiness_bundle, 'windows_outcome': 'failure'}
