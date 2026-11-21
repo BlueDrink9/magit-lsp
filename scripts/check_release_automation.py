@@ -19,7 +19,10 @@ release pipeline script, and runs fixture-driven self-tests of those decision
 points, so the rejections are exercised rather than only described.
 ``--automation-unit`` runs only the static workflow/pipeline guards and their
 fixtures, with no Cargo metadata or package, so it is usable in a tools-only
-shell.
+shell. ``--validate-publication-binding BUNDLE`` is the strict data boundary:
+it validates one producer run, every paginated job/artifact page, the upload
+identity, the run-bound manifest and the peeled original tag together; it makes
+no readiness claim and is not wired into publication yet.
 """
 
 import argparse
@@ -131,6 +134,23 @@ IDENTITY_ENV = (
 )
 UPLOAD_IDENTITY_FILE = 'build/release/upload-identity.json'
 NODE_TOOLING = ('pnpm', 'npm ', 'vsce', 'ovsx')
+# Publication binding: the tracked producer's mandatory jobs. The native matrix
+# rows are explicit experiments and no VSIX or release-ready consumer exists
+# yet, so those names stay outside the gate until NREL-19 promotes them; this
+# checker makes no publication-readiness claim about them.
+MANDATORY_RUN_JOBS = (SOURCE_CHECK_JOB, FALLBACK_JOB)
+PENDING_READINESS_JOBS = ('native-candidates', 'vsix', 'release-ready')
+REQUIRED_RUN_ARTIFACTS = (ARTIFACT_NAME, f'{ARTIFACT_NAME}-identity')
+RUN_EVENT = 'push'
+# The run-bound manifest fields emitted by scripts/check_release_pipeline.py.
+# Publication validation compares the exact set, so a replaced or extended
+# manifest cannot ride along.
+MANIFEST_FIELDS = frozenset({
+    'source_sha', 'original_ref', 'event', 'run_id', 'run_attempt',
+    'version', 'lock_hashes', 'target', 'toolchain', 'archive_sha256',
+    'executable_sha256',
+})
+ARTIFACT_DIGEST_PATTERN = re.compile(r'sha256:[0-9a-f]{64}')
 
 
 class CheckError(Exception):
@@ -1281,6 +1301,368 @@ def release_target(status, body, sha):
     return sha
 
 
+def run_int(value):
+    """Return ``value`` as a non-negative integer run field, or fail readably."""
+    if isinstance(value, str) and re.fullmatch(r'[0-9]+', value):
+        return int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        fail(f'run binding: {value!r} is not a non-negative integer')
+    return value
+
+
+def validate_run_binding(document, repository, run_id, run_attempt, workflow_id,
+                         tag_ref):
+    """Fail unless the run is this repository's push-tag build of ``tag_ref``.
+
+    Run id, attempt, repository, head repository, workflow path/name/id, event,
+    completion, conclusion and the tag branch must all match. ``head_sha`` is
+    deliberately not compared with the release source: the original tag's
+    peeled commit is the only source oracle, so a default-branch SHA carried in
+    the payload can never be mistaken for the release source. ``head_branch`` is
+    only compared with the exact tag name declared by the trusted version.
+    """
+    if not isinstance(document, dict):
+        fail('run binding: expected a JSON object')
+    if document.get('path') != BUILD_WORKFLOW_PATH:
+        fail(f'run binding workflow is {document.get("path")!r}, '
+             f'expected {BUILD_WORKFLOW_PATH!r}')
+    if document.get('name') != BUILD_WORKFLOW_NAME:
+        fail(f'run binding workflow name is {document.get("name")!r}, '
+             f'expected {BUILD_WORKFLOW_NAME!r}')
+    if document.get('workflow_id') != workflow_id:
+        fail(f'run binding workflow id is {document.get("workflow_id")!r}, '
+             f'expected {workflow_id!r}')
+    if full_name(document.get('repository')) != repository:
+        fail(f'run binding repository is {full_name(document.get("repository"))!r}, '
+             f'expected {repository!r}')
+    if full_name(document.get('head_repository')) != repository:
+        fail(f'run binding head repository is '
+             f'{full_name(document.get("head_repository"))!r}, expected {repository!r}')
+    if document.get('event') != RUN_EVENT:
+        fail(f'run binding event is {document.get("event")!r}, expected {RUN_EVENT}')
+    if not isinstance(tag_ref, str) or not tag_ref.startswith('refs/tags/'):
+        fail(f'run binding tag ref is {tag_ref!r}, expected refs/tags/*')
+    tag_name = tag_ref[len('refs/tags/'):]
+    if document.get('head_branch') != tag_name:
+        fail(f'run binding branch is {document.get("head_branch")!r}, '
+             f'expected the tag {tag_name!r}')
+    if document.get('id') != run_int(run_id):
+        fail(f'run binding id is {document.get("id")!r}, expected {run_id!r}')
+    if document.get('run_attempt') != run_int(run_attempt):
+        fail(f'run binding attempt is {document.get("run_attempt")!r}, '
+             f'expected {run_attempt!r}')
+    if document.get('status') != 'completed':
+        fail(f'run binding status is {document.get("status")!r}, expected completed')
+    if document.get('conclusion') != 'success':
+        fail(f'run binding conclusion is {document.get("conclusion")!r}, '
+             'expected success')
+
+
+def paginated_entries(pages, key, label):
+    """Return the complete entry list of every ``pages`` document, or fail.
+
+    GitHub paginates the job and artifact listings. A missing page, a page that
+    disagrees about ``total_count`` or a duplicate entry id is a contradiction,
+    not a partial success, so it fails closed. The collected count must equal
+    ``total_count`` exactly.
+    """
+    if not isinstance(pages, list) or not pages:
+        fail(f'{label}: no API pages were supplied')
+    total = None
+    entries = []
+    seen = set()
+    for index, page in enumerate(pages):
+        if not isinstance(page, dict):
+            fail(f'{label}: page {index + 1} is not a JSON object')
+        count = page.get('total_count')
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            fail(f'{label}: page {index + 1} has no valid total_count')
+        if total is None:
+            total = count
+        elif count != total:
+            fail(f'{label}: pages disagree on total_count ({total} vs {count})')
+        page_entries = page.get(key)
+        if not isinstance(page_entries, list):
+            fail(f'{label}: page {index + 1} has no {key!r} list')
+        for entry in page_entries:
+            if not isinstance(entry, dict):
+                fail(f'{label}: page {index + 1} has a non-object entry')
+            identity = entry.get('id')
+            if isinstance(identity, int) and not isinstance(identity, bool):
+                if identity in seen:
+                    fail(f'{label}: duplicate entry id {identity}')
+                seen.add(identity)
+            entries.append(entry)
+    if len(entries) < total:
+        fail(f'{label}: incomplete pagination (collected {len(entries)} of {total})')
+    if len(entries) > total:
+        fail(f'{label}: contradictory pagination (collected {len(entries)} '
+             f'of {total})')
+    return entries
+
+
+def validate_run_jobs(pages, run_id, run_attempt, mandatory=MANDATORY_RUN_JOBS):
+    """Require every page and every declared mandatory job to succeed.
+
+    Every listed job must belong to ``run_id`` and ``run_attempt``. Each
+    mandatory name must appear and every job with that name must be completed
+    with conclusion ``success``; a missing, skipped, cancelled, neutral or
+    otherwise inconclusive mandatory job fails the run.
+    """
+    jobs = paginated_entries(pages, 'jobs', 'build run jobs')
+    expected_run = run_int(run_id)
+    expected_attempt = run_int(run_attempt)
+    by_name = {}
+    for job in jobs:
+        if job.get('run_id') != expected_run:
+            fail(f'build run job {job.get("name")!r} belongs to run '
+                 f'{job.get("run_id")!r}, expected {expected_run}')
+        if job.get('run_attempt') != expected_attempt:
+            fail(f'build run job {job.get("name")!r} belongs to attempt '
+                 f'{job.get("run_attempt")!r}, expected {expected_attempt}')
+        name = job.get('name')
+        if not isinstance(name, str) or not name:
+            fail('build run job has no name')
+        by_name.setdefault(name, []).append(job)
+    for name in mandatory:
+        matches = by_name.get(name, [])
+        if not matches:
+            fail(f'build run is missing mandatory job {name!r}')
+        for job in matches:
+            if job.get('status') != 'completed':
+                fail(f'mandatory job {name!r} is inconclusive '
+                     f'(status {job.get("status")!r})')
+            if job.get('conclusion') != 'success':
+                fail(f'mandatory job {name!r} concluded '
+                     f'{job.get("conclusion")!r}, not success')
+    return jobs
+
+
+def validate_manifest_binding(manifest, expected):
+    """Fail unless the untrusted run manifest is the trusted exact binding.
+
+    ``expected`` carries the trusted version, target, run identity, locks and
+    toolchain. The manifest's keys must be exactly the producer contract's
+    fields, and its tag ref must be the version's ``refs/tags/v*``. The source
+    SHA is only shape-checked here and bound to the tag by
+    :func:`validate_tag_binding`; manifest content is never executed.
+    """
+    if not isinstance(manifest, dict):
+        fail('release manifest: expected a JSON object')
+    keys = set(manifest)
+    if keys != MANIFEST_FIELDS:
+        missing = sorted(MANIFEST_FIELDS - keys)
+        unexpected = sorted(keys - MANIFEST_FIELDS)
+        fail(f'release manifest fields differ: missing {missing}, '
+             f'unexpected {unexpected}')
+    for field in ('run_id', 'run_attempt', 'event', 'version', 'target',
+                  'original_ref'):
+        if manifest.get(field) != expected[field]:
+            fail(f'release manifest {field} is {manifest.get(field)!r}, '
+                 f'expected {expected[field]!r}')
+    if manifest['original_ref'] != f"refs/tags/v{manifest['version']}":
+        fail(f'release manifest original_ref {manifest["original_ref"]!r} is not '
+             f'the version tag v{manifest["version"]}')
+    if not isinstance(manifest['source_sha'], str) or not re.fullmatch(
+            r'[0-9a-f]{40}', manifest['source_sha']):
+        fail('release manifest source_sha is not a full commit SHA')
+    for field in ('archive_sha256', 'executable_sha256'):
+        if not isinstance(manifest[field], str) or not re.fullmatch(
+                r'[0-9a-f]{64}', manifest[field]):
+            fail(f'release manifest {field} is not a SHA-256')
+    if manifest['lock_hashes'] != expected['lock_hashes']:
+        fail('release manifest lock_hashes differ from the checked-out source')
+    if manifest['toolchain'] != expected['toolchain']:
+        fail('release manifest toolchain differs from the trusted toolchain')
+
+
+def validate_tag_binding(status, ref_body, tag_body, manifest):
+    """Peel the manifest's original tag via the API and require its source.
+
+    HTTP 404 means the original tag is missing, which publication cannot repair.
+    A lightweight ref peels directly to its commit; an annotated ref must be
+    peeled through its tag object. The peeled commit must equal the manifest
+    source SHA, so a moved or replaced tag fails for both shapes.
+    """
+    original_ref = manifest['original_ref']
+    tag_name = original_ref[len('refs/tags/'):]
+    if status == 404:
+        fail(f'release tag {original_ref} is missing; publication requires the '
+             'original tag')
+    if status != 200:
+        fail(f'release tag {original_ref} lookup returned HTTP {status}')
+    document = parse_json(ref_body, 'release tag ref')
+    if not isinstance(document, dict):
+        fail('release tag ref: expected a JSON object')
+    if document.get('ref') != original_ref:
+        fail(f'release tag ref is {document.get("ref")!r}, expected {original_ref!r}')
+    target = document.get('object')
+    if not isinstance(target, dict):
+        fail(f'release tag {original_ref} has no object')
+    kind = target.get('type')
+    sha = target.get('sha')
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
+        fail(f'release tag {original_ref} has no full object sha')
+    if kind == 'commit':
+        peeled = sha
+    elif kind == 'tag':
+        if tag_body is None:
+            fail(f'annotated release tag {original_ref} was not peeled')
+        annotated = parse_json(tag_body, 'release tag object')
+        if not isinstance(annotated, dict) or annotated.get('tag') != tag_name:
+            fail(f'release tag object is not {tag_name!r}')
+        commit = annotated.get('object')
+        if not isinstance(commit, dict) or commit.get('type') != 'commit':
+            fail(f'release tag {original_ref} does not peel to a commit')
+        peeled = commit.get('sha')
+        if not isinstance(peeled, str) or not re.fullmatch(r'[0-9a-f]{40}', peeled):
+            fail(f'release tag {original_ref} peels to no full commit sha')
+    else:
+        fail(f'release tag {original_ref} points at an unsupported {kind!r} object')
+    if peeled != manifest['source_sha']:
+        fail(f'release tag {original_ref} peels to {peeled}, not the manifest '
+             f'source {manifest["source_sha"]}')
+    return peeled
+
+
+def validate_run_artifacts(pages, run_id, required=REQUIRED_RUN_ARTIFACTS):
+    """Return the run's artifacts keyed by name after a fail-closed check.
+
+    Every required production artifact must appear exactly once with an integer
+    id, a ``sha256:`` digest and a non-expired state, and any recorded
+    ``workflow_run`` must be this run. Only the explicit ``native-*``
+    experiments may coexist; any other unexpected name is refused.
+    """
+    artifacts = paginated_entries(pages, 'artifacts', 'build run artifacts')
+    expected_run = run_int(run_id)
+    by_name = {}
+    for artifact in artifacts:
+        name = artifact.get('name')
+        if not isinstance(name, str) or not name:
+            fail('build run artifact has no name')
+        if isinstance(artifact.get('id'), bool) or not isinstance(
+                artifact.get('id'), int):
+            fail(f'build run artifact {name!r} has no integer id')
+        if not ARTIFACT_DIGEST_PATTERN.fullmatch(str(artifact.get('digest'))):
+            fail(f'build run artifact {name!r} has no supported digest')
+        if artifact.get('expired') is not False:
+            fail(f'build run artifact {name!r} is expired or has no expiry state')
+        workflow_run = artifact.get('workflow_run')
+        if workflow_run is not None:
+            if not isinstance(workflow_run, dict) or \
+                    run_int(workflow_run.get('id')) != expected_run:
+                fail(f'build run artifact {name!r} belongs to another run')
+        if name in by_name:
+            fail(f'build run has duplicate artifact {name!r}')
+        by_name[name] = artifact
+    for name in required:
+        if name not in by_name:
+            fail(f'build run is missing required artifact {name!r}')
+    for name in by_name:
+        if name not in required and not name.startswith('native-'):
+            fail(f'build run has an unexpected artifact {name!r}')
+    return by_name
+
+
+def validate_upload_identity(document, run_id, run_attempt, artifact):
+    """Bind the downloaded upload identity to this run attempt and artifact.
+
+    The identity file is untrusted data: it must carry exactly the producer's
+    fields, name the same run/attempt and target, and reproduce the API
+    artifact's id and digest.
+    """
+    if not isinstance(document, dict):
+        fail('upload identity: expected a JSON object')
+    expected_fields = {'artifact_id', 'artifact_digest', 'run_id', 'run_attempt',
+                       'target'}
+    if set(document) != expected_fields:
+        fail(f'upload identity fields differ: {sorted(document)}')
+    if document['run_id'] != str(run_int(run_id)):
+        fail(f'upload identity run_id is {document["run_id"]!r}, expected {run_id!r}')
+    if document['run_attempt'] != str(run_int(run_attempt)):
+        fail(f'upload identity run_attempt is {document["run_attempt"]!r}, '
+             f'expected {run_attempt!r}')
+    if document['target'] != ASSET:
+        fail(f'upload identity target is {document["target"]!r}, expected {ASSET!r}')
+    if not ARTIFACT_DIGEST_PATTERN.fullmatch(str(document['artifact_digest'])):
+        fail('upload identity artifact_digest is not a supported digest')
+    if document['artifact_id'] != str(artifact.get('id')):
+        fail(f'upload identity artifact id {document["artifact_id"]!r} does not '
+             f'match API artifact {artifact.get("id")!r}')
+    if document['artifact_digest'] != artifact.get('digest'):
+        fail('upload identity artifact digest does not match the API artifact')
+
+
+def validate_archive_binding(manifest, archive):
+    """Require the downloaded archive bytes to hash to the manifest's record."""
+    path = Path(archive)
+    if not path.is_file():
+        fail(f'release archive {path} is missing')
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != manifest['archive_sha256']:
+        fail(f'release archive {path.name} does not match the release manifest hash')
+    return digest
+
+
+def validate_publication_binding(run_document, job_pages, artifact_pages,
+                                 identity_document, manifest, trusted,
+                                 repository, run_id, run_attempt, workflow_id,
+                                 tag_status, tag_ref, tag_object=None):
+    """Strict data-only entrypoint binding one producer run, tag and assets.
+
+    The caller fetches the run, every jobs and artifacts page, the tag ref and
+    (for an annotated tag) its tag object; all of it is untrusted data and none
+    of it is executed. The trusted version, target, locks and toolchain arrive
+    separately in ``trusted``. On success the validated source commit, jobs and
+    artifacts are returned for privileged consumers; NREL-18 owns the workflow
+    wiring that calls this after fetching, and no readiness is claimed here.
+    """
+    validate_run_binding(run_document, repository, run_id, run_attempt,
+                         workflow_id, trusted.get('original_ref'))
+    jobs = validate_run_jobs(job_pages, run_id, run_attempt)
+    artifacts = validate_run_artifacts(artifact_pages, run_id)
+    validate_manifest_binding(manifest, trusted)
+    validate_upload_identity(identity_document, run_id, run_attempt,
+                             artifacts[ARTIFACT_NAME])
+    source = validate_tag_binding(tag_status, tag_ref, tag_object, manifest)
+    return {'source_sha': source, 'jobs': jobs, 'artifacts': artifacts,
+            'manifest': manifest}
+
+
+def validate_publication_binding_bundle(path):
+    """Validate an offline JSON publication-binding bundle and print its source.
+
+    The bundle is the data form of :func:`validate_publication_binding`: the
+    already-fetched run, job/artifact pages, upload identity, manifest, trusted
+    fields and tag ref/object. It is the CLI boundary privileged consumers can
+    call without embedding validation logic, and it never performs I/O beyond
+    reading the bundle or executes any artifact content.
+    """
+    document = parse_json(Path(path).read_bytes(), 'publication binding bundle')
+    if not isinstance(document, dict):
+        fail('publication binding bundle: expected a JSON object')
+    fields = {'repository', 'run_id', 'run_attempt', 'workflow_id', 'run',
+              'job_pages', 'artifact_pages', 'identity', 'manifest', 'trusted',
+              'tag_status', 'tag_ref', 'tag_object'}
+    missing = sorted(fields - set(document))
+    unexpected = sorted(set(document) - fields)
+    if missing or unexpected:
+        fail(f'publication binding bundle fields differ: missing {missing}, '
+             f'unexpected {unexpected}')
+    tag_ref = document['tag_ref']
+    tag_object = document['tag_object']
+    result = validate_publication_binding(
+        document['run'], document['job_pages'], document['artifact_pages'],
+        document['identity'], document['manifest'], document['trusted'],
+        document['repository'], document['run_id'], document['run_attempt'],
+        document['workflow_id'], document['tag_status'],
+        json.dumps(tag_ref),
+        None if tag_object is None else json.dumps(tag_object))
+    print(f"ok: publication binding for run {document['run_id']} "
+          f"attempt {document['run_attempt']} from source {result['source_sha']}")
+    return result
+
+
 def repository_and_sha():
     """Return ``(repository, sha)`` from the workflow environment, validated."""
     repository = os.environ.get('GITHUB_REPOSITORY', '')
@@ -1363,6 +1745,117 @@ def run_metadata_fixture(**overrides):
 def tag_document(sha):
     """Return the tag lookup body for an existing tag pointing at ``sha``."""
     return json.dumps({'sha': sha})
+
+
+SELF_TEST_WORKFLOW_ID = 987654321
+SELF_TEST_RUN_ID = '555000111'
+SELF_TEST_RUN_ATTEMPT = '1'
+SELF_TEST_VERSION = '1.2.3'
+SELF_TEST_TAG_REF = f'refs/tags/v{SELF_TEST_VERSION}'
+SELF_TEST_LOCK_HASHES = {
+    'Cargo.lock': '1' * 64,
+    'flake.lock': '2' * 64,
+    'clients/vscode/pnpm-lock.yaml': '3' * 64,
+}
+SELF_TEST_TOOLCHAIN = {'rust': RELEASE_TOOLCHAIN}
+SELF_TEST_ARTIFACT_DIGEST = 'sha256:' + 'd' * 64
+
+
+def run_binding_fixture(**overrides):
+    """Return a coherent push-tag producer run for the publication fixtures."""
+    document = {
+        'id': int(SELF_TEST_RUN_ID),
+        'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'event': 'push',
+        'head_branch': f'v{SELF_TEST_VERSION}',
+        'head_sha': SELF_TEST_SHA,
+        'path': BUILD_WORKFLOW_PATH,
+        'name': BUILD_WORKFLOW_NAME,
+        'workflow_id': SELF_TEST_WORKFLOW_ID,
+        'status': 'completed',
+        'conclusion': 'success',
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_repository': {'full_name': SELF_TEST_REPOSITORY},
+    }
+    document.update(overrides)
+    return document
+
+
+def job_document(name, job_id, **overrides):
+    """Return one completed successful job document for this fixture run."""
+    document = {
+        'id': job_id,
+        'run_id': int(SELF_TEST_RUN_ID),
+        'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'name': name,
+        'status': 'completed',
+        'conclusion': 'success',
+    }
+    document.update(overrides)
+    return document
+
+
+def page_document(key, entries, total=None):
+    """Return one GitHub listing page with an explicit total count."""
+    return {'total_count': len(entries) if total is None else total, key: list(entries)}
+
+
+def artifact_document(name, artifact_id, **overrides):
+    """Return one unexpired run artifact bound to the fixture run."""
+    document = {
+        'id': artifact_id,
+        'name': name,
+        'digest': SELF_TEST_ARTIFACT_DIGEST,
+        'expired': False,
+        'workflow_run': {'id': int(SELF_TEST_RUN_ID)},
+    }
+    document.update(overrides)
+    return document
+
+
+def manifest_fixture(**overrides):
+    """Return the exact run-bound manifest contract for the fixtures."""
+    document = {
+        'source_sha': SELF_TEST_SHA,
+        'original_ref': SELF_TEST_TAG_REF,
+        'event': 'push',
+        'run_id': SELF_TEST_RUN_ID,
+        'run_attempt': SELF_TEST_RUN_ATTEMPT,
+        'version': SELF_TEST_VERSION,
+        'lock_hashes': dict(SELF_TEST_LOCK_HASHES),
+        'target': ASSET,
+        'toolchain': dict(SELF_TEST_TOOLCHAIN),
+        'archive_sha256': 'c' * 64,
+        'executable_sha256': 'e' * 64,
+    }
+    document.update(overrides)
+    return document
+
+
+def manifest_expectation(**overrides):
+    """Return the trusted fields the manifest must reproduce exactly."""
+    document = {
+        'run_id': SELF_TEST_RUN_ID,
+        'run_attempt': SELF_TEST_RUN_ATTEMPT,
+        'event': 'push',
+        'version': SELF_TEST_VERSION,
+        'target': ASSET,
+        'original_ref': SELF_TEST_TAG_REF,
+        'lock_hashes': dict(SELF_TEST_LOCK_HASHES),
+        'toolchain': dict(SELF_TEST_TOOLCHAIN),
+    }
+    document.update(overrides)
+    return document
+
+
+def tag_ref_body(kind='commit', sha=SELF_TEST_SHA, ref=SELF_TEST_TAG_REF):
+    """Return a ``git/ref/tags`` body for a lightweight or annotated tag."""
+    return json.dumps({'ref': ref, 'object': {'type': kind, 'sha': sha}})
+
+
+def tag_object_body(commit=SELF_TEST_SHA, tag=f'v{SELF_TEST_VERSION}'):
+    """Return the annotated tag object body that peels to ``commit``."""
+    return json.dumps({'tag': tag, 'object': {'type': 'commit', 'sha': commit}})
 
 
 def write_artifacts(directory, version='1.2.3', payload=b'archive bytes'):
@@ -1914,6 +2407,369 @@ def run_self_tests():
     expect_check('non-object run metadata', validate_run_metadata, [],
                  SELF_TEST_REPOSITORY, SELF_TEST_SHA, expected='expected a JSON object')
 
+    # Publication binding: a coherent push-tag run, every paginated job and
+    # artifact entry, the exact trusted manifest and both tag shapes are
+    # accepted together. The native matrix stays a non-gating experiment and
+    # the release-ready/VSIX contract is explicitly pending, so this fixture
+    # makes no publication-readiness claim.
+    if set(MANDATORY_RUN_JOBS) & set(PENDING_READINESS_JOBS):
+        fail('self-test: pending readiness jobs must not be mandatory yet')
+    validate_run_binding(run_binding_fixture(), SELF_TEST_REPOSITORY,
+                         SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+                         SELF_TEST_WORKFLOW_ID, SELF_TEST_TAG_REF)
+    # A payload default-branch SHA is never the source oracle: changing it does
+    # not change the binding, and the tag peel below still decides the source.
+    validate_run_binding(run_binding_fixture(head_sha=SELF_TEST_OTHER_SHA),
+                         SELF_TEST_REPOSITORY, SELF_TEST_RUN_ID,
+                         SELF_TEST_RUN_ATTEMPT, SELF_TEST_WORKFLOW_ID,
+                         SELF_TEST_TAG_REF)
+    for label, document, expected in (
+        ('foreign repository',
+         run_binding_fixture(repository={'full_name': 'other/repo'}),
+         'run binding repository is'),
+        ('fork head repository',
+         run_binding_fixture(head_repository={'full_name': 'someone/magit-lsp'}),
+         'run binding head repository is'),
+        ('foreign workflow path',
+         run_binding_fixture(path='.github/workflows/other-build.yml'),
+         'run binding workflow is'),
+        ('foreign workflow name',
+         run_binding_fixture(name='Some other build'),
+         'run binding workflow name is'),
+        ('foreign workflow id',
+         run_binding_fixture(workflow_id=SELF_TEST_WORKFLOW_ID + 1),
+         'run binding workflow id is'),
+        ('manual dispatch origin',
+         run_binding_fixture(event='workflow_dispatch'), 'expected push'),
+        ('pull request origin',
+         run_binding_fixture(event='pull_request'), 'expected push'),
+        ('branch origin', run_binding_fixture(head_branch='main'),
+         'expected the tag'),
+        ('wrong run id', run_binding_fixture(id=int(SELF_TEST_RUN_ID) + 1),
+         'run binding id is'),
+        ('wrong run attempt',
+         run_binding_fixture(run_attempt=int(SELF_TEST_RUN_ATTEMPT) + 1),
+         'run binding attempt is'),
+        ('unfinished run',
+         run_binding_fixture(status='in_progress', conclusion=None),
+         'run binding status is'),
+        ('unsuccessful run', run_binding_fixture(conclusion='failure'),
+         'run binding conclusion is'),
+    ):
+        expect_check(label, validate_run_binding, document, SELF_TEST_REPOSITORY,
+                     SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+                     SELF_TEST_WORKFLOW_ID, SELF_TEST_TAG_REF, expected=expected)
+    expect_check('non-object run binding', validate_run_binding, [],
+                 SELF_TEST_REPOSITORY, SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+                 SELF_TEST_WORKFLOW_ID, SELF_TEST_TAG_REF,
+                 expected='expected a JSON object')
+
+    coherent_jobs = [job_document(SOURCE_CHECK_JOB, 1),
+                     job_document(FALLBACK_JOB, 2)]
+    jobs = validate_run_jobs(
+        [page_document('jobs', coherent_jobs + [
+            job_document('native-candidates', 3, conclusion='skipped')])],
+        SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT)
+    if [job['name'] for job in jobs][:2] != list(MANDATORY_RUN_JOBS):
+        fail('self-test: coherent jobs must list the mandatory producer jobs')
+    for label, pages, expected in (
+        ('missing mandatory job',
+         [page_document('jobs', [job_document(SOURCE_CHECK_JOB, 1)])],
+         'missing mandatory job'),
+        ('skipped mandatory job',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, conclusion='skipped')])],
+         'not success'),
+        ('cancelled mandatory job',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, conclusion='cancelled')])],
+         'not success'),
+        ('neutral mandatory job',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, conclusion='neutral')])],
+         'not success'),
+        ('inconclusive mandatory job',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, status='in_progress',
+                          conclusion=None)])],
+         'is inconclusive'),
+        ('job from another attempt',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2,
+                          run_attempt=int(SELF_TEST_RUN_ATTEMPT) + 1)])],
+         'belongs to attempt'),
+        ('job from another run',
+         [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, run_id=int(SELF_TEST_RUN_ID) + 1)])],
+         'belongs to run'),
+        ('incomplete job pagination',
+         [page_document('jobs', coherent_jobs, total=3)],
+         'incomplete pagination'),
+        ('contradictory job pagination',
+         [page_document('jobs', coherent_jobs, total=1)],
+         'contradictory pagination'),
+        ('job pages disagreeing on the total',
+         [page_document('jobs', coherent_jobs[:1], total=2),
+          page_document('jobs', coherent_jobs[1:], total=3)],
+         'pages disagree on total_count'),
+        ('no job pages', [], 'no API pages'),
+        ('duplicate job ids',
+         [page_document('jobs', [job_document(SOURCE_CHECK_JOB, 1),
+                                 job_document(FALLBACK_JOB, 1)])],
+         'duplicate entry id'),
+    ):
+        expect_check(label, validate_run_jobs, pages, SELF_TEST_RUN_ID,
+                     SELF_TEST_RUN_ATTEMPT, expected=expected)
+
+    coherent_artifacts = [
+        artifact_document(ARTIFACT_NAME, 100),
+        artifact_document(f'{ARTIFACT_NAME}-identity', 101),
+    ]
+    artifacts = validate_run_artifacts(
+        [page_document('artifacts', coherent_artifacts)], SELF_TEST_RUN_ID)
+    identity = {
+        'artifact_id': '100',
+        'artifact_digest': SELF_TEST_ARTIFACT_DIGEST,
+        'run_id': SELF_TEST_RUN_ID,
+        'run_attempt': SELF_TEST_RUN_ATTEMPT,
+        'target': ASSET,
+    }
+    validate_upload_identity(identity, SELF_TEST_RUN_ID,
+                             SELF_TEST_RUN_ATTEMPT, artifacts[ARTIFACT_NAME])
+    for label, pages, expected in (
+        ('missing candidate artifact',
+         [page_document('artifacts', coherent_artifacts[1:])],
+         'missing required artifact'),
+        ('unexpected production artifact',
+         [page_document('artifacts', coherent_artifacts + [
+             artifact_document('release-assets', 102)])],
+         'unexpected artifact'),
+        ('candidate artifact without a supported digest',
+         [page_document('artifacts', [
+             artifact_document(ARTIFACT_NAME, 100, digest='not-a-digest'),
+             coherent_artifacts[1]])],
+         'has no supported digest'),
+        ('expired candidate artifact',
+         [page_document('artifacts', [
+             artifact_document(ARTIFACT_NAME, 100, expired=True),
+             coherent_artifacts[1]])],
+         'expired'),
+        ('candidate artifact from another run',
+         [page_document('artifacts', [
+             artifact_document(ARTIFACT_NAME, 100,
+                               workflow_run={'id': int(SELF_TEST_RUN_ID) + 1}),
+             coherent_artifacts[1]])],
+         'belongs to another run'),
+        ('incomplete artifact pagination',
+         [page_document('artifacts', coherent_artifacts, total=3)],
+         'incomplete pagination'),
+        ('contradictory artifact pagination',
+         [page_document('artifacts', coherent_artifacts, total=1)],
+         'contradictory pagination'),
+        ('no artifact pages', [], 'no API pages'),
+        ('duplicate artifact names',
+         [page_document('artifacts', coherent_artifacts + [
+             artifact_document(ARTIFACT_NAME, 103)])],
+         'duplicate artifact'),
+    ):
+        expect_check(label, validate_run_artifacts, pages, SELF_TEST_RUN_ID,
+                     expected=expected)
+    for label, document, artifact, expected in (
+        ('identity for another artifact id',
+         dict(identity, artifact_id='999'), artifacts[ARTIFACT_NAME],
+         'artifact id'),
+        ('identity for another digest',
+         dict(identity, artifact_digest='sha256:' + '0' * 64),
+         artifacts[ARTIFACT_NAME], 'artifact digest does not match'),
+        ('identity for another run', dict(identity, run_id='999'),
+         artifacts[ARTIFACT_NAME], 'run_id is'),
+        ('identity for another attempt', dict(identity, run_attempt='2'),
+         artifacts[ARTIFACT_NAME], 'run_attempt is'),
+        ('identity for another target',
+         dict(identity, target='aarch64-apple-darwin'),
+         artifacts[ARTIFACT_NAME], 'target is'),
+        ('identity with extra fields', dict(identity, extra='x'),
+         artifacts[ARTIFACT_NAME], 'fields differ'),
+        ('identity with a malformed digest',
+         dict(identity, artifact_digest='not-a-digest'),
+         artifacts[ARTIFACT_NAME], 'not a supported digest'),
+    ):
+        expect_check(label, validate_upload_identity, document,
+                     SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT, artifact,
+                     expected=expected)
+    expect_check('non-object upload identity', validate_upload_identity, [],
+                 SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+                 artifacts[ARTIFACT_NAME], expected='expected a JSON object')
+
+    manifest = manifest_fixture()
+    validate_manifest_binding(manifest, manifest_expectation())
+    if validate_tag_binding(200, tag_ref_body(), None, manifest) != SELF_TEST_SHA:
+        fail('self-test: a lightweight tag must peel to the manifest source')
+    annotated_sha = 'f' * 40
+    if validate_tag_binding(
+            200, tag_ref_body(kind='tag', sha=annotated_sha),
+            tag_object_body(), manifest) != SELF_TEST_SHA:
+        fail('self-test: an annotated tag must peel to the manifest source')
+    missing_field = manifest_fixture()
+    missing_field.pop('source_sha')
+    for label, document, expected in (
+        ('manifest with an extra field', dict(manifest, extra='x'), 'unexpected'),
+        ('manifest without the source', missing_field, 'missing'),
+        ('manifest for another version', manifest_fixture(version='9.9.9'),
+         'release manifest version is'),
+        ('manifest for another target',
+         manifest_fixture(target='aarch64-apple-darwin'),
+         'release manifest target is'),
+        ('manifest for another run', manifest_fixture(run_id='999'),
+         'release manifest run_id is'),
+        ('manifest for another attempt', manifest_fixture(run_attempt='2'),
+         'release manifest run_attempt is'),
+        ('manifest from another event',
+         manifest_fixture(event='workflow_dispatch'),
+         'release manifest event is'),
+        ('manifest with a moved tag ref',
+         manifest_fixture(original_ref='refs/tags/v9.9.9'),
+         'release manifest original_ref is'),
+        ('manifest with a malformed source', manifest_fixture(source_sha='x'),
+         'source_sha is not a full commit SHA'),
+        ('manifest with a malformed archive hash',
+         manifest_fixture(archive_sha256='x'),
+         'archive_sha256 is not a SHA-256'),
+        ('manifest with a malformed executable hash',
+         manifest_fixture(executable_sha256='x'),
+         'executable_sha256 is not a SHA-256'),
+        ('manifest with other lock hashes',
+         manifest_fixture(lock_hashes={'Cargo.lock': '0' * 64}),
+         'lock_hashes differ'),
+        ('manifest with another toolchain',
+         manifest_fixture(toolchain={'rust': '1.0.0'}),
+         'toolchain differs'),
+    ):
+        expect_check(label, validate_manifest_binding, document,
+                     manifest_expectation(), expected=expected)
+    expect_check('non-object release manifest', validate_manifest_binding, [],
+                 manifest_expectation(), expected='expected a JSON object')
+
+    for label, status, ref_body, tag_body, document, expected in (
+        ('missing release tag', 404, b'{}', None, manifest, 'is missing'),
+        ('release tag lookup failure', 500, b'{}', None, manifest,
+         'returned HTTP 500'),
+        ('moved lightweight tag', 200,
+         tag_ref_body(sha=SELF_TEST_OTHER_SHA), None, manifest,
+         'not the manifest source'),
+        ('annotated tag without peeling', 200,
+         tag_ref_body(kind='tag', sha=annotated_sha), None, manifest,
+         'was not peeled'),
+        ('moved annotated tag', 200,
+         tag_ref_body(kind='tag', sha=annotated_sha),
+         tag_object_body(commit=SELF_TEST_OTHER_SHA), manifest,
+         'not the manifest source'),
+        ('annotated tag with another name', 200,
+         tag_ref_body(kind='tag', sha=annotated_sha),
+         tag_object_body(tag='v9.9.9'), manifest, 'is not'),
+        ('tag ref with another name', 200,
+         tag_ref_body(ref='refs/tags/v9.9.9'), None, manifest,
+         'release tag ref is'),
+        ('tag pointing at an unsupported object', 200,
+         tag_ref_body(kind='tree', sha=SELF_TEST_SHA), None, manifest,
+         'unsupported'),
+        # Taking the source from the default-branch payload SHA instead of the
+        # original tag is exactly the misuse this binding refuses.
+        ('manifest source taken from the payload default-branch SHA', 200,
+         tag_ref_body(), None,
+         manifest_fixture(source_sha=SELF_TEST_OTHER_SHA),
+         'not the manifest source'),
+    ):
+        expect_check(label, validate_tag_binding, status, ref_body, tag_body,
+                     document, expected=expected)
+
+    # The strict data entrypoint is what a privileged consumer calls: it wires
+    # every check together over already-fetched API data. Both tag shapes work,
+    # and the honest bundle form is accepted through the CLI boundary.
+    def binding(*, run=None, jobs=None, artifacts_pages=None,
+                identity_document=None, manifest_document=None,
+                trusted=None, tag_status=200, tag_body=None,
+                tag_object=None, repository=SELF_TEST_REPOSITORY):
+        return validate_publication_binding(
+            run or run_binding_fixture(),
+            jobs or [page_document('jobs', coherent_jobs)],
+            artifacts_pages or [page_document('artifacts', coherent_artifacts)],
+            identity_document or identity,
+            manifest_document or manifest,
+            trusted or manifest_expectation(),
+            repository, SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+            SELF_TEST_WORKFLOW_ID, tag_status, tag_body or tag_ref_body(),
+            tag_object)
+    bound = binding()
+    if bound['source_sha'] != SELF_TEST_SHA or \
+            bound['artifacts'][ARTIFACT_NAME]['id'] != 100 or \
+            [job['name'] for job in bound['jobs']] != list(MANDATORY_RUN_JOBS):
+        fail('self-test: the publication binding must return the validated data')
+    if binding(tag_body=tag_ref_body(kind='tag', sha=annotated_sha),
+               tag_object=tag_object_body())['source_sha'] != SELF_TEST_SHA:
+        fail('self-test: the publication binding must accept an annotated tag')
+    for label, options, expected in (
+        ('binding with a foreign repository',
+         {'repository': 'other/repo'}, 'run binding repository is'),
+        ('binding with a skipped mandatory job',
+         {'jobs': [page_document('jobs', [
+             job_document(SOURCE_CHECK_JOB, 1),
+             job_document(FALLBACK_JOB, 2, conclusion='skipped')])]},
+         'not success'),
+        ('binding with a replaced artifact digest',
+         {'artifacts_pages': [page_document('artifacts', [
+             artifact_document(ARTIFACT_NAME, 100,
+                               digest='sha256:' + '0' * 64),
+             coherent_artifacts[1]])]},
+         'artifact digest does not match'),
+        ('binding with other lock hashes',
+         {'manifest_document': manifest_fixture(
+             lock_hashes={'Cargo.lock': '0' * 64})},
+         'lock_hashes differ'),
+        ('binding with a moved tag',
+         {'tag_body': tag_ref_body(sha=SELF_TEST_OTHER_SHA)},
+         'not the manifest source'),
+        ('binding with a missing tag', {'tag_status': 404}, 'is missing'),
+        ('binding with an incomplete job page',
+         {'jobs': [page_document('jobs', coherent_jobs, total=3)]},
+         'incomplete pagination'),
+    ):
+        expect_check(label, lambda options=options: binding(**options),
+                     expected=expected)
+
+    with tempfile.TemporaryDirectory(prefix='magit-lsp-binding-bundle-') as temporary:
+        bundle = {
+            'repository': SELF_TEST_REPOSITORY,
+            'run_id': SELF_TEST_RUN_ID,
+            'run_attempt': SELF_TEST_RUN_ATTEMPT,
+            'workflow_id': SELF_TEST_WORKFLOW_ID,
+            'run': run_binding_fixture(),
+            'job_pages': [page_document('jobs', coherent_jobs)],
+            'artifact_pages': [page_document('artifacts', coherent_artifacts)],
+            'identity': identity,
+            'manifest': manifest,
+            'trusted': manifest_expectation(),
+            'tag_status': 200,
+            'tag_ref': json.loads(tag_ref_body()),
+            'tag_object': None,
+        }
+        bundle_path = Path(temporary) / 'binding.json'
+        bundle_path.write_text(json.dumps(bundle), encoding='utf-8')
+        if validate_publication_binding_bundle(bundle_path)['source_sha'] != \
+                SELF_TEST_SHA:
+            fail('self-test: the binding bundle must return the source commit')
+        bundle['tag_status'] = 404
+        bundle_path.write_text(json.dumps(bundle), encoding='utf-8')
+        expect_check('binding bundle with a missing tag',
+                     validate_publication_binding_bundle, bundle_path,
+                     expected='is missing')
+
     if release_target(404, b'{"message":"Not Found"}', SELF_TEST_SHA) != SELF_TEST_SHA:
         fail('self-test: an absent version tag must target the verified source commit')
     if release_target(200, tag_document(SELF_TEST_SHA), SELF_TEST_SHA) != SELF_TEST_SHA:
@@ -1945,6 +2801,18 @@ def run_self_tests():
         sidecar.unlink()
         expect_check('missing artifact sidecar', validate_artifacts, artifacts, '1.2.3',
                      expected='missing')
+
+        # The downloaded archive must still hash to the run-bound manifest.
+        archive = next((artifacts).glob('*.tar.gz'))
+        bound_manifest = manifest_fixture(
+            archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+        validate_archive_binding(bound_manifest, archive)
+        expect_check('replaced release archive', validate_archive_binding,
+                     manifest_fixture(), archive,
+                     expected='does not match the release manifest hash')
+        expect_check('missing release archive', validate_archive_binding,
+                     bound_manifest, directory / 'missing.tar.gz',
+                     expected='is missing')
 
         check_workflow()
         for label, mutations, expected in (
@@ -2273,6 +3141,9 @@ def main():
     parser.add_argument('--automation-unit', action='store_true',
                         help='run the static/self-test guards without Cargo '
                              'metadata or package')
+    parser.add_argument('--validate-publication-binding', metavar='BUNDLE',
+                        help='validate an offline JSON run/tag/asset binding '
+                             'bundle and print its source commit')
     args = parser.parse_args()
     try:
         if args.pipeline_self_tests:
@@ -2280,6 +3151,9 @@ def main():
             return 0
         if args.automation_unit:
             run_automation_unit()
+            return 0
+        if args.validate_publication_binding:
+            validate_publication_binding_bundle(args.validate_publication_binding)
             return 0
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)
