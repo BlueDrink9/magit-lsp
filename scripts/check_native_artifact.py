@@ -45,13 +45,13 @@ def safe_extract(archive, destination, expected):
         members = package.getmembers()
     except (OSError, tarfile.TarError) as error:
         raise InspectionError(f'invalid archive: {error}') from error
-    names = {f'{expected}/{name}' for name in ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md')}
-    if len(members) != len(names) or {m.name for m in members} != names:
-        raise InspectionError('archive members do not match the exact expected set')
     for member in members:
         path = PurePosixPath(member.name)
         if path.is_absolute() or '..' in path.parts or not member.isfile():
             raise InspectionError(f'unsafe archive member: {member.name}')
+    names = {f'{expected}/{name}' for name in ('magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md')}
+    if len(members) != len(names) or {m.name for m in members} != names:
+        raise InspectionError('archive members do not match the exact expected set')
     package.extractall(destination, members=members, filter='data')
     return Path(destination) / expected / 'magit-lsp'
 
@@ -64,8 +64,11 @@ def inspect_elf(binary, target, evidence):
     dynamic = run_tool(['readelf', '-d', str(binary)])
     versions = run_tool(['readelf', '--version-info', str(binary)])
     combined = program + dynamic
-    if 'Requesting program interpreter:' not in program:
+    interpreter = re.search(r'Requesting program interpreter: \[?([^]\n]+)', program)
+    if interpreter is None:
         raise InspectionError('ELF interpreter is missing')
+    if '/nix/' in interpreter[1]:
+        raise InspectionError('Nix ELF interpreter is forbidden')
     if re.search(r'(?:RPATH|RUNPATH).*\[.*(?:/nix/store|/nix/)', combined, re.I):
         raise InspectionError('Nix runtime path is forbidden')
     needed = re.findall(r'Shared library: \[([^]]+)\]', dynamic)
