@@ -88,34 +88,60 @@ the next discriminating measurement, not another implementation.
 The measured `render_sent` to `render_applied` wall-clock gap is negligible in
 these samples, but does not measure a real terminal/UI redraw or perceived
 display. Buffer application and current-window `Head:` validation are the
-client endpoint. No separate initialize reply, process-spawn span, LSP
-descriptor callback, redraw notification, lock-wait, watcher-setup or individual
-render-phase timing is available. Client/server wall clocks are merged using
-wall time and may have offset/precision error; monotonic durations within each
-process are stronger evidence. Tracing adds small overhead.
+client endpoint. Client/server wall clocks are merged using wall time and may
+have offset/precision error; monotonic durations within each process are
+stronger evidence. Tracing adds overhead. This is instrumented wall-time
+profiling, not CPU profiling; external `perf`/`strace` evidence is still needed
+to attribute CPU, scheduler and syscall costs.
 
 ## Ranked diagnosis and next discriminating experiments
 
-1. **Server handler is the largest measured internal span.** Fixture handlers
-   take 311–321 ms and worktree handlers 334–436 ms; traced Git accounts for
-   144–151 ms and 164–244 ms. Remaining handler time is unclassified.
-   `view_execution.rs:58-92` bounds session/open/render/watcher;
-   `status_view.rs:40-51` invokes status/rebase reads. Next experiment: add
-   monotonic spans around session lock, view construction/render and watcher
-   setup, without changing behavior.
-2. **Git work is substantial, not a proven sole bottleneck.** There are 11
-   fixture and 12 worktree calls; summed Git durations leave significant handler
-   time. `status_view.rs:40-51` establishes status/rebase operations. Compare
-   identical clean/dirty fixture states and rank command names by duration
-   before considering batching.
-3. **Command-to-first-request delay remains unclassified.** Initialization
-   gates open (`init.lua:427-435`, `init.lua:134-154`), but spawn, initialize
-   reply and descriptor callback boundaries are not measured. Add those events
-   next; the cold/reopen totals do not establish a particular cause.
-4. **Client render application is not currently the dominant measured gap.**
-   Correlated fixture render delivery/application timestamps are nearly
-   coincident with server send. Repeat through an attached interactive UI with
-   a redraw event before concluding visible-pixel latency is negligible.
+### Granular instrumented run (2026-11-21)
 
-No optimization is prescribed from this run. The reported user symptom needs reproduction with
-their Neovim configuration and repository before a fix is selected.
+`make nvim-startup-check` now retains correlated per-open phase durations and
+ranked Git calls in each sample's `profiles_by_trace_id`. Full output is in
+`build/startup-diagnosis/20261121T104046Z/summary.json` and its per-sample
+`*.json`/`*.trace.jsonl` files. It ran three fixture and three worktree
+processes; each has a cold open and an initialized-server reopen. Wall-time
+medians (ranges) were fixture cold 522.3 ms (479.3–551.8), worktree cold
+950.3 ms (929.7–1087.2), fixture reopen 174.0 ms (169.7–174.7), and worktree
+reopen 619.4 ms (618.4–626.9). Already-open focus was 0.044 ms fixture and
+0.101 ms worktree median.
+
+For the fixture, median traced Git duration was 106 ms on both cold and reopen;
+the cold first sample's longest commands were `rev-parse --show-toplevel` and
+cached diff at 14 ms each, followed by several 13 ms commands (ties, not a
+single dominant command). For the dirty worktree, median traced Git duration
+was 481 ms cold and 486 ms reopen. Its per-sample leader was repeated
+`git diff --name-status -z --find-renames` (up to 18 ms); status and per-file
+diff/index queries also appeared. Worktree results reflect this dirty
+diagnostic tree and must not be generalized to a clean user repository.
+
+Median handler-minus-summed-Git remainder was 147.5 ms fixture cold, 61.4 ms
+fixture reopen, 204.4 ms worktree cold and 122.7 ms worktree reopen. This is a
+measured non-Git remainder, **not** exclusive CPU time or proof that one phase
+owns the gap. Inclusive fixture-cold phase medians were 41.0 ms discovery,
+92.9 ms status listing, 28.0 ms hunk acquisition, 28.2 ms tree render and
+120.9 ms combined session open/render; these overlap and must not be added.
+Rebase and watcher setup were negligible in fixture samples. In the worktree,
+median inclusive status listing was 324.4 ms and tree rendering 195.6 ms; these
+identify status/tree construction as the next area to investigate, but their
+overlap and Git work inside those spans prevent exclusive attribution. Hunk
+acquisition was around 32 ms.
+
+The server emits repository-lock wait only on the queued mutation path; measured
+`view/open` does not go through it, so this does not measure contention on the
+session `Mutex`. Server initialization has a phase event but is not correlated
+to the `view/open` trace; client LSP setup/initialize callback, process
+spawn-to-request, and visible redraw remain unavailable boundaries, not
+zero-cost phases. Inclusive spans overlap; handler-minus-Git is only the
+arithmetic remainder. Three samples per repository show variance (notably
+worktree cold 929.7–1087.2 ms), so medians are descriptive, not controlled
+performance claims. Profiling overhead is present and not independently
+calibrated.
+
+**Next experiment:** use the user's planned `perf`/`strace` on the same public
+command with cold/reopen cases, paired with clean and dirty worktree runs. Test
+whether status-listing subprocess/filesystem activity explains the larger
+worktree span; obtain syscall/CPU attribution before proposing batching or
+another code change. No optimization follows from wall-time spans alone.

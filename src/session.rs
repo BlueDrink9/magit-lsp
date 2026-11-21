@@ -441,6 +441,7 @@ impl OpenView {
 
     /// Render authoritative structure without advancing the delivery version.
     fn render_tree(&mut self) -> Tree {
+        let started = std::time::Instant::now();
         let pending = self.menu_pending.clone();
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
@@ -451,6 +452,10 @@ impl OpenView {
             let drafts = crate::editor::registry().pending_for(owner, &self.repo_path);
             tree.append_pending_drafts(&drafts);
         }
+        crate::runner::trace_current(
+            "phase_tree_render",
+            serde_json::json!({ "duration_ms": started.elapsed().as_secs_f64() * 1000.0 }),
+        );
         tree
     }
 
@@ -516,10 +521,15 @@ fn initialize_open_view(
     draft_owner: Option<String>,
 ) -> (ViewDescriptor, ViewRender, OpenView) {
     let repo_path_owned = repo_path.to_string();
+    let render_started = std::time::Instant::now();
     let mut tree = view.render(&Ctx {
         viewport,
         pending: &[],
     });
+    crate::runner::trace_current(
+        "phase_tree_render",
+        serde_json::json!({ "duration_ms": render_started.elapsed().as_secs_f64() * 1000.0 }),
+    );
     #[cfg(unix)]
     if let Some(owner) = &draft_owner {
         let drafts = crate::editor::registry().pending_for(owner, &repo_path_owned);

@@ -16,12 +16,18 @@ impl Drop for DeferredReservation {
 }
 
 pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let total = std::time::Instant::now();
     let p: ViewOpenParams = from_params(params)?;
     let repo = p
         .repo_path()
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
+    let discovery = std::time::Instant::now();
     let discovered_repo = crate::git::GitRepo::open(&repo)?;
+    crate::runner::trace_current(
+        "phase_repository_discovery",
+        serde_json::json!({ "duration_ms": discovery.elapsed().as_secs_f64() * 1000.0 }),
+    );
     let repo = discovered_repo
         .root()
         .canonicalize()?
@@ -56,6 +62,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
                 .clone()
         }
     };
+    let session_start = std::time::Instant::now();
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         let rich = match shared
@@ -88,15 +95,29 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         let keymap = session.keymap_notice(&id);
         (descriptor, render, keymap)
     };
+    crate::runner::trace_current(
+        "phase_session_open_render",
+        serde_json::json!({ "duration_ms": session_start.elapsed().as_secs_f64() * 1000.0 }),
+    );
     let repo = repo.as_str();
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(id, repo.to_string());
+    let watcher = std::time::Instant::now();
     shared.ensure_watcher(repo);
+    crate::runner::trace_current(
+        "phase_watcher_setup",
+        serde_json::json!({ "duration_ms": watcher.elapsed().as_secs_f64() * 1000.0 }),
+    );
 
+    let delivery = std::time::Instant::now();
     let mut notifications: Vec<_> = deliver_render(shared, render).into_iter().collect();
+    crate::runner::trace_current(
+        "phase_render_delivery",
+        serde_json::json!({ "duration_ms": delivery.elapsed().as_secs_f64() * 1000.0 }),
+    );
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
@@ -108,6 +129,10 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             )));
         }
     }
+    crate::runner::trace_current(
+        "phase_view_open_total",
+        serde_json::json!({ "duration_ms": total.elapsed().as_secs_f64() * 1000.0 }),
+    );
     Ok(Dispatched::with(
         serde_json::to_value(descriptor)?,
         notifications,

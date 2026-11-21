@@ -28,9 +28,17 @@ pub(super) async fn handle_request(
             Vec::new(),
         )
     } else if let Some(active) = turn.as_ref() {
+        let lock_wait = std::time::Instant::now();
         active.wait().await;
         let lock = repository_lock(&shared.repo_locks, &active.repo_path).await;
         let _guard = lock.lock().await;
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "phase_repository_lock_wait",
+                serde_json::json!({ "duration_ms": lock_wait.elapsed().as_secs_f64() * 1000.0 }),
+            );
+        }
         if trace_id > 0 {
             runner::trace(
                 trace_id,
@@ -158,6 +166,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     let params = request.params.clone();
     match request.method.as_str() {
         "initialize" => {
+            let initialize_started = std::time::Instant::now();
             let mut notifications = Vec::new();
             let init = params
                 .get("initializationOptions")
@@ -296,6 +305,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             server_caps["experimental"]["magit"]["protocolVersion"] = serde_json::json!(1);
             server_caps["experimental"]["magit"]["effective"] =
                 serde_json::json!({"capabilities":effective_caps,"quirks":enabled});
+            runner::trace_current(
+                "phase_initialize_server",
+                serde_json::json!({ "duration_ms": initialize_started.elapsed().as_secs_f64() * 1000.0 }),
+            );
             Ok(Dispatched::with(
                 serde_json::json!({
                     "capabilities": server_caps,

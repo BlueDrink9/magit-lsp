@@ -44,8 +44,18 @@ impl StatusView {
 
     /// Read status from an already discovered repository.
     pub fn open_repo(repo: GitRepo) -> Result<Self> {
+        let status_started = std::time::Instant::now();
         let status = repo.status_listing()?;
+        crate::runner::trace_current(
+            "phase_status_listing",
+            serde_json::json!({ "duration_ms": status_started.elapsed().as_secs_f64() * 1000.0 }),
+        );
+        let rebase_started = std::time::Instant::now();
         let rebase = repo.rebase_state()?;
+        crate::runner::trace_current(
+            "phase_rebase_state",
+            serde_json::json!({ "duration_ms": rebase_started.elapsed().as_secs_f64() * 1000.0 }),
+        );
         Ok(Self {
             repo,
             status,
@@ -68,6 +78,7 @@ impl StatusView {
             }
             let key = (path.clone(), section == "staged");
             if !self.hunks.contains_key(&key) {
+                let hunk_started = std::time::Instant::now();
                 let loaded = match self.repo.file_hunks(&path, key.1) {
                     Ok(hunks) => hunks,
                     Err(error) => {
@@ -75,6 +86,10 @@ impl StatusView {
                         Vec::new()
                     }
                 };
+                crate::runner::trace_current(
+                    "phase_hunk_acquisition",
+                    serde_json::json!({ "duration_ms": hunk_started.elapsed().as_secs_f64() * 1000.0, "path": path, "staged": key.1 }),
+                );
                 self.hunks.insert(key.clone(), loaded);
             }
             if self.level < 4 {
