@@ -268,27 +268,49 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
 #[test]
 fn xdg_config_home_sets_the_default_config_path() {
     const CHILD: &str = "MAGIT_LSP_XDG_CONFIG_TEST_CHILD";
+    const TEST: &str = "xdg_config_home_sets_the_default_config_path";
     if std::env::var_os(CHILD).is_none() {
         let config_home = TempDir::new().unwrap();
         let home = TempDir::new().unwrap();
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "xdg_config_home_sets_the_default_config_path"])
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", TEST])
             .env(CHILD, "1")
-            .env("XDG_CONFIG_HOME", config_home.path())
             .env("HOME", home.path())
-            .env_remove("MAGIT_LSP_CONFIG")
-            .output()
-            .unwrap();
+            .env_remove("MAGIT_LSP_CONFIG");
+        // Only the platform's own config root points at the temp dir; the
+        // other platform's variable must not be able to influence the result.
+        #[cfg(windows)]
+        command
+            .env("APPDATA", config_home.path())
+            .env_remove("XDG_CONFIG_HOME");
+        #[cfg(not(windows))]
+        command
+            .env("XDG_CONFIG_HOME", config_home.path())
+            .env_remove("APPDATA");
+        let status = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&status.stdout);
         assert!(
             status.status.success(),
-            "child output: {}{}",
-            String::from_utf8_lossy(&status.stdout),
+            "child output: {stdout}{}",
             String::from_utf8_lossy(&status.stderr)
+        );
+        // Guard against a vacuous pass: libtest exits 0 when `--exact` matches
+        // nothing, so require the named test to have actually run once.
+        assert!(
+            stdout.contains(TEST) && stdout.contains("1 passed"),
+            "child did not run {TEST} exactly once: {stdout}"
         );
         return;
     }
-    let expected =
-        Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("magit-lsp/config.toml");
+    #[cfg(windows)]
+    let expected = Path::new(&std::env::var_os("APPDATA").unwrap())
+        .join("magit-lsp")
+        .join("config.toml");
+    #[cfg(not(windows))]
+    let expected = Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap())
+        .join("magit-lsp")
+        .join("config.toml");
     assert_eq!(default_config_path(), Some(expected.clone()));
     write(&expected, "[diff]\ncontext = 9\n");
     assert_eq!(
