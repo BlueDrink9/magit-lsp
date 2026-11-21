@@ -75,9 +75,10 @@ export function deriveSemanticContributions(roles) {
  */
 export function applySemanticRoles(pkg, roles) {
   const derived = deriveSemanticContributions(roles);
+  const { contributions: _obsolete, ...manifest } = pkg;
   return {
-    ...pkg,
-    contributions: { ...(pkg.contributions || {}), ...derived },
+    ...manifest,
+    contributes: { ...(pkg.contributes || {}), ...derived },
   };
 }
 
@@ -100,7 +101,7 @@ export function serializeManifest(pkg) {
  */
 export function semanticRolesMatch(pkg, roles) {
   const derived = deriveSemanticContributions(roles);
-  const contributed = pkg.contributions || {};
+  const contributed = pkg.contributes || {};
   return ["semanticTokenTypes", "semanticTokenScopes"].every(
     (field) => JSON.stringify(contributed[field]) === JSON.stringify(derived[field]),
   );
@@ -121,7 +122,7 @@ export function generateSemanticRoles({
   const original = readFileSync(target, "utf8");
   const pkg = JSON.parse(original);
   if (checkOnly) {
-    const current = semanticRolesMatch(pkg, roles);
+    const current = semanticRolesMatch(pkg, roles) && !Object.hasOwn(pkg, "contributions");
     if (!current) {
       console.error(
         "contributes.semanticTokenTypes/semanticTokenScopes are stale; run node clients/vscode/scripts/gen-semantic-roles.mjs",

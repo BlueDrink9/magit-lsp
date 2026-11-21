@@ -30,12 +30,13 @@ function samplePkg() {
     name: "magit-lsp",
     version: "0.2.0",
     unrelated: { keep: true },
-    contributions: {
+    contributes: {
       languages: [{ id: "magit" }],
       commands: [{ command: "magit.open" }],
       semanticTokenTypes: [{ id: "obsolete" }],
       semanticTokenScopes: [{ language: "magit", scopes: { obsolete: ["stale"] } }],
     },
+    contributions: { semanticTokenTypes: [{ id: "wrong-root" }] },
   };
 }
 
@@ -94,26 +95,23 @@ test("derivation preserves unrelated package fields and does not mutate input", 
 
   assert.deepEqual(pkg, before, "the source manifest is unchanged");
   assert.deepEqual(next.semanticTokenTypes, undefined, "top-level fields are not polluted");
+  assert.equal(Object.hasOwn(next, "contributions"), false, "obsolete root is removed");
   assert.equal(next.name, pkg.name, "top-level name is preserved");
   assert.equal(next.version, pkg.version, "top-level version is preserved");
   assert.deepEqual(next.unrelated, { keep: true }, "unrelated top-level field is preserved");
   assert.deepEqual(
-    next.contributions.languages,
-    pkg.contributions.languages,
+    next.contributes.languages,
+    pkg.contributes.languages,
     "languages are preserved",
   );
+  assert.deepEqual(next.contributes.commands, pkg.contributes.commands, "commands are preserved");
   assert.deepEqual(
-    next.contributions.commands,
-    pkg.contributions.commands,
-    "commands are preserved",
-  );
-  assert.deepEqual(
-    next.contributions.semanticTokenTypes,
+    next.contributes.semanticTokenTypes,
     derived.semanticTokenTypes,
     "token types replaced",
   );
   assert.deepEqual(
-    next.contributions.semanticTokenScopes,
+    next.contributes.semanticTokenScopes,
     derived.semanticTokenScopes,
     "scopes replaced",
   );
@@ -163,17 +161,18 @@ test("generator writes only the derived fields and is idempotent", () => {
     const derived = deriveSemanticContributions(SAMPLE_ROLES);
 
     assert.deepEqual(
-      pkg.contributions.semanticTokenTypes,
+      pkg.contributes.semanticTokenTypes,
       derived.semanticTokenTypes,
       "types written",
     );
     assert.deepEqual(
-      pkg.contributions.semanticTokenScopes,
+      pkg.contributes.semanticTokenScopes,
       derived.semanticTokenScopes,
       "scopes written",
     );
     assert.deepEqual(pkg.unrelated, { keep: true }, "unrelated field survives");
-    assert.deepEqual(pkg.contributions.languages, [{ id: "magit" }], "other contributions survive");
+    assert.deepEqual(pkg.contributes.languages, [{ id: "magit" }], "other contributions survive");
+    assert.equal(Object.hasOwn(pkg, "contributions"), false, "obsolete root is removed");
     assert.equal(written, serializeManifest(pkg), "file is the serialized manifest");
 
     assert.equal(generateSemanticRoles({ rolesPath, manifestPath }), true, "second run is a no-op");
@@ -205,7 +204,7 @@ test("checker detects a stale manifest, accepts current data and never writes", 
     assert.equal(readFileSync(manifestPath, "utf8"), current, "successful check did not write");
 
     const tamperedScope = JSON.parse(current);
-    tamperedScope.contributions.semanticTokenScopes[0].scopes.added = ["stale"];
+    tamperedScope.contributes.semanticTokenScopes[0].scopes.added = ["stale"];
     writeFileSync(manifestPath, serializeManifest(tamperedScope));
     assert.equal(
       generateSemanticRoles({ rolesPath, manifestPath, checkOnly: true }),
@@ -219,7 +218,7 @@ test("checker detects a stale manifest, accepts current data and never writes", 
     );
 
     const tamperedType = JSON.parse(current);
-    tamperedType.contributions.semanticTokenTypes.pop();
+    tamperedType.contributes.semanticTokenTypes.pop();
     writeFileSync(manifestPath, serializeManifest(tamperedType));
     assert.equal(
       semanticRolesMatch(tamperedType, SAMPLE_ROLES),
