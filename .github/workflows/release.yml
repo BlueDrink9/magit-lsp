@@ -180,12 +180,14 @@ jobs:
           retention-days: 14
 
   native-candidates:
-    # Isolated, non-publishing native-linker experiments. They are not a
-    # production promotion and never gate the fallback: no hosted proof is
-    # recorded yet. Promotion requires NREL-12's three-host ABI/LSP/Git and
-    # functional gates plus NREL-14's installed-VSIX gate bound to one source,
-    # run, attempt and immutable artifact/hash set. Each matrix row uses the same shared
-    # pipeline to build and package its own explicitly named candidate.
+    # Required, strict native builds for exactly the Linux GNU and macOS
+    # platforms. Labels stay "experimental" in this slice, but a failed or
+    # cancelled row now fails the workflow; no continue-on-error masks it.
+    # This is still not a production promotion: no hosted proof is recorded
+    # yet, and promotion needs NREL-12's three-host ABI/LSP/Git and functional
+    # gates plus NREL-14's installed-VSIX gate bound to one source, run,
+    # attempt and immutable artifact/hash set. Each matrix row uses the same
+    # shared pipeline to build and package its own explicitly named candidate.
     needs: source-checks
     strategy:
       fail-fast: false
@@ -201,7 +203,6 @@ jobs:
             target: x86_64-apple-darwin
             artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -503,3 +504,64 @@ jobs:
             ${{ runner.temp }}/native-vscode-evidence.json
           if-no-files-found: warn
           retention-days: 14
+
+  required-vsix-gate:
+    # One stable fail-closed gate for the single Node 24/frozen-lockfile VSIX
+    # producer and the installed-extension consumers that install those exact
+    # uploaded bytes. No build, package or install step runs here, so the gate
+    # never reruns or rebuilds the VSIX; missing, failed, skipped or cancelled
+    # producer or consumer results fail it.
+    needs: [vsix, native-vscode-consumers]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require the VSIX producer and installed consumers to succeed
+        env:
+          VSIX_RESULT: ${{ needs.vsix.result }}
+          NATIVE_VSCODE_CONSUMERS_RESULT: ${{ needs.native-vscode-consumers.result }}
+        run: |
+          check() { if [ "$2" != success ]; then echo "required job $1 is '$2'" >&2; exit 1; fi; }
+          check vsix "$VSIX_RESULT"
+          check native-vscode-consumers "$NATIVE_VSCODE_CONSUMERS_RESULT"
+
+  release-readiness:
+    # Single fail-closed readiness aggregate over every required Linux/macOS
+    # source, build and consumer job. Windows is absent from this graph and
+    # from every dependency above. `always()` plus explicit result checks means
+    # a failed, missing, skipped or cancelled required job blocks readiness.
+    needs:
+      - source-checks
+      - vsix
+      - linux-x86_64-gnu
+      - native-candidates
+      - native-consumers
+      - native-functional-consumers
+      - native-vscode-consumers
+      - required-vsix-gate
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require every required job to succeed
+        env:
+          SOURCE_CHECKS_RESULT: ${{ needs.source-checks.result }}
+          VSIX_RESULT: ${{ needs.vsix.result }}
+          LINUX_X86_64_GNU_RESULT: ${{ needs.linux-x86_64-gnu.result }}
+          NATIVE_CANDIDATES_RESULT: ${{ needs.native-candidates.result }}
+          NATIVE_CONSUMERS_RESULT: ${{ needs.native-consumers.result }}
+          NATIVE_FUNCTIONAL_CONSUMERS_RESULT: ${{ needs.native-functional-consumers.result }}
+          NATIVE_VSCODE_CONSUMERS_RESULT: ${{ needs.native-vscode-consumers.result }}
+          REQUIRED_VSIX_GATE_RESULT: ${{ needs.required-vsix-gate.result }}
+        run: |
+          check() { if [ "$2" != success ]; then echo "required job $1 is '$2'" >&2; exit 1; fi; }
+          check source-checks "$SOURCE_CHECKS_RESULT"
+          check vsix "$VSIX_RESULT"
+          check linux-x86_64-gnu "$LINUX_X86_64_GNU_RESULT"
+          check native-candidates "$NATIVE_CANDIDATES_RESULT"
+          check native-consumers "$NATIVE_CONSUMERS_RESULT"
+          check native-functional-consumers "$NATIVE_FUNCTIONAL_CONSUMERS_RESULT"
+          check native-vscode-consumers "$NATIVE_VSCODE_CONSUMERS_RESULT"
+          check required-vsix-gate "$REQUIRED_VSIX_GATE_RESULT"
