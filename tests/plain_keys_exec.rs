@@ -564,6 +564,84 @@ fn eligible_key_stages_exactly_and_repairs_authoritative_text() {
     );
 }
 
+/// Toggling keys on through the offered action must arm the very next typed key.
+///
+/// This mirrors the real Plain client flow: a code-action toggle applies a new
+/// header, then debounces its echo together with `s` on a file row.
+#[test]
+fn plain_key_toggle_then_typed_stage_stages_exactly_that_file() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("init", [("f.txt", "one\n"), ("g.txt", "one\n")])
+        .modify("f.txt", "two\n")
+        .modify("g.txt", "two\n")
+        .build();
+    let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", false);
+    assert!(editor.text(&uri).contains("Keys: off"));
+    let line = line_of(&editor, &uri, "g.txt");
+    replace(&mut server, &mut editor, &uri, line, 0, 0, "s");
+    apply(&mut server, &mut editor);
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "",
+        "keys off never stages"
+    );
+    let offered = actions(&mut server, &uri, 8300);
+    let args = plain_args(&offered, "plain.keys.toggle");
+    server.send(json!({"jsonrpc":"2.0","id":8301,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    let (edit, _) = next_apply(&mut server);
+    let mut echo = None;
+    for frame in editor.dispatch(&edit) {
+        if frame["method"] == "textDocument/didChange" {
+            echo = Some(frame);
+        } else {
+            server.send(frame);
+        }
+    }
+    server.response_with_id(8301);
+    assert!(
+        editor.text(&uri).contains("Keys: on"),
+        "the toggle edit reached the client"
+    );
+    let line = line_of(&editor, &uri, "g.txt");
+    let document = editor.documents.get_mut(&uri).unwrap();
+    let offset = line_offset(&document.text, line);
+    document.text.insert(offset, 's');
+    document.version += 1;
+    let mut echo = echo.expect("toggle echo");
+    let edits = edit["params"]["edit"]["documentChanges"][0]["edits"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        edits.len(),
+        1,
+        "one toggle edit produces one incremental echo"
+    );
+    echo["params"]["contentChanges"] = json!([{
+        "range":edits[0]["range"], "text":edits[0]["newText"]
+    }]);
+    echo["params"]["textDocument"]["version"] = json!(document.version);
+    echo["params"]["contentChanges"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "range":{"start":{"line":line,"character":0},"end":{"line":line,"character":0}},
+            "text":"s"
+        }));
+    server.send(echo);
+    apply(&mut server, &mut editor);
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "g.txt\n",
+        "the first typed key after the toggle stages exactly g.txt: {}",
+        server.stderr_text()
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--name-only"]),
+        "f.txt\n",
+        "only g.txt left the unstaged set"
+    );
+}
+
 #[test]
 fn destructive_paste_planned_and_off_keys_never_mutate() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -664,7 +742,7 @@ fn destructive_paste_planned_and_off_keys_never_mutate() {
 }
 
 #[test]
-fn stale_key_edit_reports_and_changes_nothing() {
+fn plain_stale_key_edit_reports_and_changes_nothing() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("init", [("f.txt", "one\n")])
         .modify("f.txt", "two\n")
@@ -777,7 +855,7 @@ fn chord_and_menu_steps_keep_server_state() {
 }
 
 #[test]
-fn armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
+fn plain_armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n"), ("g.txt", "unchanged\n")])
         .modify("f.txt", "two\n")

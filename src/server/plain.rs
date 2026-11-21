@@ -558,6 +558,7 @@ fn plain_key_step(
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .encoding;
+    let mut coalesced = None;
     let (repo, incarnation, view_id, generation, prior, mut state) = {
         let mut documents = shared
             .plain_documents
@@ -566,6 +567,35 @@ fn plain_key_step(
         let Some(entry) = documents.get_mut(uri) else {
             return PlainKeyStep::Continue;
         };
+        // Incremental clients may debounce the applyEdit echo and the next
+        // user edit into one notification. Split only at the exact outstanding
+        // echo, not at an arbitrary retained render or a guessed text diff.
+        if let Some((_, version, hash)) = entry.key_state.repair_echo {
+            if change.pre.version < version && version < change.post_version {
+                for count in 1..change.changes.len() {
+                    let mut pre = change.pre.clone();
+                    if pre
+                        .change(version, &change.changes[..count], encoding)
+                        .is_ok()
+                        && crate::presentation::plain::hash_text(&pre.text) == hash
+                    {
+                        entry.controller.observe(version, pre.text.clone());
+                        entry.key_state.repair_echo = None;
+                        if !entry.key_executing {
+                            entry.key_state.classifier = State::Ready;
+                        }
+                        coalesced = Some(super::drafts::AcceptedChange {
+                            pre,
+                            changes: change.changes[count..].to_vec(),
+                            post_version: change.post_version,
+                            post_text: change.post_text.clone(),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+        let change = coalesced.as_ref().unwrap_or(change);
         // Recognize only the exact version/hash produced by the outstanding
         // repair, before treating its mutated pre-text as fresh key input.
         if entry
@@ -603,6 +633,7 @@ fn plain_key_step(
             state,
         )
     };
+    let change = coalesced.as_ref().unwrap_or(change);
     let timeout = shared
         .config
         .for_repository(Path::new(&repo))
