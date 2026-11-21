@@ -1,0 +1,35 @@
+# PERF-OPEN-LOADING-UI: the public :Magit window shows the server-owned loading
+# document while the first Git status is held, accepts a registered key while
+# held, and replaces the loading document with fresh status after release.
+#
+# The fixture has one branch (main) and two unstaged files; the fresh view is
+# expanded by default, so the hunk header and body are asserted without a
+# visibility change.
+fixture: modified-two-files
+startup: held
+---
+wait status entered
+wait screen contains "Loading repository status"
+expect screen not-contains "Head: main"
+expect screen not-contains "Unstaged changes"
+snapshot: loading
+keys: C-t
+wait
+keys: ihello Escape
+wait
+expect screen contains "hello"
+snapshot: responsive
+keys: C-t
+wait
+expect screen contains "Loading repository status"
+expect screen not-contains "hello"
+release status
+wait screen contains "Head: main"
+expect screen contains "Head: main"
+expect screen contains "Unstaged changes (2)"
+expect screen contains "M f.txt"
+expect screen contains "M g.txt"
+expect screen contains "@@ -1,10 +1,10 @@"
+expect screen contains "+line3 CHANGED"
+expect screen not-contains "Loading repository status"
+snapshot: fresh

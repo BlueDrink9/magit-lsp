@@ -145,3 +145,35 @@ command with cold/reopen cases, paired with clean and dirty worktree runs. Test
 whether status-listing subprocess/filesystem activity explains the larger
 worktree span; obtain syscall/CPU attribution before proposing batching or
 another code change. No optimization follows from wall-time spans alone.
+
+## Early loading display evidence (2026-11-21)
+
+`make ui-file FILE=tests/ui/scenarios/status-loading.scn` exits 0
+(`ok: ui-file`). The permanent scenario uses the public `:Magit` command,
+`fixture: modified-two-files` and `startup: held`, so the first Git `status`
+subprocess is held while the client is already running. Text snapshots retain
+the lifecycle (`build/ui/status-loading/`; per-combination copies under
+`standard-80x24/`):
+
+- `loading.screen`: the active status window already shows the server text
+  `Loading repository status…`, with no `Head:` or `Unstaged changes` content.
+- `responsive.screen`: while the gate is still entered and unreleased, the
+  registered `common.toggle-text-mode` key (`ctrl+t`, sent as `C-t`) makes the
+  buffer user-owned; the scenario types `hello` and observes it on screen. A
+  second `C-t` returns to the server-owned loading document, proving the input
+  was processed rather than merely sent.
+- `fresh.screen`: `release status` then the same view shows `Head: main`,
+  `Unstaged changes (2)`, `M f.txt`, `M g.txt`, the hunk header
+  `@@ -1,10 +1,10 @@` and `+line3 CHANGED`; the loading text is absent. The
+  scenario waits for the rendered heading instead of treating client idle as
+  readiness, because the outstanding Git call is server-side work.
+
+This is display and lifecycle evidence from real Neovim, not a timing
+measurement: it does not show a CPU speedup, a terminal/UI redraw latency, or
+any threshold improvement. Snapshots are text (`.screen`/`.ansi`), no images.
+The harness derives the run directory and RPC socket from the checkout root
+(`scripts/ui_lib/paths.py:5-13`); in this worktree that path is 121 bytes,
+above Neovim's 107-byte socket limit, so the verification ran through a
+bind mount of the same checkout at a shorter path. That is a harness
+path limitation, not a product behavior finding. No `magit-lsp` process
+remained after the run.
