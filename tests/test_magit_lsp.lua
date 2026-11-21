@@ -525,28 +525,60 @@ end
 
 T[":h magit resolves the shipped help file"] = function()
   local help_dir = project .. "/build/test-help-magit"
+  local shadow_dir = project .. "/build/test-help-magit-shadow"
   child.lua(string.format(
     [[
-    local help_dir = %q
-    vim.fn.delete(help_dir, 'rf')
-    vim.fn.mkdir(help_dir .. '/doc', 'p')
-    vim.fn.writefile(vim.fn.readfile(%q .. '/doc/magit.txt'), help_dir .. '/doc/magit.txt')
-    vim.cmd('helptags ' .. vim.fn.fnameescape(help_dir .. '/doc'))
+    local help_dir, shadow_dir, project = %q, %q, %q
+    local function make_help_root(dir)
+      vim.fn.delete(dir, 'rf')
+      vim.fn.mkdir(dir .. '/doc', 'p')
+      assert(vim.uv.fs_copyfile(project .. '/doc/magit.txt', dir .. '/doc/magit.txt'))
+      vim.cmd('helptags ' .. vim.fn.fnameescape(dir .. '/doc'))
+    end
+    -- Two independent identical copies, each with its own tag index. The
+    -- shadowing copy comes first on 'runtimepath', so :help magit may resolve
+    -- through it instead of the appended copy.
+    make_help_root(help_dir)
+    make_help_root(shadow_dir)
+    vim.opt.runtimepath:prepend(shadow_dir)
     vim.opt.runtimepath:append(help_dir)
     vim.cmd('help magit')
     local stack = vim.fn.gettagstack(0).items
     local last = stack[#stack]
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    local shipped = vim.fn.readfile(project .. '/doc/magit.txt')
+    local function same_text(a)
+      if #a ~= #shipped then return false end
+      for i, line in ipairs(shipped) do
+        if a[i] ~= line then return false end
+      end
+      return true
+    end
+    -- A stale copy differs from the shipped help, so the content check above
+    -- must reject it instead of comparing the buffer with itself.
+    local stale = vim.deepcopy(shipped)
+    stale[1] = stale[1] .. ' (stale copy)'
+    local candidates = {}
+    for _, dir in ipairs(vim.opt.runtimepath:get()) do
+      local path = dir .. '/doc/magit.txt'
+      if vim.fn.filereadable(path) == 1 then
+        candidates[#candidates + 1] = path
+      end
+    end
     HELP = {
       file = vim.api.nvim_buf_get_name(0),
       tag = last and last.tagname,
-      lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
+      lines = lines,
+      shipped = shipped,
+      candidates = candidates,
+      matches_shipped = same_text(lines),
+      rejects_stale = not same_text(stale),
       tags_generated = vim.fn.filereadable(help_dir .. '/doc/tags') == 1,
-      repo_tags = vim.fn.filereadable(%q .. '/doc/tags') == 1,
       help_buffer = vim.bo.filetype == 'help',
     }
   ]],
     help_dir,
-    project,
+    shadow_dir,
     project
   ))
   local file = child.lua_get("HELP.file")
@@ -559,11 +591,36 @@ T[":h magit resolves the shipped help file"] = function()
     end
     return false
   end
+  local candidates = child.lua_get("HELP.candidates")
+  local selected_from_runtimepath = vim.tbl_contains(candidates, file)
   local text = table.concat(lines, "\n")
-  MiniTest.expect.equality(file, help_dir .. "/doc/magit.txt")
+  MiniTest.expect.equality(
+    #candidates >= 2,
+    true,
+    "another identical help copy shares the runtimepath"
+  )
+  MiniTest.expect.equality(
+    selected_from_runtimepath,
+    true,
+    "help resolved to a runtimepath copy of doc/magit.txt (got " .. file .. ")"
+  )
+  MiniTest.expect.equality(
+    #lines,
+    #child.lua_get("HELP.shipped"),
+    "help buffer has every shipped line"
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELP.matches_shipped"),
+    true,
+    "selected help buffer content is the shipped doc/magit.txt"
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELP.rejects_stale"),
+    true,
+    "the content check rejects a stale help copy"
+  )
   MiniTest.expect.equality(((child.lua_get("HELP.tag") or ""):gsub("@.*$", "")), "magit")
   MiniTest.expect.equality(child.lua_get("HELP.tags_generated"), true)
-  MiniTest.expect.equality(child.lua_get("HELP.repo_tags"), false, "no doc/tags in the repository")
   MiniTest.expect.equality(child.lua_get("HELP.help_buffer"), true)
   MiniTest.expect.equality(
     has_prefix(":Magit [directory]"),
@@ -582,7 +639,7 @@ T[":h magit resolves the shipped help file"] = function()
       "help text mentions " .. needle
     )
   end
-  child.lua(string.format("vim.fn.delete(%q, 'rf')", help_dir))
+  child.lua(string.format("vim.fn.delete(%q, 'rf'); vim.fn.delete(%q, 'rf')", help_dir, shadow_dir))
 end
 
 T["the :Magit command delegates to the public open path"] = function()
