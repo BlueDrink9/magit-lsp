@@ -564,6 +564,145 @@ READINESS_OUTCOMES = ('source', 'package', 'build', 'abi', 'lsp', 'git',
                       'functional_rust', 'neovim', 'vsix')
 
 
+def collect_release_readiness(repository, run_id, attempt, source_sha, ref, event,
+                              workflow_id, token, api_get=None,
+                              artifact_get=None):
+    """Collect and validate exact successful job/evidence records for one run.
+
+    ``api_get`` and ``artifact_get`` are injectable for deterministic offline
+    tests. Evidence JSON must contain the measured fields consumed by the
+    readiness validator; job success is never converted into test success.
+    """
+    identity = {'source_sha': source_sha, 'ref': ref, 'event': event,
+                'run_id': str(run_id), 'run_attempt': str(attempt),
+                'workflow_id': str(workflow_id),
+                'run_url': f'https://github.com/{repository}/actions/runs/{run_id}'}
+    if api_get is None:
+        api_get = fetch_api
+    if not repository or not re.fullmatch(r'[0-9a-f]{40}', str(source_sha)) or \
+            not all((run_id, attempt, workflow_id, ref, event)):
+        fail('readiness collector: explicit repository/run/attempt/source/ref/event/workflow identity required')
+    owner, _, repo = repository.partition('/')
+    if not owner or not repo:
+        fail('readiness collector: invalid repository slug')
+    run_status, run_body = api_get(repository, f'/actions/runs/{run_id}', token)
+    if run_status != 200:
+        fail(f'readiness collector: run API returned HTTP {run_status}')
+    run = parse_json(run_body, 'readiness run')
+    expected_run = {'id': int(run_id), 'run_attempt': int(attempt), 'head_sha': source_sha,
+                    'event': event, 'head_branch': ref.removeprefix('refs/tags/'),
+                    'workflow_id': int(workflow_id), 'status': 'completed',
+                    'conclusion': 'success'}
+    for key, value in expected_run.items():
+        if run.get(key) != value:
+            fail(f'readiness collector: run {key} mismatch (expected {value!r})')
+    jobs = publication_api_pages(repository, f'/actions/runs/{run_id}/jobs', token, 'jobs', api_get)
+    artifacts = publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token,
+                                      'artifacts', api_get)
+    job_entries = paginated_entries(jobs, 'jobs', 'readiness jobs')
+    required = {'source-checks', 'vsix', 'linux-x86_64-gnu', 'native-candidates'}
+    matrix_families = ('native-consumers', 'native-functional-consumers',
+                       'native-vscode-consumers')
+    seen = set()
+    for job in job_entries:
+        name = job.get('name')
+        target = next((target for target in READINESS_TARGETS
+                       if isinstance(name, str) and target in name), None)
+        family = next((family for family in matrix_families
+                       if isinstance(name, str) and name.startswith(family)), None)
+        key = (family, target) if family and target else name if name in required else None
+        if key is not None:
+            if key in seen:
+                fail(f'readiness collector: duplicate mandatory job {name!r}')
+            seen.add(key)
+            if job.get('run_attempt') != int(attempt) or job.get('conclusion') != 'success':
+                fail(f'readiness collector: mandatory job {name!r} is not successful in attempt {attempt}')
+    expected = required | {(family, target) for family in matrix_families
+                           for target in READINESS_TARGETS}
+    missing = sorted(expected - seen, key=str)
+    if missing:
+        fail(f'readiness collector: missing mandatory jobs {missing}')
+    by_name = {}
+    for artifact in paginated_entries(artifacts, 'artifacts', 'readiness artifacts'):
+        name = artifact.get('name')
+        if not name or name in by_name:
+            fail('readiness collector: missing or duplicate artifact name')
+        if artifact.get('expired') is not False or not isinstance(artifact.get('id'), int) or \
+                not ARTIFACT_DIGEST_PATTERN.fullmatch(str(artifact.get('digest', ''))):
+            fail(f'readiness collector: invalid/expired artifact {name!r}')
+        workflow_run = artifact.get('workflow_run')
+        if not isinstance(workflow_run, dict) or workflow_run.get('id') != int(run_id):
+            fail(f'readiness collector: artifact {name!r} belongs to another run')
+        by_name[name] = artifact
+    if artifact_get is None:
+        def artifact_get(artifact):
+            from scripts import download_native_candidate as transport
+            url = f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/{artifact["id"]}/zip'
+            try:
+                with transport.request(url, token) as response:
+                    data = response.read()
+            except transport.DownloadError as error:
+                fail(f'readiness collector: artifact download failed: {error}')
+            digest = 'sha256:' + hashlib.sha256(data).hexdigest()
+            if digest != artifact['digest']:
+                fail(f'readiness collector: artifact {artifact["name"]!r} digest mismatch')
+            return data
+    records = {}
+    collected_bundle = None
+    for artifact_name, artifact in by_name.items():
+        if artifact_name.startswith(('native-consumer-', 'native-functional-', 'native-vscode-')):
+            payload = artifact_get(artifact)
+            if isinstance(payload, bytes):
+                if 'sha256:' + hashlib.sha256(payload).hexdigest() != artifact['digest']:
+                    fail(f'readiness collector: artifact {artifact_name!r} digest mismatch')
+                import io
+                import zipfile
+                try:
+                    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                        names = archive.namelist()
+                        if len(names) != len(set(names)) or any(
+                                name.startswith('/') or '..' in Path(name).parts
+                                for name in names):
+                            fail(f'readiness collector: unsafe archive {artifact_name!r}')
+                        docs = [json.loads(archive.read(name)) for name in names
+                                if name.endswith('.json')]
+                except (OSError, ValueError, zipfile.BadZipFile, KeyError) as error:
+                    fail(f'readiness collector: invalid evidence archive {artifact_name!r}: {error}')
+                if len(docs) != 1:
+                    fail(f'readiness collector: expected one evidence JSON in {artifact_name!r}')
+                document = docs[0]
+            else:
+                document = payload
+            if not isinstance(document, dict):
+                fail(f'readiness collector: invalid evidence JSON in {artifact_name!r}')
+            if isinstance(document.get('readiness_bundle'), dict):
+                if collected_bundle is not None and collected_bundle != document['readiness_bundle']:
+                    fail('readiness collector: evidence artifacts disagree on readiness bundle')
+                collected_bundle = document['readiness_bundle']
+            target = next((target for target in READINESS_TARGETS if target in artifact_name), None)
+            if target is None:
+                fail(f'readiness collector: target missing from {artifact_name!r}')
+            family = ('abi' if artifact_name.startswith('native-consumer-') else
+                      'functional_rust' if artifact_name.startswith('native-functional-') else 'vsix')
+            records[(family, target)] = (artifact, document)
+    missing_records = [(family, target) for family in ('abi', 'functional_rust', 'vsix')
+                       for target in READINESS_TARGETS if (family, target) not in records]
+    if missing_records:
+        fail(f'readiness collector: missing evidence artifacts {missing_records}')
+    # The producer handoffs currently do not carry every family metric. Refuse
+    # explicitly rather than infer counts or outcomes from a successful job.
+    for (family, target), (_, document) in records.items():
+        metrics = document.get('tests')
+        if not isinstance(metrics, dict) or not isinstance(metrics.get('executed'), int):
+            fail(f'readiness collector: missing measured test metrics in {family}/{target} evidence')
+    if collected_bundle is None:
+        fail('readiness collector: evidence is missing an identity-bound readiness bundle')
+    if collected_bundle.get('identity') != identity:
+        fail('readiness collector: readiness bundle identity mismatch')
+    validate_release_readiness(collected_bundle)
+    return collected_bundle
+
+
 def validate_release_readiness(bundle):
     """Validate an exact, identity-bound readiness bundle without claiming hosted proof."""
     if not isinstance(bundle, dict):
@@ -1897,13 +2036,16 @@ def validate_publication_binding_bundle(path):
     return result
 
 
-def publication_api_pages(repository, path, token, key):
+def publication_api_pages(repository, path, token, key, api_get=None):
     """Collect every API page for a publication listing, rejecting truncation."""
     entries = []
+    if api_get is None:
+        api_get = fetch_api
     total = None
     page = 1
+    seen_pages = set()
     while True:
-        status, body = fetch_api(
+        status, body = api_get(
             repository, f'{path}?per_page=100&page={page}', token)
         if status != 200:
             fail(f'publication API {path} page {page} returned HTTP {status}')
@@ -1919,9 +2061,16 @@ def publication_api_pages(repository, path, token, key):
             total = count
         elif total != count:
             fail(f'publication API {path} pages disagree on total_count')
+        page_signature = json.dumps(values, sort_keys=True, separators=(',', ':'))
+        if page_signature in seen_pages:
+            fail(f'publication API {path} page {page} repeats an earlier page')
+        seen_pages.add(page_signature)
+        previous_count = len(entries)
         entries.extend(values)
         if len(entries) >= total:
             break
+        if len(entries) == previous_count:
+            fail(f'publication API {path} page {page} made no pagination progress')
         page += 1
     if len(entries) != total:
         fail(f'publication API {path}: incomplete pagination')
@@ -2908,6 +3057,134 @@ def run_self_tests():
     result = validate_release_readiness(readiness_bundle)
     if result != {'experimental_ready': True, 'publishable': False}:
         fail('self-test: complete experimental readiness must not imply publication')
+    # Exercise the API adapter with current run/job/artifact shapes and a
+    # future producer bundle; API access and artifact bytes remain mocked.
+    collector_jobs = ['source-checks', 'vsix', 'linux-x86_64-gnu', 'native-candidates'] + [
+        f'{family} ({target})' for family in
+        ('native-consumers', 'native-functional-consumers', 'native-vscode-consumers')
+        for target in READINESS_TARGETS]
+    collector_artifacts = []
+    collector_payloads = {}
+    for index, (family, prefix) in enumerate((('abi', 'native-consumer-'),
+                                               ('functional_rust', 'native-functional-'),
+                                               ('vsix', 'native-vscode-'))):
+        for target in READINESS_TARGETS:
+            name = f'{prefix}{target}-1'
+            artifact = {'id': 100 + index * 10 + READINESS_TARGETS.index(target),
+                        'name': name, 'digest': 'sha256:' + 'a' * 64,
+                        'expired': False, 'workflow_run': {'id': 42}}
+            collector_artifacts.append(artifact)
+            collector_payloads[name] = {'readiness_bundle': readiness_bundle,
+                                        'tests': {'executed': 1, 'skipped': 0, 'ignored': 0}}
+    def collector_api(_repository, path, _token):
+        if path == '/actions/runs/42':
+            body = {'id': 42, 'run_attempt': 1, 'head_sha': SELF_TEST_SHA,
+                    'event': 'push', 'head_branch': 'v1.2.3', 'workflow_id': 7,
+                    'status': 'completed', 'conclusion': 'success'}
+        elif path.startswith('/actions/runs/42/jobs?'):
+            body = {'total_count': len(collector_jobs), 'jobs': [
+                {'name': name, 'run_attempt': 1, 'conclusion': 'success'}
+                for name in collector_jobs]}
+        elif path.startswith('/actions/runs/42/artifacts?'):
+            body = {'total_count': len(collector_artifacts), 'artifacts': collector_artifacts}
+        else:
+            return 404, b'{}'
+        return 200, json.dumps(body).encode()
+    collected = collect_release_readiness(
+        'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
+        'push', '7', 'mock-token', api_get=collector_api,
+        artifact_get=lambda artifact: collector_payloads[artifact['name']])
+    if collected != readiness_bundle:
+        fail('self-test: mocked readiness collection did not preserve the bound bundle')
+    missing_metrics = dict(collector_payloads)
+    missing_metrics['native-consumer-x86_64-unknown-linux-gnu-1'] = {
+        'readiness_bundle': readiness_bundle}
+    expect_check('readiness collector missing measured metrics',
+                 lambda: collect_release_readiness(
+                     'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
+                     'push', '7', 'mock-token', api_get=collector_api,
+                     artifact_get=lambda artifact: missing_metrics[artifact['name']]),
+                 expected='missing measured test metrics')
+    def collector_with(jobs=None, artifact_list=None, api_mutation=None,
+                       artifact_payload_map=None):
+        def api(_repository, path, _token):
+            status, body = collector_api(_repository, path, _token)
+            if api_mutation:
+                status, body = api_mutation(path, status, body)
+            return status, body
+        original_jobs = collector_jobs[:]
+        original_artifacts = collector_artifacts[:]
+        if jobs is not None:
+            collector_jobs[:] = jobs
+        if artifact_list is not None:
+            collector_artifacts[:] = artifact_list
+        try:
+            return collect_release_readiness(
+                'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
+                'push', '7', 'mock-token', api_get=api,
+                artifact_get=lambda artifact: (artifact_payload_map or collector_payloads)[artifact['name']])
+        finally:
+            collector_jobs[:] = original_jobs
+            collector_artifacts[:] = original_artifacts
+    for state in ('failure', 'skipped', 'cancelled'):
+        def change_job(path, status, body, state=state):
+            if path.startswith('/actions/runs/42/jobs?'):
+                document = json.loads(body)
+                document['jobs'][0]['conclusion'] = state
+                return status, json.dumps(document).encode()
+            return status, body
+        expect_check(f'readiness collector job {state}', lambda: collector_with(
+            api_mutation=change_job), expected='is not successful')
+    expect_check('readiness collector missing matrix job',
+                 lambda: collector_with(jobs=collector_jobs[:-1]),
+                 expected='missing mandatory jobs')
+    expect_check('readiness collector pagination gap', lambda: collector_with(
+        api_mutation=lambda path, status, body: (status, b'{"total_count":2,"jobs":[]}')
+        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
+        expected='made no pagination progress')
+    expect_check('readiness collector empty pagination', lambda: collector_with(
+        api_mutation=lambda path, status, body: (status, b'{"total_count":1,"jobs":[]}')
+        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
+        expected='made no pagination progress')
+    expect_check('readiness collector repeating pagination', lambda: collector_with(
+        api_mutation=lambda path, status, body: (status, b'{"total_count":3,"jobs":[{"name":"repeated"}]}')
+        if path.startswith('/actions/runs/42/jobs?') else (status, body)),
+        expected='repeats an earlier page')
+    expect_check('readiness collector wrong attempt', lambda: collect_release_readiness(
+        'example/magit-lsp', '42', '2', SELF_TEST_SHA, 'refs/tags/v1.2.3',
+        'push', '7', 'mock-token', api_get=collector_api,
+        artifact_get=lambda artifact: collector_payloads[artifact['name']]),
+        expected='run_attempt mismatch')
+    expect_check('readiness collector wrong source', lambda: collect_release_readiness(
+        'example/magit-lsp', '42', '1', SELF_TEST_OTHER_SHA, 'refs/tags/v1.2.3',
+        'push', '7', 'mock-token', api_get=collector_api,
+        artifact_get=lambda artifact: collector_payloads[artifact['name']]),
+        expected='head_sha mismatch')
+    expect_check('readiness collector absent VSIX evidence', lambda: collector_with(
+        artifact_list=[a for a in collector_artifacts
+                       if not a['name'].startswith('native-vscode-')]),
+        expected='missing evidence artifacts')
+    expect_check('readiness collector wrong artifact digest', lambda: collect_release_readiness(
+        'example/magit-lsp', '42', '1', SELF_TEST_SHA, 'refs/tags/v1.2.3',
+        'push', '7', 'mock-token', api_get=collector_api,
+        artifact_get=lambda _artifact: b'not the declared artifact bytes'),
+        expected='digest mismatch')
+    import io
+    import zipfile
+    tampered_zip = io.BytesIO()
+    with zipfile.ZipFile(tampered_zip, 'w') as archive:
+        archive.writestr('evidence.json', '{not-json')
+    tampered_bytes = tampered_zip.getvalue()
+    tampered_artifacts = [dict(artifact) for artifact in collector_artifacts]
+    tampered_artifacts[0]['digest'] = 'sha256:' + hashlib.sha256(tampered_bytes).hexdigest()
+    tampered_payloads = dict(collector_payloads)
+    tampered_payloads[tampered_artifacts[0]['name']] = tampered_bytes
+    expect_check('readiness collector tampered evidence JSON', lambda: collector_with(
+        artifact_list=tampered_artifacts,
+        artifact_payload_map=tampered_payloads), expected='invalid evidence archive')
+    if validate_release_readiness({**readiness_bundle, 'windows_outcome': 'failure'})[
+            'experimental_ready'] is not True:
+        fail('self-test: irrelevant Windows job failure must not block readiness collection')
     promotion_proof = {
         'identity': {'source_sha': SELF_TEST_SHA, 'run_url': readiness_identity['run_url'],
                      'run_attempt': '1'},
@@ -3564,7 +3841,7 @@ def run_self_tests():
                     patch.object(runtime_transport_module, 'request', runtime_transport):
                 expect_check('runtime collector rejects a missing listing page',
                              prepare_publication_runtime, str(event_path),
-                             expected='page 3 returned HTTP 404')
+                             expected='made no pagination progress')
             runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
                 page_document('jobs', coherent_jobs[1:], total=2)
             runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2'] = \
@@ -4086,6 +4363,15 @@ def main():
                              'bundle and print its source commit')
     parser.add_argument('--validate-release-readiness', metavar='BUNDLE',
                         help='validate exact identity-bound readiness JSON bundle')
+    parser.add_argument('--collect-release-readiness', action='store_true',
+                        help='collect and validate readiness from this GitHub Actions run')
+    parser.add_argument('--repository', help='explicit owner/repository for readiness collection')
+    parser.add_argument('--run-id', help='explicit producer run ID')
+    parser.add_argument('--attempt', help='explicit producer run attempt')
+    parser.add_argument('--source-sha', help='explicit producer source commit')
+    parser.add_argument('--ref', help='explicit producer ref')
+    parser.add_argument('--event', help='explicit producer event')
+    parser.add_argument('--workflow-id', help='explicit producer workflow ID')
     parser.add_argument('--prepare-publication-runtime', metavar='EVENT',
                         help='read-only validate workflow_run event and upstream API')
     args = parser.parse_args()
@@ -4109,6 +4395,16 @@ def main():
             with open(args.validate_release_readiness, encoding='utf-8') as stream:
                 result = validate_release_readiness(json.load(stream))
             print(json.dumps(result, sort_keys=True))
+            return 0
+        if args.collect_release_readiness:
+            required = (args.repository, args.run_id, args.attempt, args.source_sha,
+                        args.ref, args.event, args.workflow_id)
+            if not all(required):
+                fail('--collect-release-readiness requires explicit repository/run-id/attempt/source-sha/ref/event/workflow-id')
+            bundle = collect_release_readiness(
+                args.repository, args.run_id, args.attempt, args.source_sha, args.ref,
+                args.event, args.workflow_id, os.environ.get('GH_TOKEN'))
+            print(json.dumps(bundle, sort_keys=True))
             return 0
         if args.prepare_publication_runtime:
             prepare_publication_runtime(args.prepare_publication_runtime)
