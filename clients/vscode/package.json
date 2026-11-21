@@ -75,69 +75,86 @@
     },
     "semanticTokenTypes": [
       {
-        "id": "magit-section",
-        "superType": "namespace",
-        "description": "Status section heading"
+        "id": "heading",
+        "description": "Title"
       },
       {
-        "id": "magit-diff-added",
-        "description": "Added diff line"
+        "id": "muted",
+        "description": "Comment"
       },
       {
-        "id": "magit-diff-removed",
-        "description": "Removed diff line"
+        "id": "added",
+        "description": "Added"
       },
       {
-        "id": "magit-message-error",
-        "description": "Error output from a failed command"
+        "id": "removed",
+        "description": "Removed"
       },
       {
-        "id": "magit-message-warn",
-        "description": "Warning output from a successful command"
+        "id": "changed",
+        "description": "Changed"
+      },
+      {
+        "id": "path",
+        "description": "Directory"
+      },
+      {
+        "id": "identifier",
+        "description": "Identifier"
+      },
+      {
+        "id": "ref",
+        "description": "Constant"
+      },
+      {
+        "id": "key",
+        "description": "Keyword"
+      },
+      {
+        "id": "warning",
+        "description": "WarningMsg"
+      },
+      {
+        "id": "error",
+        "description": "ErrorMsg"
       }
     ],
     "semanticTokenScopes": [
       {
         "language": "magit",
         "scopes": {
-          "magit-section": [
+          "heading": [
             "entity.name.section"
           ],
-          "magit-count": [
-            "constant.numeric"
-          ],
-          "magit-file": [
-            "string"
-          ],
-          "magit-file-modified": [
-            "markup.changed"
-          ],
-          "magit-file-added": [
-            "markup.inserted"
-          ],
-          "magit-file-deleted": [
-            "markup.deleted"
-          ],
-          "magit-file-renamed": [
-            "markup.changed"
-          ],
-          "magit-file-untracked": [
+          "muted": [
             "comment"
           ],
-          "magit-hunk-header": [
-            "meta.diff.range"
-          ],
-          "magit-diff-added": [
+          "added": [
             "markup.inserted"
           ],
-          "magit-diff-removed": [
+          "removed": [
             "markup.deleted"
           ],
-          "magit-message-error": [
-            "invalid"
+          "changed": [
+            "markup.changed"
           ],
-          "magit-message-warn": [
-            "markup.warning"
+          "path": [
+            "entity.name.filename"
+          ],
+          "identifier": [
+            "entity.name"
+          ],
+          "ref": [
+            "entity.name.tag"
+          ],
+          "key": [
+            "keyword.other"
+          ],
+          "warning": [
+            "message.warning"
+          ],
+          "error": [
+            "message.error"
           ]
         }
       }
@@ -2126,93 +2143,5 @@
         }
       }
     }
-  },
-  "contributions": {
-    "semanticTokenTypes": [
-      {
-        "id": "heading",
-        "description": "Title"
-      },
-      {
-        "id": "muted",
-        "description": "Comment"
-      },
-      {
-        "id": "added",
-        "description": "Added"
-      },
-      {
-        "id": "removed",
-        "description": "Removed"
-      },
-      {
-        "id": "changed",
-        "description": "Changed"
-      },
-      {
-        "id": "path",
-        "description": "Directory"
-      },
-      {
-        "id": "identifier",
-        "description": "Identifier"
-      },
-      {
-        "id": "ref",
-        "description": "Constant"
-      },
-      {
-        "id": "key",
-        "description": "Keyword"
-      },
-      {
-        "id": "warning",
-        "description": "WarningMsg"
-      },
-      {
-        "id": "error",
-        "description": "ErrorMsg"
-      }
-    ],
-    "semanticTokenScopes": [
-      {
-        "language": "magit",
-        "scopes": {
-          "heading": [
-            "entity.name.section"
-          ],
-          "muted": [
-            "comment"
-          ],
-          "added": [
-            "markup.inserted"
-          ],
-          "removed": [
-            "markup.deleted"
-          ],
-          "changed": [
-            "markup.changed"
-          ],
-          "path": [
-            "entity.name.filename"
-          ],
-          "identifier": [
-            "entity.name"
-          ],
-          "ref": [
-            "entity.name.tag"
-          ],
-          "key": [
-            "keyword.other"
-          ],
-          "warning": [
-            "message.warning"
-          ],
-          "error": [
-            "message.error"
-          ]
-        }
-      }
-    ]
   }
 }
