@@ -95,6 +95,9 @@
               # jscpd.packages.${system}.default
               actionlint # Check github action workflows
               cargo-llvm-cov
+
+              perf
+              strace
             ];
 
             shellHook = ''
