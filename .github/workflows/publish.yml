@@ -16,6 +16,10 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      # The publish job downloads exactly this immutable artifact from this same
+      # run; a name-only lookup or a cross-run pickup is never accepted.
+      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,9 +29,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/check_release_automation.py --prepare-publication-runtime "$GITHUB_EVENT_PATH"
+      # Only the handoff the runtime just validated, written by that runtime
+      # alone, is persisted. The directory is data for the publisher: nothing
+      # from it is checked out, imported or executed in either job.
+      - id: handoff-upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-handoff
+          path: build/release/publication-handoff
+          if-no-files-found: error
+          retention-days: 14
 
   publish:
-    name: Publish (ineligible pending asset handoff)
+    name: Publish validated handoff
     needs: validate
     # Only a successful push-tag build of this repository may reach the
     # environment. Manual dispatches and fork runs never publish; the validate
@@ -38,10 +52,28 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
-      # This job remains unreachable until the collector can hand off validated
-      # immutable assets. No external mutation or executable artifact is allowed.
+      - name: Download the validated handoff by immutable artifact id
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}
+          path: build/release/publication-handoff
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Set up pinned pnpm
+        run: corepack prepare pnpm@10.13.1 --activate
+      - name: Install the frozen publication tooling
+        run: make vscode-deps
+      # The make target owns release creation and the OIDC registry lanes; this
+      # job only hands it the exact downloaded bytes, and nothing here rebuilds,
+      # repackages, installs a PAT or runs the crate lane.
+      - name: Publish the validated handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json
