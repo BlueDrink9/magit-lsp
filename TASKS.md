@@ -23,7 +23,7 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 - [x] **PERF-OPEN-UI-GATE — Enable deterministic loading-phase UI verification.** Prerequisite for PERF-OPEN-LOADING-UI: the existing startup waits for fresh content before scenarios run (`scripts/ui_lib/driver.py:955-956`, worker finding at `bbab3bc`). test: opt-in early-start and held-first-status/release fixture lifecycle, with explicit cleanup and existing normal startup semantics unchanged. Extend nearest harness helpers and unit tests; no native screenshots or client/server production changes. Verification: `make ui-unit`.
   - Verified: `make ui-unit` → exit 0 (`ok: ui-unit`).
-  - Done: pending follow-up commit.
+  - Done: `5544db4`.
 
 - [ ] **PERF-OPEN-LOADING-UI — Verify early loading display in Neovim.** After PERF-OPEN-ASYNC and PERF-OPEN-UI-GATE, test: a permanent deterministic native text/structured scenario proves the public :Magit window displays the server-owned loading document while Git is held, remains responsive and replaces it with fresh status after release; distinguish window creation from content readiness. check: document lifecycle, measured evidence and measurement limitations. Verification: `make ui-file FILE=tests/ui/scenarios/status-loading.scn`.
   - Recipe: `fixture: modified-two-files` plus `startup: held`; `wait status entered`; capture/assert the displayed server loading text before any release; send the registered `common.toggle-text-mode` key and wait for the client to stay responsive; `release status`; `wait`; assert the fresh fixture branch, files and hunks replaced the loading text.
