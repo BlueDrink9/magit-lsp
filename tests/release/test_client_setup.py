@@ -1,14 +1,59 @@
 """Isolated real-server smoke for the documented nested Neovim client snippets."""
+import importlib.util
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
+from importlib.machinery import SourceFileLoader
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def server_binary() -> Path | None:
+    """Resolve the server binary under test, or None when none is built."""
+    binary = os.environ.get('MAGIT_LSP_TEST_BINARY')
+    if not binary:
+        for candidate in ('target/debug/magit-lsp', 'target/release/magit-lsp'):
+            if (ROOT / candidate).is_file():
+                binary = candidate
+                break
+    return (ROOT / binary).resolve() if binary else None
+
+
+def load_launcher() -> object:
+    """Import the extensionless interactive launcher script as a module."""
+    path = ROOT / 'scripts/neovim'
+    loader = SourceFileLoader('magit_neovim_launcher_smoke', str(path))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'cannot import {path}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def owned_pids(launch_dir: Path) -> list[str]:
+    """Live PIDs whose environment still names `launch_dir` (Linux only)."""
+    proc = Path('/proc')
+    if not proc.is_dir():
+        return []
+    token = f'MAGIT_LSP_LAUNCH_DIR={launch_dir}'.encode()
+    found = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            environ = (entry / 'environ').read_bytes()
+        except OSError:
+            continue
+        if token in environ.split(b'\0'):
+            found.append(entry.name)
+    return found
 
 
 class ClientSetupTests(unittest.TestCase):
@@ -16,15 +61,9 @@ class ClientSetupTests(unittest.TestCase):
 
     def test_documented_setup(self):
         nvim = shutil.which('nvim')
-        binary = os.environ.get('MAGIT_LSP_TEST_BINARY')
-        if not binary:
-            for candidate in ('target/debug/magit-lsp', 'target/release/magit-lsp'):
-                if (ROOT / candidate).is_file():
-                    binary = candidate
-                    break
+        binary = server_binary()
         if not nvim or not binary:
             self.skipTest('requires nvim 0.11+ and a magit-lsp binary')
-        binary = (ROOT / binary).resolve()
         self.assertTrue(binary.is_file(), str(binary))
         document = (ROOT / 'docs/CLIENT_INSTALL.md').read_text()
         snippets = {}
@@ -194,3 +233,157 @@ end
                 text=True, capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('lazy spec contract: ok', result.stdout + result.stderr)
+
+
+class LauncherSmokeTests(unittest.TestCase):
+    """Start the real interactive launcher argv in a temporary fixture.
+
+    The adapter adds only `--headless` and a check script to the launcher's
+    generated argv: the environment, dedicated initializer, client runtime and
+    server are the ones `make neovim` uses.
+    """
+
+    CHECK = '''local ok, err = xpcall(function()
+  assert(vim.fn.has('nvim-0.11') == 1, 'requires Neovim 0.11+')
+  local shada = assert(vim.env.MAGIT_LSP_SMOKE_SHADA,
+    'smoke adapter did not name the ShaDa path')
+  assert(vim.fn.isdirectory(shada) == 0,
+    'ShaDa path is a directory, not a file: ' .. shada)
+  assert(vim.wait(20000, function()
+    if vim.bo.filetype ~= 'magit-lsp' then return false end
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+      if line:find('new.txt', 1, true) then return true end
+    end
+    return false
+  end, 20), 'launcher did not render new.txt in a status view')
+  assert(#vim.lsp.get_clients() == 1, 'launcher did not start exactly one server')
+  vim.cmd('wshada')
+  assert(vim.fn.filereadable(shada) == 1, 'ShaDa file was not written: ' .. shada)
+  for _, client in ipairs(vim.lsp.get_clients()) do client:stop() end
+  vim.wait(5000, function() return #vim.lsp.get_clients() == 0 end, 20)
+end, debug.traceback)
+if not ok then
+  io.stderr:write(err .. '\\n')
+  vim.cmd('cquit 1')
+else
+  print('launcher smoke: rendered status and wrote shada')
+  vim.cmd('qa!')
+end
+'''
+
+    def setUp(self) -> None:
+        self.nvim = shutil.which('nvim')
+        self.binary = server_binary()
+        if not self.nvim:
+            self.skipTest('requires nvim 0.11+')
+        if not self.binary or not self.binary.is_file():
+            self.skipTest('requires a magit-lsp binary')
+        self.launcher = load_launcher()
+        self.root = Path(tempfile.mkdtemp(prefix='magit launcher smoke-'))
+        self.addCleanup(shutil.rmtree, self.root, True)
+
+    def run_smoke(self, *, directory_shada: bool = False):
+        """Launch the real argv and return its status, observations and repo."""
+        repo = self.root / 'repo with spaces'
+        repo.mkdir()
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+        (repo / 'new.txt').write_text('launcher smoke\n')
+        temporary_root = self.root / 'temporary root with spaces'
+        temporary_root.mkdir()
+        check = self.root / 'check.lua'
+        check.write_text(self.CHECK)
+        observed: dict[str, object] = {}
+
+        def adapter(command, **options):
+            argv = list(command)
+            environment = dict(options['env'])
+            base = Path(environment['MAGIT_LSP_LAUNCH_DIR'])
+            shada_index = argv.index('-i') + 1
+            shada = Path(argv[shada_index])
+            observed.update({
+                'argv': argv,
+                'init': Path(argv[argv.index('-u') + 1]),
+                'base': base,
+                'base_existed': base.is_dir(),
+                'shada_parent_existed': shada.parent.is_dir(),
+                'shada_is_directory': shada.is_dir(),
+            })
+            if directory_shada:
+                # The superseded launcher passed the isolated directory itself.
+                argv[shada_index] = str(shada.parent)
+            environment.update({
+                'MAGIT_LSP_SMOKE_SHADA': argv[shada_index],
+                'MAGIT_LSP_SMOKE_CHECK': str(check),
+            })
+            process = subprocess.Popen(
+                argv + ['--headless', '-c',
+                        'lua dofile(vim.env.MAGIT_LSP_SMOKE_CHECK)'],
+                cwd=options['cwd'], env=environment, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # The editor and its server inherit the launcher environment, so
+            # the detector must see them while the editor is still running.
+            observed['owned_running'] = len(owned_pids(base))
+            stdout, stderr = process.communicate(timeout=90)
+            result = subprocess.CompletedProcess(
+                argv, process.returncode, stdout, stderr)
+            observed['result'] = result
+            observed['shada_written'] = (
+                shada.is_file() and shada.stat().st_size > 0)
+            return result
+
+        status = self.launcher.launch(  # type: ignore[attr-defined]
+            repo, nvim=self.nvim, server=self.binary, runner=adapter,
+            temporary_root=temporary_root)
+        return status, observed, repo
+
+    def assert_no_leaked_processes(self, base: Path) -> None:
+        """Fail while a launched descendant still names the removed launch dir."""
+        deadline = time.monotonic() + 10
+        leaked = owned_pids(base)
+        while leaked and time.monotonic() < deadline:
+            time.sleep(0.05)
+            leaked = owned_pids(base)
+        self.assertEqual(
+            leaked, [], f'launched processes outlived the editor: {leaked}')
+
+    def test_launcher_smoke_renders_writes_shada_and_cleans_up(self) -> None:
+        status, observed, repo = self.run_smoke()
+        result = observed['result']
+        output = result.stdout + result.stderr
+        self.assertEqual(status, 0, output)
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn('launcher smoke: rendered status and wrote shada', output)
+        self.assertNotRegex(result.stderr, r'(?m)^Error|E\d{3,4}:')
+        self.assertEqual(observed['init'], self.launcher.INIT)  # type: ignore[attr-defined]
+        self.assertNotIn('minimal_init', ' '.join(observed['argv']))
+        self.assertIn('--noplugin', observed['argv'])
+        # Both the fixture and the temporary launch root contain a space.
+        self.assertIn(' ', str(observed['base']))
+        self.assertIn(' ', str(repo))
+        self.assertTrue(observed['base_existed'])
+        self.assertTrue(observed['shada_parent_existed'])
+        self.assertFalse(observed['shada_is_directory'])
+        self.assertTrue(observed['shada_written'])
+        self.assertGreaterEqual(
+            observed['owned_running'], 1,
+            'owned-process detector never saw the launched editor')
+        self.assertFalse(
+            Path(observed['base']).exists(), 'launch directory was not removed')
+        self.assert_no_leaked_processes(Path(observed['base']))
+        print('launcher smoke: dedicated initializer started a real status '
+              'view with spaces, wrote ShaDa and removed the launch directory')
+
+    def test_launcher_smoke_rejects_a_directory_as_the_shada_file(self) -> None:
+        status, observed, _ = self.run_smoke(directory_shada=True)
+        result = observed['result']
+        output = result.stdout + result.stderr
+        self.assertNotEqual(status, 0, output)
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertNotIn('launcher smoke: rendered status and wrote shada', output)
+        self.assertRegex(output, r'(?i)shada')
+        self.assertFalse(
+            Path(observed['base']).exists(), 'launch directory was not removed')
+        failure = next(
+            (line.strip() for line in output.splitlines()
+             if 'shada' in line.lower()), '')
+        print(f'launcher smoke rejected directory ShaDa argv: {failure}')
