@@ -117,6 +117,7 @@ SOURCE_CHECK_JOB = 'source-checks'
 FALLBACK_JOB = 'linux-x86_64-gnu'
 NATIVE_JOB = 'native-candidates'
 NATIVE_CONSUMER_JOB = 'native-consumers'
+NATIVE_FUNCTIONAL_JOB = 'native-functional-consumers'
 FALLBACK_TARGET = ASSET
 SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
 NATIVE_MATRIX = (
@@ -812,6 +813,58 @@ def check_native_consumers(block):
         fail('build workflow: native consumer candidate/check failures must fail the job')
 
 
+def check_native_functional_consumers(block):
+    """Require separate, mandatory artifact-backed native functional suites."""
+    code = '\n'.join(code_lines(block))
+    if not any(line.strip() == 'needs: native-candidates' for line in block):
+        fail('build workflow: native functional consumers must need native-candidates')
+    if 'continue-on-error:' in code:
+        fail('build workflow: native functional consumers must be mandatory')
+    matrix = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if not match:
+            continue
+        target = None
+        for entry in block[index + 1:]:
+            if entry.strip() and indent_of(entry) <= indent_of(line):
+                break
+            found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+            if found:
+                target = found.group(1)
+        matrix[match.group(1)] = target
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native functional matrix must exactly match all three native hosts')
+    for forbidden in ('release-native-build', 'cargo build', 'cargo test --release', 'continue-on-error:'):
+        if forbidden in code:
+            fail(f'build workflow: functional consumers must not substitute a server build ({forbidden})')
+    required = (
+        'needs: native-candidates', 'permissions:', 'actions: read', 'contents: read',
+        'cachix/install-nix-action@', '.#release-acceptance',
+        'scripts/download_native_candidate.py', '--run-id "${{ github.run_id }}"',
+        '--attempt "${{ github.run_attempt }}"', '--source-sha "${{ github.sha }}"',
+        '--target "${{ matrix.target }}"', '--artifact-name "${{ matrix.artifact }}"',
+        'cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive',
+        'test-rust-artifact',
+        'FILTER="--test server_async --test editor_bridge --test rebase_interactive"',
+        'native-neovim-artifact-check', 'MAGIT_LSP_TEST_BINARY=',
+        'executable_sha256', 'before_sha256', 'after_sha256',
+        'native-functional-evidence.json', 'if: always()', 'if-no-files-found: warn',
+        'steps.harness.outcome', 'steps.rust-functional.outcome',
+    )
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native functional consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: functional consumers must use immutable credential-free checkout')
+    if 'test "$after" = "$expected"' not in code:
+        fail('build workflow: functional candidate hash must remain unchanged after runs')
+    if "grep -E '([0-9]+ ignored|skipped)'" not in code:
+        fail('build workflow: functional suites must fail on ignored or skipped cases')
+    if 'test "${{ steps.candidate.outcome }}" = success' not in code:
+        fail('build workflow: functional candidate/harness/runtime failures must fail the job')
+
+
 def check_build_workflow(path=BUILD_WORKFLOW):
     """Structure-check the build workflow: locked builders, source checks,
     run-bound explicit candidates and read-only, non-publishing scope."""
@@ -853,7 +906,8 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     check_inline_scripts(lines, 'build workflow')
 
     jobs = workflow_jobs(lines)
-    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB):
+    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB,
+                     NATIVE_FUNCTIONAL_JOB):
         if required not in jobs:
             fail(f'build workflow: missing mandatory job {required!r}')
     require_pinned_builders(jobs)
@@ -918,6 +972,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
 
     check_native_candidates(jobs[NATIVE_JOB])
     check_native_consumers(jobs[NATIVE_CONSUMER_JOB])
+    check_native_functional_consumers(jobs[NATIVE_FUNCTIONAL_JOB])
     check_python_interpreter(lines)
     check_node_tooling(lines)
 
@@ -3095,7 +3150,27 @@ def run_self_tests():
              ('build workflow native consumer without failure evidence',
               (('native-evidence.json', 'native-result.json', None),),
               'native-evidence.json'),
-         ):
+             ('build workflow missing native functional consumer host',
+              (('  native-functional-consumers:', '  native-functional-consumers-disabled:', 1),),
+              "missing mandatory job 'native-functional-consumers'"),
+             ('build workflow native functional consumer missing a required suite',
+              (('--test editor_bridge --test rebase_interactive', '--test rebase_interactive', 1),),
+              'must include'),
+             ('build workflow native functional consumer substituting a server build',
+              (('nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact',
+                'cargo build --release', 1),),
+              'must not substitute a server build'),
+             ('build workflow native functional consumer optional',
+              (('  native-functional-consumers:\n',
+                '  native-functional-consumers:\n    continue-on-error: true\n', 1),),
+              'must be mandatory'),
+             ('build workflow native functional consumer without post-run identity',
+              (('test "$after" = "$expected"', 'true', 1),),
+              'hash must remain unchanged'),
+             ('build workflow native functional consumer without Neovim target',
+              (('native-neovim-artifact-check', 'missing-neovim-target', 1),),
+              'native-neovim-artifact-check'),
+          ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)

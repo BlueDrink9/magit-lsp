@@ -240,3 +240,85 @@ jobs:
       - name: Require successful candidate checks
         if: always()
         run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.native-check.outcome }}" = success
+
+  native-functional-consumers:
+    # Functional suites consume the same immutable candidates in the
+    # release-acceptance tools shell; this is not portability evidence.
+    needs: native-candidates
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.28.3/install
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Download immutable candidate
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/download_native_candidate.py
+          --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
+          --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
+          --output "$RUNNER_TEMP/native-functional-candidate" > "$RUNNER_TEMP/native-functional-download.json"
+
+      - name: Compile native Rust harness separately
+        id: harness
+        run: nix develop --no-update-lock-file .#release-native -c cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive
+
+      - name: Run artifact functional suites
+        id: rust-functional
+        run: |
+          handoff="$RUNNER_TEMP/native-functional-candidate/native-candidate.json"
+          archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff"); manifest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")
+          name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"])' "$handoff"); mkdir -p "$RUNNER_TEMP/native-functional-bin"; tar -xzf "$archive" -C "$RUNNER_TEMP/native-functional-bin"
+          binary=$(find "$RUNNER_TEMP/native-functional-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit); expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["executable_sha256"])' "$manifest")
+          before=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$before" = "$expected"; echo '{"ok":false,"phase":"rust-functional"}' > "$RUNNER_TEMP/native-functional-evidence.json"
+          make_bin=$(command -v make)
+          nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
+          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_TEST_BINARY="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
+          after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; ! grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"
+          printf '{"ok":true,"target":"%s","executable_sha256":"%s","before_sha256":"%s","after_sha256":"%s","rust_suites":["server_async","editor_bridge","rebase_interactive"],"neovim_scenarios":["status-basics.scn","commit-message-editor.scn"],"cleanup":"make targets completed"}\n' "$name" "$expected" "$before" "$after" > "$RUNNER_TEMP/native-functional-evidence.json"
+
+      - name: Upload functional evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-functional-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-functional-candidate/native-candidate.json
+            ${{ runner.temp }}/native-functional-download.json
+            ${{ runner.temp }}/native-functional-rust.log
+            ${{ runner.temp }}/native-functional-neovim.log
+            ${{ runner.temp }}/native-functional-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require successful functional run
+        if: always()
+        run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.harness.outcome }}" = success && test "${{ steps.rust-functional.outcome }}" = success
