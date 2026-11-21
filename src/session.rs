@@ -2393,6 +2393,26 @@ impl Session {
         )?))
     }
 
+    /// Re-render and publish the active view after a pending draft is admitted.
+    ///
+    /// A repository operation creates its draft after the command published its
+    /// render, so the published snapshot predates the pending row. Rendering the
+    /// active view again makes that snapshot and the retained tree include the
+    /// row, so an unchanged watcher refresh sees no difference and emits no
+    /// second status edit.
+    pub fn publish_pending_draft(&mut self) -> Result<()> {
+        let Some(view_id) = self
+            .views
+            .iter()
+            .last()
+            .map(|view| view.descriptor().id.clone())
+        else {
+            return Ok(());
+        };
+        self.refresh(&view_id)?;
+        Ok(())
+    }
+
     /// Re-read every open view's backing state and collect the new renders.
     ///
     /// This is the single refresh entry for the file watcher and detached

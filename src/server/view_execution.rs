@@ -741,6 +741,13 @@ fn spawn_repository_operation(
                     return;
                 }
             };
+            // The command published the focused view before this draft existed,
+            // so render it again now: the published snapshot then already shows
+            // the pending row and an unchanged watcher refresh is a no-op.
+            if let Some(handle) = shared.session(&repo) {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                let _ = session.publish_pending_draft();
+            }
             shared
                 .edit_configs
                 .lock()
