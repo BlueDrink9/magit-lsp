@@ -626,7 +626,11 @@ async function run() {
     async () => {
       const source = fs.readFileSync(path.join(__dirname, "e2e/run.mjs"), "utf8");
       assert.match(source, /MAGIT_VSCODE_ARTIFACT_ONLY === "1"/);
-      assert.match(source, /focusedArtifact \? process\.env\.RELEASE_VSIX/);
+      assert.match(source, /executable: process\.env\.MAGIT_LSP_SERVER_PATH/);
+      assert.match(source, /archive: process\.env\.RELEASE_ARTIFACT/);
+      assert.match(source, /manifest: process\.env\.RELEASE_MANIFEST/);
+      assert.match(source, /vsix: process\.env\.RELEASE_VSIX/);
+      assert.match(source, /focusedArtifact \? artifactPaths\.vsix/);
       assert.match(
         source,
         /focusedVsix \? \[\] : \[`--extensionDevelopmentPath=\$\{root\}\/clients\/vscode`\]/,
@@ -637,10 +641,13 @@ async function run() {
       );
       assert.doesNotMatch(source, /focusedArtifact[\s\S]{0,300}build\/vscode/);
       assert.match(source, /artifactHashesBefore/);
+      assert.match(source, /hashesAfter/);
       assert.match(source, /native-vscode-artifact-evidence\.json/);
       assert.match(source, /installedOrigin: vsixEvidence\?\.install/);
+      assert.match(source, /status: passed \? "pass" : "fail"/);
       assert.match(source, /remainingOwnedPids/);
       assert.match(source, /gitStatus/);
+      assert.match(source, /cleanup/);
     },
   );
 
@@ -648,6 +655,13 @@ async function run() {
     const directory = temporaryRoot();
     try {
       const helper = require("./e2e/download-startup.js");
+      await assert.rejects(
+        helper.prepareDownloadCache({
+          directory,
+          artifact: path.join(directory, "missing.tar.gz"),
+          manifest: path.join(directory, "manifest.json"),
+        }),
+      );
       await assert.rejects(
         helper.prepareDownloadCache({ directory, binary: BINARY, manifest: "missing" }),
       );
