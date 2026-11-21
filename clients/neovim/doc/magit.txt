@@ -23,20 +23,20 @@ Native package, from |init.lua| before plugins load:
     .. '/site/pack/magit/start/magit-lsp/clients/neovim')
 <
 
-lazy.nvim appends only the plugin directory, so append the client runtime in
-the plugin spec's `config(plugin)` hook; it runs when the plugin loads, not
-during startup:
+lazy.nvim appends only the plugin directory, so append the client runtime and
+source this plugin's entry point in the plugin spec's `config(plugin)` hook; it
+runs when the plugin loads, not during startup:
 
 >lua
   config = function(plugin)
     vim.opt.rtp:append(plugin.dir .. '/clients/neovim')
+    vim.cmd.source(plugin.dir .. '/clients/neovim/plugin/magit-lsp.lua')
   end,
 <
 
-That hook does not source this file, so the lazy setup opens status from its
-key callback.  |:Magit| is registered when Neovim sources the client's
-`plugin/` scripts, as a native package does.  Run `:helptags ALL` if help tags
-are not generated for the client `doc` directory.
+The hook registers |:Magit| without starting a session; the key callback opens
+status.  Run `:helptags ALL` if help tags are not generated for the client
+`doc` directory.
 
 ==============================================================================
 COMMANDS                                                     *magit-commands*

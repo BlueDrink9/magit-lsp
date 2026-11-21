@@ -34,6 +34,7 @@ FIXTURE = "lazy-install.txt"
 RUNTIME_SUBDIR = "clients/neovim"
 PLUGIN_SOURCE = ROOT / RUNTIME_SUBDIR / "lua/magit-lsp/init.lua"
 RUNTIME_HOOK = "vim.opt.rtp:append(plugin.dir .. '/clients/neovim')"
+PLUGIN_HOOK = "vim.cmd.source(plugin.dir .. '/clients/neovim/plugin/magit-lsp.lua')"
 
 
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -72,10 +73,10 @@ def spec_violations(snippet: str) -> list[str]:
         statements = [
             line.strip() for line in hook.group(1).splitlines()
             if line.strip() and not line.strip().startswith("--")]
-        if statements != [RUNTIME_HOOK]:
+        if statements != [RUNTIME_HOOK, PLUGIN_HOOK]:
             violations.append(
-                "documented lazy config(plugin) must only append clients/neovim to "
-                f"runtimepath, found {statements!r}")
+                "documented lazy config(plugin) must append clients/neovim to "
+                f"runtimepath and source its plugin entry point, found {statements!r}")
     return violations
 
 
@@ -244,11 +245,13 @@ def validate_positive(positive: dict[str, object]) -> None:
         "pre-key lazy state is unloaded": pre["lazy_loaded"] is False,
         "pre-key client runtime is absent from runtimepath": pre["runtime_on_runtimepath"] is False,
         "checkout root ships no Neovim runtime": pre["root_runtime_present"] is False,
+        "pre-key :Magit is unavailable": pre["magit_command_available"] is False,
         "lazy.nvim owns the documented key": pre["lazy_key_owner"] == "magit-lsp",
         "post-key lazy state is loaded": post["plugin_loaded"] is True,
         "plugin dir is this checkout": post["plugin_dir"] == str(ROOT),
         "module loaded from this checkout": post["plugin_source"] == str(PLUGIN_SOURCE),
         "client runtime is on runtimepath after loading": post["runtime_on_runtimepath"] is True,
+        "post-key :Magit is registered": post["magit_command_available"] is True,
         "status buffer has the magit filetype": post["filetype"] == "magit-lsp",
         "status rendered the fixture": FIXTURE in str(post["text"]),
         "status rendered the head": "Head:" in str(post["text"]),

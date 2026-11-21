@@ -105,8 +105,9 @@ For a native package or lazy.nvim install (a clone under your Neovim data
 directory, with `cmd` pointing at the installed binary), copy the tested snippets
 in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages): a
 native package adds `clients/neovim` from `init.lua`, and a lazy spec appends
-`plugin.dir .. '/clients/neovim'` in its `config(plugin)` hook without opening
-status eagerly. Once the client is loaded, `:h magit` documents
+`plugin.dir .. '/clients/neovim'` and sources its `plugin/magit-lsp.lua` entry
+point in the `config(plugin)` hook, registering `:Magit` without opening status
+eagerly. Once the client is loaded, `:h magit` documents
 `:Magit [directory]`, setup/server discovery and protocol-version
 troubleshooting; run `:helptags ALL` if your installation does not generate
 help tags for the client's `doc` directory.

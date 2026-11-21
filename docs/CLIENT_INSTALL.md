@@ -106,8 +106,10 @@ help tags for the client directory.
 lazy.nvim adds the plugin directory (this repository's root) to
 `'runtimepath'`; the Neovim client itself is the `clients/neovim` subdirectory.
 Add this plugin spec to your existing lazy.nvim configuration. The
-`config(plugin)` hook appends only the client runtime and runs when lazy.nvim
-loads the plugin, not during startup. Only the key callback opens status:
+`config(plugin)` hook appends the client runtime and sources the client's plugin
+entry point; it runs when lazy.nvim loads the plugin, not during startup, so
+`:Magit` is registered without starting a session. Only the key callback opens
+status:
 
 ```lua
 -- lazy.nvim plugin spec
@@ -116,6 +118,7 @@ return {
   lazy = true,
   config = function(plugin)
     vim.opt.rtp:append(plugin.dir .. '/clients/neovim')
+    vim.cmd.source(plugin.dir .. '/clients/neovim/plugin/magit-lsp.lua')
   end,
   keys = {
     { '<leader>gs', function()
@@ -135,12 +138,10 @@ the existing status view. `root_dir` defaults to Neovim's current directory;
 pass an explicit repository directory when needed.
 
 lazy.nvim appends the plugin directory itself, so `config(plugin)` is what makes
-`require('magit-lsp')` resolve. It does not source the client's
-`plugin/magit-lsp.lua`, so this lazy path opens status through the documented
-key callback rather than `:Magit`; `:Magit` is registered by the native package,
-where Neovim sources the client's `plugin/` scripts from the runtimepath. The
-client `doc/` directory is on the runtimepath after the hook, so `:h magit`
-works once help tags exist.
+`require('magit-lsp')` resolve. The same hook sources `plugin/magit-lsp.lua`,
+whose idempotent loader registers `:Magit`; the documented key callback still
+opens status. The client `doc/` directory is on the runtimepath after the hook,
+so `:h magit` works once help tags exist.
 
 Server discovery, if `cmd` is omitted: explicit `cmd` (an argv list) takes
 precedence, then `$MAGIT_LSP_BIN` (one executable path), the plugin checkout's
@@ -258,8 +259,8 @@ and temporary native package/HOME/XDG directories, without mini.nvim or network
 downloads. It boots the native package, asserts no startup session, then checks
 a rendered status after the explicit action. It also loads the documented lazy
 spec as valid Lua and asserts a key-driven spec that sets no `opts` or `build`
-and whose `config(plugin)` hook only appends `clients/neovim` to the
-runtimepath. `make lazy-install-check` goes further: it boots the actual lazy.nvim
+and whose `config(plugin)` hook appends `clients/neovim` to the runtimepath and
+sources its plugin entry point. `make lazy-install-check` goes further: it boots the actual lazy.nvim
 manager at pinned tag `v11.17.5` (commit `85c7ff3`) from a disposable cache,
 loads this exact spec with only its source directory adapted to the checkout,
 presses the documented `<leader>gs` mapping through Neovim input, and asserts

@@ -105,6 +105,10 @@ local function pre_key_audit(spec)
     not on_runtimepath(runtime),
     "pre-key oracle: the client runtime is on runtimepath before the mapping was pressed"
   )
+  check(
+    vim.fn.exists(":Magit") == 0,
+    "pre-key oracle: :Magit was registered before the manager loaded the plugin"
+  )
   local root_runtime = vim.fn.isdirectory(checkout .. "/lua") == 1
     or vim.fn.isdirectory(checkout .. "/plugin") == 1
   check(
@@ -117,6 +121,7 @@ local function pre_key_audit(spec)
     lazy_loaded = plugin._.loaded ~= nil,
     runtime_on_runtimepath = on_runtimepath(runtime),
     root_runtime_present = root_runtime,
+    magit_command_available = vim.fn.exists(":Magit") == 2,
     mapping = {
       lhs = mapping.lhs,
       mode = mapping.mode,
@@ -178,6 +183,10 @@ local function exercise(spec, pre_key)
   check(
     on_runtimepath(runtime),
     "post-key oracle: the client runtime is not on runtimepath after loading"
+  )
+  check(
+    vim.fn.exists(":Magit") == 2,
+    "post-key oracle: the loaded nested plugin entry point did not register :Magit"
   )
   check(vim.bo.filetype == "magit-lsp", "post-key oracle: status buffer filetype changed")
   check(
