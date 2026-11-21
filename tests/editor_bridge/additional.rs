@@ -41,7 +41,7 @@ fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
 
     for message in ["First scoped message\n", "Second scoped message\n"] {
         write(&message_path, "template\n");
-        let mut helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        let mut helper = Command::new(server_binary())
             .arg("--editor-helper")
             .arg(&message_path)
             .env(SOCKET_ENV, socket)
@@ -142,7 +142,7 @@ fn assert_real_scoped_squash_edits_and_cancel(
             "",
             socket,
             &operation,
-            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            &server_binary(),
             Some(&worker_scope),
         )
         .unwrap()
@@ -240,7 +240,7 @@ fn assert_real_scoped_squash_edits_and_cancel(
             "",
             socket,
             &operation,
-            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            &server_binary(),
             Some(&worker_scope),
         )
         .unwrap()
@@ -293,7 +293,7 @@ fn assert_scoped_helper_denials_and_cleanup(
     let owner = "scoped-denial-test";
     let registry = registry();
     let launch = |path: &Path, credential: &str| {
-        Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        Command::new(server_binary())
             .arg("--editor-helper")
             .arg(path)
             .env(SOCKET_ENV, socket)
@@ -1345,7 +1345,7 @@ pub(super) fn answer_askpass(
     question: &str,
     answer: &str,
 ) -> Output {
-    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+    let helper = Command::new(server_binary())
         .arg("--askpass")
         .arg(question)
         .env("MAGIT_LSP_SOCKET", socket)
@@ -1488,7 +1488,7 @@ fn a_cancelled_askpass_prompt_makes_the_helper_fail() {
     );
     let socket = server.socket_path();
 
-    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+    let helper = Command::new(server_binary())
         .arg("--askpass")
         .arg("Password:")
         .env("MAGIT_LSP_SOCKET", &socket)
