@@ -715,6 +715,40 @@ def check_producer_handoff(block, target, context, experimental):
     return check_uploads(block, target, context, experimental)
 
 
+def check_native_promotion_evidence(selected_artifact, evidence):
+    """Fail closed if production selects a native artifact without complete hosted proof."""
+    if 'experimental' not in selected_artifact:
+        return
+    if not isinstance(evidence, dict):
+        fail('build workflow: native promotion requires complete identity-bound hosted evidence')
+    identity = evidence.get('identity')
+    if not isinstance(identity, dict) or not all(identity.get(key) for key in
+            ('source_sha', 'run_url', 'run_attempt')):
+        fail('build workflow: native promotion evidence is missing source/run/attempt identity')
+    artifacts = evidence.get('artifacts')
+    if not isinstance(artifacts, dict):
+        fail('build workflow: native promotion evidence is missing immutable artifacts')
+    for _, target in NATIVE_MATRIX:
+        artifact = artifacts.get(target)
+        if not isinstance(artifact, dict) or not artifact.get('immutable_id') or \
+                not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
+            fail(f'build workflow: native promotion evidence lacks immutable ID/hash for {target}')
+        if any(artifact.get(key) != identity.get(key)
+               for key in ('source_sha', 'run_url', 'run_attempt')):
+            fail(f'build workflow: native promotion artifact identity mismatch for {target}')
+    outcomes = evidence.get('outcomes')
+    required_gates = ('abi', 'functional', 'vsix')
+    if not isinstance(outcomes, dict):
+        fail('build workflow: native promotion evidence is missing mandatory outcomes')
+    for gate in required_gates:
+        results = outcomes.get(gate)
+        if not isinstance(results, dict):
+            fail(f'build workflow: native promotion evidence is missing {gate} outcomes')
+        for _, target in NATIVE_MATRIX:
+            if results.get(target) != 'success':
+                fail(f'build workflow: native promotion {gate} outcome for {target} must be success')
+
+
 def check_native_candidates(block):
     """Keep the native matrix an isolated, non-gating, locked experiment."""
     code = '\n'.join(code_lines(block))
@@ -1017,6 +1051,10 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     if not ref_at < build_at < artifacts_at:
         fail('build workflow: version validation must precede the pinned build, '
              'and the build must precede artifact packaging')
+    selected_name, _ = step_uploads(upload_steps(fallback)[0], 'fallback')
+    # This is the production artifact selection point. No hosted proof is checked
+    # in locally; selecting an experimental artifact therefore fails closed.
+    check_native_promotion_evidence(selected_name, None)
     fallback_name = check_producer_handoff(fallback, FALLBACK_TARGET, 'fallback', False)
     if 'experimental' in fallback_name:
         fail('build workflow: experimental native artifacts cannot be selected as production')
@@ -2693,6 +2731,40 @@ def run_pipeline_self_tests():
 
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
+    promotion_identity = {
+        'source_sha': SELF_TEST_SHA,
+        'run_url': 'https://github.com/example/magit-lsp/actions/runs/42',
+        'run_attempt': '1',
+    }
+    promotion_proof = {
+        'identity': promotion_identity,
+        'artifacts': {target: {**promotion_identity, 'immutable_id': f'id-{index}',
+                              'sha256': 'a' * 64}
+                      for index, (_, target) in enumerate(NATIVE_MATRIX)},
+        'outcomes': {gate: {target: 'success' for _, target in NATIVE_MATRIX}
+                     for gate in ('abi', 'functional', 'vsix')},
+    }
+    expect_check('promotion without hosted proof', check_native_promotion_evidence,
+                 'native-linux-experimental', None, expected='complete identity-bound hosted evidence')
+    mismatch = {**promotion_proof, 'artifacts': dict(promotion_proof['artifacts'])}
+    mismatch['artifacts'] = {**mismatch['artifacts'], 'x86_64-unknown-linux-gnu': {
+        **mismatch['artifacts']['x86_64-unknown-linux-gnu'], 'source_sha': SELF_TEST_OTHER_SHA}}
+    expect_check('promotion artifact identity mismatch', check_native_promotion_evidence,
+                 'native-linux-experimental', mismatch, expected='artifact identity mismatch')
+    for gate in ('abi', 'functional', 'vsix'):
+        for _, target in NATIVE_MATRIX:
+            missing = {**promotion_proof, 'outcomes': {
+                key: dict(value) for key, value in promotion_proof['outcomes'].items()}}
+            del missing['outcomes'][gate][target]
+            expect_check(f'promotion missing {gate} outcome for {target}',
+                         check_native_promotion_evidence, 'native-linux-experimental',
+                         missing, expected=f'{gate} outcome for {target} must be success')
+            unsuccessful = {**promotion_proof, 'outcomes': {
+                key: dict(value) for key, value in promotion_proof['outcomes'].items()}}
+            unsuccessful['outcomes'][gate][target] = 'failure'
+            expect_check(f'promotion failed {gate} outcome for {target}',
+                         check_native_promotion_evidence, 'native-linux-experimental',
+                         unsuccessful, expected=f'{gate} outcome for {target} must be success')
     validate_run_metadata(run_metadata_fixture(), SELF_TEST_REPOSITORY, SELF_TEST_SHA)
     for label, document, expected in (
         ('wrong repository', run_metadata_fixture(repository={'full_name': 'other/repo'}),
@@ -3308,7 +3380,7 @@ def run_self_tests():
              ('build workflow selecting an experimental artifact for production',
               (('          name: linux-x86_64-gnu-release-candidate',
                 '          name: native-linux-x86_64-gnu-experimental', 1),),
-              'must not claim an experimental candidate'),
+              'complete identity-bound hosted evidence'),
             ('build workflow consuming a candidate by mutable name',
              (('    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n',
                '    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n'
