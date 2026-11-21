@@ -77,6 +77,7 @@ The list is a starting point, not exhaustive.
   Before adding a test, scenario or helper, search for existing ones and extend
   the nearest with matching fixture and setup (a distinct behavior gets its
   own). A test must exercise the stated requirement directly, not an adjacent path.
+  Tests should primarily test code rather than environment or setup, think carefully and judiciously about whether the test is necessary if it tests outside this boundary
 - Executable code over ~10 lines lives in a maintained script under `scripts/`
   that an existing make target exercises; Markdown shows an invocation.
 - Every external/public function and type needs a concise docstring (`///` in
