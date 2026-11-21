@@ -560,6 +560,34 @@ def pipeline_violations(module, environment):
             'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER':
         problems.append('the experimental native lane must set the explicit target '
                         'linker variable')
+    if getattr(module, 'NATIVE_XCRUN', None) != '/usr/bin/xcrun':
+        problems.append('the Darwin native lane must resolve its toolchain through '
+                        'the system /usr/bin/xcrun')
+    targets = getattr(module, 'NATIVE_TARGETS', {})
+    linux = targets.get(ASSET, {})
+    if linux.get('host') != ('linux', 'x86_64') or linux.get('linker') != '/usr/bin/cc':
+        problems.append('the native target table must keep the Linux x86_64 host '
+                        'and explicit /usr/bin/cc')
+    for target, host, label in (
+        ('aarch64-apple-darwin', ('darwin', 'arm64'), 'Darwin arm64'),
+        ('x86_64-apple-darwin', ('darwin', 'x86_64'), 'Darwin x86_64'),
+    ):
+        config = targets.get(target)
+        if not config:
+            problems.append(f'the native target table is missing the {label} '
+                            f'target {target}')
+            continue
+        if config.get('host') != host:
+            problems.append(f'the {label} target host is {config.get("host")!r}, '
+                            f'expected {host!r}')
+        if not config.get('deployment_target'):
+            problems.append(f'the {label} target must record an explicit '
+                            'deployment target')
+        variable = config.get('linker_variable', '')
+        if not variable.startswith('CARGO_TARGET_') or \
+                not variable.endswith('_LINKER'):
+            problems.append(f'the {label} target must set an explicit target '
+                            'linker variable')
     return problems
 
 
@@ -999,18 +1027,46 @@ def mutated_workflow(directory, label, mutations):
     return mutated_file(WORKFLOW, directory, 'publish-' + label, mutations)
 
 
-def fake_native_probe(calls, missing=()):
+def fake_native_probe(calls, missing=(), xcrun_missing=(), xcrun_paths=None):
     """Return a probe that records argv and answers host-tool queries with fixtures.
 
     The pipeline self-tests pass this instead of a real process boundary, so they
     can prove the native lane's argv, refusals and evidence without invoking a
-    compiler, Cargo or a build.
+    compiler, Cargo or a build. ``xcrun_missing`` names failing xcrun queries and
+    ``xcrun_paths`` overrides the resolved clang/ld/SDK paths.
     """
+    resolved = {
+        'clang': '/usr/bin/clang',
+        'ld': '/usr/bin/ld',
+        'sdk': '/Applications/Xcode.app/Contents/Developer/Platforms/'
+               'MacOSX.platform/Developer/SDKs/MacOSX.sdk',
+    }
+    resolved.update(xcrun_paths or {})
+
     def probe(argv, environment=None):
         calls.append(list(argv))
         if missing and argv[0] in missing:
             return 127, '', f'fixture {argv[0]} is missing'
-        if argv[1:] == ['--version'] and os.path.basename(argv[0]) in ('cc', 'gcc'):
+        basename = os.path.basename(argv[0])
+        if basename == 'xcrun':
+            query = tuple(argv[1:])
+            if query in xcrun_missing:
+                return 127, '', 'fixture xcrun query is missing'
+            if query == ('--sdk', 'macosx', '--find', 'clang'):
+                return 0, resolved['clang'] + '\n', ''
+            if query == ('--sdk', 'macosx', '--find', 'ld'):
+                return 0, resolved['ld'] + '\n', ''
+            if query == ('--sdk', 'macosx', '--show-sdk-path'):
+                return 0, resolved['sdk'] + '\n', ''
+            if query == ('--sdk', 'macosx', '--show-sdk-version'):
+                return 0, '26.0\n', ''
+            return 127, '', 'missing fixture xcrun query'
+        if basename == 'clang' and argv[1:] == ['--version']:
+            return 0, ('Apple clang version 17.0.0 (clang-1700.0.13.3)\n'
+                       'Target: arm64-apple-darwin26.0.0\n'), ''
+        if basename == 'ld' and argv[1:] == ['-v']:
+            return 0, '', '@(#)PROGRAM:ld PROJECT:ld-1115.7.3\n'
+        if argv[1:] == ['--version'] and basename in ('cc', 'gcc'):
             return 0, 'cc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0\n', ''
         if argv[:1] == ['ldd'] and argv[1:] == ['--version']:
             return 0, 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.1) 2.35\n', ''
@@ -1030,6 +1086,9 @@ def run_pipeline_self_tests():
         directory = Path(temporary)
         toolchain = write_fake_toolchain(directory)
         pipeline = load_pipeline()
+        problems = pipeline_violations(pipeline, dict(os.environ))
+        if problems:
+            fail('release pipeline: ' + '; '.join(problems))
 
         # Wiring: the local targets run the shared script; the native target is
         # explicit and the contract unit selects only offline cases.
@@ -1081,6 +1140,13 @@ def run_pipeline_self_tests():
                "'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER'",
                "NATIVE_LINKER_VARIABLE = 'OTHER_LINKER'", None),),
              'explicit target linker'),
+            ('pipeline without the Darwin arm64 target',
+             (("'aarch64-apple-darwin': {", "'aarch64-apple-other': {", 1),),
+             'Darwin arm64 target'),
+            ('pipeline without an explicit Darwin deployment target',
+             (("'deployment_target': DARWIN_DEPLOYMENT_TARGETS['aarch64-apple-darwin'],",
+               "'deployment_target': '',", 1),),
+             'deployment target'),
         ):
             problems = pipeline_violations(
                 load_pipeline(mutated_file(PIPELINE, directory, label, mutations)),
@@ -1132,6 +1198,129 @@ def run_pipeline_self_tests():
         path = pipeline.write_evidence(evidence, directory=directory / 'evidence')
         if json.loads(path.read_text(encoding='utf-8')) != evidence:
             fail('self-test: the native evidence file must round-trip the record')
+
+        # Darwin native plans: both matching hosts resolve Apple Clang, ld and the
+        # Xcode SDK through the injected system xcrun and record the explicit
+        # deployment target next to the locked target argv.
+        fake_xcrun = directory / 'xcrun'
+        fake_xcrun.write_text('#!/bin/sh\n', encoding='utf-8')
+        fake_xcrun.chmod(0o755)
+        expected_sdk = {
+            'path': '/Applications/Xcode.app/Contents/Developer/Platforms/'
+                    'MacOSX.platform/Developer/SDKs/MacOSX.sdk',
+            'version': '26.0',
+        }
+        for target, darwin_host, variable, deployment in (
+            ('aarch64-apple-darwin', ('darwin', 'arm64'),
+             'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER', '11.0'),
+            ('x86_64-apple-darwin', ('darwin', 'x86_64'),
+             'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER', '10.12'),
+        ):
+            calls = []
+            plan = pipeline.native_plan(
+                target, {}, host=darwin_host, xcrun_path=str(fake_xcrun),
+                probe=fake_native_probe(calls))
+            expected_argv = ['cargo', 'build', '--release', '--locked',
+                             '--target', target]
+            if plan['argv'] != expected_argv:
+                fail(f'self-test: {target} native build argv is {plan["argv"]!r}')
+            if plan['environment'].get(variable) != '/usr/bin/clang':
+                fail(f'self-test: {target} must set the target linker to Apple Clang')
+            if plan['environment'].get('MACOSX_DEPLOYMENT_TARGET') != deployment:
+                fail(f'self-test: {target} must set the explicit deployment target')
+            evidence = plan['evidence']
+            for field in ('target', 'compiler', 'compiler_path', 'linker',
+                          'linker_version', 'sdk', 'deployment_target',
+                          'deployment_target_source', 'deployment_target_status',
+                          'argv', 'source_sha', 'lock_hashes'):
+                if not evidence.get(field):
+                    fail(f'self-test: {target} native evidence is missing {field!r}')
+            if evidence['target'] != target or evidence['argv'] != expected_argv:
+                fail(f'self-test: {target} evidence must record the target and argv')
+            if evidence['compiler_path'] != '/usr/bin/clang' or \
+                    evidence['linker'] != '/usr/bin/ld':
+                fail(f'self-test: {target} evidence must record the xcrun paths')
+            if not evidence['compiler'].startswith('Apple clang version'):
+                fail(f'self-test: {target} evidence must record the Apple Clang version')
+            if evidence['sdk'] != expected_sdk:
+                fail(f'self-test: {target} evidence must record the SDK path and version')
+            if evidence['deployment_target'] != deployment:
+                fail(f'self-test: {target} evidence must record its deployment target')
+            if 'not proof' not in evidence['deployment_target_source'] or \
+                    'not a tested' not in evidence['deployment_target_status']:
+                fail(f'self-test: {target} must label the deployment target as a '
+                     'proposed build baseline, not proven final macOS support')
+            if any(call[:2] == ['cargo', 'build'] for call in calls):
+                fail('self-test: the Darwin native plan must not run the build')
+            path = pipeline.write_evidence(
+                evidence, directory=directory / f'evidence-{target}')
+            if json.loads(path.read_text(encoding='utf-8')) != evidence:
+                fail(f'self-test: the {target} evidence file must round-trip')
+
+        for label, target, darwin_host, expected in (
+            ('Darwin arm64 target on an Intel host', 'aarch64-apple-darwin',
+             ('darwin', 'x86_64'), 'Darwin arm64 host'),
+            ('Darwin x86_64 target on an arm64 host', 'x86_64-apple-darwin',
+             ('darwin', 'arm64'), 'Darwin x86_64 host'),
+            ('Darwin arm64 target on a Linux host', 'aarch64-apple-darwin',
+             ('linux', 'x86_64'), 'Darwin arm64 host'),
+        ):
+            expect_pipeline_error(
+                pipeline, label,
+                lambda target=target, darwin_host=darwin_host: pipeline.native_plan(
+                    target, {}, host=darwin_host, xcrun_path=str(fake_xcrun),
+                    probe=fake_native_probe([])),
+                expected=expected)
+        expect_pipeline_error(
+            pipeline, 'Darwin native mode without the system xcrun',
+            lambda: pipeline.native_plan(
+                'aarch64-apple-darwin', {}, host=('darwin', 'arm64'),
+                xcrun_path=str(directory / 'missing-xcrun'),
+                probe=fake_native_probe([])),
+            expected='missing or not executable')
+        for label, query, expected in (
+            ('Darwin native mode without the Xcode SDK',
+             ('--sdk', 'macosx', '--show-sdk-path'), 'Xcode macOS SDK'),
+            ('Darwin native mode without Apple Clang',
+             ('--sdk', 'macosx', '--find', 'clang'), 'Apple Clang'),
+            ('Darwin native mode without the Apple linker',
+             ('--sdk', 'macosx', '--find', 'ld'), 'Apple linker'),
+        ):
+            expect_pipeline_error(
+                pipeline, label,
+                lambda query=query: pipeline.native_plan(
+                    'aarch64-apple-darwin', {}, host=('darwin', 'arm64'),
+                    xcrun_path=str(fake_xcrun),
+                    probe=fake_native_probe([], xcrun_missing=(query,))),
+                expected=expected)
+        for label, paths in (
+            ('Darwin native mode with Nix-resolved Apple Clang',
+             {'clang': '/nix/store/ffff-apple-clang/bin/clang'}),
+            ('Darwin native mode with a Nix-resolved SDK',
+             {'sdk': '/nix/store/ffff-apple-sdk'}),
+        ):
+            expect_pipeline_error(
+                pipeline, label,
+                lambda paths=paths: pipeline.native_plan(
+                    'aarch64-apple-darwin', {}, host=('darwin', 'arm64'),
+                    xcrun_path=str(fake_xcrun),
+                    probe=fake_native_probe([], xcrun_paths=paths)),
+                expected='Nix store')
+        for label, variable, value in (
+            ('Darwin native mode with an inherited deployment target',
+             'MACOSX_DEPLOYMENT_TARGET', '10.15'),
+            ('Darwin native mode with an inherited SDK root', 'SDKROOT',
+             '/nix/store/ffff-apple-sdk'),
+            ('Darwin native mode with a Nix target linker',
+             'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER',
+             '/nix/store/ffff-apple-clang/bin/clang'),
+        ):
+            expect_pipeline_error(
+                pipeline, label,
+                lambda env={variable: value}: pipeline.native_plan(
+                    'aarch64-apple-darwin', env, host=('darwin', 'arm64'),
+                    xcrun_path=str(fake_xcrun), probe=fake_native_probe([])),
+                expected='inherited compiler/linker/sysroot')
 
         expect_pipeline_error(
             pipeline, 'native mode on a non-Linux host',

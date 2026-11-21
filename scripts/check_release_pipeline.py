@@ -6,10 +6,12 @@ then runs the workflow's ``--release --locked --target`` build; ``build
 --local`` instead uses the installed compiler without downloading one and
 records its real versions, while keeping the same locked command and artifact
 path. ``build-native`` is the experimental hosted native-linker lane: it accepts
-only the Linux x86_64 host and target, points Cargo's target linker explicitly
-at ``/usr/bin/cc`` and records the exact locked argv plus compiler, linker, libc
-and source/lock provenance under ``build/release/``. It never changes or
-replaces the strict pinned/``--local`` commands. ``artifacts``
+only the matching Linux x86_64, Darwin arm64 or Darwin x86_64 host and target.
+Linux points Cargo's target linker explicitly at ``/usr/bin/cc``; Darwin resolves
+Apple Clang, ld and the Xcode macOS SDK through the system ``/usr/bin/xcrun`` and
+sets an explicit deployment target. Both record the exact locked argv plus
+compiler, linker, SDK/libc and source/lock provenance under ``build/release/``. It
+never changes or replaces the strict pinned/``--local`` commands. ``artifacts``
 packages that exact binary with ``scripts/package-release.sh``, validates the
 archive/sidecar set offline with the release checker and runs the release suite
 with ``MAGIT_LSP_TEST_BINARY`` set, so the real-binary case runs instead of
@@ -39,20 +41,58 @@ BINARY = Path('target') / TARGET / 'release' / 'magit-lsp'
 DIST = Path('dist')
 VALIDATOR = Path('scripts/check_release_automation.py')
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
-# The experimental native lane supports only the hosted Linux GNU target; Darwin
-# selection is a separate task. The host compiler/linker is always the explicit
-# absolute host path, never a Nix wrapper discovered on PATH.
+# The experimental native lane builds only on the matching native host, never a
+# cross or Nix-wrapped toolchain. Linux uses the explicit host compiler; Darwin
+# resolves Apple Clang, ld and the Xcode SDK through the system xcrun and pins
+# the deployment target per architecture.
 NATIVE_HOST = ('linux', 'x86_64')
 NATIVE_CC = '/usr/bin/cc'
 NATIVE_LINKER_VARIABLE = 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER'
+NATIVE_XCRUN = '/usr/bin/xcrun'
+# Rust's documented macOS minimums are only proposed build targets. The hosted
+# build (NREL-17) still has to inspect the produced load commands, so these are
+# not proof that an older runtime is supported or was tested.
+DARWIN_DEPLOYMENT_TARGETS = {
+    'aarch64-apple-darwin': '11.0',
+    'x86_64-apple-darwin': '10.12',
+}
+DEPLOYMENT_TARGET_SOURCE = (
+    'Proposed build targets from Rust documented minima: macOS 10.12+ for '
+    'x86_64 and 11.0+ for arm64 (docs/RELEASING.md). These are not proof of the '
+    'final supported macOS versions; hosted inspection is pending NREL-17.')
+DEPLOYMENT_TARGET_STATUS = (
+    'proposed build target, not a tested or final macOS support baseline; '
+    'hosted build evidence is pending NREL-17 and load-command/deployment '
+    'verification belongs to NREL-12')
+NATIVE_TARGETS = {
+    TARGET: {
+        'host': NATIVE_HOST,
+        'host_label': 'Linux x86_64',
+        'linker_variable': NATIVE_LINKER_VARIABLE,
+        'linker': NATIVE_CC,
+    },
+    'aarch64-apple-darwin': {
+        'host': ('darwin', 'arm64'),
+        'host_label': 'Darwin arm64',
+        'linker_variable': 'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER',
+        'deployment_target': DARWIN_DEPLOYMENT_TARGETS['aarch64-apple-darwin'],
+    },
+    'x86_64-apple-darwin': {
+        'host': ('darwin', 'x86_64'),
+        'host_label': 'Darwin x86_64',
+        'linker_variable': 'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER',
+        'deployment_target': DARWIN_DEPLOYMENT_TARGETS['x86_64-apple-darwin'],
+    },
+}
 NATIVE_EVIDENCE_DIR = Path('build/release')
 NATIVE_EVIDENCE_FILE = 'native-build.json'
-# Inherited settings that would inject a C compiler, linker or sysroot from a
-# Nix dev shell or a caller wrapper. The native lane refuses them instead of
-# trusting flags the release shell happened to export.
+# Inherited settings that would inject a C compiler, linker, sysroot or
+# deployment target from a Nix dev shell or a caller wrapper. The native lane
+# refuses them instead of trusting flags the release shell happened to export.
 NATIVE_INJECTION_VARIABLES = (
     'CC', 'CXX', 'AR', 'CFLAGS', 'CPPFLAGS', 'LDFLAGS',
     'NIX_CC', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'SDKROOT',
+    'MACOSX_DEPLOYMENT_TARGET', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH',
 )
 
 
@@ -60,9 +100,9 @@ class PipelineError(Exception):
     """One failed release pipeline step, reported without a traceback."""
 
 
-def build_command(cargo):
-    """Return the lockstep build argv for a ``cargo`` prefix (for example ``['cargo', '+1.94.1']``)."""
-    return list(cargo) + ['build', '--release', '--locked', '--target', TARGET]
+def build_command(cargo, target=TARGET):
+    """Return the lockstep build argv for a ``cargo`` prefix and ``target``."""
+    return list(cargo) + ['build', '--release', '--locked', '--target', target]
 
 
 def artifact_commands(version, binary, dist):
@@ -206,20 +246,21 @@ def run_probe(argv, environment=None):
     return result.returncode, result.stdout, result.stderr
 
 
-def inherited_injection(environment):
+def inherited_injection(environment, linker_variable=NATIVE_LINKER_VARIABLE,
+                        linker=NATIVE_CC):
     """Return inherited compiler/linker/sysroot settings the native lane refuses.
 
-    A Nix dev shell or caller wrapper can export ``CC``, target linker or
-    sysroot flags; the native lane sets its own explicit linker and refuses the
-    rest rather than trusting them. Only the exact host linker value is allowed
-    through the target linker variable.
+    A Nix dev shell or caller wrapper can export ``CC``, target linker, sysroot
+    flags or a deployment target; the native lane sets its own explicit values
+    and refuses the rest rather than trusting them. Only the exact selected
+    target linker value is allowed through the target linker variable.
     """
     names = [name for name in NATIVE_INJECTION_VARIABLES if environment.get(name)]
     for name, value in environment.items():
         if not value:
             continue
         if name.startswith('CARGO_TARGET_') and name.endswith(('_LINKER', '_RUSTFLAGS')):
-            if name == NATIVE_LINKER_VARIABLE and value == NATIVE_CC:
+            if name == linker_variable and value == linker:
                 continue
             names.append(name)
         elif name in ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS') and \
@@ -242,32 +283,31 @@ def native_cargo(environment, probe):
     return ['cargo'], versions
 
 
-def native_plan(target, environment, host=None, compiler_path=NATIVE_CC,
-                probe=run_probe):
-    """Return the validated native build plan and its provenance evidence.
-
-    The plan carries the strict ``--release --locked --target`` argv, the
-    environment with Cargo's target linker set explicitly to the host compiler,
-    and the compiler/linker/libc/argv/source-SHA/lock-hash record written under
-    ``build/release/``. ``host`` and ``probe`` are injectable so the self-tests
-    exercise the refusals and recorded values with fake processes, never a real
-    compiler, Cargo or build.
-    """
-    host = host or host_platform()
-    if host != NATIVE_HOST:
-        raise PipelineError(
-            f'native link mode needs a Linux x86_64 host; found {host[0]} {host[1]}')
+def native_target(target):
+    """Return the configured native target entry, refusing an unsupported triple."""
     if not target:
         raise PipelineError(
             'build-native needs RELEASE_TARGET (for example '
             f'RELEASE_TARGET={TARGET})')
-    if target != TARGET:
+    config = NATIVE_TARGETS.get(target)
+    if config is None:
         raise PipelineError(
-            f'native link mode only supports {TARGET}; got {target!r}')
-    injected = inherited_injection(environment)
-    if injected:
-        raise PipelineError(
-            'refusing inherited compiler/linker/sysroot settings: ' + ', '.join(injected))
+            'native link mode only supports '
+            + ', '.join(sorted(NATIVE_TARGETS)) + f'; got {target!r}')
+    return config
+
+
+def probe_text(argv, environment, probe, message):
+    """Run one probe and return its first non-empty output line, or fail readably."""
+    code, stdout, stderr = probe(argv, environment)
+    text = stdout.strip() or stderr.strip()
+    if code != 0 or not text:
+        raise PipelineError(message)
+    return text.splitlines()[0].strip()
+
+
+def linux_native_toolchain(config, environment, compiler_path, probe):
+    """Return the explicit Linux host compiler/linker and libc evidence."""
     compiler = Path(compiler_path)
     if not compiler.is_file() or not os.access(compiler, os.X_OK):
         raise PipelineError(
@@ -278,16 +318,110 @@ def native_plan(target, environment, host=None, compiler_path=NATIVE_CC,
         raise PipelineError(
             f'{compiler_path} resolves into the Nix store ({resolved}); point it at '
             'the host C compiler')
-    code, stdout, stderr = probe([compiler_path, '--version'], environment)
-    compiler_version = stdout.strip() or stderr.strip()
-    if code != 0 or not compiler_version:
+    compiler_version = probe_text(
+        [compiler_path, '--version'], environment, probe,
+        f'{compiler_path} --version failed; the native lane needs a working '
+        'host C compiler')
+    libc = probe_text(
+        ['ldd', '--version'], environment, probe,
+        'ldd --version failed; the native lane needs the host libc')
+    return {
+        'compiler': compiler_version,
+        'linker': NATIVE_CC,
+        'libc': libc,
+        'linker_environment': {config['linker_variable']: NATIVE_CC},
+    }
+
+
+def darwin_native_toolchain(config, environment, xcrun_path, probe):
+    """Return Apple Clang, ld and Xcode SDK identities resolved through xcrun.
+
+    The system ``/usr/bin/xcrun`` selects the host Xcode toolchain; any
+    Nix-store resolution is refused, and the deployment target is set
+    explicitly from the configured table instead of inherited flags.
+    """
+    xcrun = Path(xcrun_path)
+    if not xcrun.is_file() or not os.access(xcrun, os.X_OK):
         raise PipelineError(
-            f'{compiler_path} --version failed; the native lane needs a working '
-            'host C compiler')
-    code, stdout, stderr = probe(['ldd', '--version'], environment)
-    libc = stdout.strip().splitlines()[0] if stdout.strip() else ''
-    if code != 0 or not libc:
-        raise PipelineError('ldd --version failed; the native lane needs the host libc')
+            f'{xcrun_path} is missing or not executable; the Darwin native lane '
+            'needs the system xcrun')
+    resolved = xcrun.resolve()
+    if str(resolved).startswith('/nix/store/'):
+        raise PipelineError(
+            f'{xcrun_path} resolves into the Nix store ({resolved}); use the '
+            'system xcrun')
+    def query(arguments, message):
+        return probe_text([xcrun_path, '--sdk', 'macosx'] + arguments,
+                          environment, probe, message)
+
+    clang_path = query(['--find', 'clang'],
+                       'xcrun --find clang failed; the Darwin native lane needs '
+                       'Apple Clang')
+    linker_path = query(['--find', 'ld'],
+                        'xcrun --find ld failed; the Darwin native lane needs the '
+                        'Apple linker')
+    sdk_path = query(['--show-sdk-path'],
+                     'xcrun --show-sdk-path failed; the Darwin native lane needs '
+                     'the Xcode macOS SDK')
+    sdk_version = query(['--show-sdk-version'],
+                        'xcrun --show-sdk-version failed; the Darwin native lane '
+                        'needs the Xcode macOS SDK')
+    for label, value in (('Apple Clang', clang_path), ('linker', linker_path),
+                         ('SDK', sdk_path)):
+        if value.startswith('/nix/store/'):
+            raise PipelineError(
+                f'the resolved {label} is in the Nix store ({value}); use the '
+                'system Apple toolchain')
+    compiler_version = probe_text(
+        [clang_path, '--version'], environment, probe,
+        f'{clang_path} --version failed; the Darwin native lane needs a working '
+        'Apple Clang')
+    linker_version = probe_text(
+        [linker_path, '-v'], environment, probe,
+        f'{linker_path} -v failed; the Darwin native lane needs a working '
+        'Apple linker')
+    deployment_target = config['deployment_target']
+    return {
+        'compiler': compiler_version,
+        'compiler_path': clang_path,
+        'linker': linker_path,
+        'linker_version': linker_version,
+        'sdk': {'path': sdk_path, 'version': sdk_version},
+        'deployment_target': deployment_target,
+        'deployment_target_source': DEPLOYMENT_TARGET_SOURCE,
+        'deployment_target_status': DEPLOYMENT_TARGET_STATUS,
+        'linker_environment': {
+            config['linker_variable']: clang_path,
+            'MACOSX_DEPLOYMENT_TARGET': deployment_target,
+        },
+    }
+
+
+def native_plan(target, environment, host=None, compiler_path=NATIVE_CC,
+                xcrun_path=NATIVE_XCRUN, probe=run_probe):
+    """Return the validated native build plan and its provenance evidence.
+
+    The plan carries the strict ``--release --locked --target`` argv, the
+    environment with Cargo's target linker set explicitly, and the matching
+    compiler/linker/SDK/libc/deployment-target plus source-SHA/lock-hash record
+    written under ``build/release/``. ``host``, ``xcrun_path`` and ``probe`` are
+    injectable so the self-tests exercise the refusals and recorded values with
+    fake processes, never a real compiler, Cargo or build.
+    """
+    host = host or host_platform()
+    config = native_target(target)
+    if host != config['host']:
+        raise PipelineError(
+            f'native link mode for {target} needs a {config["host_label"]} host; '
+            f'found {host[0]} {host[1]}')
+    injected = inherited_injection(environment)
+    if injected:
+        raise PipelineError(
+            'refusing inherited compiler/linker/sysroot settings: ' + ', '.join(injected))
+    if config['host'] == NATIVE_HOST:
+        toolchain = linux_native_toolchain(config, environment, compiler_path, probe)
+    else:
+        toolchain = darwin_native_toolchain(config, environment, xcrun_path, probe)
     code, stdout, stderr = probe(['git', 'rev-parse', 'HEAD'], environment)
     source_sha = stdout.strip()
     if code != 0 or not re.fullmatch(r'[0-9a-f]{40}', source_sha):
@@ -301,21 +435,18 @@ def native_plan(target, environment, host=None, compiler_path=NATIVE_CC,
         lock_hashes[lock] = hashlib.sha256(path.read_bytes()).hexdigest()
     cargo_prefix, versions = native_cargo(environment, probe)
     merged = dict(environment)
-    merged[NATIVE_LINKER_VARIABLE] = NATIVE_CC
-    argv = build_command(cargo_prefix)
+    merged.update(toolchain['linker_environment'])
+    argv = build_command(cargo_prefix, target)
     evidence = {
         'target': target,
         'host': {'system': host[0], 'machine': host[1]},
-        'compiler': compiler_version,
-        'linker': NATIVE_CC,
-        'libc': libc,
         'argv': argv,
         'source_sha': source_sha,
         'lock_hashes': lock_hashes,
         'rustc': versions['rustc'],
         'cargo': versions['cargo'],
-        'linker_environment': {NATIVE_LINKER_VARIABLE: NATIVE_CC},
     }
+    evidence.update(toolchain)
     return {'argv': argv, 'environment': merged, 'evidence': evidence}
 
 
