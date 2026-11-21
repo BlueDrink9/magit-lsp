@@ -246,7 +246,7 @@ def inspect_macho(binary, target, evidence):
     arch = target[1]
     header = run_tool(['lipo', '-archs', str(binary)])
     expected = 'arm64' if arch == 'arm64' else 'x86_64'
-    if expected not in header.split():
+    if header.split() != [expected]:
         raise InspectionError('Mach-O architecture does not match target')
     loads = run_tool(['otool', '-l', str(binary)])
     libs = run_tool(['otool', '-L', str(binary)])
@@ -254,10 +254,23 @@ def inspect_macho(binary, target, evidence):
         raise InspectionError('Nix runtime path or library is forbidden')
     if not re.search(r'cmd LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)', loads):
         raise InspectionError('Mach-O deployment load command is missing')
-    commands = re.findall(r'cmd LC_BUILD_VERSION.*?minos ([0-9.]+)|cmd LC_VERSION_MIN_MACOSX.*?version ([0-9.]+)', loads, re.S)
-    versions = [a or b for a, b in commands]
+    commands = re.findall(r'cmd (LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX)(.*?)(?=\n\s*Load command|\Z)', loads, re.S)
+    versions = []
+    for command, body in commands:
+        if command == 'LC_BUILD_VERSION':
+            platform_id = re.search(r'\bplatform (\d+)\b', body)
+            version = re.search(r'\bminos ([0-9.]+)\b', body)
+            if platform_id is None or platform_id[1] != '1':
+                raise InspectionError('invalid or non-macOS Mach-O deployment platform')
+        else:
+            version = re.search(r'\bversion ([0-9.]+)\b', body)
+        versions.append(version[1] if version else '')
     if len(versions) != 1 or not versions[0] or not re.fullmatch(r'\d+\.\d+(?:\.\d+)?', versions[0]):
         raise InspectionError('malformed or ambiguous Mach-O deployment version')
+    baseline = {'arm64': (11, 0), 'x86_64': (10, 12)}[expected]
+    deployed = tuple(map(int, versions[0].split('.')))
+    if deployed + (0,) * (2 - len(deployed)) > baseline:
+        raise InspectionError('Mach-O deployment version exceeds target baseline')
     dylibs = [line.strip().split(' (', 1)[0] for line in libs.splitlines()[1:] if line.strip()]
     if not dylibs:
         raise InspectionError('Mach-O linked libraries are missing')

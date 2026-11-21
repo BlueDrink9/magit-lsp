@@ -78,7 +78,7 @@ class NativeArtifactTests(unittest.TestCase):
     def test_macho_deployment_architecture_malformed_value_and_nix_paths(self):
         target = inspector.TARGETS['aarch64-apple-darwin']
         with mock.patch.object(inspector, 'run_tool', side_effect=[
-                'arm64', 'cmd LC_BUILD_VERSION\n minos 11.0\n path @rpath/lib.dylib',
+                'arm64', 'cmd LC_BUILD_VERSION\n platform 1\n minos 11.0\n path @rpath/lib.dylib',
                 'binary:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1)']):
             evidence = {}
             inspector.inspect_macho(Path('binary'), target, evidence)
@@ -88,12 +88,37 @@ class NativeArtifactTests(unittest.TestCase):
         with mock.patch.object(inspector, 'run_tool', side_effect=['x86_64']):
             with self.assertRaisesRegex(inspector.InspectionError, 'architecture'):
                 inspector.inspect_macho(Path('binary'), target, {})
+        with mock.patch.object(inspector, 'run_tool', side_effect=['arm64 x86_64']):
+            with self.assertRaisesRegex(inspector.InspectionError, 'architecture'):
+                inspector.inspect_macho(Path('binary'), target, {})
+        for selected_target, arch, accepted in [
+                (target, 'arm64', ('10.12', '11.0')),
+                (inspector.TARGETS['x86_64-apple-darwin'], 'x86_64', ('10.12',))]:
+            for deployment in accepted:
+                with mock.patch.object(inspector, 'run_tool', side_effect=[
+                        arch, f'cmd LC_BUILD_VERSION\n platform 1\n minos {deployment}',
+                        'binary:\n /usr/lib/libSystem.B.dylib']):
+                    inspector.inspect_macho(Path('binary'), selected_target, {})
+            later = '11.1' if arch == 'arm64' else '10.13'
+            with mock.patch.object(inspector, 'run_tool', side_effect=[
+                    arch, f'cmd LC_BUILD_VERSION\n platform 1\n minos {later}',
+                    'binary:\n /usr/lib/libSystem.B.dylib']):
+                with self.assertRaisesRegex(inspector.InspectionError, 'exceeds target baseline'):
+                    inspector.inspect_macho(Path('binary'), selected_target, {})
+        for load_commands in [
+                'cmd LC_BUILD_VERSION\n minos 11.0',
+                'cmd LC_BUILD_VERSION\n platform 2\n minos 11.0',
+                'cmd LC_BUILD_VERSION\n platform 1\n minos 11.0\nLoad command 2\n cmd LC_VERSION_MIN_MACOSX\n version 10.12']:
+            with mock.patch.object(inspector, 'run_tool', side_effect=[
+                    'arm64', load_commands, 'binary:\n /usr/lib/libSystem.B.dylib']):
+                with self.assertRaises(inspector.InspectionError):
+                    inspector.inspect_macho(Path('binary'), target, {})
         with mock.patch.object(inspector, 'run_tool', side_effect=[
-                'arm64', 'cmd LC_BUILD_VERSION\n minos nonsense', 'binary:\n /nix/store/lib']):
+                'arm64', 'cmd LC_BUILD_VERSION\n platform 1\n minos nonsense', 'binary:\n /nix/store/lib']):
             with self.assertRaises(inspector.InspectionError):
                 inspector.inspect_macho(Path('binary'), target, {})
         with mock.patch.object(inspector, 'run_tool', side_effect=[
-                'arm64', 'cmd LC_BUILD_VERSION\n minos 11.0\n path /nix/store/lib',
+                'arm64', 'cmd LC_BUILD_VERSION\n platform 1\n minos 11.0\n path /nix/store/lib',
                 'binary:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1)']):
             with self.assertRaisesRegex(inspector.InspectionError, 'Nix'):
                 inspector.inspect_macho(Path('binary'), target, {})
