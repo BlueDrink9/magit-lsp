@@ -434,7 +434,7 @@ impl<'a> Builder<'a> {
             self.menu.title.clone(),
             line,
         ));
-        self.token(line, 1, self.menu.title.len(), "magit.menu.title");
+        self.token(line, 1, self.menu.title.len(), "heading");
     }
 
     /// The `Arguments` group is vertical: one switch or option per line,
@@ -454,7 +454,7 @@ impl<'a> Builder<'a> {
             self.tree
                 .line_nodes
                 .push(LineNode::new(&group_id, NodeKind::Section));
-            self.token(line, 1, group.title.len(), "magit.menu.group");
+            self.token(line, 1, group.title.len(), "heading");
 
             let index = self.tree.nodes.len();
             let mut group_node =
@@ -484,11 +484,11 @@ impl<'a> Builder<'a> {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
             let flag_type = if !live {
-                "magit.menu.disabled"
+                "muted"
             } else if *on {
-                "magit.menu.flag.on"
+                "added"
             } else {
-                "magit.menu.flag.off"
+                "removed"
             };
             tokens.push((flag_start, flag.len(), flag_type));
             text.push_str("  ");
@@ -496,25 +496,17 @@ impl<'a> Builder<'a> {
             let marker_start = text.len();
             text.push_str(marker);
             let marker_type = if !live {
-                "magit.menu.disabled"
+                "muted"
             } else if *on {
-                "magit.menu.switch.on"
+                "added"
             } else {
-                "magit.menu.switch.off"
+                "removed"
             };
             tokens.push((marker_start, 3, marker_type));
         } else if let Item::Option { flag, value, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            tokens.push((
-                flag_start,
-                flag.len(),
-                if live {
-                    "magit.menu.flag"
-                } else {
-                    "magit.menu.disabled"
-                },
-            ));
+            tokens.push((flag_start, flag.len(), if live { "muted" } else { "muted" }));
             if let Some(value) = value {
                 text.push_str("  ");
                 let value_start = text.len();
@@ -522,11 +514,7 @@ impl<'a> Builder<'a> {
                 tokens.push((
                     value_start,
                     value.len(),
-                    if live {
-                        "magit.menu.value"
-                    } else {
-                        "magit.menu.disabled"
-                    },
+                    if live { "muted" } else { "muted" },
                 ));
             }
         }
@@ -567,13 +555,13 @@ impl<'a> Builder<'a> {
         let label_start = key_start + key.len() + 2;
         let mut tokens = Vec::new();
         if !self.item_live(key) {
-            tokens.push((key_start, key.len(), "magit.menu.disabled"));
-            tokens.push((label_start, label.len(), "magit.menu.disabled"));
+            tokens.push((key_start, key.len(), "muted"));
+            tokens.push((label_start, label.len(), "muted"));
             return tokens;
         }
         let pending = self.pending.join(" ");
         if !pending.is_empty() && key.starts_with(&pending) {
-            tokens.push((key_start, pending.len(), "magit.menu.pending"));
+            tokens.push((key_start, pending.len(), "muted"));
             tokens.push((
                 key_start + pending.len(),
                 key.len() - pending.len(),
@@ -606,7 +594,7 @@ impl<'a> Builder<'a> {
         self.tree
             .nodes
             .push(Node::new(&id, NodeKind::Message, text.clone(), line));
-        self.token(line, 1, text.len(), "magit.menu.preview");
+        self.token(line, 1, text.len(), "heading");
     }
 
     /// Action groups are laid out side by side, wrapping by viewport width.
@@ -660,7 +648,7 @@ impl<'a> Builder<'a> {
                     let base = text.len();
                     if let Some(content) = content {
                         if line_offset == 0 {
-                            self.token(line, base + 1, block.group.title.len(), "magit.menu.group");
+                            self.token(line, base + 1, block.group.title.len(), "heading");
                         } else {
                             let item = &block.group.items[line_offset - 1];
                             tokens.extend(self.item_tokens(base, item));
@@ -874,16 +862,16 @@ fn wrap_line(
 
 fn key_token(item: &Item) -> &'static str {
     if item.is_option() {
-        "magit.menu.option"
+        "muted"
     } else {
-        "magit.menu.key"
+        "key"
     }
 }
 
 fn label_token(item: &Item) -> &'static str {
     match item.status() {
-        MenuStatus::Implemented => "magit.menu.label",
-        MenuStatus::Planned { .. } => "magit.menu.planned",
+        MenuStatus::Implemented => "heading",
+        MenuStatus::Planned { .. } => "muted",
     }
 }
 

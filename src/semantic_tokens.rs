@@ -8,36 +8,39 @@ use crate::docstore::Encoding;
 use crate::tree::{Token, Tree};
 use lsp_types::{SemanticToken, SemanticTokens, SemanticTokensLegend};
 
-/// Token types the status view can emit, in legend order.
+/// Authored role metadata consumed by the server and downstream clients.
+#[derive(serde::Deserialize)]
+pub struct SemanticRole {
+    /// LSP semantic token type.
+    pub name: &'static str,
+    /// Suggested Neovim highlight group.
+    pub group: &'static str,
+    /// VS Code TextMate scope.
+    pub scope: &'static str,
+}
+
+/// Shared role definitions; malformed project data is an invariant failure.
+pub fn roles() -> &'static [SemanticRole] {
+    static ROLES: std::sync::OnceLock<Vec<SemanticRole>> = std::sync::OnceLock::new();
+    ROLES.get_or_init(|| {
+        serde_json::from_str(include_str!("semantic_roles.json"))
+            .expect("valid semantic role table")
+    })
+}
+
+/// Token types in role-table order.
 pub const TOKEN_TYPES: &[&str] = &[
-    "magit.section",
-    "magit.count",
-    "magit.file",
-    "magit.file.modified",
-    "magit.file.added",
-    "magit.file.deleted",
-    "magit.file.renamed",
-    "magit.file.untracked",
-    "magit.hunk.header",
-    "magit.diff.added",
-    "magit.diff.removed",
-    "magit.menu.title",
-    "magit.menu.group",
-    "magit.menu.key",
-    "magit.menu.label",
-    "magit.menu.flag",
-    "magit.menu.flag.on",
-    "magit.menu.flag.off",
-    "magit.menu.switch.on",
-    "magit.menu.switch.off",
-    "magit.menu.option",
-    "magit.menu.value",
-    "magit.menu.planned",
-    "magit.menu.disabled",
-    "magit.menu.pending",
-    "magit.menu.preview",
-    "magit.message.error",
-    "magit.message.warn",
+    "heading",
+    "muted",
+    "added",
+    "removed",
+    "changed",
+    "path",
+    "identifier",
+    "ref",
+    "key",
+    "warning",
+    "error",
 ];
 
 /// Token modifiers, in legend bit order.
@@ -53,38 +56,21 @@ pub const TOKEN_MODIFIERS: &[&str] = &["staged", "selected", "planned", "disable
 pub const TOKEN_GROUPS: &[&str] = &[
     "Title",
     "Comment",
-    "Directory",
-    "Changed",
     "Added",
     "Removed",
     "Changed",
-    "Comment",
-    "Special",
-    "@diff.plus",
-    "@diff.minus",
-    "Title",
-    "Statement",
+    "Directory",
+    "Identifier",
+    "Constant",
     "Keyword",
-    "Normal",
-    "Special",
-    "Special",
-    "MagitMenuFlagOff",
-    "String",
-    "Comment",
-    "String",
-    "String",
-    "Comment",
-    "MagitMenuDisabled",
-    "MagitMenuPending",
-    "Comment",
-    "ErrorMsg",
     "WarningMsg",
+    "ErrorMsg",
 ];
 
 /// The legend advertised in `semanticTokensProvider`.
 pub fn legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
-        token_types: TOKEN_TYPES.iter().copied().map(Into::into).collect(),
+        token_types: roles().iter().map(|role| role.name.into()).collect(),
         token_modifiers: TOKEN_MODIFIERS.iter().copied().map(Into::into).collect(),
     }
 }
@@ -92,8 +78,8 @@ pub fn legend() -> SemanticTokensLegend {
 /// The server-suggested theme group for each token type, keyed by type.
 pub fn token_groups() -> serde_json::Value {
     let mut groups = serde_json::Map::new();
-    for (token_type, group) in TOKEN_TYPES.iter().zip(TOKEN_GROUPS) {
-        groups.insert((*token_type).to_string(), (*group).into());
+    for role in roles() {
+        groups.insert(role.name.to_string(), role.group.into());
     }
     serde_json::Value::Object(groups)
 }
@@ -182,9 +168,9 @@ pub fn encode_lines_with_encoding(
 
 /// Index of `token_type` in the legend.
 fn type_index(token_type: &str) -> Option<u32> {
-    TOKEN_TYPES
+    roles()
         .iter()
-        .position(|candidate| *candidate == token_type)
+        .position(|candidate| candidate.name == token_type)
         .map(|index| index as u32)
 }
 

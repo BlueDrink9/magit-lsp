@@ -1,0 +1,13 @@
+[
+  {"name":"heading","group":"Title","scope":"entity.name.section"},
+  {"name":"muted","group":"Comment","scope":"comment"},
+  {"name":"added","group":"Added","scope":"markup.inserted"},
+  {"name":"removed","group":"Removed","scope":"markup.deleted"},
+  {"name":"changed","group":"Changed","scope":"markup.changed"},
+  {"name":"path","group":"Directory","scope":"entity.name.filename"},
+  {"name":"identifier","group":"Identifier","scope":"entity.name"},
+  {"name":"ref","group":"Constant","scope":"entity.name.tag"},
+  {"name":"key","group":"Keyword","scope":"keyword.other"},
+  {"name":"warning","group":"WarningMsg","scope":"message.warning"},
+  {"name":"error","group":"ErrorMsg","scope":"message.error"}
+]

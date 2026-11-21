@@ -60,14 +60,14 @@ fn build(records: Vec<ProcessRecord>) -> Tree {
         line: 0,
         start: 0,
         length: header.len(),
-        token_type: "magit.section".to_string(),
+        token_type: "heading".to_string(),
         modifiers: Vec::new(),
     });
     tree.tokens.push(Token {
         line: 0,
         start: header.len() + 1,
         length: count.len(),
-        token_type: "magit.count".to_string(),
+        token_type: "muted".to_string(),
         modifiers: Vec::new(),
     });
 
@@ -97,14 +97,14 @@ fn record_node(tree: &mut Tree, record: &ProcessRecord) {
         line,
         start: 0,
         length: command.len(),
-        token_type: "magit.file".to_string(),
+        token_type: "path".to_string(),
         modifiers: Vec::new(),
     });
     tree.tokens.push(Token {
         line,
         start: command.len() + 1,
         length: text.len() - command.len() - 1,
-        token_type: "magit.count".to_string(),
+        token_type: "muted".to_string(),
         modifiers: Vec::new(),
     });
 
@@ -134,12 +134,7 @@ fn output_lines(tree: &mut Tree, record_id: &str, label: &str, output: &str, fai
                 line,
                 start: 0,
                 length: text.len(),
-                token_type: if failed {
-                    "magit.message.error"
-                } else {
-                    "magit.message.warn"
-                }
-                .to_string(),
+                token_type: if failed { "error" } else { "warning" }.to_string(),
                 modifiers: Vec::new(),
             });
         }

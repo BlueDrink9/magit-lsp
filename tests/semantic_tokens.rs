@@ -10,6 +10,22 @@ use magit_lsp::tree::Tree;
 use serde_json::{json, Value};
 use std::time::Duration;
 
+#[test]
+fn semantic_role_table_has_unique_names_and_client_metadata() {
+    let roles = magit_lsp::semantic_tokens::roles();
+    let mut names = std::collections::HashSet::new();
+    for role in roles {
+        assert!(names.insert(role.name), "duplicate role {}", role.name);
+        assert!(!role.group.is_empty(), "missing group for {}", role.name);
+        assert!(!role.scope.is_empty(), "missing scope for {}", role.name);
+        assert!(
+            !role.name.starts_with("magit."),
+            "legacy role {}",
+            role.name
+        );
+    }
+}
+
 /// One decoded semantic token, in absolute positions.
 #[derive(Debug, PartialEq, Eq)]
 struct DecodedToken {
@@ -120,11 +136,17 @@ fn capabilities_advertise_the_legend_and_full_tokens() {
     assert_eq!(provider["full"], json!(true), "{provider}");
     let token_types = strings(&provider["legend"], "tokenTypes");
     for expected in [
-        "magit.section",
-        "magit.file",
-        "magit.hunk.header",
-        "magit.diff.added",
-        "magit.diff.removed",
+        "heading",
+        "muted",
+        "added",
+        "removed",
+        "changed",
+        "path",
+        "identifier",
+        "ref",
+        "key",
+        "warning",
+        "error",
     ] {
         assert!(
             token_types.iter().any(|candidate| candidate == expected),
@@ -197,7 +219,7 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
         .expect("unstaged unicode path line");
     let path = decoded
         .iter()
-        .find(|token| token.line == path_line as u32 && token.token_type == "magit.file")
+        .find(|token| token.line == path_line as u32 && token.token_type == "path")
         .expect("file path token");
     assert_eq!(path.start, 4);
     assert_eq!(path.length, utf16_len("üñï.txt"));
@@ -208,7 +230,7 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
 
     let staged = decoded
         .iter()
-        .find(|token| token.token_type == "magit.file.added")
+        .find(|token| token.token_type == "added")
         .expect("staged status token");
     assert_eq!(staged.modifiers, vec!["staged".to_string()]);
 

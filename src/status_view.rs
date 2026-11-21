@@ -503,14 +503,14 @@ where
             line,
             start: 0,
             length: title.len(),
-            token_type: "magit.section".to_string(),
+            token_type: "heading".to_string(),
             modifiers: Vec::new(),
         });
         self.tree.tokens.push(Token {
             line,
             start: title.len() + 1,
             length: text.len() - title.len() - 1,
-            token_type: "magit.count".to_string(),
+            token_type: "muted".to_string(),
             modifiers: Vec::new(),
         });
 
@@ -577,7 +577,7 @@ where
             line,
             start: path_start,
             length: file.path.len(),
-            token_type: "magit.file".to_string(),
+            token_type: "path".to_string(),
             modifiers,
         });
         self.tree.links.push(Link {
@@ -650,7 +650,7 @@ where
             line,
             start: 0,
             length: header.len(),
-            token_type: "magit.hunk.header".to_string(),
+            token_type: "muted".to_string(),
             modifiers: modifiers.clone(),
         });
 
@@ -701,8 +701,8 @@ where
                 self.tree.nodes.push(line_node);
 
                 let token_type = match diff_line.marker {
-                    '+' => Some("magit.diff.added"),
-                    '-' => Some("magit.diff.removed"),
+                    '+' => Some("added"),
+                    '-' => Some("removed"),
                     _ => None,
                 };
                 if let Some(token_type) = token_type {
@@ -858,10 +858,10 @@ fn hunk_source_text(hunk: &Hunk) -> String {
 
 fn status_token(status: &str) -> &'static str {
     match status {
-        "A" => "magit.file.added",
-        "D" => "magit.file.deleted",
-        "R" => "magit.file.renamed",
-        "?" => "magit.file.untracked",
-        _ => "magit.file.modified",
+        "A" => "added",
+        "D" => "removed",
+        "R" => "changed",
+        "?" => "added",
+        _ => "changed",
     }
 }

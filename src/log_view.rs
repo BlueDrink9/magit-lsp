@@ -354,7 +354,7 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
         line: n,
         start: hash_start,
         length: 8.min(c.oid.len()),
-        token_type: "magit.hash".into(),
+        token_type: "identifier".into(),
         modifiers: Vec::new(),
     });
     if !decorations.is_empty() {
@@ -363,7 +363,7 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
             line: n,
             start,
             length: decorations.len(),
-            token_type: "magit.ref".into(),
+            token_type: "ref".into(),
             modifiers: Vec::new(),
         });
     }
@@ -373,14 +373,14 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
         line: n,
         start: author_start,
         length: c.author.len(),
-        token_type: "magit.author".into(),
+        token_type: "muted".into(),
         modifiers: Vec::new(),
     });
     tree.tokens.push(Token {
         line: n,
         start: date_start,
         length: c.date.len(),
-        token_type: "magit.date".into(),
+        token_type: "muted".into(),
         modifiers: Vec::new(),
     });
 }
