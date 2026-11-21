@@ -1018,6 +1018,60 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeArtifactMakeTargetTest(unittest.TestCase):
+    def test_vscode_artifact_target_validates_inputs_and_passes_spaced_paths_without_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            capture = root / "capture"
+            node = fake_bin / "node"
+            node.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE"\nprintf "%s\\n" "$RELEASE_VSIX" >> "$CAPTURE"\nprintf "%s\\n" "$MAGIT_VSCODE_ARTIFACT_ONLY" >> "$CAPTURE"\n', encoding="utf-8")
+            node.chmod(0o755)
+            for tool in ("cargo", "pnpm"):
+                fake = fake_bin / tool
+                fake.write_text(f'#!/bin/sh\necho {tool}-called >> "$CAPTURE"\n', encoding="utf-8")
+                fake.chmod(0o755)
+            paths = {}
+            for name in ("server binary", "candidate archive.tar.gz", "release manifest.json", "candidate client.vsix"):
+                item = root / name
+                item.write_text("fixture", encoding="utf-8")
+                item.chmod(0o755)
+                paths[name] = item
+            variables = [
+                f"MAGIT_LSP_SERVER_PATH={paths['server binary']}",
+                f"RELEASE_ARTIFACT={paths['candidate archive.tar.gz']}",
+                f"RELEASE_MANIFEST={paths['release manifest.json']}",
+                f"RELEASE_VSIX={paths['candidate client.vsix']}",
+            ]
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture), DISPLAY=":99")
+            result = subprocess.run(["make", "-s", "native-vscode-artifact-check", *variables], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(str(paths["candidate client.vsix"]), capture.read_text(encoding="utf-8"))
+            calls = capture.read_text(encoding="utf-8")
+            self.assertNotIn("cargo-called", calls)
+            self.assertNotIn("pnpm-called", calls)
+            for index, expected in enumerate(("MAGIT_LSP_SERVER_PATH is required", "RELEASE_ARTIFACT is required", "RELEASE_MANIFEST is required", "RELEASE_VSIX is required")):
+                missing = variables[:index] + variables[index + 1 :]
+                failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *missing], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn(expected, failed.stderr)
+            for variable in ("MAGIT_LSP_SERVER_PATH", "RELEASE_ARTIFACT", "RELEASE_MANIFEST", "RELEASE_VSIX"):
+                supplied = [entry for entry in variables if not entry.startswith(f"{variable}=")]
+                failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *supplied, f"{variable}=relative/input"], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("absolute", failed.stderr)
+            non_executable = root / "not executable"
+            non_executable.write_text("fixture", encoding="utf-8")
+            invalid_server = [entry for entry in variables if not entry.startswith("MAGIT_LSP_SERVER_PATH=")]
+            failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *invalid_server, f"MAGIT_LSP_SERVER_PATH={non_executable}"], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("not executable", failed.stderr)
+            self.assertIn("1", capture.read_text(encoding="utf-8"))
+            self.assertNotIn("build", " ".join(variables))
+            makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+            self.assertIn("native-vscode-artifact-check:\n", makefile)
+            self.assertIn("vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps", makefile)
+
     def test_rust_artifact_target_defaults_to_server_async_and_selects_suites(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

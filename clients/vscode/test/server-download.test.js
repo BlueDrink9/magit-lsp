@@ -621,6 +621,29 @@ async function run() {
     }
   });
 
+  await check(
+    "artifact VSIX mode selects the supplied archive without a development path",
+    async () => {
+      const source = fs.readFileSync(path.join(__dirname, "e2e/run.mjs"), "utf8");
+      assert.match(source, /MAGIT_VSCODE_ARTIFACT_ONLY === "1"/);
+      assert.match(source, /focusedArtifact \? process\.env\.RELEASE_VSIX/);
+      assert.match(
+        source,
+        /focusedVsix \? \[\] : \[`--extensionDevelopmentPath=\$\{root\}\/clients\/vscode`\]/,
+      );
+      assert.match(
+        source,
+        /prepareDownloadCache\(\{[\s\S]*?artifact: process\.env\.RELEASE_ARTIFACT,[\s\S]*?manifest: process\.env\.RELEASE_MANIFEST/,
+      );
+      assert.doesNotMatch(source, /focusedArtifact[\s\S]{0,300}build\/vscode/);
+      assert.match(source, /artifactHashesBefore/);
+      assert.match(source, /native-vscode-artifact-evidence\.json/);
+      assert.match(source, /installedOrigin: vsixEvidence\?\.install/);
+      assert.match(source, /remainingOwnedPids/);
+      assert.match(source, /gitStatus/);
+    },
+  );
+
   await check("artifact helper rejects absent and manifest-mismatched inputs", async () => {
     const directory = temporaryRoot();
     try {

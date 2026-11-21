@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -342,6 +342,12 @@ vscode-download-startup: vscode-prereqs build vscode-deps
 .PHONY: vscode-vsix-install
 vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps
 	$(call run,vscode-vsix-install,MAGIT_VSCODE_VSIX_INSTALL_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
+# Hosted artifact consumer: validate explicit candidate inputs before launching
+# the installed-VSIX smoke; deliberately has no build, package or deps target.
+.PHONY: native-vscode-artifact-check
+native-vscode-artifact-check:
+	$(call run,native-vscode-artifact-check,test -n "$(MAGIT_LSP_SERVER_PATH)" || { echo 'MAGIT_LSP_SERVER_PATH is required' >&2; exit 1; }; test -n "$(RELEASE_ARTIFACT)" || { echo 'RELEASE_ARTIFACT is required' >&2; exit 1; }; test -n "$(RELEASE_MANIFEST)" || { echo 'RELEASE_MANIFEST is required' >&2; exit 1; }; test -n "$(RELEASE_VSIX)" || { echo 'RELEASE_VSIX is required' >&2; exit 1; }; for value in "$(MAGIT_LSP_SERVER_PATH)" "$(RELEASE_ARTIFACT)" "$(RELEASE_MANIFEST)" "$(RELEASE_VSIX)"; do test "$${value#/}" != "$$value" && test -f "$$value" || { echo 'release inputs must be absolute files' >&2; exit 1; }; done; test -x "$(MAGIT_LSP_SERVER_PATH)" || { echo 'MAGIT_LSP_SERVER_PATH is not executable' >&2; exit 1; }; if test ! -e /proc/sys/kernel/ostype || test -n "$$DISPLAY"; then :; else echo 'DISPLAY is required on Linux' >&2; exit 1; fi; editor="$(MAGIT_VSCODE_BIN)"; if [ -n "$$editor" ]; then test -x "$$editor" || { echo 'MAGIT_VSCODE_BIN is not executable' >&2; exit 1; }; else editor=$$(command -v codium || command -v code || true); test -n "$$editor" || { echo 'VSCode-compatible editor is required' >&2; exit 1; }; fi; MAGIT_VSCODE_ARTIFACT_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 # Focused native server management: against the pre-seeded managed release, the
 # server-info command must report it and install/reinstall must force a fresh
