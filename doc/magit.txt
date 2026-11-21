@@ -6,8 +6,8 @@ is rendered and owned by the server in a read-only buffer named
 commands.  The server is an external executable: the Neovim client never
 downloads or builds it.
 
-Requires Neovim 0.11+ and an installed `magit-lsp` server.
-See https://github.com/BlueDrink9/magit-lsp/blob/main/docs/CLIENT_INSTALL.md
+Requires Neovim 0.11+ and an installed `magit-lsp` server.  Client
+installation is documented in ../docs/CLIENT_INSTALL.md
 
 ==============================================================================
 COMMANDS                                                     *magit-commands*
@@ -71,19 +71,27 @@ The default profile is `vim`; select `standard` with
     `ctrl+t`           Toggle plain editable text mode
     `q`                Close the view
 
-Full tables: https://github.com/BlueDrink9/magit-lsp/blob/main/docs/KEYMAPS.md
+Full tables: ../docs/KEYMAPS.md
 
 ==============================================================================
 DOCUMENTATION                                                *magit-docs*
 
-    Repository and overview:
-        https://github.com/BlueDrink9/magit-lsp
+The overview and the reference documents ship with the plugin.  Put the
+cursor on a path below and press |gf| to open that file in a buffer; the
+paths are relative to the directory of this help file, so no browser or
+network access is involved.
+
+    Overview:
+        ../README.md
     Client installation and tested snippets:
-        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/CLIENT_INSTALL.md
+        ../docs/CLIENT_INSTALL.md
     Keymaps and profiles:
-        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/KEYMAPS.md
+        ../docs/KEYMAPS.md
     Protocol and capabilities:
-        https://github.com/BlueDrink9/magit-lsp/blob/main/docs/PROTOCOL.md
+        ../docs/PROTOCOL.md
+
+Upstream repository (not shipped locally):
+    https://github.com/BlueDrink9/magit-lsp
 
 ==============================================================================
 TROUBLESHOOTING                                       *magit-troubleshooting*
