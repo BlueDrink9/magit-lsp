@@ -1889,7 +1889,8 @@ def validate_upload_identity(document, run_id, run_attempt, artifact):
         fail(f'upload identity artifact id {document["artifact_id"]!r} does not '
              f'match API artifact {artifact.get("id")!r}')
     if document['artifact_digest'] != artifact.get('digest'):
-        fail('upload identity artifact digest does not match the API artifact')
+        fail('upload identity artifact digest does not match the API artifact '
+             f'(identity {document["artifact_digest"]!r}, API {artifact.get("digest")!r})')
 
 
 def validate_archive_binding(manifest, archive):
@@ -2082,11 +2083,94 @@ def prepare_publication_runtime(event_path):
         if tag_status != 200:
             fail(f'publication annotated tag lookup returned HTTP {tag_status}')
         tag_object = parse_json(tag_body, 'publication annotated tag')
-    # Source comparison awaits the downloaded producer manifest; readiness is
-    # intentionally absent until NREL-19 supplies its evidence contract.
     if tag_object is None and isinstance(target, dict) and target.get('type') != 'commit':
         fail('publication original tag has an unsupported object type')
-    fail('publication readiness/promotion evidence is absent; ineligible')
+    # Artifact bytes are untrusted data. Authenticate only against the fixed
+    # GitHub API origin, bind the identity ZIP to its immutable artifact ID,
+    # then validate the candidate ZIP and its manifest before considering gates.
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import download_native_candidate as transport
+    artifacts = validate_run_artifacts(
+        publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token,
+                              'artifacts'), run_id)
+    candidate = artifacts[ARTIFACT_NAME]
+    identity_artifact = artifacts[f'{ARTIFACT_NAME}-identity']
+    owner, _, repo = repository.partition('/')
+    if not owner or not repo:
+        fail('publication repository slug is invalid')
+
+    def artifact_bytes(artifact):
+        url = (f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/'
+               f'{artifact["id"]}/zip')
+        try:
+            with transport.request(url, token) as response:
+                return response.read()
+        except transport.DownloadError as error:
+            fail(f'publication artifact download failed: {error}')
+
+    identity_zip = artifact_bytes(identity_artifact)
+    if transport.digest(identity_zip) != identity_artifact['digest'].removeprefix('sha256:'):
+        fail('publication identity transport digest mismatch')
+    try:
+        identity_files = transport.exact_zip(identity_zip, ['upload-identity.json'])
+        identity = parse_json(identity_files['upload-identity.json'], 'publication upload identity')
+    except (transport.DownloadError, KeyError) as error:
+        fail(f'publication identity artifact is invalid: {error}')
+    validate_upload_identity(identity, run_id, attempt, candidate)
+    candidate_zip = artifact_bytes(candidate)
+    if transport.digest(candidate_zip) != candidate['digest'].removeprefix('sha256:'):
+        fail('publication candidate transport digest mismatch')
+    try:
+        files = transport.exact_zip(candidate_zip)
+        manifest = parse_json(files['release-manifest.json'], 'publication release manifest')
+    except (transport.DownloadError, KeyError) as error:
+        fail(f'publication candidate artifact is invalid: {error}')
+    trusted = {
+        'run_id': str(run_id), 'run_attempt': str(attempt), 'event': RUN_EVENT,
+        'version': original_ref[1:], 'target': ASSET, 'original_ref': tag_ref,
+        'lock_hashes': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                        for name in ('Cargo.lock', 'flake.lock')},
+        'toolchain': {'rust': RELEASE_TOOLCHAIN},
+    }
+    validate_manifest_binding(manifest, trusted)
+    tag_status, tag_body = fetch_api(repository, f'/git/ref/tags/{original_ref}', token)
+    tag_object_body = None
+    tag_target = tag_document.get('object') if isinstance(tag_document, dict) else None
+    if isinstance(tag_target, dict) and tag_target.get('type') == 'tag':
+        peel_status, peel_body = fetch_api(repository, f'/git/tags/{tag_target.get("sha")}', token)
+        if peel_status != 200:
+            fail(f'publication annotated tag lookup returned HTTP {peel_status}')
+        tag_object_body = peel_body
+    source_sha = validate_tag_binding(tag_status, tag_body, tag_object_body, manifest)
+    archive_name = f'magit-lsp-v{manifest["version"]}-{manifest["target"]}.tar.gz'
+    required = {archive_name, archive_name + '.sha256', 'release-manifest.json',
+                'release-manifest.json.sha256'}
+    if {Path(name).name for name in files} != required:
+        fail('publication candidate asset list differs from the validated manifest')
+    archive = next(data for name, data in files.items() if Path(name).name == archive_name)
+    checksum = next(data for name, data in files.items()
+                    if Path(name).name == archive_name + '.sha256')
+    manifest_bytes = files['release-manifest.json']
+    sidecar = files['release-manifest.json.sha256'].decode('ascii').split()
+    if transport.digest(manifest_bytes) != sidecar[0] or \
+            transport.digest(archive) != manifest['archive_sha256'] or \
+            not checksum.decode('ascii').split() or \
+            checksum.decode('ascii').split()[0] != transport.digest(archive):
+        fail('publication candidate asset hash validation failed')
+    with tempfile.TemporaryDirectory(prefix='publication-assets-') as temporary:
+        archive_path = Path(temporary) / archive_name
+        archive_path.write_bytes(archive)
+        try:
+            binary = transport.native.safe_extract(
+                archive_path, Path(temporary) / 'extracted', archive_name.removesuffix('.tar.gz'))
+        except Exception as error:
+            fail(f'publication release archive is invalid: {error}')
+        if transport.native.digest(binary) != manifest['executable_sha256']:
+            fail('publication executable hash differs from manifest')
+    # This part intentionally remains ineligible until readiness and promotion
+    # evidence are supplied and independently revalidated by the publisher.
+    fail(f'publication provenance validated for {source_sha}; readiness/promotion evidence is absent; ineligible')
 
 
 def repository_and_sha():
@@ -3046,7 +3130,7 @@ def run_self_tests():
         [page_document('artifacts', coherent_artifacts)], SELF_TEST_RUN_ID)
     identity = {
         'artifact_id': '100',
-        'artifact_digest': SELF_TEST_ARTIFACT_DIGEST,
+        'artifact_digest': artifacts[ARTIFACT_NAME]['digest'],
         'run_id': SELF_TEST_RUN_ID,
         'run_attempt': SELF_TEST_RUN_ATTEMPT,
         'target': ASSET,
@@ -3292,6 +3376,56 @@ def run_self_tests():
     # Exercise the runtime boundary with mocked GitHub API responses: this
     # proves the collector binds the workflow_run payload to upstream API data.
     from unittest.mock import patch
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import download_native_candidate as runtime_transport_module
+    import io
+    import tarfile
+    import zipfile
+
+    def zip_bytes(entries):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name, value in entries.items():
+                archive.writestr(name, value)
+        return stream.getvalue()
+
+    executable = b'fixture executable bytes'
+    tar_stream = io.BytesIO()
+    with tarfile.open(fileobj=tar_stream, mode='w:gz') as archive:
+        for name, value, mode in (
+                ('magit-lsp', executable, 0o755), ('LICENSE', b'license', 0o644),
+                ('LICENSE-APACHE', b'apache', 0o644), ('INSTALL.md', b'install', 0o644)):
+            info = tarfile.TarInfo(f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}/{name}')
+            info.size, info.mode = len(value), mode
+            archive.addfile(info, io.BytesIO(value))
+    runtime_manifest = manifest_fixture(
+        lock_hashes={name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                     for name in ('Cargo.lock', 'flake.lock')},
+        archive_sha256=hashlib.sha256(tar_stream.getvalue()).hexdigest(),
+        executable_sha256=hashlib.sha256(executable).hexdigest())
+    runtime_manifest_bytes = json.dumps(runtime_manifest).encode()
+    runtime_archive_name = f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}.tar.gz'
+    runtime_assets = {
+        runtime_archive_name: tar_stream.getvalue(),
+        runtime_archive_name + '.sha256':
+            f'{hashlib.sha256(tar_stream.getvalue()).hexdigest()}  {runtime_archive_name}\n'.encode(),
+        'release-manifest.json': runtime_manifest_bytes,
+        'release-manifest.json.sha256':
+            f'{hashlib.sha256(runtime_manifest_bytes).hexdigest()}  release-manifest.json\n'.encode(),
+    }
+    runtime_candidate_zip = zip_bytes(runtime_assets)
+    runtime_identity = {
+        'artifact_id': '100', 'artifact_digest': 'sha256:' + hashlib.sha256(runtime_candidate_zip).hexdigest(),
+        'run_id': SELF_TEST_RUN_ID, 'run_attempt': SELF_TEST_RUN_ATTEMPT, 'target': ASSET,
+    }
+    runtime_identity_zip = zip_bytes({'upload-identity.json': json.dumps(runtime_identity).encode()})
+    runtime_coherent_artifacts = [
+        artifact_document(ARTIFACT_NAME, 100,
+                         digest='sha256:' + hashlib.sha256(runtime_candidate_zip).hexdigest()),
+        artifact_document(f'{ARTIFACT_NAME}-identity', 101,
+                         digest='sha256:' + hashlib.sha256(runtime_identity_zip).hexdigest()),
+    ]
     runtime_event = {'action': 'completed', 'workflow_run': {
         'id': int(SELF_TEST_RUN_ID), 'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
         'workflow_id': SELF_TEST_WORKFLOW_ID, 'event': 'push',
@@ -3308,9 +3442,9 @@ def run_self_tests():
         f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2':
             page_document('jobs', coherent_jobs[1:], total=2),
         f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1':
-            page_document('artifacts', coherent_artifacts[:1], total=2),
+            page_document('artifacts', runtime_coherent_artifacts[:1], total=2),
         f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2':
-            page_document('artifacts', coherent_artifacts[1:], total=2),
+            page_document('artifacts', runtime_coherent_artifacts[1:], total=2),
         f'/git/ref/tags/v{SELF_TEST_VERSION}': json.loads(tag_ref_body()),
     }
     runtime_calls = []
@@ -3330,10 +3464,20 @@ def run_self_tests():
         with tempfile.TemporaryDirectory(prefix='publication-runtime-') as temporary:
             event_path = Path(temporary) / 'event.json'
             event_path.write_text(json.dumps(runtime_event), encoding='utf-8')
-            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+            def runtime_transport(url, token):
+                artifact_id = url.split('/actions/artifacts/')[1].split('/')[0]
+                content = {'100': runtime_candidate_zip, '101': runtime_identity_zip}[artifact_id]
+                class Response:
+                    def __enter__(self): return self
+                    def __exit__(self, *_): return None
+                    def read(self): return content
+                return Response()
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
                 expect_check('runtime collector stops without readiness',
                              prepare_publication_runtime, str(event_path),
-                             expected='readiness/promotion evidence is absent')
+                             expected=f'publication provenance validated for {SELF_TEST_SHA}; '
+                                      'readiness/promotion evidence is absent; ineligible')
             required_paths = [f'/actions/runs/{SELF_TEST_RUN_ID}',
                           f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2',
                           f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2',
@@ -3344,17 +3488,71 @@ def run_self_tests():
                 fail(f'self-test: runtime collector missed API paths {missing_runtime_paths!r}; calls={runtime_calls!r}')
             runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture(name='untrusted')
             runtime_calls.clear()
-            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
                 expect_check('runtime collector rejects mismatched workflow',
                              prepare_publication_runtime, str(event_path),
                              expected='workflow name')
             runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture()
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', [
+                    artifact_document(ARTIFACT_NAME, 100,
+                                      digest='sha256:' + '0' * 64)], total=2)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a changed API artifact digest',
+                             prepare_publication_runtime, str(event_path),
+                             expected='artifact digest does not match')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', runtime_coherent_artifacts[:1], total=2)
             runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
                 page_document('jobs', [], total=2)
-            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch):
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
                 expect_check('runtime collector rejects a missing listing page',
                              prepare_publication_runtime, str(event_path),
                              expected='page 3 returned HTTP 404')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', coherent_jobs[1:], total=2)
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2'] = \
+                page_document('artifacts', runtime_coherent_artifacts[1:], total=2)
+            runtime_responses['/git/ref/heads/main'] = {'object': {'sha': SELF_TEST_OTHER_SHA}}
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects the wrong default checkout',
+                             prepare_publication_runtime, str(event_path),
+                             expected='checkout SHA is not the current default branch SHA')
+            runtime_responses['/git/ref/heads/main'] = {'object': {'sha': SELF_TEST_SHA}}
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = \
+                run_binding_fixture(run_attempt=int(SELF_TEST_RUN_ATTEMPT) + 1)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a changed run attempt',
+                             prepare_publication_runtime, str(event_path),
+                             expected='binding attempt')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture()
+            runtime_responses[f'/git/ref/tags/v{SELF_TEST_VERSION}'] = \
+                json.loads(tag_ref_body(sha=SELF_TEST_OTHER_SHA))
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a moved original tag',
+                             prepare_publication_runtime, str(event_path),
+                             expected='not the manifest source')
+            runtime_responses[f'/git/ref/tags/v{SELF_TEST_VERSION}'] = json.loads(tag_ref_body())
+            runtime_calls.clear()
+            original_runtime_transport = runtime_transport
+            def changed_runtime_transport(url, token):
+                response = original_runtime_transport(url, token)
+                class ChangedResponse:
+                    def __enter__(self): return self
+                    def __exit__(self, *_): return None
+                    def read(self): return response.read() + b'changed'
+                return ChangedResponse()
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', changed_runtime_transport):
+                expect_check('runtime collector rejects changed handoff bytes',
+                             prepare_publication_runtime, str(event_path),
+                             expected='transport digest mismatch')
     finally:
         for key, value in saved_env.items():
             if value is None:
