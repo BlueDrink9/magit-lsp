@@ -29,7 +29,10 @@ jobs:
   publish:
     name: Publish (ineligible pending asset handoff)
     needs: validate
-    if: ${{ false }}
+    # Only a successful push-tag build of this repository may reach the
+    # environment. Manual dispatches and fork runs never publish; the validate
+    # job still independently proves the tag/source binding before this runs.
+    if: ${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-24.04
     environment: release-publish
     permissions:
