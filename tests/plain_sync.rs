@@ -4,6 +4,7 @@ mod common;
 
 use common::stdio::TestServer;
 use magit_lsp::docstore::{Change, DocStore, Encoding};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 /// Receive server frames until `method` arrives, skipping unrelated messages.
@@ -104,8 +105,14 @@ fn stdio_advertises_incremental_sync_and_accepts_document_lifecycle() {
     let path = repo.path().join(".magit");
     common::write(&path, "stale disk text\n");
     let disk_before = std::fs::read(&path).unwrap();
-    let uri = format!("file://{}", path.display());
-    let root_uri = format!("file://{}", repo.path().display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
+    let root_uri = uri_from_path(repo.path())
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = TestServer::spawn(&[]);
     let initialized = server.initialize_params(json!({
         "processId": null,

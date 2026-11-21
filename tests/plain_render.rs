@@ -6,6 +6,7 @@ mod fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::docstore::Encoding;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::presentation::plain::{
     hash_text, text_edits, DocumentFormat, DocumentState, PlainDocument,
 };
@@ -137,8 +138,7 @@ fn plain_server(root: &std::path::Path, apply: bool, versioned: bool) -> stdio::
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":apply,"workspaceEdit":{"documentChanges":versioned},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(root).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -151,8 +151,7 @@ fn workaround_server(root: &std::path::Path, client: Value, overrides: Value) ->
     init["params"]["clientInfo"] = client;
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
     init["params"]["initializationOptions"] = json!({"quirks":overrides});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(root).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -193,7 +192,10 @@ fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safe
                 .build();
             let path = repo.path().join(".magit");
             fixtures::write(&path, "disk sentinel\n");
-            let uri = format!("file://{}", path.display());
+            let uri = uri_from_path(&path)
+                .expect("native path has a file URI")
+                .as_str()
+                .to_owned();
             let mut server = workaround_server(repo.path(), client.clone(), server_override);
             let empty_capabilities = json!({});
             let resolution = magit_lsp::quirks::resolve(
@@ -311,7 +313,10 @@ fn binary_profiles_watch_and_repair_divergence_in_both_response_orders() {
                 .build();
             let path = repo.path().join(".magit");
             fixtures::write(&path, "disk sentinel\n");
-            let uri = format!("file://{}", path.display());
+            let uri = uri_from_path(&path)
+                .expect("native path has a file URI")
+                .as_str()
+                .to_owned();
             let mut server = plain_server(repo.path(), true, profile != Profile::NoDocumentChanges);
             let mut editor = FakeEditor::new(profile);
             server.send(editor.open(&uri, "stale"));
@@ -374,7 +379,10 @@ fn binary_stale_rapid_repair_retries_latest_version_and_repairs_undo() {
         .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel\n");
-    let uri = format!("file://{}", path.display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = plain_server(repo.path(), true, true);
     let mut editor = FakeEditor::new(Profile::Standard);
     server.send(editor.open(&uri, "stale"));
@@ -442,7 +450,10 @@ fn binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo()
         fixtures::write(&repo.path().join("f.txt"), &changed_file);
         let path = repo.path().join(".magit");
         fixtures::write(&path, "disk sentinel\n");
-        let uri = format!("file://{}", path.display());
+        let uri = uri_from_path(&path)
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         let mut server = plain_server(repo.path(), true, true);
         let mut editor = FakeEditor::new(Profile::Standard);
         server.send(editor.open(&uri, source));
@@ -495,7 +506,10 @@ fn binary_close_reopen_ignores_pending_reply_and_disconnect_terminates_pending_e
         .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel");
-    let uri = format!("file://{}", path.display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = plain_server(repo.path(), true, true);
     let mut editor = FakeEditor::new(Profile::Standard);
     server.send(editor.open(&uri, "old incarnation"));
@@ -529,7 +543,10 @@ fn binary_absent_apply_edit_reports_readable_unsupported_without_custom_delivery
         .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "untouched");
-    let uri = format!("file://{}", path.display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = plain_server(repo.path(), false, true);
     let mut editor = FakeEditor::new(Profile::Standard);
     server.send(editor.open(&uri, "untouched"));
@@ -846,8 +863,14 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
     let path = repo.path().join(".magit");
     fixtures::write(&path, "stale disk text\n");
     let disk_before = std::fs::read(&path).unwrap();
-    let uri = format!("file://{}", path.display());
-    let root_uri = format!("file://{}", repo.path().display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
+    let root_uri = uri_from_path(repo.path())
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     for (overrides, expected_format) in [
         (json!({}), "documentChanges"),
         (
@@ -941,8 +964,14 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel\n");
     let disk_before = std::fs::read(&path).unwrap();
-    let uri = format!("file://{}", path.display());
-    let root_uri = format!("file://{}", repo.path().display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
+    let root_uri = uri_from_path(repo.path())
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["clientInfo"] = json!({"name":"Neovim","version":"0.12.6"});
@@ -1056,7 +1085,10 @@ fn binary_format_drift_warns_once_refuses_actions_and_recovers_on_reopen() {
         .build();
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk\r\n");
-    let uri = format!("file://{}", path.display());
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = plain_server(repo.path(), true, true);
     let mut editor = FakeEditor::new(Profile::CrlfNormalise);
     server.send(editor.open(&uri, "stale\r\n"));

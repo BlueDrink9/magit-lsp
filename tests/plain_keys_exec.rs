@@ -11,6 +11,7 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
@@ -28,7 +29,10 @@ fn open_with_env(
     keys: bool,
     env: &[(String, String)],
 ) -> (stdio::TestServer, FakeEditor, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let env: Vec<_> = env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -42,8 +46,7 @@ fn open_with_env(
     });
     init["params"]["clientInfo"] = json!({"name":client_name,"version":"1"});
     init["params"]["initializationOptions"] = json!({"plain":{"keys":{"default":keys}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     server.response_with_id(1);
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -895,7 +898,10 @@ fn plain_armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
     id += 1;
     let _ = settle(&mut server, &mut editor);
     replace(&mut server, &mut editor, &uri, 0, 0, 0, "c");
-    let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", repo.path().display());
+    let draft_uri = uri_from_path(&repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let deadline = Instant::now() + Duration::from_secs(20);
     while !seen.iter().any(|message| {
         message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri

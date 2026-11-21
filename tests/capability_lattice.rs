@@ -10,6 +10,7 @@ mod fixtures;
 #[path = "common/stdio.rs"]
 mod stdio;
 
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 fn declared(capabilities: &Value, path: &str) -> bool {
@@ -50,7 +51,10 @@ fn stage_profile(
     profile: fake_editor::Profile,
     expected_end: Option<usize>,
 ) -> (String, String, String) {
-    let (repo, _) = fixtures::RepoFixture::new()
+    let special_parent = tempfile::tempdir().expect("tempdir");
+    let repo_parent = special_parent.path().join("repo é#%");
+    std::fs::create_dir(&repo_parent).expect("repository parent");
+    let (repo, _) = fixtures::RepoFixture::new_in(&repo_parent)
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
         .modify_standard()
         .build();
@@ -70,7 +74,10 @@ fn stage_profile(
         let id = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         assert!(client.until_response(id)["error"].is_null());
     } else {
-        let uri = format!("file://{}/.magit", repo.path().display());
+        let uri = uri_from_path(&repo.path().join(".magit"))
+            .expect("native path has a file URI")
+            .as_str()
+            .to_owned();
         let initial = if expected_end.is_some() {
             "é😀x"
         } else {
@@ -358,9 +365,12 @@ fn draft_chain(
         stdio::TestServer::spawn(&[]),
         fake_editor::Profile::Standard,
         &model,
-        json!({"rootUri": format!("file://{}", repo.path().display())}),
+        json!({"rootUri": uri_from_path(repo.path()).expect("native path has a file URI").as_str()}),
     );
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let open = client.editor.open(&uri, "old\n");
     client.send(open);
     client.until(|c| c.editor.text(&uri).contains("f.txt"));
@@ -373,7 +383,10 @@ fn draft_chain(
             .expect("commit menu"),
     );
     let draft_path = repo.path().join(".git/COMMIT_EDITMSG");
-    let draft_uri = format!("file://{}", draft_path.display());
+    let draft_uri = uri_from_path(&draft_path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     // The pre-opened document makes template refresh observable, not merely showDocument.
     let open = client.editor.open(&draft_uri, "Previous message\n");
     client.send(open);
