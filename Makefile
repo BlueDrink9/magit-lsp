@@ -125,8 +125,11 @@ test-rust:
 # native harness may be compiled here, but the server under test must be the
 # supplied artifact, never the binary Cargo builds: `MAGIT_LSP_TEST_BINARY` is
 # required, absolute and executable, and its SHA-256 is recorded before Cargo
-# starts. There is no `build` (server) prerequisite.
+# starts. The Rust harness is compiled separately from the selected server
+# identity; there is no `build` (server) prerequisite. FILTER may select a
+# focused hosted suite set without changing ordinary test-rust defaults.
 MAGIT_LSP_TEST_BINARY ?=
+RUST_ARTIFACT_FILTER ?= --test server_async
 test-rust-artifact:
 	@case "$(MAGIT_LSP_TEST_BINARY)" in \
 	'') echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
@@ -136,7 +139,7 @@ test-rust-artifact:
 	*) echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
 	esac
 	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("test-rust-artifact: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
-	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q --test server_async)
+	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q $(if $(strip $(FILTER)),$(FILTER),$(RUST_ARTIFACT_FILTER)))
 
 # Exercises the real `run` macro above through temporary included Makefiles.
 .PHONY: wrapper-check

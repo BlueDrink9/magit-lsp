@@ -1018,7 +1018,7 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeArtifactMakeTargetTest(unittest.TestCase):
-    def test_artifact_target_has_no_build_and_preserves_selected_path(self) -> None:
+    def test_rust_artifact_target_defaults_to_server_async_and_selects_suites(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "verified artifact" / "magit-lsp"
@@ -1029,26 +1029,30 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
             fake_bin.mkdir()
             capture = root / "calls"
             python = fake_bin / "python3"
-            python.write_text(
-                "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$MAGIT_LSP_TEST_BINARY\" \"$MAGIT_LSP_BIN\" \"$*\" >> \"$CAPTURE\"\n",
-                encoding="utf-8",
-            )
+            python.write_text("#!/bin/sh\necho python-called >> \"$CAPTURE\"\n", encoding="utf-8")
             python.chmod(0o755)
             cargo = fake_bin / "cargo"
-            cargo.write_text("#!/bin/sh\necho cargo-called >> \"$CAPTURE\"; exit 99\n", encoding="utf-8")
+            cargo.write_text(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$MAGIT_LSP_TEST_BINARY\" \"$*\" >> \"$CAPTURE\"\n",
+                encoding="utf-8",
+            )
             cargo.chmod(0o755)
             env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture))
-            result = subprocess.run(
-                ["make", "-s", "native-neovim-artifact-check", f"MAGIT_LSP_TEST_BINARY={binary}"],
-                cwd=ROOT, env=env, text=True, capture_output=True, check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            calls = capture.read_text(encoding="utf-8")
-            self.assertNotIn("cargo-called", calls)
-            self.assertIn(
-                f"{binary}|{binary}|scripts/ui run tests/ui/scenarios/status-basics.scn tests/ui/scenarios/commit-message-editor.scn",
-                calls,
-            )
+            for selector, expected in (
+                (None, "test -q --test server_async"),
+                ("--test server_async --test editor_bridge --test rebase_interactive",
+                 "test -q --test server_async --test editor_bridge --test rebase_interactive"),
+            ):
+                capture.unlink(missing_ok=True)
+                command = ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={binary}"]
+                if selector:
+                    command.append(f"FILTER={selector}")
+                result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = capture.read_text(encoding="utf-8")
+                self.assertEqual(calls.count("python-called"), 1)
+                self.assertEqual(calls.splitlines()[-1], f"{binary}|{expected}")
+                self.assertNotIn("build", calls)
 
     def test_missing_artifact_fails_before_python_or_build(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1069,7 +1073,7 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
                 (str(root / "missing"), "is not an executable file"),
             ):
                 result = subprocess.run(
-                    ["make", "-s", "native-neovim-artifact-check", f"MAGIT_LSP_TEST_BINARY={selected}"],
+                    ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={selected}"],
                     cwd=ROOT, env=env, text=True, capture_output=True, check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
