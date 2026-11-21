@@ -7,6 +7,7 @@ use common::stdio::*;
 use common::*;
 use magit_lsp::status_view;
 use magit_lsp::tree::Tree;
+use magit_lsp::view::{Placement, ViewKind};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -24,6 +25,84 @@ fn semantic_role_table_has_unique_names_and_client_metadata() {
             role.name
         );
     }
+}
+
+fn emitted_roles(tree: &Tree) -> std::collections::HashSet<&'static str> {
+    magit_lsp::semantic_tokens::encode(tree)
+        .data
+        .iter()
+        .map(|token| magit_lsp::semantic_tokens::TOKEN_TYPES[token.token_type as usize])
+        .collect()
+}
+
+#[test]
+fn log_view_semantic_response_emits_identifiers_and_refs() {
+    let (fixture, _) = RepoFixture::new()
+        .commit("role fixture", [("file.txt", "content\n")])
+        .build();
+    let mut test = TestSession::new(
+        fixture.path().to_string_lossy(),
+        magit_lsp::config::Profile::Vim,
+    );
+    test.open_view("log", ViewKind::Log, Placement::Main, WIDE_VIEWPORT);
+    let roles = emitted_roles(test.tree_of("log"));
+    assert!(
+        roles.contains("identifier"),
+        "log response roles: {roles:?}"
+    );
+    assert!(roles.contains("ref"), "log response roles: {roles:?}");
+}
+
+#[test]
+fn menu_view_semantic_response_emits_key_role() {
+    let (fixture, _) = RepoFixture::new()
+        .commit("menu fixture", [("file.txt", "content\n")])
+        .build();
+    let (mut test, _) =
+        TestSession::open_status_at(&fixture, magit_lsp::config::Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let roles = emitted_roles(test.tree_of(&menu.id));
+    assert!(roles.contains("key"), "menu response roles: {roles:?}");
+}
+
+#[test]
+fn process_log_semantic_response_emits_warning_and_error_roles() {
+    let (fixture, _) = RepoFixture::new()
+        .commit("process fixture", [("file.txt", "content\n")])
+        .build();
+    let cwd = fixture.path().display().to_string();
+    magit_lsp::runner::global_log().record(
+        std::path::Path::new(&cwd),
+        &["failed"],
+        1,
+        std::time::Duration::ZERO,
+        b"",
+        b"failure",
+    );
+    magit_lsp::runner::global_log().record(
+        std::path::Path::new(&cwd),
+        &["warning"],
+        0,
+        std::time::Duration::ZERO,
+        b"",
+        b"warning",
+    );
+    let mut test = TestSession::new(cwd, magit_lsp::config::Profile::Vim);
+    test.open_view(
+        "process",
+        ViewKind::ProcessLog,
+        Placement::Main,
+        WIDE_VIEWPORT,
+    );
+    let roles = emitted_roles(test.tree_of("process"));
+    assert!(
+        roles.contains("warning"),
+        "process-log response roles: {roles:?}"
+    );
+    assert!(
+        roles.contains("error"),
+        "process-log response roles: {roles:?}"
+    );
 }
 
 /// One decoded semantic token, in absolute positions.
@@ -121,11 +200,13 @@ fn strings(value: &Value, key: &str) -> Vec<String> {
 /// A repo with a unicode tracked file (unstaged change) and a unicode staged
 /// file, so tokens cover both sections and both modifier states.
 fn unicode_fixture() -> (RepoFixture, magit_lsp::git::GitRepo) {
-    RepoFixture::new()
-        .commit("init", [("üñï.txt", TEN_LINES)])
+    let (fixture, repo) = RepoFixture::new()
+        .commit("init", [("üñï.txt", TEN_LINES), ("deleted.txt", "gone\n")])
         .staged_file("staged ünï.txt", "a\nb\n")
         .modify("üñï.txt", standard_changes())
-        .build()
+        .build();
+    fixture.git(&["rm", "deleted.txt"]);
+    (fixture, repo)
 }
 
 #[test]
@@ -205,6 +286,16 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
         .as_array()
         .unwrap_or_else(|| panic!("no token data: {response}"));
     let decoded = decode(data, &token_types, &token_modifiers);
+    let emitted: std::collections::HashSet<_> = decoded
+        .iter()
+        .map(|token| token.token_type.as_str())
+        .collect();
+    for role in ["heading", "muted", "added", "removed", "changed", "path"] {
+        assert!(
+            emitted.contains(role),
+            "fixture response did not emit {role}: {decoded:?}"
+        );
+    }
 
     let tree = status_view::build(&repo.status().expect("status"));
     let expected = expected_tokens(&tree, &token_types, &token_modifiers);
