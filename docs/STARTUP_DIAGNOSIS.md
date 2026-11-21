@@ -1,65 +1,103 @@
-# Neovim opening investigation
+# Neovim `:Magit` opening diagnosis
 
-Source inspection: 2026-11-21, base `5d1da91e6527adb1d060171d75b61cae62a59369`.
-Implementation and measurements remain pending: worker execution was blocked by
-the account usage limit. This is a hypothesis packet, not a performance result.
-Canonical task: [PERF-MAGIT-OPEN](../TASKS.md).
+This is a measured diagnostic, not an optimization report. It does not reproduce
+the user's environment or establish a performance threshold. The user's
+reported slowness remains unreproduced.
 
-## Verified path
+## Reproduction and evidence
 
-- `lua/magit-lsp/init.lua:427-435`: initial status opening waits for LSP
-  initialization, version checking and highlight legend application.
-- `lua/magit-lsp/init.lua:134-154`: `view/open` must return its descriptor
-  before the client calls `view.open`. This request has no `traceId`.
-- `src/server/view_execution.rs:24-28,32-55`: opening discovers/canonicalizes
-  the Git root and creates a repository session if needed.
-- `src/server/view_execution.rs:58-82,90-92`: the server acquires the session
-  lock, opens the view and obtains its render, then ensures the watcher and
-  prepares render delivery. These steps precede completion of this handler.
-- `src/session.rs:2507` constructs a status view through `StatusView::open`.
-- `src/status_view.rs:40-51`: status construction synchronously reads
-  `status_listing` and `rebase_state`, with maximum detail as its initial level.
-- `lua/magit-lsp/init.lua:166-170`: opening an already registered status view
-  simply focuses it. This is not equivalent to reopening a closed status view.
+Run `make nvim-startup-check`. The Make target builds the debug server and runs
+the Python/Lua harness through the public `:Magit` command. It performs three
+fresh-process samples each on a one-file temporary Git fixture and on the
+current worktree. Each process also wipes/reopens the status buffer against its
+initialized server and invokes `:Magit` once more while the view is already
+open. The harness fails for missing event types, invalid status text/window,
+open timeout, Neovim failure or missing binaries; it has no speed threshold.
 
-## Ranked working hypotheses (not measured)
+Recorded environment: Neovim `NVIM v0.12.6`, debug server
+`target/debug/magit-lsp`, Python `3.14.10`, Linux
+`b9ff40574f5a` / kernel `7.2.11-0.fc44.x86_64`. The reproducible run is retained
+at `build/startup-diagnosis/20261121T095024Z/`; `summary.json` contains version,
+host, definitions and distributions. Each `*.json` contains sample status and
+timings; each `*.trace.jsonl` is the wall-clock-merged client/server trace.
+`*.events.jsonl` contains the raw display-check events. These are generated
+artifacts and are not committed.
 
-1. **Repository work before first display.** Status collection and view/render
-   construction are on the open handler's critical path. Large dirty repositories
-   could cost more than clean fixtures; default maximum detail is another reason
-   to inspect subsequent hunk loading/rendering, not proof that it dominates.
-   Discriminate with Git spans versus total handler time, clean/dirty fixtures,
-   and matched repository size. Inspect actual hunk loading before suggesting
-   lazy loading or caching.
-2. **Cold server initialization.** First open cannot request status until
-   `on_init`; process creation, handshake and client setup may dominate first
-   use but not a genuine warm reopen. Time command, process launch, initialize
-   reply and `view/open` separately.
-3. **Serialization or watcher setup.** Opening takes the repository session
-   lock and ensures a watcher before delivery. Concurrent work or watcher setup
-   might delay opening. Separate lock wait, render work and watcher creation;
-   compare idle and busy sessions. No contention has been demonstrated.
-4. **Client work after server completion.** Descriptor processing, document
-   application and editor redraw may account for a gap after server work.
-   Compare response/render reception, document application and an attached
-   UI's redraw notification. Buffer contents alone do not prove displayed pixels.
+| Case | Fixture median (range), ms | Worktree median (range), ms |
+|---|---:|---:|
+| Fresh Neovim/server, command to visible `Head:` status | 734.7 (678.9–759.5) | 1082.4 (1052.0–1116.7) |
+| Same initialized server, wipe and reopen status | 242.8 (225.5–274.0) | 593.4 (588.9–597.2) |
+| Already-open view, focus only | 0.055 (0.046–0.056) | 0.063 (0.058–0.066) |
 
-## Required timing check
+The “cold” label means a fresh Neovim and server process, **not** cold
+filesystem/OS caches. Fixture and worktree are intentionally different
+repositories; the worktree was dirty with diagnostic edits and generated build
+artifacts during sampling. Its larger Git workload is not a clean baseline and
+must not be generalized to the user's repository.
 
-Add `make nvim-startup-check` with maintained Python/Lua helpers. Run real
-Neovim through public `:Magit`, using text/structured state only. Record:
+## Attribution and limits
 
-- Process-cold first open (not a claim of cold filesystem caches), reopened
-  status using an initialized server, and already-open focus as distinct cases.
-- Repeated fixture and repository samples, environment, server path/build
-  profile, editor version and median/range with raw JSON evidence.
-- Command, process/initialize, open request/response, server handler, Git,
-  render reception/application and UI redraw boundaries. Report overlap and
-  clock precision rather than adding overlapping spans.
-- Opt-in trace correlation on initial `view/open` so existing server/Git
-  traces can explain startup. Confirm correlation survives through dispatch.
-- A failure exit for missing events, invalid status document/window or process
-  cleanup failure; no arbitrary speed threshold.
+The opt-in client trace allocates a correlation ID on initial `view/open` and
+the existing server request tracing, Git-call tracing, and client render events
+are merged with `t_unix_ms`. On the first fixture sample
+(`fixture-1795254624569455965.trace.jsonl`), the first client open-trace event
+was at elapsed 351.1 ms; the correlated server handler ran from 0.17 to 407.2
+ms on its own clock (about 407 ms), with `render_sent` at 407.3 ms. Client
+`render_received` and `render_applied` were at 759.4 and 759.6 ms on the
+client clock; their merged wall times were within about 1 ms of `render_sent`.
+Thus the command-to-open-request interval is roughly 351 ms and the server
+handler-to-render-application interval roughly 408 ms in this sample. Do not
+sum these overlapping clock domains.
 
-No dominant delay or improvement is established yet. A clean-profile run also
-cannot explain a user's configuration without a matching comparison.
+The same sample logs Git root discovery, status listing and cached-file diff
+calls. Individual reported Git calls were typically 13–16 ms, several calls
+occurred before/around status construction, and the traced handler's duration
+was about 407 ms. This leaves substantial handler time not explained by those
+Git spans (including uninstrumented session, view construction, rendering and
+watcher work). It is not safe to label the complete handler as Git cost. In the
+current modified worktree trace
+(`worktree-1795254630996053483.trace.jsonl`), the first handler lasted about
+719 ms and emitted many `ls-tree`/`diff` Git calls because the worktree itself
+contained modifications. This is evidence that repository contents can expand
+the Git workload, not evidence about the user's clean or configured checkout.
+
+The measured `render_sent` to `render_applied` wall-clock gap is negligible in
+these samples, but does not measure a real terminal/UI redraw or perceived
+display. Buffer application and current-window `Head:` validation are the
+client endpoint. No separate initialize reply, process-spawn span, LSP
+descriptor callback, redraw notification, lock-wait, watcher-setup or individual
+render-phase timing is available. Client/server wall clocks are merged using
+wall time and may have offset/precision error; monotonic durations within each
+process are stronger evidence. Tracing adds small overhead.
+
+## Ranked diagnosis and next discriminating experiments
+
+1. **Work before the first correlated open request is substantial.** The
+   measured command-to-request gap is about 351 ms for the fixture, while the
+   cold command-to-visible median is about 735 ms. Source: `init.lua:427-435`
+   gates initial open on client initialization; `init.lua:134-154` sends the
+   view request only after that path. Discriminate client startup, process spawn
+   and initialize response by adding explicit lifecycle boundaries; do not
+   infer which component dominates from this aggregate gap.
+2. **Server open work is a major measured interval, with Git only partly
+   attributed.** The fixture handler is about 407 ms; current modified worktree
+   handler is about 719 ms with more Git calls. `view_execution.rs:24-92`
+   places root discovery, session creation/lock, open/render and watcher setup
+   in this path; `status_view.rs:40-51` reads status/rebase state
+   synchronously. Add narrowly placed spans for lock wait, session/view/render,
+   and watcher setup, then compare clean/dirty repositories of controlled
+   sizes. The evidence does not yet justify a caching or lazy-load change.
+3. **Git call multiplicity may explain some dirty-worktree growth.** The trace
+   confirms multiple status and per-file Git operations. Quantify Git time and
+   invocation counts against a clean commit and controlled file/hunk counts
+   before considering batching. Current worktree data is confounded by this
+   diagnostic's own uncommitted changes.
+4. **Client render application is not currently the dominant measured gap.**
+   Correlated fixture render delivery/application timestamps are nearly
+   coincident with server send. Repeat through an attached interactive UI with
+   a redraw event before concluding visible-pixel latency is negligible.
+
+No optimization is prescribed from this run. The bounded next task is to add
+diagnostic spans for initialization and server handler subphases and run a clean,
+controlled fixture matrix; the reported user symptom needs reproduction with
+their Neovim configuration and repository before a fix is selected.

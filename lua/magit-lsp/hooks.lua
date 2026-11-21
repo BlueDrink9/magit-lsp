@@ -81,6 +81,12 @@ function M.trace_id()
   return 0
 end
 
+--- Start a correlated trace for the initial status-view request.
+---@return integer
+function M.open_trace_id()
+  return 0
+end
+
 --- Record one canonical key step being sent to the server.
 ---@param step string
 ---@param id string|nil

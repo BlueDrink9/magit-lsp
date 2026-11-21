@@ -131,10 +131,12 @@ local function open_status(session)
     session.buf = buffer.fresh()
   end
   vim.lsp.buf_attach_client(session.buf, session.client_id)
+  local trace_id = hooks.open_trace_id()
   view.request(session.buf, session.client_id, "view/open", {
     kind = "status",
     args = { repo_path = session.root },
     viewport = { cols = vim.o.columns, rows = vim.o.lines },
+    traceId = trace_id,
   }, function(descriptor, err)
     if not descriptor then
       vim.notify("magit-lsp open failed: " .. error_message(err), vim.log.levels.ERROR)

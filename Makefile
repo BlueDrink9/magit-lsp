@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -181,6 +181,9 @@ ui-test: build
 
 ui-file: build
 	$(call run,ui-file,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) $(FILE))
+
+nvim-startup-check: build
+	$(call run,nvim-startup-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/measure_nvim_startup.py)
 
 update-snapshots:
 	$(call run,update-snapshots,UPDATE_EXPECT=1 cargo test -q --test manifest --test parity --test menu --test menus)
