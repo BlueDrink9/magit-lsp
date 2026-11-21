@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Repository-relative path of the generated LuaLS annotation file.
-pub const ANNOTATION_PATH: &str = "lua/magit-lsp/types.lua";
+pub const ANNOTATION_PATH: &str = "clients/neovim/lua/magit-lsp/types.lua";
 
 /// One generated LuaLS annotation file.
 pub struct Annotations {

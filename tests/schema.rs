@@ -1380,7 +1380,7 @@ fn lua_declaration<'a>(text: &'a str, header: &str) -> &'a str {
 fn luals_annotations_generation_is_deterministic() {
     let first = schema_luals::protocol_annotations().expect("generate annotations");
     let second = schema_luals::protocol_annotations().expect("regenerate annotations");
-    assert_eq!(first.path, "lua/magit-lsp/types.lua");
+    assert_eq!(first.path, "clients/neovim/lua/magit-lsp/types.lua");
     assert_eq!(
         first.text, second.text,
         "annotation generation must be deterministic"
