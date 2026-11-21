@@ -83,6 +83,8 @@ class NativeArtifactTests(unittest.TestCase):
             evidence = {}
             inspector.inspect_macho(Path('binary'), target, evidence)
             self.assertEqual(evidence['deployment'], '11.0')
+            self.assertEqual(evidence['dylibs'], ['/usr/lib/libSystem.B.dylib'])
+            self.assertEqual(evidence['rpaths'], ['@rpath/lib.dylib'])
         with mock.patch.object(inspector, 'run_tool', side_effect=['x86_64']):
             with self.assertRaisesRegex(inspector.InspectionError, 'architecture'):
                 inspector.inspect_macho(Path('binary'), target, {})
