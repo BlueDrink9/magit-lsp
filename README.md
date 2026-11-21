@@ -112,6 +112,23 @@ eagerly. Once the client is loaded, `:h magit` documents
 troubleshooting; run `:helptags ALL` if your installation does not generate
 help tags for the client's `doc` directory.
 
+To try the client from a full checkout without changing your own Neovim
+configuration, the `make neovim` launcher builds the debug server and starts an
+interactive Neovim that loads only this checkout, pointing `$MAGIT_LSP_BIN` at
+`target/debug/magit-lsp`:
+
+```sh
+make neovim                      # open the current working directory
+make neovim REPO=/path/to/repo   # open a chosen repository
+```
+
+It does not load user configuration, plugin managers or the test initializer,
+and it keeps HOME, XDG state/cache/config/data, shada, swap, backup and undo
+files in a temporary directory that is removed when Neovim exits. PATH and
+terminal variables are inherited. The automated targets below (`make test-lua`
+via `scripts/minimal_init.lua`, and tmux-driven `make ui-test`/`make ui-file`)
+are test harnesses, not interactive launchers.
+
 ### VS Code (1.85+)
 
 Install the locked extension dependencies (Node.js 22+ and pnpm) and start an

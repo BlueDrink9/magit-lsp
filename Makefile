@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-local release-artifact-check-local test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-local release-artifact-check-local test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour neovim plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -144,6 +144,14 @@ test-file: build
 
 ui-unit:
 	$(call run,ui-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py')
+
+# Interactive only: a real terminal must stay attached, so this target
+# deliberately bypasses the log-capturing `run` helper. `make test-lua`,
+# `make test-file` and `make ui-test` are automated harnesses, not interactive
+# launchers. `scripts/neovim` isolates editor state and removes it on exit.
+REPO ?= $(CURDIR)
+neovim: build
+	$(CURDIR)/scripts/neovim --repo "$(REPO)"
 
 PLAIN_ARGS ?=
 plain-neovim: build

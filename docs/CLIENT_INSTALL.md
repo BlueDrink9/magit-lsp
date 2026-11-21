@@ -101,6 +101,29 @@ The client ships `clients/neovim/doc/magit.txt`: `:h magit` documents
 troubleshooting. Run `:helptags ALL` if your package manager does not generate
 help tags for the client directory.
 
+## Interactive checkout launcher (development only)
+
+From a full checkout, `make neovim` builds the debug server and starts an
+interactive Neovim with only `clients/neovim` loaded:
+
+```sh
+make neovim                      # open the current working directory
+make neovim REPO=/path/to/repo   # open a chosen repository
+```
+
+The launcher runs `scripts/neovim` with the dedicated `scripts/neovim_init.lua`,
+which prepends the client runtime, sources `plugin/magit-lsp.lua` explicitly
+and opens the selected repository with `:Magit`; user configuration, plugin
+managers and the MiniTest initializer are not loaded. `$MAGIT_LSP_BIN` points
+at the checkout's `target/debug/magit-lsp`. HOME, XDG state/cache/config/data,
+shada, swap, backup and undo files live in a temporary directory that is
+removed when Neovim exits; PATH and terminal variables are inherited. This is
+a development convenience, not an installation method.
+
+The automated targets are not interactive launchers: `make test-lua` and
+`make test-file` run headless `mini.test` through `scripts/minimal_init.lua`,
+and `make ui-test`/`make ui-file` drive scripted Neovim screens in tmux.
+
 ## Neovim lazy.nvim (on demand)
 
 lazy.nvim adds the plugin directory (this repository's root) to

@@ -39,6 +39,21 @@ status.  Run `:helptags ALL` if help tags are not generated for the client
 `doc` directory.
 
 ==============================================================================
+CHECKOUT LAUNCHER                                        *magit-checkout*
+
+From a full checkout, `make neovim` builds the debug server and starts an
+interactive Neovim that loads only the in-tree client:
+
+    make neovim                      " open the current directory
+    make neovim REPO=/path/to/repo   " open a chosen repository
+
+It loads `scripts/neovim_init.lua` instead of your user configuration, sources
+the plugin entry point explicitly and uses the checkout's debug server.  HOME,
+XDG directories, shada, swap, backup and undo files are temporary and removed
+when Neovim exits.  The automated targets (`make test-lua`, `make ui-test`) are
+test harnesses, not interactive launchers.
+
+==============================================================================
 COMMANDS                                                     *magit-commands*
 
 :Magit [directory]                                                  *:Magit*
