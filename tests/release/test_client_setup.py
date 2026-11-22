@@ -245,6 +245,9 @@ class LauncherSmokeTests(unittest.TestCase):
 
     CHECK = '''local ok, err = xpcall(function()
   assert(vim.fn.has('nvim-0.11') == 1, 'requires Neovim 0.11+')
+  local ready = assert(vim.env.MAGIT_LSP_SMOKE_READY,
+    'smoke adapter did not name the readiness file')
+  vim.fn.writefile({ 'ready' }, ready)
   local shada = assert(vim.env.MAGIT_LSP_SMOKE_SHADA,
     'smoke adapter did not name the ShaDa path')
   assert(vim.fn.isdirectory(shada) == 0,
@@ -257,6 +260,41 @@ class LauncherSmokeTests(unittest.TestCase):
     return false
   end, 20), 'launcher did not render new.txt in a status view')
   assert(#vim.lsp.get_clients() == 1, 'launcher did not start exactly one server')
+  -- The caller's Neovim configuration and plugins must never be sourced.
+  assert(vim.g.caller_nvim_config_loaded == nil,
+    'caller Neovim configuration was sourced')
+  for marker in string.gmatch(vim.env.MAGIT_LSP_SMOKE_LEAK_MARKERS or '', '[^:]+') do
+    assert(vim.fn.filereadable(marker) == 0,
+      'caller Neovim config or plugin was loaded: ' .. marker)
+  end
+  -- Git in the launched editor must see the caller's global configuration.
+  -- A plain repository lookup reads local, then global config (following
+  -- includes), the same machinery a commit uses. `git config --global` alone
+  -- does not follow `include.path` directives in current Git.
+  local function lookup(key)
+    local value = vim.fn.systemlist({ 'git', 'config', '--get', key })
+    return value[1], vim.v.shell_error
+  end
+  local expected = {
+    ['user.name'] = vim.env.MAGIT_LSP_SMOKE_GIT_NAME,
+    ['user.email'] = vim.env.MAGIT_LSP_SMOKE_GIT_EMAIL,
+    ['user.signingkey'] = vim.env.MAGIT_LSP_SMOKE_GIT_SIGNINGKEY,
+    ['gpg.format'] = vim.env.MAGIT_LSP_SMOKE_GIT_GPGFORMAT,
+    ['commit.gpgsign'] = vim.env.MAGIT_LSP_SMOKE_GIT_GPGSIGN,
+  }
+  for key, want in pairs(expected) do
+    if want and want ~= '' then
+      local got, code = lookup(key)
+      assert(code == 0 and got == want, string.format(
+        'git config --get %s = %q, expected %q (status %d)',
+        key, tostring(got), want, code))
+    end
+  end
+  for key in string.gmatch(vim.env.MAGIT_LSP_SMOKE_GIT_ABSENT or '', '[^:]+') do
+    local got, code = lookup(key)
+    assert(code ~= 0, string.format(
+      'git config --get %s unexpectedly returned %q', key, tostring(got)))
+  end
   vim.cmd('wshada')
   assert(vim.fn.filereadable(shada) == 1, 'ShaDa file was not written: ' .. shada)
   for _, client in ipairs(vim.lsp.get_clients()) do client:stop() end
@@ -282,17 +320,61 @@ end
         self.root = Path(tempfile.mkdtemp(prefix='magit launcher smoke-'))
         self.addCleanup(shutil.rmtree, self.root, True)
 
-    def run_smoke(self, *, directory_shada: bool = False):
-        """Launch the real argv and return its status, observations and repo."""
+    def run_smoke(self, *, directory_shada: bool = False,
+                  caller_environment: dict[str, str] | None = None):
+        """Launch the real argv and return its status, observations and repo.
+
+        The caller's HOME and XDG config fixture holds a global Git identity and
+        signing policy plus a Neovim config and plugin that write markers when
+        sourced; `caller_environment` adds expectations or an explicit
+        `GIT_CONFIG_GLOBAL` override.
+        """
         repo = self.root / 'repo with spaces'
         repo.mkdir()
         subprocess.run(['git', 'init', '-q', str(repo)], check=True)
         (repo / 'new.txt').write_text('launcher smoke\n')
         temporary_root = self.root / 'temporary root with spaces'
         temporary_root.mkdir()
+        caller_home = self.root / 'caller home'
+        caller_xdg = caller_home / '.config'
+        caller_home.mkdir()
+        (caller_xdg / 'git').mkdir(parents=True)
+        (caller_xdg / 'git' / 'config').write_text(
+            '[user]\n\temail = xdg-sentinel@example.com\n'
+            '[gpg]\n\tformat = ssh\n[commit]\n\tgpgsign = true\n',
+            encoding='utf-8')
+        (caller_home / '.gitconfig').write_text(
+            '[user]\n\tname = Home Sentinel\n'
+            '\temail = home-sentinel@example.com\n'
+            '\tsigningkey = SIGNING-SENTINEL-1234\n', encoding='utf-8')
+        # A caller Neovim config and plugin record being loaded, which the
+        # dedicated initializer must prevent.
+        config_marker = caller_xdg / 'nvim' / 'config-loaded'
+        plugin_dir = caller_home / '.local' / 'share' / 'nvim' / 'site' / 'plugin'
+        plugin_marker = plugin_dir / 'plugin-loaded'
+        (caller_xdg / 'nvim').mkdir()
+        (caller_xdg / 'nvim' / 'init.lua').write_text(
+            "vim.g.caller_nvim_config_loaded = true\n"
+            "vim.fn.writefile({'loaded'}, vim.fn.expand('<sfile>:p:h') .. '/config-loaded')\n",
+            encoding='utf-8')
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / 'caller_plugin.lua').write_text(
+            "vim.fn.writefile({'loaded'}, vim.fn.expand('<sfile>:p:h') .. '/plugin-loaded')\n",
+            encoding='utf-8')
+        environment = {
+            'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+            'TERM': os.environ.get('TERM', 'xterm-256color'),
+            'HOME': str(caller_home),
+            'XDG_CONFIG_HOME': str(caller_xdg),
+            'MAGIT_LSP_SMOKE_LEAK_MARKERS': f'{config_marker}:{plugin_marker}',
+        }
+        if caller_environment:
+            environment.update(caller_environment)
         check = self.root / 'check.lua'
         check.write_text(self.CHECK)
-        observed: dict[str, object] = {}
+        ready = self.root / 'ready'
+        observed: dict[str, object] = {'caller_home': caller_home,
+                                       'leak_markers': [config_marker, plugin_marker]}
 
         def adapter(command, **options):
             argv = list(command)
@@ -307,6 +389,13 @@ end
                 'base_existed': base.is_dir(),
                 'shada_parent_existed': shada.parent.is_dir(),
                 'shada_is_directory': shada.is_dir(),
+                'environment': {
+                    key: environment[key]
+                    for key in ('HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+                                'XDG_STATE_HOME', 'XDG_CACHE_HOME',
+                                'XDG_RUNTIME_DIR', 'GIT_CONFIG_GLOBAL')
+                    if key in environment
+                },
             })
             if directory_shada:
                 # The superseded launcher passed the isolated directory itself.
@@ -314,14 +403,23 @@ end
             environment.update({
                 'MAGIT_LSP_SMOKE_SHADA': argv[shada_index],
                 'MAGIT_LSP_SMOKE_CHECK': str(check),
+                'MAGIT_LSP_SMOKE_READY': str(ready),
             })
             process = subprocess.Popen(
                 argv + ['--headless', '-c',
                         'lua dofile(vim.env.MAGIT_LSP_SMOKE_CHECK)'],
                 cwd=options['cwd'], env=environment, text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Sample only after the launched editor reports that its own script
+            # is running: sampling a freshly spawned image can race its exec and
+            # observe no launcher environment, making the detector vacuous.
             # The editor and its server inherit the launcher environment, so
-            # the detector must see them while the editor is still running.
+            # the detector must then see them while the editor is still running.
+            deadline = time.monotonic() + 30
+            while (not ready.is_file() and process.poll() is None
+                   and time.monotonic() < deadline):
+                time.sleep(0.01)
+            observed['ready'] = ready.is_file()
             observed['owned_running'] = len(owned_pids(base))
             stdout, stderr = process.communicate(timeout=90)
             result = subprocess.CompletedProcess(
@@ -333,8 +431,28 @@ end
 
         status = self.launcher.launch(  # type: ignore[attr-defined]
             repo, nvim=self.nvim, server=self.binary, runner=adapter,
-            temporary_root=temporary_root)
+            inherited=environment, temporary_root=temporary_root)
         return status, observed, repo
+
+    def assert_editor_state_isolated(self, observed: dict[str, object]) -> None:
+        """Assert caller Neovim config/plugins stayed out of the launched run."""
+        environment = observed['environment']
+        base = Path(observed['base'])
+        self.assertTrue(
+            observed['ready'], 'launched editor never reported startup')
+        self.assertEqual(environment['HOME'], str(observed['caller_home']))
+        for name in ('XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME',
+                     'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR'):
+            self.assertTrue(Path(environment[name]).is_relative_to(base), name)
+        self.assertNotEqual(
+            environment['XDG_CONFIG_HOME'],
+            str(Path(observed['caller_home']) / '.config'))
+        for marker in observed['leak_markers']:
+            self.assertFalse(
+                marker.exists(), f'caller Neovim config or plugin was loaded: {marker}')
+        self.assertFalse(
+            Path(observed['base']).exists(), 'launch directory was not removed')
+        self.assert_no_leaked_processes(base)
 
     def assert_no_leaked_processes(self, base: Path) -> None:
         """Fail while a launched descendant still names the removed launch dir."""
@@ -372,6 +490,58 @@ end
         self.assert_no_leaked_processes(Path(observed['base']))
         print('launcher smoke: dedicated initializer started a real status '
               'view with spaces, wrote ShaDa and removed the launch directory')
+
+    def test_launcher_smoke_keeps_caller_git_identity_and_signing_policy(self) -> None:
+        status, observed, _ = self.run_smoke(caller_environment={
+            # Identity spans the original XDG file and HOME `.gitconfig`;
+            # `user.email` exists in both and HOME wins Git's precedence.
+            'MAGIT_LSP_SMOKE_GIT_NAME': 'Home Sentinel',
+            'MAGIT_LSP_SMOKE_GIT_EMAIL': 'home-sentinel@example.com',
+            'MAGIT_LSP_SMOKE_GIT_SIGNINGKEY': 'SIGNING-SENTINEL-1234',
+            'MAGIT_LSP_SMOKE_GIT_GPGFORMAT': 'ssh',
+            'MAGIT_LSP_SMOKE_GIT_GPGSIGN': 'true',
+        })
+        result = observed['result']
+        output = result.stdout + result.stderr
+        self.assertEqual(status, 0, output)
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn('launcher smoke: rendered status and wrote shada', output)
+        self.assertNotRegex(result.stderr, r'(?m)^Error|E\d{3,4}:')
+        self.assertTrue(observed['shada_written'])
+        self.assertEqual(
+            Path(observed['environment']['GIT_CONFIG_GLOBAL']),
+            Path(observed['base']) / self.launcher.GIT_GLOBAL_CONFIG)  # type: ignore[attr-defined]
+        self.assert_editor_state_isolated(observed)
+        print('launcher smoke: caller XDG/HOME Git identity and signing policy '
+              'visible in the launched editor; Neovim state stayed isolated')
+
+    def test_launcher_smoke_respects_explicit_git_config_global_override(self) -> None:
+        override = self.root / 'explicit global'
+        override.write_text(
+            '[user]\n\tname = Override Sentinel\n'
+            '\temail = override-sentinel@example.com\n'
+            '\tsigningkey = OVERRIDE-SIGNING-SENTINEL\n'
+            '[commit]\n\tgpgsign = false\n', encoding='utf-8')
+        status, observed, _ = self.run_smoke(caller_environment={
+            'GIT_CONFIG_GLOBAL': str(override),
+            'MAGIT_LSP_SMOKE_GIT_NAME': 'Override Sentinel',
+            'MAGIT_LSP_SMOKE_GIT_EMAIL': 'override-sentinel@example.com',
+            'MAGIT_LSP_SMOKE_GIT_SIGNINGKEY': 'OVERRIDE-SIGNING-SENTINEL',
+            'MAGIT_LSP_SMOKE_GIT_GPGSIGN': 'false',
+            # The caller's original XDG file must not be replayed.
+            'MAGIT_LSP_SMOKE_GIT_ABSENT': 'gpg.format',
+        })
+        result = observed['result']
+        output = result.stdout + result.stderr
+        self.assertEqual(status, 0, output)
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn('launcher smoke: rendered status and wrote shada', output)
+        self.assertNotRegex(result.stderr, r'(?m)^Error|E\d{3,4}:')
+        self.assertEqual(
+            observed['environment']['GIT_CONFIG_GLOBAL'], str(override))
+        self.assert_editor_state_isolated(observed)
+        print('launcher smoke: explicit GIT_CONFIG_GLOBAL override reached the '
+              'launched editor; original XDG config was not replayed')
 
     def test_launcher_smoke_rejects_a_directory_as_the_shada_file(self) -> None:
         status, observed, _ = self.run_smoke(directory_shada=True)
