@@ -362,13 +362,12 @@ impl OpenView {
     fn leave_text_mode(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
         self.mode = ViewMode::Interactive;
         self.descriptor.mode = ViewMode::Interactive;
-        // A completion acquired during text mode already holds the current
-        // backing state: publish it rather than reading Git again. A refresh
-        // queued after that completion is superseded by the same stored result.
-        let completed = std::mem::take(&mut self.pending_completion);
-        if completed {
-            self.dirty = false;
-        } else if std::mem::take(&mut self.dirty) {
+        // A completion acquired during text mode already holds the backing
+        // state, so publish it without reading Git again. A refresh that
+        // arrived after it was installed is still queued in `dirty` and must
+        // be honored before the full replacement.
+        self.pending_completion = false;
+        if std::mem::take(&mut self.dirty) {
             self.view.on_refresh()?;
         }
         self.render_with_delivery(cursor, None, RenderDelivery::Full)
