@@ -290,10 +290,21 @@ fn queued_prompt_routing_uses_unique_correlated_request_ids() {
         .as_str()
         .unwrap()
         .to_owned();
+    // State-dependent commands are refused while the status acquisition is still
+    // running (src/session.rs:1321-1333), so wait for the server-owned render to
+    // publish acquired state before opening the commit menu.
     client.until(|c| {
         c.rich
             .as_ref()
-            .is_some_and(|r| r.views.contains_key(&status))
+            .and_then(|r| r.views.get(&status))
+            .is_some_and(|state| {
+                state.version > 0
+                    && !state.lines.is_empty()
+                    && !state
+                        .lines
+                        .iter()
+                        .any(|line| line.contains("Loading repository status"))
+            })
     });
     let invoke = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":status,"command":"open.commit"}}));
     let opened = client.until_response(invoke);
@@ -1505,6 +1516,30 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
         .as_str()
         .expect("opened view")
         .to_owned();
+    // State-dependent commands are refused while the status acquisition is still
+    // running (src/session.rs:1321-1333). Plain clients may not receive pushed
+    // renders, so poll the server-owned render until acquired contents install.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "status view {view} did not publish acquired contents"
+        );
+        let id = client
+            .send(json!({"jsonrpc":"2.0","id":0,"method":"view/resync","params":{"viewId":view}}));
+        let resync = client.until_response(id);
+        let lines = resync["result"]["text"]
+            .as_array()
+            .unwrap_or_else(|| panic!("full status resync: {resync}"));
+        if !lines.is_empty()
+            && !lines.iter().any(|line| {
+                line.as_str()
+                    .is_some_and(|line| line.contains("Loading repository status"))
+            })
+        {
+            break;
+        }
+    }
     let id=client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
     let response = client.until_response(id);
     assert!(response.get("result").is_some(), "{response}");
@@ -1523,7 +1558,7 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
                 .iter()
                 .filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end")
                 .count()
-                == 2
+                == 3
     });
     let requests: Vec<_> = client
         .editor
@@ -1531,7 +1566,7 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
         .iter()
         .filter(|m| m["method"] == "window/workDoneProgress/create")
         .collect();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert_ne!(requests[0]["id"], requests[1]["id"]);
     for request in requests {
         assert!(client
@@ -2377,14 +2412,37 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             "pending URI row absent: {}",
             client.editor.text(&uri)
         );
+        client.until(|c| {
+            c.server.notifications.iter().any(|m| {
+                m["method"] == "$/progress"
+                    && m["params"]["value"]["kind"] == "begin"
+                    && m["params"]["value"]["message"] == "commit"
+            })
+        });
         let token = client
             .server
             .notifications
             .iter()
-            .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+            .find(|m| {
+                m["method"] == "$/progress"
+                    && m["params"]["value"]["kind"] == "begin"
+                    && m["params"]["value"]["message"] == "commit"
+            })
             .expect("commit progress began")["params"]["token"]
             .clone();
+        client.until(|c| c.editor.text(&uri).contains(&expected_path));
         if !declared {
+            // Without showDocument the only delivery signal is the manual
+            // instructions message; wait for it so didOpen attaches to the
+            // registered run instead of racing the template delivery.
+            client.until(|c| {
+                c.server.notifications.iter().any(|m| {
+                    m["method"] == "window/showMessage"
+                        && m["params"]["message"]
+                            .as_str()
+                            .is_some_and(|message| message.contains(&expected_uri))
+                })
+            });
             let initial = std::fs::read_to_string(&expected_path).unwrap();
             let did_open = client.editor.open(&expected_uri, &initial);
             client.send(did_open);
@@ -2403,7 +2461,12 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             let confirm = offered
                 .iter()
                 .find(|action| action["command"]["arguments"][0]["command"] == "common.confirm")
-                .expect("attached draft offers Confirm")["command"]["arguments"][0]
+                .unwrap_or_else(|| {
+                    panic!(
+                        "attached draft offers Confirm: {offered:?}\n{}",
+                        client.server.stderr_text()
+                    )
+                })["command"]["arguments"][0]
                 .clone();
             assert_eq!(confirm["version"], 2);
             let mut stale = confirm.clone();
@@ -2467,8 +2530,21 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
                 .find(|action| action["command"]["arguments"][0]["command"] == "menu.run-action")
                 .expect("start abortable commit")["command"]["arguments"][0]
                 .clone();
+            let manual_instructions = |c: &ClientPump| {
+                c.server
+                    .notifications
+                    .iter()
+                    .filter(|m| {
+                        m["method"] == "window/showMessage"
+                            && m["params"]["message"]
+                                .as_str()
+                                .is_some_and(|message| message.contains(&expected_uri))
+                    })
+                    .count()
+            };
+            let delivered = manual_instructions(&client);
             assert!(execute_plain_action(&mut client, create)["error"].is_null());
-            client.until(|c| c.editor.text(&uri).contains(&expected_path));
+            client.until(|c| manual_instructions(c) > delivered);
             let initial = std::fs::read_to_string(&expected_path).unwrap();
             let did_open = client.editor.open(&expected_uri, &initial);
             client.send(did_open);
@@ -2526,6 +2602,14 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             assert_eq!(repo.git(&["write-tree"]), abort_tree);
             assert_eq!(repo.git(&["status", "--porcelain"]), abort_status);
         } else {
+            // Deliver the draft before cancelling: the correlated worker token
+            // must reach showDocument, or the cancel kills the run too early.
+            client.until(|c| {
+                c.editor.outbound.iter().any(|m| {
+                    m["method"] == "window/showDocument"
+                        && m["params"]["uri"].as_str() == Some(expected_uri.as_str())
+                })
+            });
             client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
             client.until(|c| {
                 let begins = c
@@ -2722,13 +2806,25 @@ fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
         .as_str()
         .to_owned();
     client.until(|c| c.editor.text(&uri).contains(&expected_uri));
+    client.until(|c| {
+        c.server.notifications.iter().any(|m| {
+            m["method"] == "$/progress"
+                && m["params"]["value"]["kind"] == "begin"
+                && m["params"]["value"]["message"] == "commit"
+        })
+    });
     let token = client
         .server
         .notifications
         .iter()
-        .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+        .find(|m| {
+            m["method"] == "$/progress"
+                && m["params"]["value"]["kind"] == "begin"
+                && m["params"]["value"]["message"] == "commit"
+        })
         .expect("commit progress began")["params"]["token"]
         .clone();
+    client.until(|c| c.editor.text(&uri).contains(&expected_path));
 
     let initial = std::fs::read_to_string(&expected_path).unwrap();
     let did_open = client.editor.open(&expected_uri, &initial);
