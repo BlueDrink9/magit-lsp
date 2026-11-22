@@ -26,6 +26,7 @@ no readiness claim and is not wired into publication yet.
 """
 
 import argparse
+import base64
 import hashlib
 import inspect
 import json
@@ -185,6 +186,13 @@ MANIFEST_FIELDS = frozenset({
     'executable_sha256',
 })
 ARTIFACT_DIGEST_PATTERN = re.compile(r'sha256:[0-9a-f]{64}')
+# The lockfiles the producer hashes into a release manifest. Publication reads
+# them at the bound source commit, never from the publisher checkout.
+SOURCE_LOCK_FILES = (
+    'Cargo.lock',
+    'flake.lock',
+    'clients/vscode/pnpm-lock.yaml',
+)
 # Publication binding: the tracked producer's mandatory jobs. The stable
 
 class CheckError(Exception):
@@ -1720,6 +1728,41 @@ def fetch_api(repository, path, token):
         fail(f'GitHub API request for {path} failed: {error}')
 
 
+def fetch_source_locks(repository, source_sha, token):
+    """Return each tracked lockfile's sha256 at the immutable ``source_sha``.
+
+    The locks are read as inert bytes through the ordinary read-only contents
+    API at the bound commit, so the expectation follows the release source and
+    not the publisher checkout. Unavailable or malformed data fails closed;
+    nothing is checked out, executed or read from the local tree.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', str(source_sha)):
+        fail('release source lock lookup requires a full commit SHA')
+    digests = {}
+    for name in SOURCE_LOCK_FILES:
+        status, body = fetch_api(
+            repository, f'/contents/{name}?ref={source_sha}', token)
+        if status != 200:
+            fail(f'release source {name} at {source_sha} returned HTTP {status}')
+        document = parse_json(body, f'release source {name}')
+        if not isinstance(document, dict) or document.get('type') != 'file' \
+                or document.get('path') != name:
+            fail(f'release source {name} is not the tracked file')
+        if document.get('encoding') != 'base64':
+            fail(f'release source {name} is not base64-encoded content')
+        content = document.get('content')
+        if not isinstance(content, str) or not content:
+            fail(f'release source {name} has no content')
+        try:
+            data = base64.b64decode(''.join(content.split()), validate=True)
+        except ValueError:
+            fail(f'release source {name} content is not valid base64')
+        if isinstance(document.get('size'), bool) or document.get('size') != len(data):
+            fail(f'release source {name} size differs from its content')
+        digests[name] = hashlib.sha256(data).hexdigest()
+    return digests
+
+
 def validate_run_metadata(document, repository, sha):
     """Fail unless the run is this repository's successful release build of ``sha``.
 
@@ -1945,7 +1988,7 @@ def validate_manifest_binding(manifest, expected):
                 r'[0-9a-f]{64}', manifest[field]):
             fail(f'release manifest {field} is not a SHA-256')
     if manifest['lock_hashes'] != expected['lock_hashes']:
-        fail('release manifest lock_hashes differ from the checked-out source')
+        fail('release manifest lock_hashes differ from the bound release source')
     if manifest['toolchain'] != expected['toolchain']:
         fail('release manifest toolchain differs from the trusted toolchain')
 
@@ -2330,14 +2373,14 @@ def prepare_publication_runtime(event_path):
         manifest = parse_json(files['release-manifest.json'], 'publication release manifest')
     except (transport.DownloadError, KeyError) as error:
         fail(f'publication candidate artifact is invalid: {error}')
-    trusted = {
-        'run_id': str(run_id), 'run_attempt': str(attempt), 'event': RUN_EVENT,
-        'version': original_ref[1:], 'target': ASSET, 'original_ref': tag_ref,
-        'lock_hashes': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
-                        for name in ('Cargo.lock', 'flake.lock')},
-        'toolchain': {'rust': RELEASE_TOOLCHAIN},
-    }
-    validate_manifest_binding(manifest, trusted)
+    # Peel the manifest's original tag before trusting any lock expectation:
+    # the locks belong to the immutable source commit, so they are fetched as
+    # data at that SHA and never read from the publisher checkout or default
+    # branch. A legitimate older tag therefore releases its own lockfiles.
+    if not isinstance(manifest, dict) or not isinstance(
+            manifest.get('original_ref'), str) or not isinstance(
+            manifest.get('source_sha'), str):
+        fail('release manifest is missing its original_ref/source_sha binding')
     tag_status, tag_body = fetch_api(repository, f'/git/ref/tags/{original_ref}', token)
     tag_object_body = None
     tag_target = tag_document.get('object') if isinstance(tag_document, dict) else None
@@ -2347,6 +2390,15 @@ def prepare_publication_runtime(event_path):
             fail(f'publication annotated tag lookup returned HTTP {peel_status}')
         tag_object_body = peel_body
     source_sha = validate_tag_binding(tag_status, tag_body, tag_object_body, manifest)
+    source_locks = fetch_source_locks(repository, source_sha, token)
+    trusted = {
+        'run_id': str(run_id), 'run_attempt': str(attempt), 'event': RUN_EVENT,
+        'version': original_ref[1:], 'target': ASSET, 'original_ref': tag_ref,
+        'lock_hashes': {name: source_locks[name]
+                        for name in ('Cargo.lock', 'flake.lock')},
+        'toolchain': {'rust': RELEASE_TOOLCHAIN},
+    }
+    validate_manifest_binding(manifest, trusted)
     archive_name = f'magit-lsp-v{manifest["version"]}-{manifest["target"]}.tar.gz'
     required = {archive_name, archive_name + '.sha256', 'release-manifest.json',
                 'release-manifest.json.sha256'}
@@ -2405,7 +2457,8 @@ def prepare_publication_runtime(event_path):
     try:
         vsix = vsix_transport.fetch_candidate(
             repository, run_id, attempt, source_sha, tag_ref, RUN_EVENT,
-            original_ref[1:], handoff_dir, token, opener=transport.request)
+            original_ref[1:], handoff_dir, token, opener=transport.request,
+            expected_locks=source_locks)
     except (vsix_transport.DownloadError, KeyError, ValueError, OSError) as error:
         fail(f'publication VSIX handoff is invalid: {error}')
     # The handoff records only handoff-relative names for the exact accepted
@@ -3813,8 +3866,22 @@ def run_self_tests():
             info = tarfile.TarInfo(f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}/{name}')
             info.size, info.mode = len(value), mode
             archive.addfile(info, io.BytesIO(value))
+    # The bound release source owns its lockfiles. These fixture bytes
+    # deliberately differ from this publisher checkout, so a successful run
+    # proves the expectation comes from the source SHA, not the publisher tree.
+    source_lock_bytes = {
+        name: f'fixture bound-source {name}\n'.encode('utf-8')
+        for name in SOURCE_LOCK_FILES}
+    source_lock_hashes = {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in source_lock_bytes.items()}
+    for name in SOURCE_LOCK_FILES:
+        if source_lock_hashes[name] == hashlib.sha256(
+                Path(name).read_bytes()).hexdigest():
+            fail(f'self-test: the {name} source fixture must differ from the '
+                 'publisher checkout')
     runtime_manifest = manifest_fixture(
-        lock_hashes={name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+        lock_hashes={name: source_lock_hashes[name]
                      for name in ('Cargo.lock', 'flake.lock')},
         archive_sha256=hashlib.sha256(tar_stream.getvalue()).hexdigest(),
         executable_sha256=hashlib.sha256(executable).hexdigest())
@@ -3840,9 +3907,7 @@ def run_self_tests():
         'run_id': SELF_TEST_RUN_ID, 'run_attempt': SELF_TEST_RUN_ATTEMPT,
         'version': SELF_TEST_VERSION, 'pnpm_version': '10.13.1',
         'vsix_sha256': hashlib.sha256(vsix_bytes).hexdigest(),
-        'lock_hashes': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
-                        for name in ('Cargo.lock', 'flake.lock',
-                                     'clients/vscode/pnpm-lock.yaml')},
+        'lock_hashes': dict(source_lock_hashes),
     }
     vsix_manifest_bytes = json.dumps(vsix_manifest).encode()
     vsix_name = f'magit-lsp-{SELF_TEST_VERSION}.vsix'
@@ -3893,6 +3958,11 @@ def run_self_tests():
             page_document('artifacts', runtime_coherent_artifacts[2:],
                           total=runtime_total_artifacts),
         f'/git/ref/tags/v{SELF_TEST_VERSION}': json.loads(tag_ref_body()),
+        **{f'/contents/{name}?ref={SELF_TEST_SHA}': {
+            'type': 'file', 'path': name, 'encoding': 'base64',
+            'size': len(source_lock_bytes[name]),
+            'content': base64.b64encode(source_lock_bytes[name]).decode('ascii')}
+           for name in SOURCE_LOCK_FILES},
     }
     runtime_calls = []
     runtime_overrides = {}
@@ -3981,6 +4051,19 @@ def run_self_tests():
                     Path(handoff['vsix']['vsix']).is_absolute() or \
                     Path(handoff['vsix']['manifest']).is_absolute():
                 fail('self-test: the handoff must record relocatable native/VSIX names')
+            # Every lock expectation is fetched at the peeled source SHA; the
+            # default branch and the publisher checkout are never consulted.
+            expected_lock_paths = [f'/contents/{name}?ref={SELF_TEST_SHA}'
+                                   for name in SOURCE_LOCK_FILES]
+            missing_lock_paths = [path for path in expected_lock_paths
+                                  if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
+            if missing_lock_paths:
+                fail('self-test: the runtime must fetch every source lock at the '
+                     f'bound SHA; missing {missing_lock_paths!r}')
+            lock_calls = [path for _, path in runtime_calls if '/contents/' in path]
+            if any(f'ref={SELF_TEST_SHA}' not in path for path in lock_calls):
+                fail('self-test: every lock fetch must address the bound source '
+                     f'SHA, saw {lock_calls!r}')
             for key in ('vsix', 'manifest'):
                 if not (handoff_dir / handoff['vsix'][key]).is_file():
                     fail(f'self-test: the handoff {key} path must stay readable')
@@ -4309,6 +4392,105 @@ def run_self_tests():
                 expect_check('runtime collector rejects a mismatched VSIX identity',
                              prepare_publication_runtime, str(event_path),
                              expected='upload identity does not bind candidate/run/attempt')
+            # Missing or malformed source lock data fails closed before any
+            # handoff or publication; it never falls back to the checkout or
+            # the default branch.
+            handoff_path = handoff_dir / 'publication-handoff.json'
+            handoff_path.unlink()
+            cargo_lock_path = f'/contents/Cargo.lock?ref={SELF_TEST_SHA}'
+            runtime_overrides[cargo_lock_path] = (404, '{}')
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects an unavailable source lock',
+                             prepare_publication_runtime, str(event_path),
+                             expected=f'release source Cargo.lock at {SELF_TEST_SHA} '
+                                      'returned HTTP 404')
+            if handoff_path.exists():
+                fail('self-test: unavailable source lock data must fail before '
+                     'the handoff')
+            runtime_overrides[cargo_lock_path] = (
+                200, json.dumps({'type': 'file', 'path': 'Cargo.lock',
+                                 'encoding': 'base64', 'size': 1,
+                                 'content': '!!!!'}))
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a malformed source lock',
+                             prepare_publication_runtime, str(event_path),
+                             expected='release source Cargo.lock content is not '
+                                      'valid base64')
+            runtime_overrides.clear()
+            # A native manifest whose locks name another revision is rejected
+            # against the bound source even though its bytes are self-coherent.
+            mismatched_native_manifest = dict(
+                runtime_manifest,
+                lock_hashes={**runtime_manifest['lock_hashes'],
+                             'Cargo.lock': '0' * 64})
+            mismatched_native_bytes = json.dumps(mismatched_native_manifest).encode()
+            mismatched_native_assets = dict(
+                runtime_assets, **{
+                    'release-manifest.json': mismatched_native_bytes,
+                    'release-manifest.json.sha256':
+                        f'{hashlib.sha256(mismatched_native_bytes).hexdigest()}  '
+                        'release-manifest.json\n'.encode()})
+            mismatched_native_zip = zip_bytes(mismatched_native_assets)
+            mismatched_native_identity = dict(
+                runtime_identity,
+                artifact_digest='sha256:' +
+                hashlib.sha256(mismatched_native_zip).hexdigest())
+            mismatched_native_identity_zip = zip_bytes(
+                {'upload-identity.json': json.dumps(
+                    mismatched_native_identity).encode()})
+            runtime_zip_bytes['100'] = mismatched_native_zip
+            runtime_zip_bytes['101'] = mismatched_native_identity_zip
+            runtime_coherent_artifacts[0]['digest'] = \
+                mismatched_native_identity['artifact_digest']
+            runtime_coherent_artifacts[1]['digest'] = (
+                'sha256:' + hashlib.sha256(
+                    mismatched_native_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects manifest locks from another '
+                             'source', prepare_publication_runtime, str(event_path),
+                             expected='lock_hashes differ from the bound release source')
+            runtime_zip_bytes['100'] = runtime_candidate_zip
+            runtime_zip_bytes['101'] = runtime_identity_zip
+            runtime_coherent_artifacts[0]['digest'] = runtime_identity['artifact_digest']
+            runtime_coherent_artifacts[1]['digest'] = (
+                'sha256:' + hashlib.sha256(runtime_identity_zip).hexdigest())
+            # The same holds for the VSIX manifest's source lock map.
+            mismatched_vsix_manifest = dict(
+                vsix_manifest,
+                lock_hashes={**vsix_manifest['lock_hashes'],
+                             'clients/vscode/pnpm-lock.yaml': '0' * 64})
+            mismatched_vsix_zip = zip_bytes({
+                vsix_name: vsix_bytes,
+                'vsix-manifest.json': json.dumps(
+                    mismatched_vsix_manifest).encode()})
+            mismatched_vsix_identity = dict(
+                runtime_vsix_identity,
+                artifact_digest='sha256:' +
+                hashlib.sha256(mismatched_vsix_zip).hexdigest())
+            mismatched_vsix_identity_zip = zip_bytes(
+                {'vsix-upload-identity.json': json.dumps(
+                    mismatched_vsix_identity).encode()})
+            runtime_zip_bytes['102'] = mismatched_vsix_zip
+            runtime_zip_bytes['103'] = mismatched_vsix_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = \
+                mismatched_vsix_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(
+                    mismatched_vsix_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects VSIX locks from another '
+                             'source', prepare_publication_runtime, str(event_path),
+                             expected='VSIX manifest provenance does not match')
+            runtime_zip_bytes['102'] = runtime_vsix_zip
+            runtime_zip_bytes['103'] = runtime_vsix_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = \
+                runtime_vsix_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(runtime_vsix_identity_zip).hexdigest())
     finally:
         for key, value in saved_env.items():
             if value is None:
