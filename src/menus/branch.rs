@@ -83,7 +83,7 @@ pub fn definition() -> MenuDef {
                         "branch.create-and-checkout",
                         "new branch",
                         "magit-branch-and-checkout",
-                        "R-6.1",
+                        "",
                     ),
                     action(
                         "s",

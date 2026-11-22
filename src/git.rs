@@ -769,6 +769,24 @@ impl GitRepo {
             .map(|_| ())
     }
 
+    /// Create branch `new` at `startpoint` and switch to it.
+    ///
+    /// A local-branch startpoint becomes the new branch's upstream, matching
+    /// [`Self::create_branch_at`]. The ref creation and worktree switch happen
+    /// in one `git switch`, so a checkout Git refuses (for example because it
+    /// would overwrite local changes) leaves no new ref behind.
+    pub fn create_and_checkout_branch(&self, new: &str, startpoint: &str) -> Result<()> {
+        let new = self.validate_branch_name(new)?;
+        Self::reject_option_like("start point", startpoint)?;
+        if self.is_local_branch(startpoint) {
+            return self
+                .run(&["switch", "-c", new.as_str(), "--track", startpoint])
+                .map(|_| ());
+        }
+        self.run(&["switch", "-c", new.as_str(), startpoint])
+            .map(|_| ())
+    }
+
     /// Create branch `new` at `startpoint`, setting `startpoint` as its
     /// upstream.
     ///

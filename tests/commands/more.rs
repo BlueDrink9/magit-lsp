@@ -1125,6 +1125,436 @@ fn branch_create_refuses_option_like_answers() {
 }
 
 #[test]
+fn branch_create_and_checkout_menu_flow_creates_tracking_branch_and_switches() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let main_oid = tmp.git(&["rev-parse", "main"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    test.ui()
+        .reply_text(Some("main".into()))
+        .reply_text(Some("feature".into()));
+    test.press_ui("b");
+    let result = test.press_ui("c");
+    assert!(
+        message_texts(&result.effects).contains(&"Created and checked out branch feature"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "feature",
+        "menu c must switch to the new branch"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "feature"]).trim(),
+        main_oid,
+        "the new branch must start at the answered local branch's commit"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--get", "branch.feature.merge"]).trim(),
+        "refs/heads/main",
+        "a local-branch startpoint must become the new branch's upstream"
+    );
+    assert_eq!(
+        tmp.git(&["config", "--get", "branch.feature.remote"])
+            .trim(),
+        ".",
+        "a local-branch startpoint tracks a local branch"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+/// Start the two-prompt create-and-checkout flow on the focused view.
+fn start_create_and_checkout(test: &mut TestSession) -> magit_lsp::session::Execution {
+    test.session
+        .start_invoke(&magit_lsp::protocol::ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.create-and-checkout".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn branch_create_and_checkout_default_and_revision_startpoints_do_not_track() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let earlier = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("same".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Created and checked out branch same"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "same"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "same"]).trim(), head);
+    assert_eq!(
+        tmp.git(&[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            "refs/heads/same",
+        ])
+        .trim(),
+        "",
+        "a HEAD startpoint must not set an upstream"
+    );
+
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("older".into())))
+        .unwrap()
+    else {
+        panic!("expected completion");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Created and checked out branch older"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "older"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "older"]).trim(),
+        earlier,
+        "the new branch must start at the answered revision"
+    );
+    assert_eq!(
+        tmp.git(&[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            "refs/heads/older",
+        ])
+        .trim(),
+        "",
+        "a revision startpoint must not set an upstream"
+    );
+    assert!(!tmp.path().join("second.txt").exists());
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_create_and_checkout_cancellation_and_invalid_answers_preserve_state() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "other"]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"])
+                .trim()
+                .to_owned(),
+            tmp.git(&["rev-parse", "HEAD"]).trim().to_owned(),
+            tmp.git(&["write-tree"]).trim().to_owned(),
+            tmp.git(&["status", "--porcelain"]).trim().to_owned(),
+            tmp.git(&["for-each-ref", "--format=%(refname)", "refs/heads"])
+                .trim()
+                .to_owned(),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        )
+    };
+    let before = state(&tmp);
+
+    // Cancellation at the starting-point prompt.
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Done(cancelled) = test.session.resume_prompt(&start.prompt_id, None).unwrap()
+    else {
+        panic!("cancellation must complete");
+    };
+    assert!(
+        message_texts(&cancelled.effects).is_empty(),
+        "cancelling the starting point must be silent: {:?}",
+        cancelled.effects
+    );
+    assert_eq!(
+        state(&tmp),
+        before,
+        "cancelling the starting point must not write"
+    );
+    assert!(!test.session.has_pending_prompt());
+
+    // Cancellation at the name prompt.
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(cancelled) = test.session.resume_prompt(&name.prompt_id, None).unwrap()
+    else {
+        panic!("cancellation must complete");
+    };
+    assert!(
+        message_texts(&cancelled.effects).is_empty(),
+        "cancelling the name must be silent: {:?}",
+        cancelled.effects
+    );
+    assert_eq!(
+        state(&tmp),
+        before,
+        "cancelling the name must not create a branch or move HEAD"
+    );
+    assert!(!test.session.has_pending_prompt());
+
+    // Refused answers through to the Git boundary.
+    for (startpoint, name) in [
+        ("does-not-exist", "feature"),
+        ("HEAD", "bad name"),
+        ("HEAD", "other"),
+    ] {
+        let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+            panic!("expected starting point prompt");
+        };
+        let Execution::Prompt(name_prompt) = test
+            .session
+            .resume_prompt(&start.prompt_id, Some(PromptValue::Text(startpoint.into())))
+            .unwrap()
+        else {
+            panic!("{startpoint}: expected branch name prompt");
+        };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(&name_prompt.prompt_id, Some(PromptValue::Text(name.into())))
+            .unwrap()
+        else {
+            panic!("{startpoint}/{name}: expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts.iter().any(|text| !text.is_empty()),
+            "{startpoint}/{name}: refusal must be readable: {:?}",
+            result.effects
+        );
+        assert!(
+            !texts
+                .iter()
+                .any(|text| text.starts_with("Created and checked out")),
+            "{startpoint}/{name}: a refusal must not claim success: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{startpoint}/{name}: refusal must preserve HEAD, index, worktree and refs"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+
+    // Invalid starting-point answers stop before the name prompt.
+    for answer in ["", "   ", "-D"] {
+        let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+            panic!("expected starting point prompt");
+        };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(&start.prompt_id, Some(PromptValue::Text(answer.into())))
+            .unwrap()
+        else {
+            panic!("{answer:?}: an invalid starting point must stop before the name");
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| !text.is_empty()),
+            "{answer:?}: refusal must be readable: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{answer:?}: an invalid starting point must not write"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+}
+
+#[test]
+fn branch_create_and_checkout_conflicting_dirty_refused_and_permitted_dirty_preserved() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+
+    // A dirty file the target revision would overwrite must refuse the whole
+    // create-and-checkout without leaving the new ref behind.
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "main\n")])
+        .build();
+    tmp.git(&["branch", "other", "HEAD~1"]);
+    std::fs::write(tmp.path().join("base.txt"), "dirty\n").unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let head = tmp
+        .git(&["symbolic-ref", "--short", "HEAD"])
+        .trim()
+        .to_owned();
+    let head_oid = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let index = tmp.git(&["write-tree"]).trim().to_owned();
+    let status = tmp.git(&["status", "--porcelain"]).trim().to_owned();
+    let refs = tmp
+        .git(&["for-each-ref", "--format=%(refname)", "refs/heads"])
+        .trim()
+        .to_owned();
+    let dirty = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
+
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("other".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("feature".into())))
+        .unwrap()
+    else {
+        panic!("a refused checkout must complete with a message");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts.iter().any(|text| !text.is_empty()),
+        "Git's refusal must be readable: {:?}",
+        result.effects
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.starts_with("Created and checked out")),
+        "a refused checkout must not claim success: {:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["symbolic-ref", "--short", "HEAD"]).trim(),
+        head,
+        "a refused checkout must keep HEAD"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), head_oid);
+    assert_eq!(tmp.git(&["write-tree"]).trim(), index);
+    assert_eq!(tmp.git(&["status", "--porcelain"]).trim(), status);
+    assert_eq!(
+        tmp.git(&["for-each-ref", "--format=%(refname)", "refs/heads"])
+            .trim(),
+        refs,
+        "a refused checkout must not leave a stray branch"
+    );
+    assert_eq!(
+        tmp.git(&["for-each-ref", "--format=%(refname)", "refs/heads/feature",])
+            .trim(),
+        "",
+        "the refused branch name must not exist"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        dirty,
+        "a refused checkout must preserve the dirty bytes"
+    );
+    assert!(!test.session.has_pending_prompt());
+
+    // A permitted dirty checkout switches branches and keeps the user's bytes.
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    let earlier = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    std::fs::write(tmp.path().join("base.txt"), "dirty\n").unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let Execution::Prompt(start) = start_create_and_checkout(&mut test) else {
+        panic!("expected starting point prompt");
+    };
+    let Execution::Prompt(name) = test
+        .session
+        .resume_prompt(&start.prompt_id, Some(PromptValue::Text("HEAD~1".into())))
+        .unwrap()
+    else {
+        panic!("expected branch name prompt after the starting point");
+    };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&name.prompt_id, Some(PromptValue::Text("older".into())))
+        .unwrap()
+    else {
+        panic!("a permitted dirty checkout must complete");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Created and checked out branch older"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "older"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "older"]).trim(), earlier);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        "dirty\n",
+        "a permitted dirty checkout must preserve user bytes"
+    );
+    assert!(!tmp.path().join("second.txt").exists());
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
 fn tag_create_prompts_and_creates_tag_at_head() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;

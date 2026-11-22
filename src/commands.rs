@@ -388,6 +388,13 @@ pub enum PromptAction {
         /// The starting point answered at the first prompt.
         startpoint: String,
     },
+    /// New create-and-checkout flow: the answered starting point, then the name.
+    BranchCreateAndCheckoutStart,
+    /// Second half of a create-and-checkout: create and switch at this startpoint.
+    BranchCreateAndCheckoutTarget {
+        /// The starting point answered at the first prompt.
+        startpoint: String,
+    },
     /// Check out the answered branch or revision.
     BranchCheckout,
     /// Check out the answered existing local branch.
@@ -753,6 +760,38 @@ pub fn resume_prompt(
                 ctx,
                 |repo| repo.create_branch_at(&name, &startpoint),
                 format!("Created branch {name}"),
+            )
+        }
+        PromptAction::BranchCreateAndCheckoutStart => {
+            let PromptValue::Text(startpoint) = answer else {
+                return Err(crate::Error::new("Expected a starting point"));
+            };
+            let startpoint = startpoint.trim().to_owned();
+            if startpoint.is_empty() {
+                ctx.info("A starting point is required");
+                return Ok(CommandOutcome::default());
+            }
+            if startpoint.starts_with('-') {
+                ctx.info("A starting point cannot begin with '-'");
+                return Ok(CommandOutcome::default());
+            }
+            Ok(CommandOutcome {
+                prompt: Some((
+                    branch_name_prompt("Create branch", "", "New branch name"),
+                    PromptAction::BranchCreateAndCheckoutTarget { startpoint },
+                )),
+                ..Default::default()
+            })
+        }
+        PromptAction::BranchCreateAndCheckoutTarget { startpoint } => {
+            let PromptValue::Text(name) = answer else {
+                return Err(crate::Error::new("Expected a branch name"));
+            };
+            let name = name.trim().to_owned();
+            branch_action(
+                ctx,
+                |repo| repo.create_and_checkout_branch(&name, &startpoint),
+                format!("Created and checked out branch {name}"),
             )
         }
         PromptAction::BranchCheckout => {
@@ -1817,6 +1856,7 @@ fn build() -> Registry {
             effects: &[],
         },
         command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch from a starting point", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
+        command! { id: "branch.create-and-checkout", scope: Scope::MenuAction, doc: "Create a branch from a starting point and check it out", status: CommandStatus::Implemented, run: branch_create_and_checkout, effects: &[] },
         command! { id: "branch.checkout", scope: Scope::MenuAction, doc: "Check out a branch or revision", status: CommandStatus::Implemented, run: branch_checkout, effects: &[] },
         command! { id: "branch.checkout-local", scope: Scope::MenuAction, doc: "Check out an existing local branch", status: CommandStatus::Implemented, run: branch_checkout_local, effects: &[] },
         command! { id: "branch.checkout-remote", scope: Scope::MenuAction, doc: "Check out a remote-tracking ref as a local tracking branch", status: CommandStatus::Implemented, run: branch_checkout_remote, effects: &[] },
@@ -2775,6 +2815,17 @@ fn branch_create(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         prompt: Some((
             branch_name_prompt("Starting point", "", "Branch or revision"),
             PromptAction::BranchCreateStart,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt for the starting point of a branch that is created and checked out.
+fn branch_create_and_checkout(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Starting point", "", "Branch or revision"),
+            PromptAction::BranchCreateAndCheckoutStart,
         )),
         ..Default::default()
     })
