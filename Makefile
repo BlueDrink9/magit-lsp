@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -392,6 +392,9 @@ native-vscode-artifact-check:
 .PHONY: vscode-server-commands
 vscode-server-commands: vscode-prereqs build vscode-deps
 	$(call run,vscode-server-commands,MAGIT_VSCODE_SERVER_COMMANDS_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
+vscode-host-spike: build vscode-deps
+	MAGIT_VSCODE_BIN="$${MAGIT_VSCODE_BIN:-code}" node clients/vscode/test/e2e/real-file-spike.mjs
 
 vscode-e2e: vscode-prereqs build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)

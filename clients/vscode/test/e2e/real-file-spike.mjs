@@ -10,6 +10,7 @@ import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 const root = resolve(import.meta.dirname, "../../../..");
 if (process.argv[2] === "--cdp") {
   const [, , , port, method, params] = process.argv;
@@ -234,7 +235,7 @@ async function lifecycle() {
   }
 }
 const editor = process.env.MAGIT_VSCODE_BIN || "code";
-const dir = mkdtempSync("/tmp/opencode/real-file-vscode-");
+const dir = mkdtempSync(`${tmpdir()}/real-file-vscode-`);
 const repo = `${dir}/repo`;
 execFileSync("git", ["init", "-q", repo]);
 writeFileSync(`${repo}/.git/COMMIT_EDITMSG`, "spike message\n");

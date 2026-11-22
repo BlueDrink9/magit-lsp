@@ -1180,6 +1180,7 @@ Readiness means no known missing Make entry point, not completion or permission 
 
 - [ ] **T024 — host-spike.** [Scope](./TASKS_PART_SEVEN.md#t024-host-spike-s).
   - The obsolete missing-Make-target blocker is removed: `make vscode-e2e` exists, with native A06 evidence in the completed E2E split. That evidence does not satisfy the ten-run spike or choose the host. T025/T026 depend on this decision; T027/T028 retain their native VSCode verification requirements.
+  - Landed (parked WIP code): 487de18 — vscode-host-spike Makefile target + os.tmpdir() spike portability fix; ten-run spike and host decision still open (T025/T026 depend on it).
 
 ## Blocked prerequisites
 
