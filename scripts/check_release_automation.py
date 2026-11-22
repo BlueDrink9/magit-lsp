@@ -2798,6 +2798,39 @@ def publisher_backend(module, release=None, fail=None):
     return Recording()
 
 
+def publisher_release_body(tag, assets, draft=False):
+    """Return one GitHub release API body with tag identity, draft state and assets."""
+    return json.dumps({
+        'tag_name': tag, 'draft': draft,
+        'assets': [{'name': name, 'digest': digest}
+                   for name, digest in assets.items()]})
+
+
+def publisher_command(responses):
+    """Return an argv log and a ``subprocess.run`` stand-in for the real backend.
+
+    ``responses`` is consumed in order as ``(returncode, stdout, stderr)``
+    tuples. Driving :class:`publish_release.CommandBackend` this way exercises
+    its actual ``gh``/registry command parsing and response validation offline.
+    """
+    calls, pending = [], list(responses)
+
+    def run(argv, **kwargs):
+        calls.append([str(token) for token in argv])
+        if not pending:
+            fail(f'self-test: unexpected external command {argv!r}')
+        returncode, stdout, stderr = pending.pop(0)
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout,
+                                           stderr=stderr)
+
+    return calls, run
+
+
+def registry_commands_run(calls):
+    """Return the recorded registry invocations from a publisher argv log."""
+    return [call for call in calls if call[0].endswith(('vsce', 'ovsx'))]
+
+
 def expect_publish_error(module, label, function, *args, expected=None, **kwargs):
     """Fail the self-test unless the publisher rejects the fixture."""
     try:
@@ -4218,6 +4251,94 @@ def run_self_tests():
             if [call[0] for call in backend.calls] != ['release_assets']:
                 fail('self-test: a conflicting release must not be mutated or '
                      'published')
+            # The real backend parser reads the GitHub response itself. A draft,
+            # a wrong tag or conflicting bytes fails closed before either
+            # registry, for both an existing release and a creation readback.
+            tag = f'v{SELF_TEST_VERSION}'
+            release_names = (native_archive, native_archive + '.sha256',
+                             'release-manifest.json',
+                             'release-manifest.json.sha256',
+                             f'magit-lsp-{SELF_TEST_VERSION}.vsix')
+            exact_assets = {name: 'sha256:' + hashlib.sha256(
+                (relocated / name).read_bytes()).hexdigest()
+                for name in release_names}
+            lookup = ['gh', 'api',
+                      f'repos/{SELF_TEST_REPOSITORY}/releases/tags/{tag}']
+            for label, body, expected in (
+                    ('draft', publisher_release_body(tag, exact_assets, draft=True),
+                     'is not published'),
+                    ('wrong-tag', publisher_release_body('v9.9.9', exact_assets),
+                     'returned tag')):
+                calls, run = publisher_command([(0, body, '')])
+                with patch.object(subprocess, 'run', run):
+                    expect_publish_error(
+                        publish_release,
+                        f'publisher with an existing {label} release',
+                        publish_release.publish, relocated_handoff,
+                        backend=publish_release.CommandBackend(root=str(relocated)),
+                        environment=publisher_environment(),
+                        event=publisher_event(), expected=expected)
+                if calls != [lookup]:
+                    fail(f'self-test: an existing {label} release must fail '
+                         f'before any registry; saw {calls!r}')
+            conflict_body = publisher_release_body(
+                tag, {name: 'sha256:' + '0' * 64 for name in release_names})
+            calls, run = publisher_command([(0, conflict_body, '')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release,
+                    'publisher with a real conflicting GitHub release',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(),
+                    event=publisher_event(),
+                    expected='conflicting assets; refusing to overwrite')
+            if calls != [lookup]:
+                fail(f'self-test: a real conflicting release must fail before '
+                     f'any registry; saw {calls!r}')
+            # Creation succeeds, but the readback must still prove published
+            # identity before the registry lanes run.
+            for label, body, expected in (
+                    ('draft', publisher_release_body(tag, exact_assets, draft=True),
+                     'is not published'),
+                    ('wrong-tag', publisher_release_body('v9.9.9', exact_assets),
+                     'returned tag')):
+                calls, run = publisher_command(
+                    [(1, '', 'gh: Not Found (HTTP 404)'), (0, '', ''),
+                     (0, body, '')])
+                with patch.object(subprocess, 'run', run):
+                    expect_publish_error(
+                        publish_release,
+                        f'publisher whose created release reads back {label}',
+                        publish_release.publish, relocated_handoff,
+                        backend=publish_release.CommandBackend(root=str(relocated)),
+                        environment=publisher_environment(),
+                        event=publisher_event(), expected=expected)
+                if calls[0] != lookup or calls[1][:3] != ['gh', 'release', 'create'] \
+                        or registry_commands_run(calls):
+                    fail(f'self-test: a created {label} readback must fail before '
+                         f'any registry; saw {calls!r}')
+            # An exact published release is still accepted and both registry
+            # lanes run against the same VSIX.
+            calls, run = publisher_command(
+                [(0, publisher_release_body(tag, exact_assets), ''),
+                 (0, '', ''), (0, '', '')])
+            with patch.object(subprocess, 'run', run):
+                completed = publish_release.publish(
+                    relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event())
+            if completed != ['github-release', 'marketplace', 'openvsx']:
+                fail(f'self-test: an exact published release must publish in '
+                     f'order, saw {completed!r}')
+            registries = registry_commands_run(calls)
+            if calls[0] != lookup or len(registries) != 2 or \
+                    not registries[0][0].endswith('vsce') or \
+                    not registries[1][0].endswith('ovsx') or \
+                    registries[0][1:] != ['publish', '--oidc', '--packagePath',
+                                          str((relocated / handoff['vsix']['vsix']).resolve())]:
+                fail(f'self-test: an exact published release must reach both '
+                     f'registry lanes once; saw {calls!r}')
             # Partial registry completion is reported, never atomic success.
             backend = publisher_backend(publish_release, fail='marketplace')
             expect_publish_error(

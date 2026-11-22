@@ -358,7 +358,13 @@ class CommandBackend:
         return result.stdout
 
     def release_assets(self, repository, tag):
-        """Return the release's asset digests, or ``None`` when it is absent."""
+        """Return the release's asset digests, or ``None`` when it is absent.
+
+        The response is validated at this boundary: the release must be the
+        requested tag and already published. Both the existing-release lookup
+        and the post-creation readback use this method, so a draft or a
+        differently tagged response fails closed before any registry lane.
+        """
         result = subprocess.run(
             ['gh', 'api', f'repos/{repository}/releases/tags/{tag}'],
             cwd=str(self.root), capture_output=True, text=True)
@@ -369,7 +375,15 @@ class CommandBackend:
             fail(f'GitHub release lookup for {tag} failed: '
                  + ' | '.join(message.strip().splitlines()[-4:] or ['no output']))
         document = parse_json(result.stdout, f'GitHub release {tag}')
-        entries = document.get('assets') if isinstance(document, dict) else None
+        if not isinstance(document, dict):
+            fail(f'GitHub release {tag} response is not an object')
+        if document.get('tag_name') != tag:
+            fail(f'GitHub release lookup for {tag} returned tag '
+                 f'{document.get("tag_name")!r}; refusing to publish')
+        if document.get('draft') is not False:
+            fail(f'GitHub release {tag} is not published (draft state '
+                 f'{document.get("draft")!r}); refusing to publish')
+        entries = document.get('assets')
         if not isinstance(entries, list):
             fail(f'GitHub release {tag} has no asset listing')
         assets = {}
