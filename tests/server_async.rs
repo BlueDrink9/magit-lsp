@@ -801,12 +801,13 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
     let base = tmp.git(&["rev-parse", "HEAD~3"]).trim().to_owned();
     let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
 
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        let version = if view == status { status_version } else { 1 };
         server.send(
             json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{
-            "viewId":view,"version":1,"key":key,"editorMode":"normal",
+            "viewId":view,"version":version,"key":key,"editorMode":"normal",
             "cursor":{"line":line,"column":0}}}),
         );
         server.response_with_id(id)
@@ -935,11 +936,12 @@ fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller(
     let prior_head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
     let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        let version = if view == status { status_version } else { 1 };
         server.send(
             json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{
-            "viewId":view,"version":1,"key":key,"editorMode":"normal",
+            "viewId":view,"version":version,"key":key,"editorMode":"normal",
             "cursor":{"line":line,"column":0}}}),
         );
         server.response_with_id(id)
@@ -1243,9 +1245,10 @@ fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(10);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { status_version } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -1482,11 +1485,12 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
     let target = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
     let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        let version = if view == status { status_version } else { 1 };
         server.send(
             json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{
-            "viewId":view,"version":1,"key":key,"editorMode":"normal",
+            "viewId":view,"version":version,"key":key,"editorMode":"normal",
             "cursor":{"line":line,"column":0}}}),
         );
         server.response_with_id(id)
@@ -1728,9 +1732,10 @@ fn instant_squash_registered_editor_abort_retains_marker_and_releases_worker() {
     let mut server = TestServer::spawn(&[]);
     server.auto_respond_to_progress_create();
     assert!(server.initialize_rich(json!({"window":{"workDoneProgress":true}}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { status_version } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -1878,9 +1883,10 @@ fn prepared_rebase_message_actions_refuse_through_real_server_submit() {
         let base = tmp.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
         let mut server = TestServer::spawn(&[]);
         assert!(server.initialize_rich(json!({}))["error"].is_null());
-        let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+        let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
         let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-            server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+            let version = if view == status { status_version } else { 1 };
+            server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
             server.response_with_id(id)
         };
         let pushed = |response: &Value| {
@@ -2009,9 +2015,10 @@ fn prepared_rebase_edit_pause_is_abortable_from_usable_caller() {
     );
     let mut server = TestServer::spawn(&[("GIT_EDITOR", "true")]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { status_version } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -2108,9 +2115,10 @@ fn prepared_rebase_conflict_can_be_resolved_and_continued_from_caller() {
     let base = tmp.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
     let mut server = TestServer::spawn(&[("GIT_EDITOR", "true")]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { status_version } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -2242,9 +2250,10 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
     let base = tmp.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
     let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
-    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (status, status_version) = open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { status_version } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -2385,6 +2394,16 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
 
 /// Open a status view and consume its initial render and keymap pushes.
 fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
+    open_view_versioned(server, id, repo).0
+}
+
+/// Open a status view and acknowledge its deferred status completion.
+///
+/// Returns the view id and the acknowledged render version. Opening is
+/// asynchronous: the loading render is followed by the fresh status render, so
+/// positional keys must send the version the client acknowledged, not the
+/// loading version.
+fn open_view_versioned(server: &mut TestServer, id: i64, repo: &Value) -> (String, u64) {
     server.send(open_view_message(id, repo));
     let opened = server.response_with_id(id);
     let view_id = opened["result"]["id"]
@@ -2401,8 +2420,11 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
             .as_u64()
             .expect("initial render version"),
     );
-    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":ready["params"]["version"]}}));
-    view_id
+    let version = ready["params"]["version"]
+        .as_u64()
+        .expect("ready render version");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
+    (view_id, version)
 }
 
 /// Open a Plain logical view without waiting for Rich-only render/keymap pushes.
