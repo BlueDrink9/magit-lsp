@@ -4025,12 +4025,6 @@ def run_self_tests():
         if path not in runtime_responses:
             return 404, '{}'
         return 200, json.dumps(runtime_responses[path])
-    # The runtime must never request the Administration-only protection
-    # endpoint; its declared contents/actions read token only supports the
-    # ordinary branch metadata (Contents: read).
-    if '/protection' in inspect.getsource(prepare_publication_runtime):
-        fail('self-test: the runtime must not request the Administration-only '
-             'branch protection endpoint')
     saved_env = {key: os.environ.get(key) for key in (
         'GITHUB_REPOSITORY', 'GITHUB_REF', 'GITHUB_SHA',
         'GITHUB_EVENT_NAME', 'GH_TOKEN', 'PUBLICATION_HANDOFF_DIR')}
@@ -4076,7 +4070,13 @@ def run_self_tests():
                 raise AssertionError(f'unexpected transport URL {url}')
             with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
                     patch.object(runtime_transport_module, 'request', runtime_transport):
+                runtime_calls.clear()
                 handoff = prepare_publication_runtime(str(event_path))
+                if (SELF_TEST_REPOSITORY, '/branches/main') not in runtime_calls:
+                    fail('self-test: runtime collector must read the protected branch metadata')
+                if any('/protection' in path for _, path in runtime_calls):
+                    fail('self-test: runtime collector requested the Administration-only '
+                         'branch protection endpoint')
             expected_vsix_sha = hashlib.sha256(vsix_bytes).hexdigest()
             if handoff['source_sha'] != SELF_TEST_SHA or \
                     handoff['version'] != SELF_TEST_VERSION or \
@@ -4471,11 +4471,6 @@ def run_self_tests():
                                  if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
             if missing_runtime_paths:
                 fail(f'self-test: runtime collector missed API paths {missing_runtime_paths!r}; calls={runtime_calls!r}')
-            if (SELF_TEST_REPOSITORY, '/branches/main') not in runtime_calls:
-                fail('self-test: runtime collector must read the protected branch metadata')
-            if any('/protection' in path for _, path in runtime_calls):
-                fail('self-test: runtime collector requested the Administration-only '
-                     'branch protection endpoint')
             # Branch protection is read through ordinary branch metadata. Only a
             # positive boolean counts; forbidden, missing, unprotected and
             # malformed responses all fail closed.
