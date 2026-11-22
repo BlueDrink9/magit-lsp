@@ -116,6 +116,12 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 
 ## Review
 
+- [x] **[P2] Retire duplicated authored semantic legend documentation**
+  - VERIFIED at `65cbd2b`: `docs/client-exchanges.md:19,69,122,146,178,195` duplicate obsolete legends; canonical copies already generated in `docs/schema/worked-exchanges-0{1,2,3}.md`. `docs/ARCHITECTURE.md:670-683` still declares the old role table.
+  - check: retain exchange explanations but replace duplicated fenced transcripts with precise generated-reference links; describe the eleven canonical roles and `tokenTypeGroups` without implementing T045 theming docs. Run `make docs-check` and record link/retired-literal inspection; no new tests.
+  - Done: `3a5bc20`.
+  - Verified: `make docs-check` @ `65cbd2b` (with implementation applied; HEAD `3a5bc20`) → exit 0 (`ok: docs-check`). Scoped inspection: all six headings kept and their fenced transcripts replaced by explanations linking `docs/schema/worked-exchanges-01.md#commit-edit-abortjsonl`, `-02.md#commit-edit-confirmjsonl`, and `-03.md#{plain-code-action,plain-document-prompt,plain-open,rich-lifecycle}jsonl`; each target file and matching `#####` anchor exists. `docs/ARCHITECTURE.md` names `src/semantic_roles.json` as canonical, lists its eleven roles in legend order with `legend.tokenTypes`/`tokenTypeGroups`, and `rg 'magit\.(section|count|file|hunk|diff|menu|message|hash|author|ref|message\.warn)' docs/client-exchanges.md docs/ARCHITECTURE.md` finds no retired role literals. Coverage limit: `docs/client-exchanges.md` is outside `DOC_FILES`, so its links were inspected manually, not asserted by `docs-check`.
+
 - [x] **[P1] Emit hook-stable generated Lua bytes**
   - VERIFIED `6d15e6a`: `make schema-check` log `schema-check.pa9V93` rejects only shared.lua/types.lua; generator single quotes (`scripts/generate_schema.rs:296-310`) and extra EOF blank (`scripts/schema_luals.rs:31-45`) disagree with committed hook-formatted bytes.
   - Part 1 test: preserve generation semantics/order and emit double-quoted escaped Lua strings and exactly one terminal newline; use existing generator fixture tests, not committed-artifact equality tests. Verify `make test-rust FILTER="--test schema"`.
