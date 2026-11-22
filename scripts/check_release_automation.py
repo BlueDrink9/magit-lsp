@@ -31,6 +31,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -258,10 +259,13 @@ def check_workflow(path=WORKFLOW):
                      'python3 scripts/check_release_automation.py --prepare-publication-runtime "$GITHUB_EVENT_PATH"'):
         if required not in text:
             fail(f'workflow: missing trusted collector contract {required!r}')
+    # The publisher may not rebuild, repackage, install a PAT or run a registry/
+    # GitHub-release command inline: it downloads its own validated handoff and
+    # hands those exact bytes to the declared make interface.
     for forbidden in ('build_run_id', 'inputs.mode', 'github.sha', 'make vscode-package',
-                      'vscode-deps', 'CARGO_REGISTRY_TOKEN', 'secrets.',
-                      'gh release create', 'vsce publish', 'ovsx publish',
-                      'cargo publish', 'actions/download-artifact'):
+                      'vsce package', 'pnpm run', 'cargo build', 'CARGO_REGISTRY_TOKEN',
+                      'secrets.', 'gh release create', 'vsce publish',
+                      'ovsx publish', 'cargo publish', 'VSCE_PAT', 'OVSX_PAT'):
         if forbidden in text:
             fail(f'workflow: forbidden legacy/bypass path {forbidden!r}')
     top_permissions = block_after(lines, find_line(lines, 'permissions:', 'workflow') - 1, 0)
@@ -302,6 +306,37 @@ def check_workflow(path=WORKFLOW):
             fail(f'workflow: publish guard must require {requirement!r}')
     if '    environment: release-publish' not in publish:
         fail('workflow: publish job must require release-publish environment')
+    # The read-only validate job uploads only the runtime's own handoff directory
+    # and exposes its immutable upload id; the protected publisher downloads that
+    # exact id, installs the frozen locked tooling and calls the declared make
+    # interface. A candidate by name, an inline registry command, a rebuild or a
+    # PAT never satisfies this contract.
+    for required in (
+            '        name: publication-handoff',
+            "      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}",
+            '        uses: actions/download-artifact@',
+            '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}',
+            "          node-version: '24'",
+            '        run: make vscode-deps',
+            '        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
+    ):
+        if required not in text:
+            fail(f'workflow: missing immutable handoff/publication contract {required!r}')
+    if 'actions/download-artifact@' in validate_text:
+        fail('workflow: only the protected publish job may download the handoff')
+    publish_text = '\n'.join(publish)
+    if '          name: publication-handoff' in publish_text:
+        fail('workflow: the handoff download must use the immutable artifact id, '
+             'not a mutable name')
+    if '          path: build/release/publication-handoff' not in publish_text:
+        fail('workflow: the handoff download must target the declared handoff path')
+    deps_line = next((index for index, line in enumerate(publish)
+                      if line.strip() == 'run: make vscode-deps'), None)
+    publish_line = next((index for index, line in enumerate(publish)
+                         if line.strip().startswith('run: make release-publish')),
+                        None)
+    if deps_line is None or publish_line is None or deps_line > publish_line:
+        fail('workflow: frozen publication tooling must be installed before publishing')
 
 
 def require_job(lines, name):
@@ -1403,6 +1438,8 @@ def check_local_pipeline(path=MAKEFILE):
         ('release-native-build', PIPELINE_BUILD_NATIVE),
         ('release-pipeline-check', PIPELINE_CHECK),
         ('release-automation-unit', PIPELINE_AUTOMATION_UNIT),
+        ('release-publish',
+         'python3 scripts/publish_release.py --handoff "$(HANDOFF)"'),
     ):
         number = next((index for index, line in enumerate(lines, 1)
                        if line.startswith(target + ':')), None)
@@ -1455,14 +1492,24 @@ def check_contract_unit(path=MAKEFILE):
 
 
 def check_artifact_consistency():
-    """The producer publishes candidate assets; publisher currently stays ineligible."""
+    """The producer uploads candidates; the publisher transfers only its handoff."""
     build_jobs = workflow_jobs(read_lines(BUILD_WORKFLOW))
     uploaded = step_artifact_name(
         build_jobs[FALLBACK_JOB], 'actions/upload-artifact@', 'build workflow')
     if uploaded != ARTIFACT_NAME:
         fail(f'build workflow: uploads {uploaded!r}, expected {ARTIFACT_NAME!r}')
-    if 'actions/download-artifact@' in '\n'.join(read_lines(WORKFLOW)):
-        fail('publish workflow: candidate download is forbidden before immutable asset handoff')
+    publish = require_job(read_lines(WORKFLOW), 'publish')
+    publish_text = '\n'.join(publish)
+    if 'actions/download-artifact@' not in publish_text:
+        fail('publish workflow: the publisher must download its validated handoff')
+    if '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}' \
+            not in publish_text:
+        fail('publish workflow: the handoff must be addressed by the validate '
+             'artifact id')
+    if '          name: publication-handoff' in publish_text:
+        fail('publish workflow: the handoff must never be downloaded by name')
+    if 'build/release/publication-handoff' not in publish_text:
+        fail('publish workflow: the handoff must use the declared handoff path')
 
 
 def check_metadata():
@@ -2248,18 +2295,43 @@ def prepare_publication_runtime(event_path):
     checksum = next(data for name, data in files.items()
                     if Path(name).name == archive_name + '.sha256')
     manifest_bytes = files['release-manifest.json']
-    sidecar = files['release-manifest.json.sha256'].decode('ascii').split()
-    if transport.digest(manifest_bytes) != sidecar[0] or \
+    try:
+        sidecar = files['release-manifest.json.sha256'].decode('ascii').split()
+        checksum_tokens = checksum.decode('ascii').split()
+    except UnicodeDecodeError:
+        fail('publication candidate checksums are not ASCII')
+    if len(sidecar) != 2 or sidecar[1] != 'release-manifest.json' or \
+            transport.digest(manifest_bytes) != sidecar[0] or \
             transport.digest(archive) != manifest['archive_sha256'] or \
-            not checksum.decode('ascii').split() or \
-            checksum.decode('ascii').split()[0] != transport.digest(archive):
+            len(checksum_tokens) != 2 or checksum_tokens[1] != archive_name or \
+            checksum_tokens[0] != transport.digest(archive):
         fail('publication candidate asset hash validation failed')
+    # Persist the exact validated native bytes next to the VSIX. The artifact
+    # upload carries this whole directory, so every later consumer addresses
+    # the files by handoff-relative names, never by a path from this job's
+    # temporary workspace. The extraction below only rechecks the executable.
+    handoff_dir = Path(os.environ.get('PUBLICATION_HANDOFF_DIR') or
+                       'build/release/publication-handoff')
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    persisted = {
+        archive_name: archive,
+        archive_name + '.sha256': checksum,
+        'release-manifest.json': manifest_bytes,
+        'release-manifest.json.sha256': files['release-manifest.json.sha256'],
+    }
+    for name, data in persisted.items():
+        destination = handoff_dir / name
+        if destination.is_symlink():
+            fail(f'publication handoff {name} must not be a symbolic link')
+        destination.write_bytes(data)
+        if destination.is_symlink() or \
+                transport.digest(destination.read_bytes()) != transport.digest(data):
+            fail(f'publication handoff {name} was not persisted as exact bytes')
     with tempfile.TemporaryDirectory(prefix='publication-assets-') as temporary:
-        archive_path = Path(temporary) / archive_name
-        archive_path.write_bytes(archive)
         try:
             binary = transport.native.safe_extract(
-                archive_path, Path(temporary) / 'extracted', archive_name.removesuffix('.tar.gz'))
+                handoff_dir / archive_name, Path(temporary) / 'extracted',
+                archive_name.removesuffix('.tar.gz'))
         except Exception as error:
             fail(f'publication release archive is invalid: {error}')
         if transport.native.digest(binary) != manifest['executable_sha256']:
@@ -2269,17 +2341,15 @@ def prepare_publication_runtime(event_path):
     # the same transport verifier the installed-extension consumers use; nothing
     # here rebuilds, repackages or reinstalls the extension.
     from scripts import download_vsix_candidate as vsix_transport
-    handoff_dir = Path(os.environ.get('PUBLICATION_HANDOFF_DIR') or
-                       'build/release/publication-handoff')
     try:
         vsix = vsix_transport.fetch_candidate(
             repository, run_id, attempt, source_sha, tag_ref, RUN_EVENT,
             original_ref[1:], handoff_dir, token, opener=transport.request)
     except (vsix_transport.DownloadError, KeyError, ValueError, OSError) as error:
         fail(f'publication VSIX handoff is invalid: {error}')
-    # Simple validated handoff for the next publication slice: the exact bytes
-    # and their immutable identity, never a rebuilt package or a promotion
-    # bundle. Registry publication stays disabled in this slice.
+    # The handoff records only handoff-relative names for the exact accepted
+    # bytes and their immutable identities, never a rebuilt package or a
+    # promotion bundle. The protected publisher consumes these paths verbatim.
     handoff = {
         'source_sha': source_sha,
         'version': manifest['version'],
@@ -2291,16 +2361,32 @@ def prepare_publication_runtime(event_path):
         'native': {
             'artifact_id': str(candidate.get('id')),
             'artifact_digest': candidate.get('digest'),
+            'archive': archive_name,
+            'checksum': archive_name + '.sha256',
+            'manifest': 'release-manifest.json',
+            'manifest_checksum': 'release-manifest.json.sha256',
             'archive_sha256': manifest['archive_sha256'],
+            'manifest_sha256': transport.digest(manifest_bytes),
             'executable_sha256': manifest['executable_sha256'],
         },
-        'vsix': vsix,
+        'vsix': {
+            'artifact_id': vsix['artifact_id'],
+            'artifact_digest': vsix['artifact_digest'],
+            'run_id': vsix['run_id'],
+            'run_attempt': vsix['run_attempt'],
+            'source_sha': vsix['source_sha'],
+            # Relocatable: resolved against the published handoff JSON's directory.
+            'vsix': Path(vsix['vsix']).name,
+            'manifest': Path(vsix['manifest']).name,
+            'vsix_sha256': vsix['vsix_sha256'],
+        },
     }
     handoff_path = handoff_dir / 'publication-handoff.json'
     handoff_path.write_text(json.dumps(handoff, sort_keys=True) + '\n',
                             encoding='utf-8')
     print(f'ok: publication handoff validated for {source_sha}; '
-          f'VSIX {vsix["vsix_sha256"]}; registry publication remains disabled')
+          f'VSIX {vsix["vsix_sha256"]}; publication is delegated to the '
+          'protected publisher')
     return handoff
 
 
@@ -2538,6 +2624,75 @@ def manifest_expectation(**overrides):
     }
     document.update(overrides)
     return document
+
+
+def publisher_event(**overrides):
+    """Return a trusted successful push workflow_run event for the fixtures."""
+    document = {'action': 'completed', 'workflow_run': {
+        'id': int(SELF_TEST_RUN_ID), 'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'event': 'push', 'conclusion': 'success',
+        'head_branch': f'v{SELF_TEST_VERSION}', 'head_sha': SELF_TEST_SHA,
+        'path': BUILD_WORKFLOW_PATH, 'name': BUILD_WORKFLOW_NAME,
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_repository': {'full_name': SELF_TEST_REPOSITORY}}}
+    document.update(overrides)
+    return document
+
+
+def publisher_environment(**overrides):
+    """Return the GitHub Actions OIDC context the publisher requires."""
+    environment = {
+        'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_run',
+        'GITHUB_REPOSITORY': SELF_TEST_REPOSITORY,
+        'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://oidc.example.invalid/request',
+        'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'fixture-oidc-request-token',
+    }
+    environment.update(overrides)
+    return environment
+
+
+def publisher_backend(module, release=None, fail=None):
+    """Return an offline publisher backend that records external calls."""
+    class Recording:
+        def __init__(self):
+            self.release = None if release is None else dict(release)
+            self.calls = []
+
+        def release_assets(self, repository, tag):
+            self.calls.append(('release_assets', repository, tag))
+            return None if self.release is None else dict(self.release)
+
+        def create_release(self, repository, tag, title, assets):
+            self.calls.append(('create_release', tag,
+                               [Path(path).name for path in assets]))
+            if fail == 'github':
+                raise module.PublishError('gh release create failed')
+            self.release = {
+                Path(path).name: 'sha256:' + hashlib.sha256(
+                    Path(path).read_bytes()).hexdigest() for path in assets}
+
+        def publish_marketplace(self, vsix_path):
+            self.calls.append(('marketplace', str(vsix_path)))
+            if fail == 'marketplace':
+                raise module.PublishError('vsce publish failed')
+
+        def publish_openvsx(self, vsix_path):
+            self.calls.append(('openvsx', str(vsix_path)))
+            if fail == 'openvsx':
+                raise module.PublishError('ovsx publish failed')
+
+    return Recording()
+
+
+def expect_publish_error(module, label, function, *args, expected=None, **kwargs):
+    """Fail the self-test unless the publisher rejects the fixture."""
+    try:
+        function(*args, **kwargs)
+    except module.PublishError as error:
+        if expected is not None and expected not in str(error):
+            fail(f'self-test: {label} failed for another reason: {error}')
+        return
+    fail(f'self-test: {label} was accepted')
 
 
 def tag_ref_body(kind='commit', sha=SELF_TEST_SHA, ref=SELF_TEST_TAG_REF):
@@ -3073,6 +3228,9 @@ def run_pipeline_self_tests():
 
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import publish_release
     # The retired readiness draft must not reappear: neither its CLI
     # entrypoints/arguments nor its collector/validator symbols may remain.
     options = set(build_parser()._option_string_actions)
@@ -3738,9 +3896,190 @@ def run_self_tests():
             handoff_path = handoff_dir / 'publication-handoff.json'
             if json.loads(handoff_path.read_text(encoding='utf-8')) != handoff:
                 fail('self-test: the runtime must write the validated handoff')
+            native_archive = f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}.tar.gz'
+            for name in (native_archive, native_archive + '.sha256',
+                         'release-manifest.json', 'release-manifest.json.sha256',
+                         f'magit-lsp-{SELF_TEST_VERSION}.vsix', 'vsix-manifest.json'):
+                persisted = handoff_dir / name
+                if not persisted.is_file() or persisted.is_symlink():
+                    fail(f'self-test: the runtime must persist {name!r} as a '
+                         'regular file')
+            if handoff['native']['archive'] != native_archive or \
+                    handoff['native']['checksum'] != native_archive + '.sha256' or \
+                    Path(handoff['native']['archive']).is_absolute() or \
+                    handoff['vsix']['vsix'] != f'magit-lsp-{SELF_TEST_VERSION}.vsix' or \
+                    Path(handoff['vsix']['vsix']).is_absolute() or \
+                    Path(handoff['vsix']['manifest']).is_absolute():
+                fail('self-test: the handoff must record relocatable native/VSIX names')
             for key in ('vsix', 'manifest'):
-                if not Path(handoff['vsix'][key]).is_file():
+                if not (handoff_dir / handoff['vsix'][key]).is_file():
                     fail(f'self-test: the handoff {key} path must stay readable')
+            # The uploaded directory is relocated by the artifact download; the
+            # publisher must resolve every accepted byte from that new location.
+            relocated = Path(temporary) / 'relocated-handoff'
+            shutil.copytree(handoff_dir, relocated)
+            relocated_handoff = relocated / 'publication-handoff.json'
+            backend = publisher_backend(publish_release)
+            completed = publish_release.publish(
+                relocated / 'publication-handoff.json', backend=backend,
+                environment=publisher_environment(), event=publisher_event())
+            if completed != ['github-release', 'marketplace', 'openvsx']:
+                fail(f'self-test: unexpected publication order {completed!r}')
+            if [call[0] for call in backend.calls] != [
+                    'release_assets', 'create_release', 'release_assets',
+                    'marketplace', 'openvsx']:
+                fail(f'self-test: publication must proceed GitHub -> Marketplace '
+                     f'-> Open VSX, saw {backend.calls!r}')
+            lane_paths = {call[1] for call in backend.calls
+                          if call[0] in ('marketplace', 'openvsx')}
+            if len(lane_paths) != 1 or \
+                    Path(lane_paths.pop()).read_bytes() != vsix_bytes:
+                fail('self-test: both registry lanes must publish the identical '
+                     'accepted VSIX bytes')
+            # Exact locked local invocations, never a packaging/build fallback.
+            marketplace_argv, openvsx_argv = publish_release.registry_commands(
+                'accepted.vsix')
+            if marketplace_argv != ('clients/vscode/node_modules/.bin/vsce',
+                                    'publish', '--oidc', '--packagePath',
+                                    'accepted.vsix') or \
+                    openvsx_argv != ('clients/vscode/node_modules/.bin/ovsx',
+                                     'publish', '--trusted-publishing',
+                                     'accepted.vsix'):
+                fail(f'self-test: unexpected registry argv '
+                     f'{marketplace_argv!r}/{openvsx_argv!r}')
+            for argv in (marketplace_argv, openvsx_argv):
+                if argv[1] != 'publish' or any(
+                        token in argv for token in ('package', 'build', 'cargo',
+                                                    'pnpm', 'npm', 'npx')):
+                    fail('self-test: registry commands must publish, not '
+                         'build/repackage')
+            if publish_release.BUILD_WORKFLOW_NAME != BUILD_WORKFLOW_NAME or \
+                    publish_release.BUILD_WORKFLOW_PATH != BUILD_WORKFLOW_PATH or \
+                    publish_release.TARGET != ASSET or \
+                    publish_release.MANIFEST_FIELDS != MANIFEST_FIELDS:
+                fail('self-test: publisher contract constants drifted')
+            # Changed bytes, escaped paths and symlinks never reach a destination.
+            def relocated_case(label):
+                case = Path(temporary) / f'case-{label}'
+                shutil.copytree(handoff_dir, case)
+                return case / 'publication-handoff.json'
+
+            case = relocated_case('changed-bytes')
+            (case.parent / native_archive).write_bytes(b'changed archive bytes')
+            backend = publisher_backend(publish_release)
+            expect_publish_error(
+                publish_release, 'publisher with changed archive bytes',
+                publish_release.publish, case, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='archive bytes differ from the handoff')
+            if backend.calls:
+                fail('self-test: a tampered input reached a destination')
+            for escaped, expected in (('../escape.tar.gz',
+                                       'escapes the handoff directory'),
+                                      ('/etc/passwd', 'escapes the handoff directory'),
+                                      ('nested/archive.tar.gz',
+                                       'escapes the handoff directory'),
+                                      ('..\\escape.tar.gz', 'invalid')):
+                expect_publish_error(
+                    publish_release, f'publisher with escaped path {escaped!r}',
+                    publish_release.asset_path, handoff_dir, escaped, 'archive',
+                    expected=expected)
+            case = relocated_case('symlink')
+            outside_vsix = Path(temporary) / 'outside.vsix'
+            shutil.copy(case.parent / handoff['vsix']['vsix'], outside_vsix)
+            (case.parent / handoff['vsix']['vsix']).unlink()
+            (case.parent / handoff['vsix']['vsix']).symlink_to(outside_vsix)
+            expect_publish_error(
+                publish_release, 'publisher with a symlinked VSIX',
+                publish_release.publish, case,
+                backend=publisher_backend(publish_release),
+                environment=publisher_environment(), event=publisher_event(),
+                expected='symbolic link')
+            # Mismatched source, tag, version and run are refused before mutation.
+            for label, mutation, expected in (
+                    ('source', ('head_sha', SELF_TEST_OTHER_SHA),
+                     'source differs from the trusted tag commit'),
+                    ('tag', ('head_branch', 'v9.9.9'), 'event tag'),
+                    ('run', ('id', int(SELF_TEST_RUN_ID) + 1),
+                     'run identity differs')):
+                event = publisher_event()
+                event['workflow_run'][mutation[0]] = mutation[1]
+                expect_publish_error(
+                    publish_release, f'publisher with a mismatched {label}',
+                    publish_release.publish,
+                    relocated_case(f'mismatch-{label}'),
+                    backend=publisher_backend(publish_release),
+                    environment=publisher_environment(), event=event,
+                    expected=expected)
+            case = relocated_case('version')
+            document = json.loads(case.read_text(encoding='utf-8'))
+            document['version'] = '9.9.9'
+            case.write_text(json.dumps(document), encoding='utf-8')
+            expect_publish_error(
+                publish_release, 'publisher with a mismatched version',
+                publish_release.publish, case,
+                backend=publisher_backend(publish_release),
+                environment=publisher_environment(), event=publisher_event(),
+                expected='is not the version tag')
+            # Missing OIDC and every PAT fallback fail closed.
+            missing_oidc = publisher_environment()
+            missing_oidc.pop('ACTIONS_ID_TOKEN_REQUEST_URL')
+            missing_oidc.pop('ACTIONS_ID_TOKEN_REQUEST_TOKEN')
+            expect_publish_error(
+                publish_release, 'publisher without OIDC',
+                publish_release.publish, relocated_handoff,
+                backend=publisher_backend(publish_release),
+                environment=missing_oidc, event=publisher_event(),
+                expected='OIDC environment')
+            for name in ('VSCE_PAT', 'OVSX_PAT'):
+                pat_only = dict(missing_oidc, **{name: 'fixture-pat'})
+                expect_publish_error(
+                    publish_release, f'publisher with only {name}',
+                    publish_release.publish, relocated_handoff,
+                    backend=publisher_backend(publish_release),
+                    environment=pat_only, event=publisher_event(),
+                    expected='PAT fallback')
+            # GitHub failure blocks every registry lane.
+            backend = publisher_backend(publish_release, fail='github')
+            expect_publish_error(
+                publish_release, 'publisher with a GitHub failure',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='completed none; pending github-release, marketplace, '
+                         'openvsx')
+            if any(call[0] in ('marketplace', 'openvsx') for call in backend.calls):
+                fail('self-test: a GitHub failure must block both registries')
+            # An existing release with different bytes is a conflict, never an
+            # overwrite and never a registry publication.
+            conflict = {name: 'sha256:' + '0' * 64
+                        for name in (native_archive, native_archive + '.sha256',
+                                     'release-manifest.json',
+                                     'release-manifest.json.sha256',
+                                     f'magit-lsp-{SELF_TEST_VERSION}.vsix')}
+            backend = publisher_backend(publish_release, release=conflict)
+            expect_publish_error(
+                publish_release, 'publisher with a conflicting GitHub release',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='conflicting assets; refusing to overwrite')
+            if [call[0] for call in backend.calls] != ['release_assets']:
+                fail('self-test: a conflicting release must not be mutated or '
+                     'published')
+            # Partial registry completion is reported, never atomic success.
+            backend = publisher_backend(publish_release, fail='marketplace')
+            expect_publish_error(
+                publish_release, 'publisher with a marketplace failure',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='completed github-release; pending marketplace, openvsx')
+            if any(call[0] == 'openvsx' for call in backend.calls):
+                fail('self-test: a marketplace failure must leave Open VSX pending')
+            backend = publisher_backend(publish_release, fail='openvsx')
+            expect_publish_error(
+                publish_release, 'publisher with an Open VSX failure',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='completed github-release, marketplace; pending openvsx')
             required_paths = [f'/actions/runs/{SELF_TEST_RUN_ID}',
                           f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2',
                           f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2',
@@ -3985,6 +4324,31 @@ def run_self_tests():
             ('untrusted producer checkout', (('ref: ${{ github.event.repository.default_branch }}',
                                                 'ref: ${{ github.event.workflow_run.head_sha }}', 1),),
              'validate must check out the protected default branch'),
+            ('publisher without the immutable handoff download',
+             (('        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0',
+               '        uses: actions/upload-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher downloading the handoff by mutable name',
+             (('          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}',
+               '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}\n'
+               '          name: publication-handoff', 1),),
+             'must use the immutable artifact id'),
+            ('publisher without the uploaded artifact id',
+             (('      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}',
+               '      handoff_artifact_id: fixture-id', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher rebuilding the VSIX',
+             (('      - name: Install the frozen publication tooling\n',
+               '      - name: Install the frozen publication tooling\n'
+               '      - run: make vscode-package\n', 1),),
+             'forbidden legacy/bypass path'),
+            ('publisher without the frozen tooling',
+             (('        run: make vscode-deps\n', '', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher without the declared make interface',
+             (('        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
+               '        run: true', 1),),
+             'missing immutable handoff/publication contract'),
         ):
             expect_check(label, check_workflow,
                          mutated_workflow(directory, label, mutations),

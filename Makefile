@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -282,6 +282,14 @@ release-pipeline-check:
 # tools-only shell; the broad release-automation-check remains Cargo-aware.
 release-automation-unit:
 	$(call run,release-automation-unit,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py --automation-unit)
+
+# Publication consumes only the validated handoff downloaded by the protected
+# publisher job. It never builds, repackages, installs a PAT or picks a
+# cheaper credential path; the script verifies the handoff and OIDC/GitHub
+# context before the first mutation and reports partial outcomes honestly.
+release-publish:
+	@test -n "$(HANDOFF)" || { echo 'release-publish: HANDOFF is required' >&2; exit 2; }
+	$(call run,release-publish,PYTHONDONTWRITEBYTECODE=1 python3 scripts/publish_release.py --handoff "$(HANDOFF)")
 
 # Explicit offline release contract cases plus shellcheck. Selecting the
 # methods avoids optional real-binary cases and needs no Cargo build; the
