@@ -118,11 +118,19 @@ async function prepareDownloadCache({
       "darwin-x64": "x86_64-apple-darwin",
     };
     const asset = assetByHost[`${host.platform}-${host.arch}`];
-    const match = /^magit-lsp-v(.+)-(.+)\.tar\.gz$/.exec(archiveName);
-    assert.ok(match && asset, "artifact filename and extension-host runtime must be supported");
+    // Strip the runtime's exact asset suffix instead of splitting on the last
+    // dash: the asset itself contains dashes, and the version may use any form
+    // the resolver accepts (including a prerelease).
+    const prefix = "magit-lsp-v";
+    const suffix = asset ? `-${asset}.tar.gz` : "";
+    assert.ok(
+      suffix && archiveName.startsWith(prefix) && archiveName.endsWith(suffix),
+      "artifact filename and extension-host runtime must be supported",
+    );
+    const version = archiveName.slice(prefix.length, -suffix.length);
+    assert.ok(version.length > 0, "artifact filename must name a version");
     assert.equal(manifest.target, asset, "manifest target must match the extension-host runtime");
-    assert.equal(manifest.version, match[1], "manifest version must match the archive filename");
-    assert.equal(match[2], asset, "archive target must match the extension-host runtime");
+    assert.equal(manifest.version, version, "manifest version must match the archive filename");
     assert.equal(
       digest(archive),
       manifest.archive_sha256,
@@ -133,6 +141,7 @@ async function prepareDownloadCache({
       version: manifest.version,
       stem: `magit-lsp-v${manifest.version}-${asset}`,
       archiveName,
+      base: `https://github.com/BlueDrink9/magit-lsp/releases/download/v${manifest.version}`,
       archive,
       sidecar,
       asset,

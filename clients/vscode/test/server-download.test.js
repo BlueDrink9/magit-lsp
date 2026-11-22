@@ -630,7 +630,10 @@ async function run() {
       assert.match(source, /archive: process\.env\.RELEASE_ARTIFACT/);
       assert.match(source, /manifest: process\.env\.RELEASE_MANIFEST/);
       assert.match(source, /vsix: process\.env\.RELEASE_VSIX/);
-      assert.match(source, /focusedArtifact \? artifactPaths\.vsix/);
+      const artifactSelection = /if \(focusedArtifact\) \{([\s\S]*?)\} else \{/.exec(source);
+      assert.ok(artifactSelection, "artifact mode selects its VSIX before the built fallback");
+      assert.match(artifactSelection[1], /vsixPath = artifactPaths\.vsix/);
+      assert.doesNotMatch(artifactSelection[1], /build\/vscode/);
       assert.match(
         source,
         /focusedVsix \? \[\] : \[`--extensionDevelopmentPath=\$\{root\}\/clients\/vscode`\]/,
@@ -639,12 +642,15 @@ async function run() {
         source,
         /prepareDownloadCache\(\{[\s\S]*?artifact: process\.env\.RELEASE_ARTIFACT,[\s\S]*?manifest: process\.env\.RELEASE_MANIFEST/,
       );
-      assert.doesNotMatch(source, /focusedArtifact[\s\S]{0,300}build\/vscode/);
+      assert.match(source, /\} else \{[\s\S]{0,400}?vsixPath = `\$\{root\}\/build\/vscode/);
       assert.match(source, /artifactHashesBefore/);
       assert.match(source, /hashesAfter/);
       assert.match(source, /native-vscode-artifact-evidence\.json/);
       assert.match(source, /installedOrigin: vsixEvidence\?\.install/);
-      assert.match(source, /status: passed \? "pass" : "fail"/);
+      assert.match(
+        source,
+        /status:\s*vsixEvidence\?\.status === "pass" &&\s*unchanged &&\s*remainingOwnedPids\.length === 0 &&\s*gitStatus\.includes\("tracked\.txt"\)\s*\? "pass"\s*:\s*"fail"/,
+      );
       assert.match(source, /remainingOwnedPids/);
       assert.match(source, /gitStatus/);
       assert.match(source, /cleanup/);
@@ -688,6 +694,16 @@ async function run() {
         );
       }
       fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+      const wrongTarget = path.join(directory, archiveNameOf(VERSION, "aarch64-apple-darwin"));
+      fs.copyFileSync(artifact, wrongTarget);
+      fs.writeFileSync(
+        `${wrongTarget}.sha256`,
+        `${digest(archive)}  ${path.basename(wrongTarget)}\n`,
+      );
+      await assert.rejects(
+        helper.prepareDownloadCache({ directory, artifact: wrongTarget, manifest: manifestPath }),
+        "archive filename target must match the extension-host runtime",
+      );
       fs.writeFileSync(artifact, Buffer.concat([archive, Buffer.from("changed")]));
       await assert.rejects(
         helper.prepareDownloadCache({ directory, artifact, manifest: manifestPath }),
@@ -1117,16 +1133,26 @@ async function run() {
             `${RELEASE_BASE}/${archiveName}`,
           ]);
         }
-        const wrongHost = releaseFixture({ asset: "x86_64-apple-darwin" });
-        await rejects(
-          resolveServer({
-            version: VERSION,
-            cacheRoot: root,
-            transport: wrongHost.transport,
-            runtime: { platform: "darwin", arch: "arm64", glibc: null },
-          }),
-          /unexpected download/,
-        );
+        // Resolve from an uncached root so a matching wrong-target download is
+        // actually attempted, rather than reusing the warmed Darwin cache above.
+        const uncachedRoot = temporaryRoot();
+        try {
+          const wrongHost = releaseFixture({ asset: "x86_64-apple-darwin" });
+          await rejects(
+            resolveServer({
+              version: VERSION,
+              cacheRoot: uncachedRoot,
+              transport: wrongHost.transport,
+              runtime: { platform: "darwin", arch: "arm64", glibc: null },
+            }),
+            /unexpected download/,
+          );
+          assert.deepEqual(wrongHost.calls, [
+            `${RELEASE_BASE}/${archiveNameOf(VERSION, "aarch64-apple-darwin")}.sha256`,
+          ]);
+        } finally {
+          fs.rmSync(uncachedRoot, { recursive: true, force: true });
+        }
         const unsupported = releaseFixture();
         await rejects(
           resolveServer({
@@ -1182,7 +1208,6 @@ async function run() {
     try {
       const fixture = releaseFixture();
       const hosts = [
-        [{ platform: "darwin", arch: "arm64", glibc: null }, /darwin-arm64/],
         [{ platform: "linux", arch: "arm64", glibc: "2.36" }, /linux-arm64/],
         [{ platform: "win32", arch: "x64", glibc: null }, /win32-x64/],
         [{ platform: "linux", arch: "x64", glibc: "2.31" }, /glibc 2\.35/],
