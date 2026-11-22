@@ -2766,7 +2766,13 @@ def publisher_environment(**overrides):
 
 
 def publisher_backend(module, release=None, fail=None):
-    """Return an offline publisher backend that records external calls."""
+    """Return an offline publisher backend that records external calls.
+
+    ``fail`` selects one external failure: ``lookup`` before any mutation,
+    ``upload`` after the created release is recorded (as ``gh release create``
+    does before uploading assets), ``readback`` on the lookup that follows
+    creation, or ``marketplace``/``openvsx`` in a registry lane.
+    """
     class Recording:
         def __init__(self):
             self.release = None if release is None else dict(release)
@@ -2774,16 +2780,21 @@ def publisher_backend(module, release=None, fail=None):
 
         def release_assets(self, repository, tag):
             self.calls.append(('release_assets', repository, tag))
+            if fail == 'lookup':
+                raise module.PublishError('gh release lookup failed')
+            if fail == 'readback' and any(
+                    call[0] == 'release_assets' for call in self.calls[:-1]):
+                raise module.PublishError('gh release readback failed')
             return None if self.release is None else dict(self.release)
 
         def create_release(self, repository, tag, title, assets):
             self.calls.append(('create_release', tag,
                                [Path(path).name for path in assets]))
-            if fail == 'github':
-                raise module.PublishError('gh release create failed')
             self.release = {
                 Path(path).name: 'sha256:' + hashlib.sha256(
                     Path(path).read_bytes()).hexdigest() for path in assets}
+            if fail == 'upload':
+                raise module.PublishError('gh release asset upload failed')
 
         def publish_marketplace(self, vsix_path):
             self.calls.append(('marketplace', str(vsix_path)))
@@ -2831,13 +2842,21 @@ def registry_commands_run(calls):
     return [call for call in calls if call[0].endswith(('vsce', 'ovsx'))]
 
 
-def expect_publish_error(module, label, function, *args, expected=None, **kwargs):
+def expect_publish_error(module, label, function, *args, expected=None,
+                         required=(), forbidden=(), **kwargs):
     """Fail the self-test unless the publisher rejects the fixture."""
     try:
         function(*args, **kwargs)
     except module.PublishError as error:
-        if expected is not None and expected not in str(error):
+        text = str(error)
+        if expected is not None and expected not in text:
             fail(f'self-test: {label} failed for another reason: {error}')
+        for fragment in required:
+            if fragment not in text:
+                fail(f'self-test: {label} omitted {fragment!r}: {error}')
+        for fragment in forbidden:
+            if fragment in text:
+                fail(f'self-test: {label} wrongly claimed {fragment!r}: {error}')
         return
     fail(f'self-test: {label} was accepted')
 
@@ -4225,16 +4244,72 @@ def run_self_tests():
                     backend=publisher_backend(publish_release),
                     environment=pat_only, event=publisher_event(),
                     expected='PAT fallback')
-            # GitHub failure blocks every registry lane.
-            backend = publisher_backend(publish_release, fail='github')
+            # A GitHub release that fails during asset upload or its
+            # post-creation readback may already exist. That must be reported as
+            # partial/unverified GitHub progress requiring inspection, never as
+            # a clean failure, and it still blocks both registry lanes.
+            for label, failure in (('asset upload', 'upload'),
+                                   ('post-creation readback', 'readback')):
+                backend = publisher_backend(publish_release, fail=failure)
+                expect_publish_error(
+                    publish_release,
+                    f'publisher whose GitHub {label} fails after creation',
+                    publish_release.publish, relocated_handoff, backend=backend,
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='partial or unverified',
+                    required=('require manual inspection',
+                              'neither registry was attempted',
+                              'completed none',
+                              'pending github-release, marketplace, openvsx'),
+                    forbidden=('no GitHub mutation was attempted',))
+                if not any(call[0] == 'create_release' for call in backend.calls):
+                    fail(f'self-test: a GitHub {label} failure must follow a '
+                         'recorded release creation')
+                if any(call[0] in ('marketplace', 'openvsx') for call in backend.calls):
+                    fail(f'self-test: a GitHub {label} failure must block both '
+                         'registries')
+            # A lookup failure happens before creation, so it stays an honest
+            # no-mutation diagnostic rather than claiming unknown side effects.
+            backend = publisher_backend(publish_release, fail='lookup')
             expect_publish_error(
-                publish_release, 'publisher with a GitHub failure',
+                publish_release, 'publisher whose GitHub lookup fails',
                 publish_release.publish, relocated_handoff, backend=backend,
                 environment=publisher_environment(), event=publisher_event(),
-                expected='completed none; pending github-release, marketplace, '
-                         'openvsx')
-            if any(call[0] in ('marketplace', 'openvsx') for call in backend.calls):
-                fail('self-test: a GitHub failure must block both registries')
+                expected='no GitHub mutation was attempted',
+                required=('completed none', 'pending github-release, marketplace, '
+                          'openvsx'),
+                forbidden=('partial or unverified',))
+            if [call[0] for call in backend.calls] != ['release_assets']:
+                fail('self-test: a GitHub lookup failure must happen before any '
+                     'mutation or registry call')
+            # The command exit status makes the uncertainty visible to the
+            # release workflow: a real upload failure after creation exits 1 and
+            # prints the inspection warning.
+            publisher_event_path = Path(temporary) / 'publisher-event.json'
+            publisher_event_path.write_text(json.dumps(publisher_event()),
+                                            encoding='utf-8')
+            mutation_lookup = ['gh', 'api',
+                               f'repos/{SELF_TEST_REPOSITORY}/releases/tags/'
+                               f'v{SELF_TEST_VERSION}']
+            calls, run = publisher_command(
+                [(1, '', 'gh: Not Found (HTTP 404)'),
+                 (1, '', 'gh: release asset upload failed')])
+            diagnostic = io.StringIO()
+            with patch.object(subprocess, 'run', run), \
+                    patch.dict(os.environ, publisher_environment(
+                        GITHUB_EVENT_PATH=str(publisher_event_path)), clear=True), \
+                    patch.object(sys, 'stderr', diagnostic):
+                status = publish_release.main(
+                    ['--handoff', str(relocated_handoff)])
+            if status != 1 or 'partial or unverified' not in diagnostic.getvalue():
+                fail('self-test: an uncertain GitHub release mutation must exit '
+                     f'nonzero with an inspection diagnostic; saw {status!r} and '
+                     f'{diagnostic.getvalue()!r}')
+            if calls[0] != mutation_lookup or \
+                    calls[1][:3] != ['gh', 'release', 'create'] \
+                    or registry_commands_run(calls):
+                fail(f'self-test: a real upload failure must attempt creation '
+                     f'only; saw {calls!r}')
             # An existing release with different bytes is a conflict, never an
             # overwrite and never a registry publication.
             conflict = {name: 'sha256:' + '0' * 64
@@ -4313,11 +4388,45 @@ def run_self_tests():
                         publish_release.publish, relocated_handoff,
                         backend=publish_release.CommandBackend(root=str(relocated)),
                         environment=publisher_environment(),
-                        event=publisher_event(), expected=expected)
+                        event=publisher_event(), expected=expected,
+                        required=('partial or unverified',
+                                  'neither registry was attempted'))
                 if calls[0] != lookup or calls[1][:3] != ['gh', 'release', 'create'] \
                         or registry_commands_run(calls):
                     fail(f'self-test: a created {label} readback must fail before '
                          f'any registry; saw {calls!r}')
+            # A readback that cannot be read at all is equally uncertain.
+            calls, run = publisher_command(
+                [(1, '', 'gh: Not Found (HTTP 404)'), (0, '', ''),
+                 (1, '', 'gh: HTTP 500: server error')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release,
+                    'publisher whose created release readback errors',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='GitHub release lookup for',
+                    required=('partial or unverified',
+                              'neither registry was attempted'))
+            if calls[0] != lookup or calls[1][:3] != ['gh', 'release', 'create'] \
+                    or registry_commands_run(calls):
+                fail(f'self-test: an errored readback must attempt creation only; '
+                     f'saw {calls!r}')
+            # A lookup that fails before creation is not a partial mutation.
+            calls, run = publisher_command(
+                [(1, '', 'gh: HTTP 500: server error')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release, 'publisher whose release lookup errors',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='no GitHub mutation was attempted',
+                    forbidden=('partial or unverified',))
+            if calls != [lookup]:
+                fail(f'self-test: a failed release lookup must not create or '
+                     f'publish; saw {calls!r}')
             # An exact published release is still accepted and both registry
             # lanes run against the same VSIX.
             calls, run = publisher_command(

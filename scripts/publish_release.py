@@ -57,6 +57,15 @@ class PublishError(Exception):
     """A handoff, trusted context or external publication step failed closed."""
 
 
+class ReleaseMutationError(PublishError):
+    """GitHub release creation was attempted, so remote side effects may exist.
+
+    ``gh release create`` publishes the release before uploading its assets, so
+    a failure during creation, an asset upload or the post-creation readback can
+    leave a release and some assets behind. Such a failure is never a clean one.
+    """
+
+
 def fail(message):
     raise PublishError(message)
 
@@ -313,6 +322,9 @@ def ensure_release(backend, repository, document, assets):
     An existing release is never overwritten: any extra, missing or differently
     hashed asset is a conflict and stops publication before the registry lanes.
     A newly created release is read back and must contain exactly those bytes.
+    Failures before creation are ordinary :class:`PublishError`; anything that
+    fails after creation was attempted is a :class:`ReleaseMutationError`, since
+    GitHub may already hold a release or some uploaded assets.
     """
     tag = f'v{document["version"]}'
     expected = expected_release_assets(assets)
@@ -321,10 +333,13 @@ def ensure_release(backend, repository, document, assets):
         if existing != expected:
             fail(f'GitHub release {tag} has conflicting assets; refusing to overwrite')
         return 'existing'
-    backend.create_release(repository, tag, tag, list(assets['release']))
-    verified = backend.release_assets(repository, tag)
-    if verified != expected:
-        fail(f'GitHub release {tag} does not contain the exact accepted assets')
+    try:
+        backend.create_release(repository, tag, tag, list(assets['release']))
+        verified = backend.release_assets(repository, tag)
+        if verified != expected:
+            fail(f'GitHub release {tag} does not contain the exact accepted assets')
+    except PublishError as error:
+        raise ReleaseMutationError(str(error)) from error
     return 'created'
 
 
@@ -423,7 +438,10 @@ def publish(handoff_path, backend=None, environment=None, event=None):
 
     Returns the completed destination names in order. Any validation problem or
     destination failure raises :class:`PublishError` describing the completed
-    and pending destinations; no destination is retried.
+    and pending destinations; no destination is retried. A failure before any
+    release mutation says no mutation was attempted; a failure after creation
+    was attempted reports GitHub side effects as partial or unverified and
+    requiring inspection, because the release or some assets may already exist.
     """
     environment = dict(os.environ) if environment is None else environment
     document, root = load_handoff(handoff_path)
@@ -434,8 +452,14 @@ def publish(handoff_path, backend=None, environment=None, event=None):
     backend = backend or CommandBackend()
     try:
         ensure_release(backend, repository, document, assets)
+    except ReleaseMutationError as error:
+        fail(f'publication uncertain: GitHub release creation was attempted, so '
+             f'its side effects are partial or unverified and require manual '
+             f'inspection: {error}; neither registry was attempted; completed '
+             f'none; pending {", ".join(DESTINATIONS)}')
     except PublishError as error:
-        fail(f'publication failed before any registry: {error}; completed none; '
+        fail(f'publication failed before any registry: {error}; no GitHub '
+             f'mutation was attempted; completed none; '
              f'pending {", ".join(DESTINATIONS)}')
     completed = ['github-release']
     lanes = (('marketplace', backend.publish_marketplace),
