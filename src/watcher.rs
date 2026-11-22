@@ -41,6 +41,25 @@ impl Default for WatcherConfig {
     }
 }
 
+impl WatcherConfig {
+    /// Production timing, with the debounce overridable for tests.
+    ///
+    /// `MAGIT_LSP_WATCH_DEBOUNCE_MS` overrides the default debounce so tests can
+    /// wait for a real refresh without a production-length quiet period; an
+    /// absent or invalid value keeps the default.
+    pub fn from_env() -> Self {
+        let mut config = Self::default();
+        if let Some(debounce) = std::env::var("MAGIT_LSP_WATCH_DEBOUNCE_MS")
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(Duration::from_millis)
+        {
+            config.debounce = debounce;
+        }
+        config
+    }
+}
+
 /// One debounced burst the watcher hands to its owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refresh {

@@ -455,7 +455,7 @@ impl Shared {
         let presentation_files = self.config.config().presentation_files.clone();
         let result = RepoWatcher::start_with_presentation_files(
             Path::new(repo),
-            WatcherConfig::default(),
+            WatcherConfig::from_env(),
             presentation_files,
             move |refresh: Refresh| match refresh {
                 Refresh::Changed(_paths) => {
