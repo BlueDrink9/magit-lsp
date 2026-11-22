@@ -421,10 +421,20 @@ fn draft_chain(
                 })
             })
     });
-    let template_index = client.editor.outbound.iter().position(|m| {
-        m["method"] == "workspace/applyEdit"
-            && m["params"]["edit"].to_string().contains("COMMIT_EDITMSG")
-    });
+    let edits_draft = |message: &Value| {
+        message["method"] == "workspace/applyEdit"
+            && (message["params"]["edit"]["documentChanges"]
+                .as_array()
+                .is_some_and(|changes| {
+                    changes
+                        .iter()
+                        .any(|change| change["textDocument"]["uri"] == draft_uri)
+                })
+                || message["params"]["edit"]["changes"]
+                    .get(draft_uri.as_str())
+                    .is_some())
+    };
+    let template_index = client.editor.outbound.iter().position(edits_draft);
     assert_eq!(
         template_index.is_some(),
         refresh,
