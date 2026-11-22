@@ -715,6 +715,43 @@ impl GitRepo {
         .is_ok()
     }
 
+    /// Whether `name` is an existing remote-tracking ref such as `origin/main`.
+    pub fn is_remote_ref(&self, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() || name.starts_with('-') {
+            return false;
+        }
+        self.run(&[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/remotes/{name}"),
+        ])
+        .is_ok()
+    }
+
+    /// Every local branch name.
+    pub fn local_branch_names(&self) -> Result<Vec<String>> {
+        let output = self.run(&["for-each-ref", "--format=%(refname:short)", "refs/heads"])?;
+        Ok(output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// Every remote-tracking ref name, excluding each remote's symbolic `HEAD`.
+    pub fn remote_ref_names(&self) -> Result<Vec<String>> {
+        let output = self.run(&["for-each-ref", "--format=%(refname:short)", "refs/remotes"])?;
+        Ok(output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.ends_with("/HEAD"))
+            .map(str::to_string)
+            .collect())
+    }
+
     /// Create branch `new` at `startpoint` without switching to it.
     ///
     /// A startpoint that names a local branch becomes the new branch's
@@ -752,6 +789,62 @@ impl GitRepo {
     pub fn checkout_branch(&self, name: &str) -> Result<()> {
         let name = self.validate_branch_name(name)?;
         self.run(&["switch", name.as_str()]).map(|_| ())
+    }
+
+    /// Check out `revision` with a detached HEAD at its commit.
+    ///
+    /// The revision is resolved to a commit first, so a name that only points
+    /// at a tree or blob is refused, and an option-like answer is refused here.
+    pub fn checkout_detached(&self, revision: &str) -> Result<()> {
+        Self::reject_option_like("revision", revision)?;
+        let commit = self.resolve_commit(revision)?;
+        self.run(&["switch", "--detach", commit.as_str()])
+            .map(|_| ())
+    }
+
+    /// Create a local branch tracking `remote_ref` and switch to it.
+    ///
+    /// The intended local name is the remote-tracking ref without its
+    /// configured remote prefix. An existing local branch is never moved or
+    /// reset: the operation is refused before any ref changes. Git creates the
+    /// branch and updates the worktree in one checkout, so a refused checkout
+    /// never force-deletes a ref another actor could own.
+    pub fn checkout_remote_ref(&self, remote_ref: &str) -> Result<String> {
+        Self::reject_option_like("remote ref", remote_ref)?;
+        if !self.is_remote_ref(remote_ref) {
+            return Err(Error::new(format!(
+                "{remote_ref} is not a remote-tracking ref."
+            )));
+        }
+        let local = self.local_name_for_remote_ref(remote_ref).ok_or_else(|| {
+            Error::new(format!(
+                "Cannot derive a local branch name from {remote_ref}."
+            ))
+        })?;
+        let local = self.validate_branch_name(&local)?;
+        if self.is_local_branch(&local) {
+            return Err(Error::new(format!(
+                "A local branch {local} already exists; use local branch checkout to switch to it."
+            )));
+        }
+        self.run(&["switch", "-c", local.as_str(), "--track", remote_ref])?;
+        Ok(local)
+    }
+
+    /// Local branch name implied by `remote_ref`, using the longest configured
+    /// remote prefix so remote names containing slashes still resolve.
+    fn local_name_for_remote_ref(&self, remote_ref: &str) -> Option<String> {
+        let remote = self
+            .remote_names()
+            .ok()?
+            .into_iter()
+            .filter(|remote| {
+                remote_ref
+                    .strip_prefix(remote)
+                    .is_some_and(|rest| rest.starts_with('/') && rest.len() > 1)
+            })
+            .max_by_key(String::len)?;
+        Some(remote_ref[remote.len() + 1..].to_string())
     }
 
     /// Full ref name of the configured upstream of `branch`, or `None` when it

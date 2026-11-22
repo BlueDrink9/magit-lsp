@@ -5848,3 +5848,369 @@ fn skip_worktree_commands_index_lock_failure_is_readable() {
         "base bytes"
     );
 }
+
+/// Invoke a checkout command and answer its single prompt, or cancel it.
+fn checkout_invoke(
+    test: &mut TestSession,
+    command: &str,
+    answer: Option<magit_lsp::protocol::PromptValue>,
+) -> magit_lsp::session::Execution {
+    let execution = test
+        .session
+        .start_invoke(&magit_lsp::protocol::ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: command.into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap();
+    let magit_lsp::session::Execution::Prompt(prompt) = execution else {
+        panic!("{command}: expected a prompt");
+    };
+    test.session
+        .resume_prompt(&prompt.prompt_id, answer)
+        .unwrap()
+}
+
+#[test]
+fn branch_checkout_checks_out_local_branch_and_detached_revision() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "other", "HEAD~1"]);
+    let earlier = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let Execution::Done(result) = checkout_invoke(
+        &mut test,
+        "branch.checkout",
+        Some(PromptValue::Text("other".into())),
+    ) else {
+        panic!("a local branch answer must complete");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Checked out branch other"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "other"
+    );
+
+    let Execution::Done(result) = checkout_invoke(
+        &mut test,
+        "branch.checkout",
+        Some(PromptValue::Text(earlier.clone())),
+    ) else {
+        panic!("a revision answer must complete");
+    };
+    assert!(
+        message_texts(&result.effects)
+            .iter()
+            .any(|text| text.contains("detached HEAD")),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "HEAD",
+        "a revision answer must detach HEAD"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), earlier);
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_checkout_local_chooser_lists_only_local_branches() {
+    use magit_lsp::protocol::{PromptChoiceAnswer, PromptKind, PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    tmp.git(&["branch", "topic"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    tmp.git(&["remote", "add", "origin", "."]);
+    tmp.git(&["update-ref", "refs/remotes/origin/feature", &head]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "branch.checkout-local".into(),
+            version: Some(test.version()),
+            cursor: None,
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected a local branch choice prompt");
+    };
+    assert_eq!(prompt.kind, PromptKind::Choice);
+    let items = prompt.items.as_ref().expect("choice items");
+    let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+    assert!(ids.contains(&"main"), "{ids:?}");
+    assert!(ids.contains(&"topic"), "{ids:?}");
+    assert!(
+        !items.iter().any(|item| item.id.contains('/')),
+        "the local chooser must exclude remote-tracking refs: {ids:?}"
+    );
+
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(
+            &prompt.prompt_id,
+            Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                id: "topic".into(),
+            })),
+        )
+        .unwrap()
+    else {
+        panic!("a local branch choice must complete");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Checked out branch topic"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "topic"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_checkout_remote_creates_the_intended_tracking_branch() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    tmp.git(&["remote", "add", "origin", "."]);
+    tmp.git(&["update-ref", "refs/remotes/origin/feature", &head]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let Execution::Done(result) = checkout_invoke(
+        &mut test,
+        "branch.checkout-remote",
+        Some(PromptValue::Text("origin/feature".into())),
+    ) else {
+        panic!("a remote ref answer must complete");
+    };
+    assert!(
+        message_texts(&result.effects).contains(&"Checked out feature tracking origin/feature"),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "feature"
+    );
+    assert_eq!(tmp.git(&["rev-parse", "feature"]).trim(), head);
+    assert_eq!(
+        tmp.git(&[
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            "refs/heads/feature",
+        ])
+        .trim(),
+        "origin/feature",
+        "the new branch must track the remote ref"
+    );
+    assert!(!test.session.has_pending_prompt());
+}
+
+#[test]
+fn branch_checkout_cancellation_and_invalid_answers_preserve_state() {
+    use magit_lsp::protocol::{PromptChoiceAnswer, PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("second.txt", "second\n")])
+        .build();
+    tmp.git(&["branch", "other"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    tmp.git(&["remote", "add", "origin", "."]);
+    tmp.git(&["update-ref", "refs/remotes/origin/feature", &head]);
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"])
+                .trim()
+                .to_owned(),
+            tmp.git(&["rev-parse", "HEAD"]).trim().to_owned(),
+            tmp.git(&["write-tree"]).trim().to_owned(),
+            tmp.git(&["status", "--porcelain"]).trim().to_owned(),
+            tmp.git(&[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ])
+            .trim()
+            .to_owned(),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        )
+    };
+    let before = state(&tmp);
+
+    for command in [
+        "branch.checkout",
+        "branch.checkout-local",
+        "branch.checkout-remote",
+    ] {
+        let Execution::Prompt(prompt) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: command.into(),
+                version: Some(test.version()),
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("{command}: expected a prompt");
+        };
+        let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, None).unwrap()
+        else {
+            panic!("{command}: cancellation must complete");
+        };
+        assert!(
+            !result.effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Message {
+                    level: MessageLevel::Warn,
+                    ..
+                }
+            )),
+            "{command}: cancellation must not warn: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{command}: cancellation must not write"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+
+    for (command, answer) in [
+        (
+            "branch.checkout",
+            PromptValue::Text("does-not-exist".into()),
+        ),
+        ("branch.checkout", PromptValue::Text("  ".into())),
+        (
+            "branch.checkout-local",
+            PromptValue::Choice(PromptChoiceAnswer::Id {
+                id: "no-such-branch".into(),
+            }),
+        ),
+        (
+            "branch.checkout-remote",
+            PromptValue::Text("origin/does-not-exist".into()),
+        ),
+    ] {
+        let Execution::Done(result) = checkout_invoke(&mut test, command, Some(answer)) else {
+            panic!("{command}: expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts.iter().any(|text| !text.is_empty()),
+            "{command}: invalid input must be readable: {:?}",
+            result.effects
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("Checked out")),
+            "{command}: invalid input must not claim success: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{command}: invalid input must not write"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+}
+
+#[test]
+fn branch_checkout_conflicts_preserve_head_index_worktree_and_refs() {
+    use magit_lsp::protocol::PromptValue;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .commit("second", [("base.txt", "main\n")])
+        .build();
+    tmp.git(&["branch", "other", "HEAD~1"]);
+    let earlier = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    tmp.git(&["remote", "add", "origin", "."]);
+    tmp.git(&["update-ref", "refs/remotes/origin/feature", &earlier]);
+    std::fs::write(tmp.path().join("base.txt"), "dirty\n").unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"])
+                .trim()
+                .to_owned(),
+            tmp.git(&["rev-parse", "HEAD"]).trim().to_owned(),
+            tmp.git(&["write-tree"]).trim().to_owned(),
+            tmp.git(&["status", "--porcelain"]).trim().to_owned(),
+            tmp.git(&[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ])
+            .trim()
+            .to_owned(),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        )
+    };
+    let before = state(&tmp);
+
+    for (command, answer) in [
+        ("branch.checkout", PromptValue::Text("other".into())),
+        (
+            "branch.checkout-remote",
+            PromptValue::Text("origin/feature".into()),
+        ),
+    ] {
+        let Execution::Done(result) = checkout_invoke(&mut test, command, Some(answer)) else {
+            panic!("{command}: expected completion");
+        };
+        let texts = message_texts(&result.effects);
+        assert!(
+            texts.iter().any(|text| !text.is_empty()),
+            "{command}: Git's refusal must be readable: {:?}",
+            result.effects
+        );
+        assert!(
+            !texts.iter().any(|text| text.starts_with("Checked out")),
+            "{command}: a refused checkout must not claim success: {:?}",
+            result.effects
+        );
+        assert_eq!(
+            state(&tmp),
+            before,
+            "{command}: a refused checkout must preserve HEAD, index, worktree and refs"
+        );
+        assert!(!test.session.has_pending_prompt());
+    }
+}

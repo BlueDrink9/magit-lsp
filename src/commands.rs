@@ -388,6 +388,12 @@ pub enum PromptAction {
         /// The starting point answered at the first prompt.
         startpoint: String,
     },
+    /// Check out the answered branch or revision.
+    BranchCheckout,
+    /// Check out the answered existing local branch.
+    BranchCheckoutLocal,
+    /// Create and check out a local tracking branch for the answered remote ref.
+    BranchCheckoutRemote,
     /// Spin the current branch's unpushed commits onto the answered branch.
     BranchSpinoff,
     /// Spin out the current branch's unpushed commits onto the answered branch.
@@ -748,6 +754,75 @@ pub fn resume_prompt(
                 |repo| repo.create_branch_at(&name, &startpoint),
                 format!("Created branch {name}"),
             )
+        }
+        PromptAction::BranchCheckout => {
+            let PromptValue::Text(label) = answer else {
+                return Err(crate::Error::new("Expected a branch or revision"));
+            };
+            let label = label.trim().to_owned();
+            if label.is_empty() {
+                ctx.effects.push(Effect::message(
+                    MessageLevel::Warn,
+                    "Enter a branch or revision to check out",
+                ));
+                return Ok(CommandOutcome::default());
+            }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if repo.is_local_branch(&label) {
+                return checkout_action(
+                    ctx,
+                    repo.checkout_branch(&label),
+                    format!("Checked out branch {label}"),
+                );
+            }
+            if repo.is_remote_ref(&label) {
+                ctx.effects.push(Effect::message(
+                    MessageLevel::Warn,
+                    format!(
+                        "{label} is a remote-tracking ref; use the remote ref checkout action to create a tracking branch"
+                    ),
+                ));
+                return Ok(CommandOutcome::default());
+            }
+            checkout_action(
+                ctx,
+                repo.checkout_detached(&label),
+                format!("Checked out {label} (detached HEAD)"),
+            )
+        }
+        PromptAction::BranchCheckoutLocal => {
+            let PromptValue::Choice(PromptChoiceAnswer::Id { id }) = answer else {
+                return Err(crate::Error::new("Expected a local branch choice"));
+            };
+            branch_action(
+                ctx,
+                |repo| repo.checkout_branch(&id),
+                format!("Checked out branch {id}"),
+            )
+        }
+        PromptAction::BranchCheckoutRemote => {
+            let PromptValue::Text(remote_ref) = answer else {
+                return Err(crate::Error::new("Expected a remote-tracking ref"));
+            };
+            let remote_ref = remote_ref.trim().to_owned();
+            if remote_ref.is_empty() {
+                ctx.effects.push(Effect::message(
+                    MessageLevel::Warn,
+                    "Enter a remote-tracking ref to check out",
+                ));
+                return Ok(CommandOutcome::default());
+            }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            match repo.checkout_remote_ref(&remote_ref) {
+                Ok(local) => {
+                    return checkout_action(
+                        ctx,
+                        Ok(()),
+                        format!("Checked out {local} tracking {remote_ref}"),
+                    );
+                }
+                Err(err) => checkout_action(ctx, Err(err), String::new()),
+            }
         }
         PromptAction::BranchSpinoff => spin_answered(ctx, answer, SpinMode::Spinoff),
         PromptAction::BranchSpinout => spin_answered(ctx, answer, SpinMode::Spinout),
@@ -1742,6 +1817,9 @@ fn build() -> Registry {
             effects: &[],
         },
         command! { id: "branch.create", scope: Scope::MenuAction, doc: "Create a branch from a starting point", status: CommandStatus::Implemented, run: branch_create, effects: &[] },
+        command! { id: "branch.checkout", scope: Scope::MenuAction, doc: "Check out a branch or revision", status: CommandStatus::Implemented, run: branch_checkout, effects: &[] },
+        command! { id: "branch.checkout-local", scope: Scope::MenuAction, doc: "Check out an existing local branch", status: CommandStatus::Implemented, run: branch_checkout_local, effects: &[] },
+        command! { id: "branch.checkout-remote", scope: Scope::MenuAction, doc: "Check out a remote-tracking ref as a local tracking branch", status: CommandStatus::Implemented, run: branch_checkout_remote, effects: &[] },
         command! { id: "branch.rename", scope: Scope::MenuAction, doc: "Rename a branch", status: CommandStatus::Implemented, run: branch_rename, effects: &[] },
         command! { id: "branch.delete", scope: Scope::MenuAction, doc: "Delete a branch", status: CommandStatus::Implemented, run: branch_delete, destructive: true, effects: &[] },
         command! { id: "branch.reset", scope: Scope::MenuAction, doc: "Reset a branch to a revision", status: CommandStatus::Implemented, run: branch_reset, effects: &[] },
@@ -2474,6 +2552,28 @@ fn branch_action(
     })
 }
 
+/// Report a completed checkout, or its Git failure, as a readable message.
+fn checkout_action(
+    ctx: &mut CommandCtx<'_>,
+    result: Result<()>,
+    success: String,
+) -> Result<CommandOutcome> {
+    match result {
+        Ok(()) if !success.is_empty() => ctx.info(success),
+        Ok(()) => {}
+        Err(err) => ctx.effects.push(Effect::Message {
+            level: MessageLevel::Warn,
+            text: err.to_string(),
+            hint: None,
+            detail: None,
+        }),
+    }
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
+}
+
 /// Which `git reset` mode an answered revision applies with.
 enum ResetMode {
     /// Reset HEAD and the index.
@@ -2610,6 +2710,63 @@ fn branch_description_prompt(name: &str) -> ViewPromptParams {
         min: None,
         max: None,
     }
+}
+
+/// Prompt for a branch or revision to check out.
+fn branch_checkout(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt("Check out branch or revision", "", "Branch or revision"),
+            PromptAction::BranchCheckout,
+        )),
+        ..Default::default()
+    })
+}
+
+/// Prompt with only existing local branches, never remote-tracking refs.
+fn branch_checkout_local(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    let branches = repo.local_branch_names()?;
+    if branches.is_empty() {
+        ctx.effects.push(Effect::message(
+            MessageLevel::Warn,
+            "No local branches to check out",
+        ));
+        return Ok(CommandOutcome::default());
+    }
+    let mut prompt = branch_name_prompt("Check out local branch", "", "Local branch");
+    prompt.kind = PromptKind::Choice;
+    prompt.items = Some(
+        branches
+            .into_iter()
+            .map(|name| PromptItem {
+                id: name.clone(),
+                label: name,
+                description: None,
+                detail: None,
+            })
+            .collect(),
+    );
+    prompt.allow_custom = Some(false);
+    Ok(CommandOutcome {
+        prompt: Some((prompt, PromptAction::BranchCheckoutLocal)),
+        ..Default::default()
+    })
+}
+
+/// Prompt for a remote-tracking ref to check out as a local tracking branch.
+fn branch_checkout_remote(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        prompt: Some((
+            branch_name_prompt(
+                "Check out remote ref",
+                "",
+                "Remote-tracking ref such as origin/main",
+            ),
+            PromptAction::BranchCheckoutRemote,
+        )),
+        ..Default::default()
+    })
 }
 
 /// Prompt for the starting point of a new branch.
