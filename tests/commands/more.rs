@@ -5935,6 +5935,8 @@ fn branch_checkout_local_chooser_lists_only_local_branches() {
         .commit("init", [("base.txt", "base\n")])
         .build();
     tmp.git(&["branch", "topic"]);
+    tmp.git(&["branch", "feature/deep"]);
+    tmp.git(&["tag", "v1.0"]);
     let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_owned();
     tmp.git(&["remote", "add", "origin", "."]);
     tmp.git(&["update-ref", "refs/remotes/origin/feature", &head]);
@@ -5960,17 +5962,16 @@ fn branch_checkout_local_chooser_lists_only_local_branches() {
     let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
     assert!(ids.contains(&"main"), "{ids:?}");
     assert!(ids.contains(&"topic"), "{ids:?}");
-    assert!(
-        !items.iter().any(|item| item.id.contains('/')),
-        "the local chooser must exclude remote-tracking refs: {ids:?}"
-    );
+    assert!(ids.contains(&"feature/deep"), "{ids:?}");
+    assert!(!ids.contains(&"origin/feature"), "{ids:?}");
+    assert!(!ids.contains(&"v1.0"), "{ids:?}");
 
     let Execution::Done(result) = test
         .session
         .resume_prompt(
             &prompt.prompt_id,
             Some(PromptValue::Choice(PromptChoiceAnswer::Id {
-                id: "topic".into(),
+                id: "feature/deep".into(),
             })),
         )
         .unwrap()
@@ -5978,13 +5979,13 @@ fn branch_checkout_local_chooser_lists_only_local_branches() {
         panic!("a local branch choice must complete");
     };
     assert!(
-        message_texts(&result.effects).contains(&"Checked out branch topic"),
+        message_texts(&result.effects).contains(&"Checked out branch feature/deep"),
         "{:?}",
         result.effects
     );
     assert_eq!(
         tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
-        "topic"
+        "feature/deep"
     );
     assert!(!test.session.has_pending_prompt());
 }
@@ -6028,6 +6029,54 @@ fn branch_checkout_remote_creates_the_intended_tracking_branch() {
         .trim(),
         "origin/feature",
         "the new branch must track the remote ref"
+    );
+    assert!(!test.session.has_pending_prompt());
+
+    // A remote ref whose derived local name already exists as a local branch
+    // must be refused without touching refs, HEAD, the index or the worktree.
+    tmp.git(&["branch", "taken"]);
+    tmp.git(&["update-ref", "refs/remotes/origin/taken", &head]);
+    let state = |tmp: &RepoFixture| {
+        (
+            tmp.git(&["rev-parse", "--abbrev-ref", "HEAD"])
+                .trim()
+                .to_owned(),
+            tmp.git(&["rev-parse", "HEAD"]).trim().to_owned(),
+            tmp.git(&["write-tree"]).trim().to_owned(),
+            tmp.git(&["status", "--porcelain"]).trim().to_owned(),
+            tmp.git(&[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ])
+            .trim()
+            .to_owned(),
+            std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(),
+        )
+    };
+    let before = state(&tmp);
+
+    let Execution::Done(result) = checkout_invoke(
+        &mut test,
+        "branch.checkout-remote",
+        Some(PromptValue::Text("origin/taken".into())),
+    ) else {
+        panic!("a colliding remote ref answer must complete");
+    };
+    let texts = message_texts(&result.effects);
+    assert!(
+        texts.iter().any(|text| text.contains("already exists")),
+        "the local-name collision must be reported readably: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.starts_with("Checked out")),
+        "a refused checkout must not claim success: {texts:?}"
+    );
+    assert_eq!(
+        state(&tmp),
+        before,
+        "a refused checkout must preserve HEAD, index, worktree and refs"
     );
     assert!(!test.session.has_pending_prompt());
 }
