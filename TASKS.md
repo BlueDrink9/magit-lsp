@@ -822,12 +822,15 @@ The overlapping P0 operand-protection item above is reopened for the remaining d
   - Done: `dcd0e0d`.
   - Verified: `make release-automation-unit` → exit 0 (`ok: release-automation-unit`). The runtime fixture now loops wrong `path`, `type: 'dir'`, `encoding: 'utf-8'`, empty content and a size/content mismatch through `prepare_publication_runtime`, each expecting its exact `fetch_source_locks` message and asserting `publication-handoff.json` absent; the existing invalid-base64 case stays in the loop. Removing any one of the five guards made exactly its labelled fixture fail (`failed for another reason`). No production change; no defect found.
 
-- [ ] **[P3] RV-TEST-REL-03 — Drop the helper-name presence loop from the release self-tests** (`scripts/check_release_automation.py:3413-3419`, `run_self_tests`)
+- [x] **[P3] RV-TEST-REL-03 — Drop the helper-name presence loop from the release self-tests** (`scripts/check_release_automation.py:3413-3419`, `run_self_tests`)
   - **Problem:** The loop asserts `callable(globals().get(name))` for seven publication helpers. Every one of them is already exercised by fixtures in the same function (`validate_run_jobs` :3538/:3632, `validate_run_artifacts` :3641/:3697, `validate_upload_identity` :3650/:3719, `validate_tag_binding` :3728, `validate_run_binding` in the binding fixture, `publication_api_pages` and `prepare_publication_runtime` in the runtime fixture), so deleting a helper already fails a behavioural fixture. The loop cannot detect a behaviour change, duplicates coverage as a name registry, and its comment claims a caller check that does not exist.
   - **Why it matters:** Simplicity and cleanliness: a name-presence assertion adds maintenance and false confidence without testing observable behaviour.
   - **Change:** Remove the `for retained in (...)` loop and its comment at :3413-3419. Keep the retired readiness CLI-option and symbol absence loops directly above (:3400-3412) — those are genuine contract-drift guards.
   - **Done when:** `make release-automation-unit` passes and no `retained publication helper` string or `retained` loop remains.
   - **Constraints:** Do not remove the retired-symbol/CLI absence assertions, and do not replace the loop with another name list.
+  - Verified: `git diff` at `c79665c` shows only the 7 deletions at `scripts/check_release_automation.py:3413-3419` (comment plus `for retained in (...)` block); `grep -c "retained publication helper"` → 0 and no `retained` loop remains (the only other `retained` occurrence is the unrelated line 56 fixture comment). The retired readiness contract guards stay intact: `scripts/check_release_automation.py:3403-3407` (CLI option absence) and `:3408-3412` (symbol absence) are unchanged, and no replacement name registry was added.
+  - Verified: `make release-automation-unit` → exit 0 (`ok: release-automation-unit`) at `c79665c`+edit; the behavioural fixtures for every former loop entry still run in `run_self_tests` (`validate_run_binding` :3483/:3525/:3528, `validate_run_jobs` :3538/:3632, `validate_run_artifacts` :3641/:3697, `validate_upload_identity` :3650/:3719, `validate_tag_binding` :3728/:3805, `prepare_publication_runtime` :4496+).
+  - Done: `87c832a`.
 
 ## Ready independent work
 
