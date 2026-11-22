@@ -1,13 +1,20 @@
 # Release foundation (R-REL-1, not release approval)
 
 This is a prepared release foundation, not an approved release. Two tracked
-workflows cover the automation boundary: `.github/workflows/release.yml` builds
-and packages the release candidate, and `.github/workflows/publish.yml` is a
-manual, dispatch-only publication workflow that defaults to a validation-only
-dry run and gates its registry lanes on human-provided credentials. Neither
-has been run, no tag has been pushed, no credential is configured and nothing
-has been published. GitHub Actions artifacts are short-lived CI outputs, **not**
-GitHub Release assets. R-REL-1 and the release go/no-go remain open.
+workflows cover the automation boundary: `.github/workflows/release.yml` is the
+read-only, unprivileged producer that builds and packages the release candidate,
+and `.github/workflows/publish.yml` is the protected publisher that runs only
+after a successful push of a version-aligned `vX.Y.Z` tag. Publication is never
+manual: the publisher's `workflow_run` guard admits only a same-repository
+`push` run that concluded successfully, and its read-only `validate` job then
+independently peels the tag to the built source before the protected `publish`
+environment performs any mutation. Because the publisher is `workflow_run`-based
+and checks out the default branch, both workflow definitions must already be on
+the default branch before the release tag is pushed; a tag run cannot introduce
+them. No hosted tag run has happened, no tag has been pushed, no trusted
+publisher registration is configured and nothing has been published. GitHub
+Actions artifacts are short-lived CI outputs, **not** GitHub Release assets.
+R-REL-1 and the release go/no-go remain open.
 
 Client setup/discovery and on-demand Neovim examples are in
 [CLIENT_INSTALL](CLIENT_INSTALL.md); human-only README image guidance is in
@@ -221,11 +228,18 @@ compiled natively.
 
 ## Tracked workflows and local checks
 
-`.github/workflows/release.yml` runs on manual dispatch and on `v*` tags. It
-installs Rust 1.94.1, builds the locked `x86_64-unknown-linux-gnu` target on the
-Ubuntu 22.04 baseline, packages and smoke-tests the binary, and uploads the
-`linux-x86_64-gnu-release-candidate` artifact (14-day retention). It publishes
-nothing and holds no credentials.
+`.github/workflows/release.yml` is triggered by `workflow_dispatch` and `v*`
+tags; only a version-aligned `vX.Y.Z` tag run can lead to publication, because
+the publisher requires the `push` event and a manual dispatch is a build-only
+rehearsal. Its required graph runs read-only source checks, builds and tests
+Ubuntu 22.04 GNU x86_64, macOS arm64 and macOS Intel, and packages one VSIX from
+Node 24 with frozen locked pnpm; a failed, skipped, cancelled or missing
+required job blocks the run, while Windows is informational and appears in no
+required matrix or gate. The Linux job installs Rust 1.94.1, builds the locked
+`x86_64-unknown-linux-gnu` target on the Ubuntu 22.04 baseline, packages and
+smoke-tests the binary, and uploads the `linux-x86_64-gnu-release-candidate`
+artifact (14-day retention). The workflow publishes nothing and holds no
+credentials; the VSIX reaches the publisher only as an immutable artifact.
 
 The native-linker lane is an explicit, nonpublishing experiment in a separate
 `*-experimental` artifact namespace; it does not replace or gate the established
@@ -239,16 +253,31 @@ or any failed, skipped, or inconclusive mandatory gate cannot establish proof.
 The authoritative completion record is NREL-17 in `TASKS.md`; this document
 does not claim that hosted proof exists.
 
-`.github/workflows/publish.yml` is `workflow_dispatch`-only, so no push or tag
-can publish on its own. Its inputs are a required `build_run_id` naming a
-completed build-workflow run and a `mode` choice defaulting to `dry-run`. The
-`validate` job re-checks that run's archive, sidecar and version triple and
-rebuilds the offline VSIX; only a `publish`-mode dispatch continues, creating the
-GitHub Release `v<version>` from the validated assets (refusing an existing
-release) and publishing the VSIX to the VS Code Marketplace (`VSCE_PAT`), Open
-VSX (`OVSX_PAT`) and the crate to crates.io (`CARGO_REGISTRY_TOKEN`). Each of
-those three registry lanes is gated on its own human-provided secret and skips
-with a notice when that secret is absent.
+`.github/workflows/publish.yml` is a `workflow_run` publisher: it fires when
+`release.yml` completes and never on a branch push or a manual dispatch of its
+own. Its `if` guard admits only `event == 'push'`, `conclusion == 'success'` and
+`head_repository.full_name == github.repository`, so manual build dispatches,
+failed or cancelled builds and fork runs cannot publish; `validate` additionally
+requires the exact version tag, peels the tag ref/object to the manifest source
+SHA and refuses unless every mandatory producer job succeeded with artifacts
+bound to that source. `validate` is read-only
+(`contents: read`, `actions: read`): it revalidates the run's archive, sidecar,
+VSIX and version binding and uploads exactly one immutable `publication-handoff`
+artifact that the publisher addresses by artifact id, never by mutable name or
+across runs. Only after that does the protected `publish` job run in the
+`release-publish` environment with job-local `contents: write`,
+`id-token: write` and `actions: read`; it downloads that same artifact id,
+installs the frozen locked `vsce`/`ovsx` tooling with Node 24 and pinned pnpm
+10.13.1, and runs `make release-publish HANDOFF=…`. That step creates the GitHub
+Release `v<version>` from the verified assets (refusing a conflicting existing
+release) and only after that publishes the one identical tested VSIX to the VS
+Code Marketplace with `vsce publish --oidc` and to Open VSX with
+`ovsx publish --trusted-publishing`. There is no PAT input, no rebuild or
+repackage, no manual rehearsal path and no crate lane. A failed GitHub Release
+blocks both registry lanes; a registry failure is reported as
+completed/pending destinations, never as atomic success. Hosted execution of
+this chain, the mandatory Ubuntu 22.04 GNU and both macOS jobs and the single
+VSIX it would publish are all still pending.
 
 Three local targets guard this automation: `make workflows-check` (actionlint
 syntax, expression and `run:` shell lint over every workflow),
@@ -323,7 +352,7 @@ does not prove the hosted artifact runs on glibc 2.35; do not publish local Fedo
 builds under the Ubuntu-baseline asset name. No clean-machine/editor-native
 installation evidence is implied by the command-line smoke.
 
-## Publication blockers and manual protected procedure
+## Publication blockers and protected tag procedure
 
 * Complete prerequisite feature gates R-4.1a/R-7.3a and R-CLIENT-SPEC; assess
   their canonical evidence in TASKS.md rather than assuming readiness here.
@@ -331,7 +360,7 @@ installation evidence is implied by the command-line smoke.
   client/protocol/specification/documentation Apache-2.0 exceptions. Cargo description
   and repository metadata are present. Dependency/upstream-license and
   corresponding-source review and publication approval remain open.
-* Crates.io, Marketplace, Open VSX dry runs, actual crate/VSIX install smoke,
+* Marketplace and Open VSX test publications, actual VSIX install smoke,
   client discovery, release notes and both-client native evidence remain gates.
   The current extension uses an external server; no bundled server, automatic
   installer or published extension is promised. Binary users need no Rust;
@@ -340,29 +369,61 @@ installation evidence is implied by the command-line smoke.
   a responsiveness fix. Full regression, phase evidence and explicit **pre-tag
   human go/no-go** for v0.2.0 remain required. No tag/publish approval is implied.
 
-Focused licensing/release verification on 2026-10-28 passed: 16 unittest tests,
-0 skips, including the real-binary package/install/launch smoke; shellcheck and
-`git diff --check` passed. This local evidence does not close hosted or publication
-gates.
+### Crate publication scope audit (2026-11-21)
 
-After those gates and explicit human approval, an authorized maintainer should
-review the exact commit and aligned versions, protect the release tag and require
-reviewers on the environment used for any publication dispatch. Each registry
-credential (`VSCE_PAT`, `OVSX_PAT`, `CARGO_REGISTRY_TOKEN`) is human-provided,
-minimally scoped and kept out of build jobs; none is configured today and no
-publication has occurred.
+The publisher has no crate lane and this audit does not add one. The crates.io
+development update of 2026-01-21
+(<https://blog.rust-lang.org/2026/01/21/crates-io-development-update/>) blocks
+trusted publication from `workflow_run` workflows, and `publish.yml` is exactly
+such a workflow, so it cannot complete a crates.io OIDC/trusted-publishing
+exchange. `https://crates.io/api/v1/crates/magit-lsp` also returned HTTP 404 on
+2026-11-21, so there is no existing crate lane or published version to preserve.
+Crate publication is therefore explicitly deferred, not silently dropped: it
+needs a separately scoped ticket that satisfies the upstream restriction before
+it may run, and it must never weaken the required GitHub Release and single-VSIX
+Marketplace/Open VSX delivery below. The asserted publication scope is exactly
+one GitHub Release plus the same tested VSIX delivered to the VS Code
+Marketplace and Open VSX, after human registrations and environment protection.
 
-Run `release.yml` at the approved commit (dispatch, or an approved `v*` tag),
-inspect logs and checksums, download the CI artifact, verify its actual
-Ubuntu-baseline binary on a clean machine, and retain install/launch evidence.
-Only then may an approved maintainer dispatch `publish.yml` with that run's
-`build_run_id`: a `dry-run` dispatch validates the artifact and packaged VSIX
-without touching any channel, while a `publish` dispatch creates the GitHub
-Release with the validated archive and sidecar and publishes each registry
-deliverable only where that registry's credential is present. Never mark a
-release successful merely
-because the build job passed. Re-download published assets and smoke both latest
-and pinned installation; verify all registry and client deliverables separately.
+Historical (2026-10-28; describes the superseded manual-credential procedure and
+is not a current instruction): focused licensing/release verification passed 16
+unittest tests, 0 skips, including the real-binary package/install/launch smoke;
+shellcheck and `git diff --check` passed. That local evidence did not close
+hosted or publication gates, and it does not authorize the current chain.
+
+Hosted evidence and approval remain pending. No hosted tag run has produced the
+mandatory Ubuntu 22.04 GNU, macOS arm64 and macOS Intel outcomes or the single
+VSIX, and no `release-publish` environment registration exists.
+
+Once those gates and an explicit human go/no-go exist, an authorized maintainer
+proceeds only by pushing a version-aligned `vX.Y.Z` tag at the approved commit,
+with both workflows already merged to the default branch. Before that push the
+maintainer must:
+
+* protect the release tag and require reviewers on the `release-publish`
+  environment;
+* register trusted publishing for this exact owner/repository, the
+  `publish.yml` workflow and the `release-publish` environment with the VS Code
+  Marketplace and Open VSX. Registration is human-owned and pending; no PAT is
+  an input and none is configured.
+
+The tag run builds and tests the mandatory Ubuntu 22.04 GNU x86_64, macOS arm64
+and macOS Intel jobs, produces the single Node 24/frozen-pnpm VSIX once, and
+only a `release-readiness` aggregate that requires `source-checks`, that VSIX,
+all three mandatory platform jobs and every consumer gate lets the workflow
+succeed. Windows is informational and gates nothing. A manual `release.yml`
+dispatch is a build-only rehearsal: its `workflow_run` event is not `push`, so
+`publish` never runs. Inspect logs and checksums, download the CI artifact,
+verify its actual Ubuntu-baseline binary on a clean machine and retain
+install/launch evidence before trusting any publication.
+
+The pushed tag is what publishes: `publish.yml` validates that run read-only,
+then the protected job creates the GitHub Release from the verified archive and
+sidecar and, only on success, publishes the identical tested VSIX to both
+registries through OIDC. Never mark a release successful merely because the
+build job passed, and never treat a partial registry outcome as success.
+Re-download published assets and smoke both latest and pinned installation;
+verify both registry and client deliverables separately.
 
 For recovery, inventory which channels and asset hashes actually exist first.
 Rerunning this build workflow is safe (CI artifacts only); it does not repair
