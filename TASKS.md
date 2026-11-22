@@ -7,6 +7,12 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **PERF-PROFILE-CACHE — Parse immutable embedded keymap profiles once.** Measured DWARF server stacks reach `profile_keys` → TOML binding parsing → `span_line`; verified `src/config.rs:489-502` reparses embedded profiles on each call from per-scope resolution. test: cache successful immutable built-in profile parsing per profile/process, retain owned independent results, profile choice, user configuration/error behavior and all command coverage/conflict semantics. Extend nearest keymap tests with direct reuse and mutation-isolation coverage. Verification: `make test-rust FILTER="--test keymap"`.
+  - Done: `dcfe893`.
+  - Verified: tested working revision `dcfe893` (plus formatting-only working-tree sync) — `make test-rust FILTER="--test keymap"` → exit 0, 22 passed including `repeated_profile_resolution_reuses_stable_independent_bindings`; `make test-rust FILTER="--lib profile_cache"` → exit 0, 2 passed: `repeated_lookups_reuse_one_cached_parse`, `switching_profiles_caches_each_parse_separately`.
+
+- [ ] **PERF-PROFILE-CACHE-MEASURE — Verify startup improvement from profile reuse.** After PERF-PROFILE-CACHE, check: compare same fixture repeated cold/fresh/reopen startup distributions before/after using existing Make harness, disclose debug/profiler/sample limitations and worktree differences, and retain raw artifacts. Verify targeted CPU hotspot removal separately if needed through an ordered part with its own Make command; report actual improvement rather than assuming a win. Verification: `make nvim-startup-check` on baseline and change.
+
 - [x] **PERF-OPEN-LOADING-STATE — Represent status loading in the server tree.** Establish an explicit not-yet-loaded status lifecycle and generation-safe fresh-state installation without inventing empty/clean repository data or allowing unsafe file actions against incomplete state. Preserve ready-state rendering and live refresh. test: deterministic inline Rust coverage of loading tree, readiness, stale completion rejection and close-safe lifecycle. Verification: `make test-rust FILTER="--lib"`.
   Done: `56fe500`.
   - Verified: `make test-rust FILTER="--lib"` → exit 0 (`ok: rust (warnings detected; check log: build/test-logs/rust.DFpSvy)`).
