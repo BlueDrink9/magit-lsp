@@ -125,21 +125,14 @@ pub(super) struct DeferredStatus {
 
 impl DeferredStatus {
     async fn run(self, shared: Shared) {
-        let repo_path = self.repo_path;
-        let view_id = self.view_id;
-        let generation = self.generation;
-        let trace_id = self.trace_id;
-        let acquisition_path = repo_path.clone();
-        let acquired = tokio::task::spawn_blocking(move || {
-            crate::runner::with_trace_id(trace_id, || {
-                let repo = crate::git::GitRepo::open(&acquisition_path)?;
-                crate::status_view::StatusView::acquire_opening_state(&repo, generation)
-            })
-        })
+        super::view_execution::acquire_status(
+            shared,
+            self.repo_path,
+            self.view_id,
+            self.generation,
+            self.trace_id,
+        )
         .await;
-        super::view_execution::finish_status_acquisition(
-            shared, repo_path, view_id, generation, trace_id, acquired,
-        );
     }
 }
 

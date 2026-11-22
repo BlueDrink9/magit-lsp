@@ -152,7 +152,54 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     }
 }
 
-pub(super) fn finish_status_acquisition(
+/// What one acquisition produced once it reached its publication turn.
+enum InstallStatus {
+    /// The live generation's render, if the view still exists interactive.
+    Installed(Option<ViewRender>),
+    /// The completed generation was superseded by a coalesced refresh.
+    Coalesced(u64),
+}
+
+/// Acquire one status generation off-runtime, then publish it in repository order.
+pub(super) async fn acquire_status(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+) {
+    let acquisition_path = repo_path.clone();
+    let acquired = tokio::task::spawn_blocking(move || {
+        crate::runner::with_trace_id(trace_id, || {
+            let repo = crate::git::GitRepo::open(&acquisition_path)?;
+            crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+        })
+    })
+    .await;
+    finish_status_acquisition(shared, repo_path, view_id, generation, trace_id, acquired).await;
+}
+
+/// Start the single coalesced follow-up acquisition on its own task.
+fn spawn_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+) {
+    tokio::spawn(acquire_status(
+        shared, repo_path, view_id, generation, trace_id,
+    ));
+}
+
+/// Publish an already-acquired status generation through its repository's turn.
+///
+/// Acquisition happens before this call, so the turn only covers live-generation
+/// validation, installation and enqueueing the render. A request ordered after
+/// this ticket therefore cannot publish between installation and delivery, and
+/// a close ordered before it leaves nothing to install. The blocking install
+/// mirrors command dispatch: no Tokio worker waits on the session mutex.
+pub(super) async fn finish_status_acquisition(
     shared: Shared,
     repo_path: String,
     view_id: String,
@@ -163,31 +210,69 @@ pub(super) fn finish_status_acquisition(
         tokio::task::JoinError,
     >,
 ) {
+    let turn = shared.reserve_mutation(repo_path.clone());
+    turn.wait().await;
+    let lock = repository_lock(&shared.repo_locks, &repo_path).await;
+    let _guard = lock.lock().await;
+    let install_shared = shared.clone();
+    let install_repo = repo_path.clone();
+    let install_view = view_id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        install_status_acquisition(
+            install_shared,
+            install_repo,
+            install_view,
+            generation,
+            acquired,
+        )
+    })
+    .await;
+    match outcome {
+        Ok(InstallStatus::Coalesced(next_generation)) => {
+            spawn_status_acquisition(
+                shared,
+                repo_path,
+                view_id.clone(),
+                next_generation,
+                trace_id,
+            );
+        }
+        Ok(InstallStatus::Installed(render)) => {
+            if let Some(render) = render {
+                if let Some(message) = super::plain::deliver_render(&shared, render) {
+                    let _ = shared.sender.send(message);
+                }
+            }
+        }
+        Err(error) => tracing::warn!(%error, "status completion install failed"),
+    }
+    if trace_id > 0 {
+        crate::runner::trace(
+            trace_id,
+            "status_completion_processed",
+            serde_json::json!({ "view": view_id }),
+        );
+    }
+    drop(turn);
+}
+
+/// Install or coalesce one acquired generation; the caller owns the turn.
+fn install_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    acquired: std::result::Result<
+        std::result::Result<crate::status_view::FreshStatus, crate::Error>,
+        tokio::task::JoinError,
+    >,
+) -> InstallStatus {
     let Some(handle) = shared.session(&repo_path) else {
-        return;
+        return InstallStatus::Installed(None);
     };
     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(next_generation) = session.take_pending_status_refresh(&view_id, generation) {
-        drop(session);
-        tokio::spawn(async move {
-            let acquisition_path = repo_path.clone();
-            let acquired = tokio::task::spawn_blocking(move || {
-                crate::runner::with_trace_id(trace_id, || {
-                    let repo = crate::git::GitRepo::open(&acquisition_path)?;
-                    crate::status_view::StatusView::acquire_opening_state(&repo, next_generation)
-                })
-            })
-            .await;
-            finish_status_acquisition(
-                shared,
-                repo_path,
-                view_id,
-                next_generation,
-                trace_id,
-                acquired,
-            );
-        });
-        return;
+        return InstallStatus::Coalesced(next_generation);
     }
     let render = match acquired {
         Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
@@ -202,10 +287,13 @@ pub(super) fn finish_status_acquisition(
             format!("Unable to load repository status: {error}"),
         ),
     };
-    drop(session);
-    if let Ok(Some(render)) = render {
-        if let Some(message) = super::plain::deliver_render(&shared, render) {
-            let _ = shared.sender.send(message);
+    match render {
+        Ok(render) => InstallStatus::Installed(render),
+        // Installation failures still complete this acquisition; a later
+        // request sees the installed loading/error state, not a stale retry.
+        Err(error) => {
+            tracing::warn!(%error, "status completion install failed");
+            InstallStatus::Installed(None)
         }
     }
 }

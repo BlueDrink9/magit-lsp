@@ -22,6 +22,42 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+/// The server's trace file for a client trace path (see `runner::TRACE_ENV`).
+#[cfg(unix)]
+fn completion_trace_file(trace: &std::path::Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.server", trace.display()))
+}
+
+/// Wait until the server processed `expected` status completions for `view`.
+///
+/// The completion task traces only after its render is enqueued, so observing
+/// the event proves the completion's ordering turn has delivered (or dropped)
+/// its output. This is the barrier the close regressions assert against; no
+/// unrelated request or quiet window stands in for it.
+#[cfg(unix)]
+fn wait_for_completion_barrier(trace: &std::path::Path, view: &str, expected: usize) {
+    let path = completion_trace_file(trace);
+    let needle = format!("\"view\":\"{view}\"");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let events = std::fs::read_to_string(&path).unwrap_or_default();
+        let seen = events
+            .lines()
+            .filter(|line| {
+                line.contains("\"event\":\"status_completion_processed\"") && line.contains(&needle)
+            })
+            .count();
+        if seen >= expected {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "status completion barrier {expected} not observed for {view}: {events}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn status_open_held_git_unacknowledged_completion_sends_full_text() {
@@ -139,14 +175,20 @@ fn status_open_close_drops_held_success_without_resurrection() {
         .modify_standard()
         .build();
     let gate = GatedGit::arm("status");
-    let env = gate.child_env();
-    let env: Vec<(&str, &str)> = env
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
     let mut server = TestServer::spawn(&env);
     server.initialize_rich(json!({}));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(7);
+    server.send(open);
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"].as_str().expect("status view id");
     let loading = server.recv();
@@ -159,12 +201,17 @@ fn status_open_close_drops_held_success_without_resurrection() {
     let closed = server.response_with_id(3);
     assert!(closed["error"].is_null(), "{closed}");
     gate.release();
+    // The completion must actually execute before absence of output is
+    // asserted; the trace event follows its enqueued render.
+    wait_for_completion_barrier(&trace, view, 1);
 
-    server.send(
-        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/foldingRange",
-        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(4);
+    assert!(
+        !resync["error"].is_null(),
+        "the closed view must stay unroutable: {resync}"
     );
-    assert!(server.response_with_id(4)["result"].is_null());
     assert!(
         !server.notifications.iter().any(
             |message| message["method"] == "view/render" && message["params"]["viewId"] == view
@@ -183,14 +230,20 @@ fn status_open_close_drops_held_error_without_resurrection() {
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
     let gate = GatedGit::arm("status");
-    let env = gate.child_env();
-    let env: Vec<(&str, &str)> = env
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-error-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
     let mut server = TestServer::spawn(&env);
     server.initialize_rich(json!({}));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(8);
+    server.send(open);
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"].as_str().expect("status view id");
     assert_eq!(server.recv()["method"], "view/render");
@@ -204,12 +257,16 @@ fn status_open_close_drops_held_error_without_resurrection() {
     let saved_git = tmp.path().join(".git-held");
     std::fs::rename(&git_dir, &saved_git).unwrap();
     gate.release();
+    // The held error must be processed before asserting it was not rendered.
+    wait_for_completion_barrier(&trace, view, 1);
 
-    server.send(
-        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/foldingRange",
-        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(4);
+    assert!(
+        !resync["error"].is_null(),
+        "the closed view must stay unroutable: {resync}"
     );
-    assert!(server.response_with_id(4)["result"].is_null());
     assert!(
         !server.notifications.iter().any(
             |message| message["method"] == "view/render" && message["params"]["viewId"] == view
@@ -229,14 +286,20 @@ fn status_open_refreshes_while_loading_are_coalesced() {
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
     let gate = GatedGit::arm("status");
-    let env = gate.child_env();
-    let env: Vec<(&str, &str)> = env
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-coalesced-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
     let mut server = TestServer::spawn(&env);
     server.initialize_rich(json!({}));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(9);
+    server.send(open);
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"]
         .as_str()
@@ -272,6 +335,9 @@ fn status_open_refreshes_while_loading_are_coalesced() {
     );
 
     gate.release();
+    // Both the superseded acquisition and its single follow-up must complete
+    // before the newer render is treated as final.
+    wait_for_completion_barrier(&trace, &view, 2);
     let ready =
         server.wait_for_view_render_after(&view, loading["params"]["version"].as_u64().unwrap());
     let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
@@ -289,6 +355,18 @@ fn status_open_refreshes_while_loading_are_coalesced() {
         gate.invocation_count(),
         2,
         "overlapping refreshes schedule one follow-up acquisition"
+    );
+    // An older completion must never publish after the follow-up's render.
+    let later = server.drain_notifications();
+    assert!(
+        !later.iter().any(|message| {
+            message["method"] == "view/render"
+                && message["params"]["viewId"] == view
+                && message["params"]["text"]
+                    .to_string()
+                    .contains("Loading repository status")
+        }),
+        "a stale loading completion was delivered after the newer render: {later:?}"
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
