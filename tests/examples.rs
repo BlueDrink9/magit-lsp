@@ -823,28 +823,59 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let view_id = opened.message["result"]["id"]
         .as_str()
         .expect("view descriptor id");
-    let initial_render = index(&|line| {
+    let loading_render = index(&|line| {
         line.dir == Dir::ServerToClient
             && method(line, "view/render")
             && line.message["params"]["version"] == 1
     });
-    let initial_ack = index(&|line| {
+    assert_eq!(
+        lines[loading_render].message["params"]["text"],
+        json!(["Loading repository status…"]),
+        "the initial render is the loading placeholder"
+    );
+    let fresh_render = index(&|line| {
+        line.dir == Dir::ServerToClient
+            && method(line, "view/render")
+            && line.message["params"]["version"] == 2
+    });
+    assert!(
+        loading_render < fresh_render,
+        "the fresh status render follows the loading placeholder"
+    );
+    assert!(
+        lines[fresh_render].message["params"]
+            .get("baseVersion")
+            .is_none()
+            && lines[fresh_render].message["params"].get("edits").is_none(),
+        "the fresh render is a full replace: no render was acknowledged before it"
+    );
+    assert_eq!(
+        lines[fresh_render].message["params"]["text"][0], "Head: main",
+        "the fresh render carries the acquired status"
+    );
+    let loading_ack = index(&|line| {
         line.dir == Dir::ClientToServer
             && method(line, "view/rendered")
             && line.message["params"]["version"] == 1
     });
-    assert!(
-        initial_render < initial_ack,
-        "the client acknowledges the initial render only after receiving it"
-    );
+    let fresh_ack = index(&|line| {
+        line.dir == Dir::ClientToServer
+            && method(line, "view/rendered")
+            && line.message["params"]["version"] == 2
+    });
     let key = index(&|line| line.dir == Dir::ClientToServer && method(line, "view/key"));
     assert!(
-        initial_ack < key,
-        "the key is pressed against the acknowledged version"
+        fresh_render < loading_ack && loading_ack < fresh_ack && fresh_ack < key,
+        "the client receives the fresh render before acknowledging either version, \
+         then presses the key against the acknowledged fresh version"
     );
     assert_eq!(
         lines[key].message["params"]["key"], "S",
         "the recorded key is status.stage-all, the mutation whose progress the file pins"
+    );
+    assert_eq!(
+        lines[key].message["params"]["version"], lines[fresh_render].message["params"]["version"],
+        "the key is pressed against the acknowledged fresh render"
     );
 
     let create = index(&|line| {
@@ -858,7 +889,7 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let next_render = index(&|line| {
         line.dir == Dir::ServerToClient
             && method(line, "view/render")
-            && line.message["params"]["version"] == 2
+            && line.message["params"]["version"] == 3
     });
 
     // The recorded ordering, as observed from the real server: create, begin and
@@ -892,6 +923,19 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     assert_eq!(
         lines[next_render].message["params"]["viewId"], view_id,
         "the refreshed render targets the acknowledged view"
+    );
+    assert_eq!(
+        lines[next_render].message["params"]["baseVersion"], 2,
+        "the mutation render edits from the acknowledged fresh version"
+    );
+    let next_ack = index(&|line| {
+        line.dir == Dir::ClientToServer
+            && method(line, "view/rendered")
+            && line.message["params"]["version"] == 3
+    });
+    assert!(
+        next_render < next_ack,
+        "the client acknowledges the mutation render only after receiving it"
     );
 }
 
@@ -2339,16 +2383,16 @@ fn a_divergent_rich_expectation_fails_the_replay() {
         .find(|line| {
             line.dir == Dir::ServerToClient
                 && line.message.get("method").and_then(Value::as_str) == Some("view/render")
-                && line.message["params"]["version"] == 1
+                && line.message["params"]["version"] == 2
         })
-        .expect("the recorded initial rich render");
-    render.message["params"]["text"][0] =
-        Value::String("Head: not the recorded rich render".to_owned());
+        .expect("the recorded fresh rich render");
+    render.message["params"]["viewId"] =
+        Value::String("v-not-the-recorded-fresh-render".to_owned());
     let error = replay_example("rich-lifecycle.jsonl", &lines)
-        .expect_err("a divergent rich frame must fail the replay");
+        .expect_err("a divergent fresh rich frame must fail the replay");
     assert!(
         error.contains("recorded s2c frame mismatch")
-            && error.contains("not the recorded rich render"),
+            && error.contains("v-not-the-recorded-fresh-render"),
         "the rich mismatch must be reported: {error}"
     );
 }
