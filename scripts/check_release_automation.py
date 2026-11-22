@@ -4633,16 +4633,42 @@ def run_self_tests():
             if handoff_path.exists():
                 fail('self-test: unavailable source lock data must fail before '
                      'the handoff')
-            runtime_overrides[cargo_lock_path] = (
-                200, json.dumps({'type': 'file', 'path': 'Cargo.lock',
-                                 'encoding': 'base64', 'size': 1,
-                                 'content': '!!!!'}))
-            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
-                    patch.object(runtime_transport_module, 'request', runtime_transport):
-                expect_check('runtime collector rejects a malformed source lock',
-                             prepare_publication_runtime, str(event_path),
-                             expected='release source Cargo.lock content is not '
-                                      'valid base64')
+            malformed_source_locks = (
+                ('a lock from another path',
+                 {'type': 'file', 'path': 'flake.lock', 'encoding': 'base64',
+                  'size': 1, 'content': 'eA=='},
+                 'is not the tracked file'),
+                ('a directory in place of the lock',
+                 {'type': 'dir', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 1, 'content': 'eA=='},
+                 'is not the tracked file'),
+                ('a lock with another encoding',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'utf-8',
+                  'size': 1, 'content': 'eA=='},
+                 'is not base64-encoded content'),
+                ('an empty lock',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 0, 'content': ''},
+                 'has no content'),
+                ('a lock whose size does not match',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 2, 'content': 'eA=='},
+                 'size differs from its content'),
+                ('invalid base64 lock content',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 1, 'content': '!!!!'},
+                 'content is not valid base64'),
+            )
+            for description, document, reason in malformed_source_locks:
+                runtime_overrides[cargo_lock_path] = (200, json.dumps(document))
+                with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                        patch.object(runtime_transport_module, 'request',
+                                     runtime_transport):
+                    expect_check(f'runtime collector rejects {description}',
+                                 prepare_publication_runtime, str(event_path),
+                                 expected=f'release source Cargo.lock {reason}')
+                if handoff_path.exists():
+                    fail(f'self-test: {description} must fail before the handoff')
             runtime_overrides.clear()
             # A native manifest whose locks name another revision is rejected
             # against the bound source even though its bytes are self-coherent.
