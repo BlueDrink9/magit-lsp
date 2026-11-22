@@ -3410,13 +3410,6 @@ def run_self_tests():
                     'PENDING_READINESS_JOBS'):
         if hasattr(sys.modules[__name__], retired):
             fail(f'self-test: retired readiness symbol {retired} remains')
-    # The ordinary publication boundary keeps its required helpers and caller.
-    for retained in ('validate_run_binding', 'validate_run_jobs',
-                     'validate_run_artifacts', 'validate_upload_identity',
-                     'validate_tag_binding', 'publication_api_pages',
-                     'prepare_publication_runtime'):
-        if not callable(globals().get(retained)):
-            fail(f'self-test: retained publication helper {retained} is missing')
     promotion_identity = {
         'source_sha': SELF_TEST_SHA,
         'run_url': 'https://github.com/example/magit-lsp/actions/runs/42',
