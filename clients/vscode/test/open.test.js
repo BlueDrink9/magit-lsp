@@ -184,7 +184,7 @@ async function testStatusOpenLifecycle() {
         serverInfo: { version: require("../package.json").version },
         capabilities: {
           semanticTokensProvider: {
-            legend: { tokenTypes: ["magit.section"], tokenModifiers: [] },
+            legend: { tokenTypes: ["heading"], tokenModifiers: [] },
           },
           experimental: { magit: { protocolVersion: 1 } },
         },

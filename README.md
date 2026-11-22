@@ -491,8 +491,8 @@ generated VSCode keybindings for both profiles (the R-2.5 CI snapshot), and
 the commit menu rendered at 60 and 140 columns. The other large menus
 (rebase, push, diff) are checked against structural invariants instead of
 spacing snapshots: every rendered line fits the viewport, action columns
-reflow to fewer columns at narrower widths, and every planned action carries
-a `magit.menu.planned` token over exactly its label.
+reflow to fewer columns at narrower widths, and every planned action's label
+carries a `muted` token with the `planned` modifier over exactly that label.
 
 Snapshot tests use `expect_file!` with a single update mechanism. Run this to
 rewrite stale snapshots — and the README parity block below — in place,
