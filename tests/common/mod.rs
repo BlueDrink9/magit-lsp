@@ -8,7 +8,9 @@
 pub mod recording_prompt_ui;
 
 use magit_lsp::git::GitRepo;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, Once, OnceLock};
@@ -159,13 +161,22 @@ pub struct RepoFixture {
     changes: Vec<(String, String)>,
     unborn: bool,
     detached: bool,
+    /// Whether this fixture was started by [`Self::new`] and so participates in
+    /// the automatic plan cache; see [`Self::is_cacheable`].
+    cacheable: bool,
 }
 
 impl RepoFixture {
     /// Start a fixture whose repository is created by [`Self::build`].
+    ///
+    /// Fixtures started here are cacheable: [`Self::build`] publishes the first
+    /// repository built from a given plan and copies it for later identical
+    /// plans.
     pub fn new() -> Self {
         apply_determinism_env();
-        Self::with_tempdir(TempDir::new().expect("tempdir"))
+        let mut fixture = Self::with_tempdir(TempDir::new().expect("tempdir"));
+        fixture.cacheable = true;
+        fixture
     }
 
     /// Start a fixture inside `parent`, whose repository is created by
@@ -173,7 +184,10 @@ impl RepoFixture {
     ///
     /// `parent` may be reached through a symbolic link: [`Self::path`] always
     /// reports the canonical root. The fixture owns the directory it creates
-    /// and removes it on drop.
+    /// and removes it on drop. Fixtures started here are exempt from the
+    /// automatic template cache: [`Self::build`] always runs for real and never
+    /// registers or copies a template, so [`fork`] builders and fork-vs-fresh
+    /// comparisons keep a genuine build.
     pub fn new_in(parent: &Path) -> Self {
         apply_determinism_env();
         let dir = tempfile::Builder::new()
@@ -196,6 +210,7 @@ impl RepoFixture {
             changes: Vec::new(),
             unborn: false,
             detached: false,
+            cacheable: false,
         }
     }
 
@@ -259,8 +274,44 @@ impl RepoFixture {
     }
 
     /// Create the repository on disk and open it.
+    ///
+    /// A cacheable fixture ([`Self::new`]) publishes the repository it builds
+    /// as a process-global template keyed on its construction plan, so a later
+    /// build of the same plan copies that template into a fresh temporary
+    /// directory instead of replaying the git commands; every caller still
+    /// receives a private repository. The plan is exactly the recorded data
+    /// (`commits`, `renames`, `staged`, `changes`, `unborn`, `detached`), which
+    /// [`apply_determinism_env`] pins to fixed identities and dates, so
+    /// identical plans always produce identical repositories. Caching is safe
+    /// for the fake-git server children: `git` here is spawned from the test
+    /// process itself, and a child's environment (the fake-git gate) never
+    /// reaches it, so a cached template cannot be poisoned. Fixtures started by
+    /// [`Self::new_in`] (and the copies [`fork`]/[`fork_in`] return) are exempt:
+    /// they always build for real and never register.
     pub fn build(self) -> (RepoFixture, GitRepo) {
         apply_determinism_env();
+        let cache_plan = if self.is_cacheable() && !in_template_build() {
+            Some(self.auto_plan())
+        } else {
+            None
+        };
+        if let Some(plan) = cache_plan.as_deref() {
+            if let Some(template) = cached_auto_template(&plan_template_name(plan), plan) {
+                let (mut fixture, repo) = copy_template(&template, None);
+                refresh_copied_index(fixture.path());
+                // The fixture still records the plan it asked for, so callers
+                // can inspect it (and `auto_template_name` stays stable), and it
+                // keeps its `new` origin even though the repository is a copy.
+                fixture.commits = self.commits;
+                fixture.renames = self.renames;
+                fixture.staged = self.staged;
+                fixture.changes = self.changes;
+                fixture.unborn = self.unborn;
+                fixture.detached = self.detached;
+                fixture.cacheable = true;
+                return (fixture, repo);
+            }
+        }
         let path = self.root.clone();
         git(&path, &["init", "-q"]);
         git(&path, &["symbolic-ref", "HEAD", "refs/heads/main"]);
@@ -290,7 +341,63 @@ impl RepoFixture {
             write(&path.join(name), content);
         }
         let repo = GitRepo::open(&path).expect("open repo");
+        if let Some(plan) = cache_plan {
+            self.register_auto_template(&plan_template_name(&plan), &plan);
+        }
         (self, repo)
+    }
+
+    /// Whether this fixture was started by [`Self::new`], including the copies
+    /// [`Self::build`] serves from the automatic template cache.
+    ///
+    /// False for [`Self::new_in`] fixtures and for the copies [`fork`] and
+    /// [`fork_in`] return: those are exempt from the automatic cache.
+    pub fn is_cacheable(&self) -> bool {
+        self.cacheable
+    }
+
+    /// Registry name [`Self::build`] uses for this fixture's construction plan.
+    ///
+    /// Derived only from the recorded plan, so every fixture that records the
+    /// same plan yields the same name, including exempt [`Self::new_in`]
+    /// fixtures (which never register it). The `auto-` prefix keeps these names
+    /// from colliding with the human names given to [`fork`].
+    pub fn auto_template_name(&self) -> String {
+        plan_template_name(&self.auto_plan())
+    }
+
+    /// Serialization of the recorded construction plan.
+    ///
+    /// This is the identity behind [`Self::auto_template_name`]'s hash and is
+    /// stored with each automatic template so a lookup can reject a hash
+    /// collision instead of serving a repository built from another plan.
+    fn auto_plan(&self) -> String {
+        format!(
+            "{:?}{:?}{:?}{:?}{:?}{:?}",
+            self.commits, self.renames, self.staged, self.changes, self.unborn, self.detached
+        )
+    }
+
+    /// Publish this fixture's finished repository as the automatic template
+    /// `name`, unless another build already registered it.
+    ///
+    /// `plan` is stored beside the directory as the identity that [`Self::build`]
+    /// checks before copying.
+    fn register_auto_template(&self, name: &str, plan: &str) {
+        let mut cache = templates().lock().expect("template cache lock");
+        if cache.contains_key(name) {
+            return;
+        }
+        let dir = template_root().path().join(name);
+        std::fs::create_dir_all(&dir).expect("create automatic template directory");
+        copy_tree(&self.root, &dir);
+        cache.insert(
+            name.to_owned(),
+            Template {
+                path: dir,
+                plan: Some(plan.to_owned()),
+            },
+        );
     }
 
     /// Canonical root directory of the temporary repository.
@@ -345,35 +452,103 @@ fn template_root() -> &'static TempDir {
     })
 }
 
-/// Templates already built in this process, keyed by [`fork`]'s `name`.
-static TEMPLATES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+/// Templates already built in this process, keyed by template name: [`fork`]'s
+/// human `name`, or the plan-derived `auto-` name of an automatic template.
+static TEMPLATES: OnceLock<Mutex<HashMap<String, Template>>> = OnceLock::new();
+
+/// One registered template: the directory to copy and, for automatic templates,
+/// the serialized construction plan that keyed it.
+struct Template {
+    /// Directory holding the built repository.
+    path: PathBuf,
+    /// Plan serialization of an automatic template; `None` for [`fork`] names.
+    plan: Option<String>,
+}
 
 /// The process-global template registry.
-fn templates() -> &'static Mutex<HashMap<String, PathBuf>> {
+fn templates() -> &'static Mutex<HashMap<String, Template>> {
     TEMPLATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Canonical directory of the cached template called `name`, once built.
+thread_local! {
+    /// Set while a [`fork_in`] builder runs with the registry lock held, where
+    /// consulting the automatic cache would re-enter that lock.
+    static IN_TEMPLATE_BUILD: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+/// Whether this thread is currently inside a [`fork_in`] builder.
+fn in_template_build() -> bool {
+    IN_TEMPLATE_BUILD.with(|flag| flag.get())
+}
+
+/// Run `f` with automatic template caching disabled on this thread.
 ///
-/// `None` until a [`fork`] or [`fork_in`] call with that name has run its
-/// builder.
-pub fn template_path(name: &str) -> Option<PathBuf> {
+/// Clears the flag on unwind too, so a panicking builder cannot leave later
+/// builds on the same thread uncacheable.
+fn without_auto_cache<T>(f: impl FnOnce() -> T) -> T {
+    struct Clear;
+
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            IN_TEMPLATE_BUILD.with(|flag| flag.set(false));
+        }
+    }
+
+    IN_TEMPLATE_BUILD.with(|flag| flag.set(true));
+    let _clear = Clear;
+    f()
+}
+
+/// The registered directory of the automatic template `name`, if built.
+fn cached_template(name: &str) -> Option<PathBuf> {
     templates()
         .lock()
         .expect("template cache lock")
         .get(name)
-        .cloned()
+        .map(|template| template.path.clone())
+}
+
+/// The directory of the automatic template `name`, if one was built from
+/// exactly `plan`.
+///
+/// The name's hash keys the registry, but a collision must never serve a
+/// repository built from another plan, so the stored serialization is compared
+/// before the copy.
+fn cached_auto_template(name: &str, plan: &str) -> Option<PathBuf> {
+    let cache = templates().lock().expect("template cache lock");
+    let template = cache.get(name)?;
+    (template.plan.as_deref() == Some(plan)).then(|| template.path.clone())
+}
+
+/// Registry name of the automatic template for the serialized construction
+/// `plan`: `auto-` plus a 64-bit hash of the plan in hex.
+fn plan_template_name(plan: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    plan.hash(&mut hasher);
+    format!("auto-{:016x}", hasher.finish())
+}
+
+/// Canonical directory of the cached template called `name`, once built.
+///
+/// `None` until a [`fork`]/[`fork_in`] call with that name has run its builder,
+/// or a cacheable [`RepoFixture::build`] has published its plan. Automatic
+/// templates are registered under [`RepoFixture::auto_template_name`]'s
+/// plan-derived `auto-` names, which cannot collide with `fork`'s names.
+pub fn template_path(name: &str) -> Option<PathBuf> {
+    cached_template(name)
 }
 
 /// Build the repository template `name` once per process, then return a fresh
 /// copy of it through the template root.
 ///
-/// [`RepoFixture::build`] cannot be cached directly because every fixture owns
-/// and removes its directory. The first call runs `build` inside the
-/// process-global template root, passing it the directory to build in; later
-/// calls skip `build` and copy the template into a new temporary directory, so
-/// each caller receives an independent repository interchangeable with
-/// [`RepoFixture::build`]'s output.
+/// [`RepoFixture::build`] cannot be cached within a fixture because every
+/// fixture owns and removes its directory. The first call runs `build` inside
+/// the process-global template root, passing it the directory to build in;
+/// later calls skip `build` and copy the template into a new temporary
+/// directory, so each caller receives an independent repository interchangeable
+/// with [`RepoFixture::build`]'s output. Builders must construct their
+/// repository with [`RepoFixture::new_in`], which is exempt from the automatic
+/// cache that [`RepoFixture::build`] otherwise consults.
 pub fn fork(
     name: &str,
     build: impl FnOnce(&Path) -> (RepoFixture, GitRepo),
@@ -391,21 +566,36 @@ pub fn fork_in(
     let template = {
         let mut cache = templates().lock().expect("template cache lock");
         match cache.get(name) {
-            Some(path) => path.clone(),
+            Some(template) => template.path.clone(),
             None => {
                 let root = template_root();
                 let dir = root.path().join(name);
                 std::fs::create_dir_all(&dir).expect("create template directory");
-                let (fixture, _) = build(&dir);
+                // This holds the registry lock, so `build` must not consult the
+                // automatic cache below; the guard keeps that true even if a
+                // builder one day uses `RepoFixture::new`.
+                let (fixture, _) = without_auto_cache(|| build(&dir));
                 let path = fixture.path().to_path_buf();
                 // The registry owns the template now, so keep its directory
                 // instead of letting the fixture remove it on drop.
                 let _ = fixture.dir.keep();
-                cache.insert(name.to_owned(), path.clone());
+                cache.insert(
+                    name.to_owned(),
+                    Template {
+                        path: path.clone(),
+                        plan: None,
+                    },
+                );
                 path
             }
         }
     };
+    copy_template(&template, parent)
+}
+
+/// Copy the repository at `template` into a fresh temporary directory (inside
+/// `parent` when given) and open the copy.
+fn copy_template(template: &Path, parent: Option<&Path>) -> (RepoFixture, GitRepo) {
     let copy = match parent {
         Some(parent) => tempfile::Builder::new()
             .prefix("magit-lsp-fixture")
@@ -413,10 +603,34 @@ pub fn fork_in(
         None => TempDir::new(),
     }
     .expect("copy fixture template");
-    copy_tree(&template, copy.path());
+    copy_tree(template, copy.path());
     let fixture = RepoFixture::with_tempdir(copy);
-    let repo = GitRepo::open(fixture.path()).expect("open forked repository");
+    let repo = GitRepo::open(fixture.path()).expect("open copied repository");
     (fixture, repo)
+}
+
+/// Make a copied repository's index as functional as a fresh build's.
+///
+/// A copy keeps the template's index bytes, whose stat data describes the
+/// template's files; refreshing rewrites that stat cache in place so later Git
+/// commands see the copy's own files.
+fn refresh_copied_index(dir: &Path) {
+    if !dir.join(".git/index").is_file() {
+        return;
+    }
+    apply_determinism_env();
+    let out = Command::new("git")
+        .args(["update-index", "--refresh"])
+        .current_dir(dir)
+        .output()
+        .expect("failed to run git update-index --refresh");
+    // Exit 1 means some paths need updating (the fixtures' uncommitted changes),
+    // which is legitimate and still rewrites the stat data.
+    assert!(
+        matches!(out.status.code(), Some(0) | Some(1)),
+        "git update-index --refresh failed in {dir:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Recursively copy `source` into `target`, preserving file contents and modes.

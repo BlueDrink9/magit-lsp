@@ -2954,7 +2954,10 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
         files
     }
 
-    let (fresh, _) = fixtures::RepoFixture::new()
+    // The fresh side stays a real build: `new_in` fixtures are exempt from the
+    // automatic template cache, so this comparison can never silently degrade
+    // to a comparison of two copies.
+    let (fresh, _) = fixtures::RepoFixture::new_in(&std::env::temp_dir())
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
         .commit("nested", [("nested/deep.txt", "deep\n")])
         .modify_standard()
@@ -3065,6 +3068,136 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
     assert_eq!(
         fs::read(template.join(".git/index")).expect("read template index"),
         template_index
+    );
+
+    // Automatic cache: `build` on a `new` fixture publishes its plan as a
+    // process-global template, and a second identical plan copies it instead of
+    // replaying the git commands. The shared, plan-derived name proves the
+    // sharing, and each copy refreshes the copied index so it stages and
+    // reports exactly what a fresh build of the same plan does.
+    let auto_build = || {
+        fixtures::RepoFixture::new()
+            .commit("auto init", [("auto.txt", fixtures::TEN_LINES)])
+            .commit("auto nested", [("auto/nested.txt", "nested\n")])
+            .modify("auto.txt", "auto worktree change\n")
+            .build()
+    };
+    let (auto_first, _) = auto_build();
+    assert!(auto_first.is_cacheable());
+    let auto_name = auto_first.auto_template_name();
+    let auto_template =
+        fixtures::template_path(&auto_name).expect("an automatic template was cached");
+    let (auto_second, _) = auto_build();
+    assert!(auto_second.is_cacheable());
+    assert_eq!(auto_name, auto_second.auto_template_name());
+    assert_eq!(
+        fixtures::template_path(&auto_name).expect("template stays registered"),
+        auto_template
+    );
+    assert_ne!(auto_first.path(), auto_template);
+    assert_ne!(auto_second.path(), auto_template);
+    assert_ne!(auto_first.path(), auto_second.path());
+
+    // Copies keep the template's index bytes, whose stat data describes the
+    // template's files rather than the copy's; `build` refreshes it, so each
+    // copy must list the same staged tree as a genuine same-plan build and must
+    // keep its index stable when Git checks status again.
+    let (auto_fresh, _) = fixtures::RepoFixture::new_in(&std::env::temp_dir())
+        .commit("auto init", [("auto.txt", fixtures::TEN_LINES)])
+        .commit("auto nested", [("auto/nested.txt", "nested\n")])
+        .modify("auto.txt", "auto worktree change\n")
+        .build();
+    let fresh_index = auto_fresh.git(&["ls-files", "-s"]);
+    for copy in [&auto_first, &auto_second] {
+        assert_eq!(
+            copy.git(&["ls-files", "-s"]),
+            fresh_index,
+            "an automatically cached copy must stage the same index as a fresh build"
+        );
+        let index = fs::read(copy.path().join(".git/index")).expect("read cached copy index");
+        copy.git(&["status", "--porcelain"]);
+        assert_eq!(
+            fs::read(copy.path().join(".git/index")).expect("reread cached copy index"),
+            index,
+            "git status must leave a refreshed cached copy's index unchanged"
+        );
+    }
+    assert_eq!(
+        auto_first.git(&["rev-parse", "HEAD"]),
+        auto_second.git(&["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        auto_first.git(&["status", "--porcelain"]),
+        auto_second.git(&["status", "--porcelain"])
+    );
+    assert_eq!(
+        worktree_files(auto_first.path()),
+        worktree_files(auto_second.path())
+    );
+
+    // File and directory modes travel with an automatic copy as well.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| {
+            fs::metadata(path)
+                .expect("inspect cached mode")
+                .permissions()
+                .mode()
+                & 0o7777
+        };
+        for copy in [&auto_first, &auto_second] {
+            for relative in ["auto.txt", "auto", "auto/nested.txt"] {
+                assert_eq!(
+                    mode(&copy.path().join(relative)),
+                    mode(&auto_template.join(relative)),
+                    "{relative} must keep the template's mode in an automatic copy"
+                );
+            }
+        }
+    }
+
+    // A differing plan gets its own template, so the key really covers the
+    // recorded plan.
+    let (auto_other, _) = fixtures::RepoFixture::new()
+        .commit("auto init", [("auto.txt", "different content\n")])
+        .build();
+    let other_name = auto_other.auto_template_name();
+    assert_ne!(other_name, auto_name);
+    assert!(
+        fixtures::template_path(&other_name).is_some(),
+        "a differing plan must get its own automatic template"
+    );
+    assert_ne!(
+        auto_other.git(&["rev-parse", "HEAD"]),
+        auto_first.git(&["rev-parse", "HEAD"])
+    );
+
+    // Exempt: a `new_in` fixture always builds for real and never registers,
+    // even when its plan could be cached.
+    let (exempt, _) = fixtures::RepoFixture::new_in(&std::env::temp_dir())
+        .commit("auto exempt", [("exempt.txt", "exempt\n")])
+        .build();
+    assert!(!exempt.is_cacheable());
+    assert!(
+        fixtures::template_path(&exempt.auto_template_name()).is_none(),
+        "a new_in build must not register an automatic template"
+    );
+
+    // Mutation isolation between automatic copies and their template.
+    let auto_template_files = worktree_files(&auto_template);
+    let auto_template_index =
+        fs::read(auto_template.join(".git/index")).expect("read automatic template index");
+    let auto_first_files = worktree_files(auto_first.path());
+    let auto_second_files = worktree_files(auto_second.path());
+    fs::write(auto_first.path().join("auto.txt"), "mutated\n").expect("mutate cached copy");
+    fs::write(auto_first.path().join("added.txt"), "added\n").expect("add to cached copy");
+    assert_ne!(worktree_files(auto_first.path()), auto_first_files);
+    assert_eq!(worktree_files(auto_second.path()), auto_second_files);
+    assert_eq!(worktree_files(&auto_template), auto_template_files);
+    assert_eq!(
+        fs::read(auto_template.join(".git/index")).expect("read automatic template index"),
+        auto_template_index
     );
 
     // Restore writable modes so the template sweep and each fixture's teardown
