@@ -41,29 +41,6 @@ function M.define()
   if not ft then
     return
   end
-  -- A link cannot add attributes, so the off flag's dim is carried by an
-  -- intermediate group; its colour still comes from the colourscheme.
-  local comment = vim.api.nvim_get_hl(0, { name = "Comment" })
-  vim.api.nvim_set_hl(0, "MagitMenuFlagOff", {
-    fg = comment.fg,
-    bg = comment.bg,
-    dim = true,
-  })
-  -- A menu item that cannot complete the pending prefix, and the prefix of one
-  -- that can. Both need an intermediate group because a link cannot add the
-  -- dim/bold attributes.
-  vim.api.nvim_set_hl(0, "MagitMenuDisabled", {
-    fg = comment.fg,
-    bg = comment.bg,
-    dim = true,
-  })
-  local keyword = vim.api.nvim_get_hl(0, { name = "Keyword" })
-  vim.api.nvim_set_hl(0, "MagitMenuPending", {
-    fg = keyword.fg,
-    bg = keyword.bg,
-    bold = true,
-  })
-
   local legend = M.legend or {}
   local suggested = legend.tokenTypeGroups or {}
   for _, token_type in ipairs(legend.tokenTypes or {}) do
