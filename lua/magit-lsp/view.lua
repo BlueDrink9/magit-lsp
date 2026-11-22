@@ -258,7 +258,13 @@ local function ack(view)
   end
 end
 
+--- Ask Neovim to re-request semantic tokens for `view` once it is acknowledged.
+---@param view table
+local refresh_tokens
+
 --- Send the acknowledgements held for `client_id`, dropping closed views.
+--- A render whose tokens were refreshed while its acknowledgement was held fires
+--- that one deferred refresh now, after the server knows the version.
 ---@param client_id integer
 function M.flush_acks(client_id)
   local keys = {}
@@ -276,16 +282,28 @@ function M.flush_acks(client_id)
     if view and c then
       c:notify("view/rendered", { viewId = pending.view_id, version = pending.version })
       hooks.render_acked(key, pending.version)
+      if view.token_refresh_pending then
+        view.token_refresh_pending = nil
+        refresh_tokens(view)
+      end
     end
   end
 end
 
 requests.on_quiet = M.flush_acks
 
---- Ask Neovim to re-request semantic tokens for `buf`.
---- The server owns highlighting, but only sends tokens on request.
----@param buf integer
-local function refresh_tokens(buf)
+--- Ask Neovim to re-request semantic tokens for `view`.
+--- The server owns highlighting and answers positional requests from the last
+--- acknowledged tree, so a refresh for a render whose acknowledgement is still
+--- held is deferred to `flush_acks`; requesting it now would be answered for the
+--- previous tree, and the stale tokens would leave the new render unhighlighted.
+---@param view table
+refresh_tokens = function(view)
+  local buf = view.buf
+  if M.pending_ack[view.key] then
+    view.token_refresh_pending = true
+    return
+  end
   hooks.schedule(function()
     if buf and vim.api.nvim_buf_is_valid(buf) then
       vim.lsp.semantic_tokens.force_refresh(buf)
@@ -402,7 +420,7 @@ function M.apply_render(params, client_id)
   if placement and placement.fit then
     placement.fit(view)
   end
-  refresh_tokens(view.buf)
+  refresh_tokens(view)
 end
 
 --- Apply renders held while `key`'s resync was outstanding.

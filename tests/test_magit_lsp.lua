@@ -1307,6 +1307,133 @@ T["tokens are refreshed after a mutation"] = function()
   )
 end
 
+T["tokens are not requested for an unacknowledged render"] = function()
+  --- Hold the view/invoke response so the render arrives while the request is in
+  --- flight and the acknowledgement is held; the token refresh must wait too.
+  child.lua(string.format(
+    [[
+    HOLD_INVOKE = true
+    HELD_RESPONSE = nil
+    local config = require('magit-lsp.config')
+    require('magit-lsp').setup({ root_dir = %q, cmd = function(dispatchers, cfg)
+      local rpc = vim.lsp.rpc.start(config.server_command(), dispatchers, {
+        cwd = cfg.cmd_cwd, env = cfg.cmd_env, detached = cfg.detached,
+      })
+      local request = rpc.request
+      rpc.request = function(method, params, handler, notify_reply_callback)
+        if method == 'view/invoke' and HOLD_INVOKE then
+          HOLD_INVOKE = false
+          return request(method, params, function(err, result, id)
+            HELD_RESPONSE = function()
+              HELD_RESPONSE = nil
+              handler(err, result, id)
+            end
+          end, notify_reply_callback)
+        end
+        return request(method, params, handler, notify_reply_callback)
+      end
+      return rpc
+    end })
+    local opened = vim.wait(5000, function()
+      return STATUS_SETTLED(require('magit-lsp').status_view())
+    end, 10)
+    if not opened then error('status view stayed at the loading placeholder') end
+    ]],
+    repo
+  ))
+  setup_child()
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_tokens()"), true, "semantic tokens arrive")
+
+  child.lua([[
+    REFRESH_CALLS = {}
+    VERSION_BEFORE = STATUS.version
+    local view = require('magit-lsp.view')
+    local real_refresh = vim.lsp.semantic_tokens.force_refresh
+    vim.lsp.semantic_tokens.force_refresh = function(buf)
+      REFRESH_CALLS[#REFRESH_CALLS + 1] = {
+        ack_held = view.pending_ack[STATUS.key] ~= nil,
+        version = STATUS.version,
+      }
+      return real_refresh(buf)
+    end
+  ]])
+  child.lua("M.invoke('status.stage-all')")
+  local held = child.lua_get([[
+    (function()
+      --- Client token refreshes for the mutated render, not an earlier one.
+      local function mutated()
+        local out = {}
+        for _, call in ipairs(REFRESH_CALLS) do
+          if call.version and call.version > VERSION_BEFORE then
+            out[#out + 1] = call
+          end
+        end
+        return out
+      end
+      local applied = HELPERS.wait_for(function()
+        return HELD_RESPONSE ~= nil
+          and STATUS.version > VERSION_BEFORE
+          and HELPERS.has_line('Staged changes (1)')
+      end)
+      local ack_held = require('magit-lsp.view').pending_ack[STATUS.key] ~= nil
+      -- An immediate refresh would run within a loop turn.
+      HELPERS.wait_for(function()
+        return #mutated() > 0
+      end, 500)
+      return { applied = applied, ack_held = ack_held, refreshes = #mutated() }
+    end)()
+  ]])
+  MiniTest.expect.equality(held.applied, true, "the mutation rendered before its response")
+  MiniTest.expect.equality(held.ack_held, true, "the render's acknowledgement is still held")
+  MiniTest.expect.equality(
+    held.refreshes,
+    0,
+    "no token refresh is requested for an unacknowledged render"
+  )
+
+  child.lua("HELD_RESPONSE()")
+  local flushed = child.lua_get([[
+    (function()
+      --- Client token refreshes for the mutated render, not an earlier one.
+      local function mutated()
+        local out = {}
+        for _, call in ipairs(REFRESH_CALLS) do
+          if call.version and call.version > VERSION_BEFORE then
+            out[#out + 1] = call
+          end
+        end
+        return out
+      end
+      local requested = HELPERS.wait_for(function()
+        return #mutated() == 1
+      end)
+      local staged = HELPERS.wait_for(function()
+        for i, line in ipairs(STATUS.lines) do
+          if line == '  M f.txt' then
+            local token = HELPERS.token_at(i - 1, 2)
+            if token and token.modifiers and token.modifiers.staged then
+              return true
+            end
+          end
+        end
+        return false
+      end)
+      local refreshes = mutated()
+      local first = refreshes[1]
+      return {
+        requested = requested,
+        refreshes = #refreshes,
+        ack_held = first and first.ack_held,
+        staged = staged,
+      }
+    end)()
+  ]])
+  MiniTest.expect.equality(flushed.requested, true, "the deferred refresh runs once")
+  MiniTest.expect.equality(flushed.refreshes, 1, "exactly one token refresh follows the flush")
+  MiniTest.expect.equality(flushed.ack_held, false, "the refresh follows the acknowledged version")
+  MiniTest.expect.equality(flushed.staged, true, "the staged token arrives after the flush")
+end
+
 T["uses manual folding and serves fold ranges from the server"] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get("vim.wo.foldmethod"), "manual")
