@@ -307,8 +307,43 @@ impl RepoFixture {
 /// Process-global root that owns every cached repository template.
 ///
 /// Lives outside every test's temporary directory so templates outlive the
-/// fixture that built them, and for the lifetime of the process.
+/// fixture that built them. The root survives for the lifetime of the process,
+/// but initialization registers an exit-time sweep that removes the whole tree
+/// when the test binary exits normally, after every test thread has joined (so
+/// no template copy is in flight). A process that dies without running exit
+/// handlers (for example on `SIGKILL`) leaves its root behind; the stale root
+/// has a random [`TempDir`] name and does not affect later runs.
 static TEMPLATE_ROOT: OnceLock<TempDir> = OnceLock::new();
+
+/// Filesystem path of [`TEMPLATE_ROOT`], read by the exit-time sweep.
+static TEMPLATE_ROOT_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Remove [`TEMPLATE_ROOT`] when the test binary exits.
+///
+/// Registered with `atexit` exactly once from [`template_root`]. Exit handlers
+/// run after the test harness has joined its threads, so no copy can still be
+/// reading the tree this removes.
+extern "C" fn sweep_template_root() {
+    if let Some(path) = TEMPLATE_ROOT_PATH.get() {
+        let _ = std::fs::remove_dir_all(path);
+    }
+}
+
+/// The process-global template root, created and armed for exit-time removal on
+/// first use.
+fn template_root() -> &'static TempDir {
+    TEMPLATE_ROOT.get_or_init(|| {
+        let root = TempDir::new().expect("template root");
+        let _ = TEMPLATE_ROOT_PATH.set(root.path().to_path_buf());
+        // SAFETY: the handler only reads the immutable path stored in
+        // `TEMPLATE_ROOT_PATH` and removes that tree; it runs at exit, after
+        // the harness has joined every test thread.
+        if unsafe { libc::atexit(sweep_template_root) } != 0 {
+            panic!("register template root sweep");
+        }
+        root
+    })
+}
 
 /// Templates already built in this process, keyed by [`fork`]'s `name`.
 static TEMPLATES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
@@ -358,7 +393,7 @@ pub fn fork_in(
         match cache.get(name) {
             Some(path) => path.clone(),
             None => {
-                let root = TEMPLATE_ROOT.get_or_init(|| TempDir::new().expect("template root"));
+                let root = template_root();
                 let dir = root.path().join(name);
                 std::fs::create_dir_all(&dir).expect("create template directory");
                 let (fixture, _) = build(&dir);
