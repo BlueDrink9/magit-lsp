@@ -548,22 +548,12 @@ impl<'a> Builder<'a> {
         } else if let Item::Option { flag, value, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            tokens.push((
-                flag_start,
-                flag.len(),
-                if live { "muted" } else { "muted" },
-                attributes,
-            ));
+            tokens.push((flag_start, flag.len(), "muted", attributes));
             if let Some(value) = value {
                 text.push_str("  ");
                 let value_start = text.len();
                 text.push_str(value);
-                tokens.push((
-                    value_start,
-                    value.len(),
-                    if live { "muted" } else { "muted" },
-                    attributes,
-                ));
+                tokens.push((value_start, value.len(), "muted", attributes));
             }
         }
 
