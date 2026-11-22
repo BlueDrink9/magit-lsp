@@ -116,6 +116,13 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 
 ## Review
 
+- [ ] **[P1] Complete menu and status-render semantic fixture migration**
+  - VERIFIED scout at `77da295`: `tests/menus.rs:676,700` still select retired planned/group types; current labels are `muted`+`planned` and group headings `heading` (`src/menu.rs:935-939,700-706`). Full gate `rust.DNSdCA` failed planned-action collection.
+  - Part 1: test: preserve exact planned-label list and narrow/wide layout assertions using canonical type/modifier selectors; check: `make test-rust FILTER="--test menus"`.
+  - Part 2: test: migrate `tests/status_render.rs:247-295` known retired role assertions to current canonical emissions, preserving text spans and staged modifiers; check: `make test-rust FILTER="--test status_render"`. Production unchanged; record evidence, commit each part, tick on last.
+  - Done (Part 1): `a49e458`.
+  - Verified (Part 1): `make test-rust FILTER="--test menus"` @ `a49e458` → `ok: rust` (12 passed; 0 failed; log `build/test-logs/rust.gS3Nrk`). `the_largest_menus_reflow_and_grey_every_planned_action` now collects planned labels by `token_type == "muted"` + `modifiers` containing `planned` (key spans stay `key`/option-`muted` and are excluded), and counts group columns by `token_type == "heading"`; the exact planned-label list, label spans, per-width bounds and `narrow < wide` reflow assertion are unchanged. The retired selectors had collected zero greyed labels in full gate `rust.DNSdCA`. Tests only; production untouched. Parent stays unticked until Part 2.
+
 - [x] **[P1] Refresh example recordings after semantic legend migration**
   - Full gate at `2c35bf8` stopped in examples (`build/test-logs/rust.KayF9t`): seven failures expect retired `tokenTypeGroups.magit.count`. VERIFIED generation seam: Makefile:124-125 `make update-examples`; tests/examples.rs:1637-1651 enumerates eight maintained outputs under `docs/examples/`.
   - Part 1: check: regenerate with `make update-examples`, inspect generated diff and commit outputs alone, naming semantic legend migration and command; no authored docs or queue in artifact commit.
