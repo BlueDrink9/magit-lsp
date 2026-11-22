@@ -673,7 +673,9 @@ fn the_largest_menus_reflow_and_grey_every_planned_action() {
             let mut greyed: Vec<String> = tree
                 .tokens
                 .iter()
-                .filter(|token| token.token_type == "magit.menu.planned")
+                .filter(|token| {
+                    token.token_type == "muted" && token.modifiers.contains(&"planned".to_string())
+                })
                 .map(|token| {
                     tree.lines[token.line][token.start..token.start + token.length].to_string()
                 })
@@ -697,7 +699,7 @@ fn the_largest_menus_reflow_and_grey_every_planned_action() {
 fn columns(tree: &magit_lsp::tree::Tree) -> usize {
     let mut per_line: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for token in &tree.tokens {
-        if token.token_type == "magit.menu.group" {
+        if token.token_type == "heading" {
             *per_line.entry(token.line).or_insert(0) += 1;
         }
     }
