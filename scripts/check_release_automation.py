@@ -756,7 +756,7 @@ def check_native_consumers(block):
     required = (
         'permissions:', 'actions: read', 'contents: read',
         'GITHUB_TOKEN: ${{ github.token }}', 'actions/setup-python@',
-        "python-version: '3.12'", 'scripts/download_native_candidate.py',
+        "python-version: '3.12'", 'python3 -m scripts.download_native_candidate',
         '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
         '--source-sha "${{ github.sha }}"', '--target "${{ matrix.target }}"',
         '--artifact-name "${{ matrix.artifact }}"',
@@ -800,7 +800,7 @@ def check_native_functional_consumers(block):
     required = (
         'needs: native-candidates', 'permissions:', 'actions: read', 'contents: read',
         'cachix/install-nix-action@', '.#release-acceptance',
-        'scripts/download_native_candidate.py', '--run-id "${{ github.run_id }}"',
+        'python3 -m scripts.download_native_candidate', '--run-id "${{ github.run_id }}"',
         '--attempt "${{ github.run_attempt }}"', '--source-sha "${{ github.sha }}"',
         '--target "${{ matrix.target }}"', '--artifact-name "${{ matrix.artifact }}"',
         'cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive',
@@ -845,10 +845,12 @@ def check_native_vscode_consumers(block):
             matrix[match.group(1)] = target
     if matrix != dict(NATIVE_MATRIX):
         fail('build workflow: native VSCode matrix must exactly match all three native hosts')
-    required = ('scripts/download_native_candidate.py', 'scripts/download_vsix_candidate.py',
+    required = ('python3 -m scripts.download_native_candidate',
+                'python3 -m scripts.download_vsix_candidate',
                 '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
                 '--source-sha "${{ github.sha }}"', '--ref "${{ github.ref }}"',
-                '--event "${{ github.event_name }}"', 'safe_extract',
+                '--event "${{ github.event_name }}"',
+                'from scripts.check_native_artifact import safe_extract',
                 'make native-vscode-artifact-check', 'MAGIT_LSP_SERVER_PATH=',
                 'RELEASE_ARTIFACT=', 'RELEASE_MANIFEST=', 'RELEASE_VSIX=',
                 'native-candidate.json', 'vsix-candidate.json',
@@ -867,6 +869,55 @@ def check_native_vscode_consumers(block):
             fail(f'build workflow: native VSCode consumers must not build or package ({forbidden})')
     if "if: runner.os == 'Linux'" not in code or "if: runner.os == 'macOS'" not in code:
         fail('build workflow: editor setup must cover Linux and macOS hosted runners')
+
+
+def check_consumer_entrypoints(path=BUILD_WORKFLOW):
+    """Prove the consumer Python entrypoints on a clean runner, without network.
+
+    ``python3 -m`` resolves a repository-root module from the working directory
+    even when ``PYTHONPATH`` is unset; a script path does not add the repository
+    root to ``sys.path``, so these subprocesses fail exactly where the workflow
+    would. The installed-VSIX step must import the one real extractor from its
+    owning module instead of an aliased or duplicated downloader symbol.
+    """
+    code = '\n'.join(code_lines(read_lines(path)))
+    for script in ('scripts/download_native_candidate.py',
+                   'scripts/download_vsix_candidate.py'):
+        if script in code:
+            fail(f'build workflow: consumer steps must invoke the root module, not '
+                 f'the script path {script!r}')
+    for module in ('scripts.download_native_candidate',
+                   'scripts.download_vsix_candidate'):
+        if f'python3 -m {module}' not in code:
+            fail(f'build workflow: consumer steps must invoke `python3 -m {module}`')
+    if 'from scripts.check_native_artifact import safe_extract' not in code:
+        fail('build workflow: installed-VSIX extraction must import the owning '
+             "`from scripts.check_native_artifact import safe_extract`")
+    if 'from scripts.download_native_candidate import safe_extract' in code:
+        fail('build workflow: installed-VSIX extraction must not alias safe_extract '
+             'from the downloader module')
+    root = Path(__file__).resolve().parents[1]
+    owners = [script for script in sorted((root / 'scripts').glob('*.py'))
+              if re.search(r'^def safe_extract\b',
+                           script.read_text(encoding='utf-8'), re.MULTILINE)]
+    if owners != [root / 'scripts/check_native_artifact.py']:
+        found = ', '.join(str(script.relative_to(root)) for script in owners) or 'none'
+        fail('build workflow: safe_extract must be defined once in '
+             f'scripts/check_native_artifact.py, found {found}')
+    environment = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
+    commands = [[sys.executable, '-m', module, '--help']
+                for module in ('scripts.download_native_candidate',
+                               'scripts.download_vsix_candidate')]
+    commands.append([sys.executable, '-c',
+                     'from scripts.check_native_artifact import safe_extract'])
+    for command in commands:
+        result = subprocess.run(command, cwd=root, env=environment,
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            tail = detail[-6:] if detail else ['no output']
+            fail(f'consumer entrypoint {" ".join(command)} exited '
+                 f'{result.returncode}: ' + ' | '.join(tail))
 
 
 def job_needs(block, context):
@@ -4601,6 +4652,10 @@ def run_self_tests():
              ('build workflow native consumer without immutable run binding',
               (('--attempt "${{ github.run_attempt }}"', '--attempt "1"', 1),),
               'github.run_attempt'),
+             ('build workflow native consumer invoking the downloader by script path',
+              (('python3 -m scripts.download_native_candidate\n',
+                'python3 scripts/download_native_candidate.py\n', 1),),
+              'must include'),
              ('build workflow native consumer without functional probe',
               (('scripts/check_native_artifact.py --functional', 'true', 1),),
               'scripts/check_native_artifact.py --functional'),
@@ -4640,6 +4695,10 @@ def run_self_tests():
              ('build workflow native VSCode misses immutable identity',
               (('vsix-candidate.json', 'missing-identity.json', 1),),
               "must include 'vsix-candidate.json'"),
+             ('build workflow native VSCode imports the extractor from the downloader',
+              (('from scripts.check_native_artifact import safe_extract',
+                'from scripts.download_native_candidate import safe_extract', 1),),
+              'must include'),
              ('build workflow native VSCode misses post-run hash',
               (('test "$vsix_before" = "$vsix_after"', 'true', 1),),
               "must include 'test \"$vsix_before\" = \"$vsix_after\"'"),
@@ -4826,6 +4885,7 @@ def run_automation_unit():
     run_self_tests()
     check_workflow()
     check_build_workflow()
+    check_consumer_entrypoints()
     check_release_pipeline()
     check_local_pipeline()
     check_automation_unit()

@@ -313,7 +313,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python3 scripts/download_native_candidate.py
+          python3 -m scripts.download_native_candidate
           --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
           --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
           --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
@@ -382,7 +382,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python3 scripts/download_native_candidate.py
+          python3 -m scripts.download_native_candidate
           --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
           --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
           --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
@@ -465,7 +465,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python3 scripts/download_native_candidate.py --repository "${{ github.repository }}"
+          python3 -m scripts.download_native_candidate --repository "${{ github.repository }}"
           --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
           --source-sha "${{ github.sha }}" --target "${{ matrix.target }}"
           --artifact-name "${{ matrix.artifact }}" --output "$RUNNER_TEMP/vscode-native"
@@ -474,7 +474,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
-          python3 scripts/download_vsix_candidate.py --repository "${{ github.repository }}"
+          python3 -m scripts.download_vsix_candidate --repository "${{ github.repository }}"
           --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
           --source-sha "${{ github.sha }}" --ref "${{ github.ref }}"
           --event "${{ github.event_name }}" --version "$(python3 scripts/check_release_automation.py --print-version)"
@@ -482,7 +482,7 @@ jobs:
       - name: Run installed VSIX acceptance
         run: |
           mkdir -p "$RUNNER_TEMP/vscode-native-bin"
-          python3 -c 'from pathlib import Path; from scripts.download_native_candidate import safe_extract; import json,sys; h=json.load(open(sys.argv[1])); safe_extract(Path(h["archive"]),Path(sys.argv[2]),Path(h["archive"]).name.removesuffix(".tar.gz"))' "$RUNNER_TEMP/vscode-native/native-candidate.json" "$RUNNER_TEMP/vscode-native-bin"
+          python3 -c 'from pathlib import Path; from scripts.check_native_artifact import safe_extract; import json,sys; h=json.load(open(sys.argv[1])); safe_extract(Path(h["archive"]),Path(sys.argv[2]),Path(h["archive"]).name.removesuffix(".tar.gz"))' "$RUNNER_TEMP/vscode-native/native-candidate.json" "$RUNNER_TEMP/vscode-native-bin"
           binary=$(find "$RUNNER_TEMP/vscode-native-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit)
           handoff="$RUNNER_TEMP/vscode-native/native-candidate.json"; version=$(python3 scripts/check_release_automation.py --print-version); vsix="$RUNNER_TEMP/vscode-vsix/magit-lsp-$version.vsix"
           evidence="$RUNNER_TEMP/native-vscode-evidence.json"; echo '{"ok":false,"phase":"not-run"}' > "$evidence"
