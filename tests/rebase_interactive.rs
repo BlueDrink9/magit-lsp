@@ -71,7 +71,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
             Some(dir.path().join("missing-source")),
         ),
     ] {
-        let mut command = Command::new(binary);
+        let mut command = Command::new(&binary);
         command.args(args);
         if let Some(source) = source {
             command.env(PLAN_FILE_ENV, source);
@@ -83,7 +83,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
     }
     let source = dir.path().join("source");
     std::fs::write(&source, b"plan").unwrap();
-    assert!(!Command::new(binary)
+    assert!(!Command::new(&binary)
         .args(["--sequence-editor-helper", "prepared", "missing/todo"])
         .env(PLAN_FILE_ENV, source)
         .current_dir(dir.path())
@@ -95,7 +95,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
     let destination = dir.path().join("todo ' preserve");
     let bytes = b"# transformed\npick abc fixup! subject\0\n";
     std::fs::write(&destination, bytes).unwrap();
-    assert!(Command::new(binary)
+    assert!(Command::new(&binary)
         .args(["--sequence-editor-helper", "preserve"])
         .arg(&destination)
         .env_remove(PLAN_FILE_ENV)
@@ -103,7 +103,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
         .unwrap()
         .success());
     assert_eq!(std::fs::read(&destination).unwrap(), bytes);
-    assert!(!Command::new(binary)
+    assert!(!Command::new(&binary)
         .args(["--sequence-editor-helper", "unknown"])
         .arg(&destination)
         .env_remove(PLAN_FILE_ENV)
@@ -561,7 +561,7 @@ fn initial_rebase_selector_cancel_and_stale_preparation_keep_caller_usable() {
 
 #[test]
 fn initial_rebase_invalid_selection_keeps_caller_usable() {
-    let (dir, _, base) = repo();
+    let (dir, _, _) = repo();
     let before = state(dir.path());
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
