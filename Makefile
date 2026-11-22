@@ -270,6 +270,14 @@ vscode-server-commands: vscode-prereqs build vscode-deps
 vscode-e2e: build vscode-deps
 	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
+# Focused native semantic-role smoke: one real status diff must render the
+# server's canonical added and removed content cells with explicitly unequal
+# computed foregrounds under the default dark scheme, without touching the
+# isolated fixture or running the theme-transition cases.
+.PHONY: vscode-semantic-e2e
+vscode-semantic-e2e: vscode-prereqs build vscode-deps
+	$(call run,vscode-semantic-e2e,MAGIT_VSCODE_SEMANTIC_ROLES_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
 # Focused native F5 check: physical F5 on the focused status view must dispatch
 # and render common.refresh, recording key/modifier events and the request or
 # its absence. Fails honestly when the contributed binding produces no refresh.
