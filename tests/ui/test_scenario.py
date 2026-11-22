@@ -379,6 +379,7 @@ class HelperTest(unittest.TestCase):
             "expect screen matches /a.*b/",
             "expect no_message /W10|readonly/",
             'expect style "(--all)" dim',
+            'expect style "added" different-foreground-from "removed"',
             'expect cursor on "Unstaged changes"',
             'expect latency("?") <= 100ms',
             "expect windows.floating == 1",
@@ -594,6 +595,69 @@ class StylePredicateTest(unittest.TestCase):
         ok, actual = scenario.check_style("x", "x", "glowing")
         self.assertFalse(ok)
         self.assertIn("unknown style mode", actual)
+
+    def test_different_foregrounds(self) -> None:
+        ansi = "\x1b[32madded\x1b[0m\n\x1b[31mremoved\x1b[0m"
+        self.assertTrue(
+            scenario.check_style_different_foreground(ansi, "added", "removed")[0]
+        )
+
+    def test_split_runs_with_uniform_foreground(self) -> None:
+        ansi = "\x1b[32madd\x1b[0m\x1b[32med\x1b[0m \x1b[31mremoved\x1b[0m"
+        self.assertTrue(
+            scenario.check_style_different_foreground(ansi, "added", "removed")[0]
+        )
+
+    def test_same_foreground_different_escape_spellings(self) -> None:
+        ansi = (
+            "\x1b[38;2;255;0;0madded\x1b[0m "
+            "\x1b[38:2:255:0:0mremoved\x1b[0m"
+        )
+        ok, actual = scenario.check_style_different_foreground(
+            ansi, "added", "removed"
+        )
+        self.assertFalse(ok)
+        self.assertIn("same", actual)
+        self.assertIn("rgb:255,0,0", actual)
+
+    def test_missing_foreground_text(self) -> None:
+        ansi = "\x1b[32madded\x1b[0m"
+        ok, actual = scenario.check_style_different_foreground(
+            ansi, "added", "removed"
+        )
+        self.assertFalse(ok)
+        self.assertIn("right 'removed' is not on screen", actual)
+
+    def test_default_foreground(self) -> None:
+        ansi = "\x1b[32madded\x1b[0m removed"
+        ok, actual = scenario.check_style_different_foreground(
+            ansi, "added", "removed"
+        )
+        self.assertFalse(ok)
+        self.assertIn("right 'removed' has the default foreground", actual)
+
+    def test_mixed_foreground(self) -> None:
+        ansi = (
+            "\x1b[32madd\x1b[0m\x1b[31med\x1b[0m "
+            "\x1b[34mremoved\x1b[0m"
+        )
+        ok, actual = scenario.check_style_different_foreground(
+            ansi, "added", "removed"
+        )
+        self.assertFalse(ok)
+        self.assertIn("left 'added' has mixed foregrounds", actual)
+        self.assertIn("green", actual)
+        self.assertIn("red", actual)
+
+    def test_evaluate_different_foreground(self) -> None:
+        expectation = scenario.parse_expectation(
+            'expect style "added" different-foreground-from "removed"'
+        )
+        ansi = "\x1b[32madded\x1b[0m \x1b[31mremoved\x1b[0m"
+        ok, _ = scenario.evaluate(
+            expectation, screen="", ansi=ansi, snapshot={}, events=[]
+        )
+        self.assertTrue(ok)
 
 
 class CursorPredicateTest(unittest.TestCase):

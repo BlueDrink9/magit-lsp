@@ -406,12 +406,13 @@ expect view_stack.menus == 1
 expect pending == "-"
 expect no_message /W10|readonly/
 expect style "(--all)" dim              # dim | bold | coloured | plain
+expect style "added" different-foreground-from "removed"  # distinct fg evidence
 expect cursor on "Unstaged changes"
 expect latency("?") <= 100ms            # key-to-idle for the last key named
 snapshot: name                          # writes build/ui/<scenario>/<name>.screen and .ansi
 ```
 
-`style` predicates use the ANSI decoder on the run containing the quoted text. `latency` uses the trace. A failed `expect` prints the expectation, the actual value, and the full current screen, then continues to the next scenario.
+`style` predicates use the ANSI decoder on the run containing the quoted text. `expect style "<left>" different-foreground-from "<right>"` requires both texts on screen, each with one non-default foreground across its nonempty cells (a text split across runs must share one foreground), and those foregrounds must differ. It fails for missing text, default foregrounds, mixed foregrounds or equal foregrounds, and does not pin a colour value or scheme. `latency` uses the trace. A failed `expect` prints the expectation, the actual value, and the full current screen, then continues to the next scenario.
 
 `goto "<text>"` moves the cursor to the first character of the first buffer line containing the quoted text (a literal match, no regex). It fails when the text is absent. It is an RPC call rather than a key press, so it neither appears in the trace nor contributes to a `latency` measurement; scenarios use it to name a target instead of counting motion keys.
 

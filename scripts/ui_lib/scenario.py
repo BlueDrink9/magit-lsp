@@ -47,6 +47,7 @@ class Expectation:
 
     kind: str
     text: str | None = None
+    other_text: str | None = None
     pattern: str | None = None
     path: str | None = None
     value: Any = None
@@ -247,6 +248,19 @@ def parse_expectation(line: str) -> Expectation:
     if match:
         return Expectation(
             kind="style", text=unquote(match.group(1)), mode=match.group(2)
+        )
+
+    match = re.match(
+        r"^expect\s+style\s+(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')\s+"
+        r"different-foreground-from\s+"
+        r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')$",
+        line,
+    )
+    if match:
+        return Expectation(
+            kind="style-different-foreground",
+            text=unquote(match.group(1)),
+            other_text=unquote(match.group(2)),
         )
 
     match = re.match(
@@ -557,6 +571,70 @@ def check_style(ansi: str, text: str, mode: str) -> tuple[bool, str]:
     return ok, f"style of {text!r} is {mode}={ok} ({actual})"
 
 
+def _uniform_foreground(runs: list[dict], text: str) -> tuple[str | None, str]:
+    """The single foreground of `text`'s nonempty cells, or `None`.
+
+    `text` must be on screen. Every non-whitespace cell it spans must share
+    one non-default foreground; missing text, a default foreground or mixed
+    foregrounds return `None` with a readable reason.
+    """
+    for row in sorted({run["row"] for run in runs}):
+        line, row_runs = _row_view(runs, row)
+        start = line.find(text)
+        if start == -1:
+            continue
+        foregrounds: list[str | None] = []
+        for offset, char in enumerate(text):
+            if char.isspace():
+                continue
+            position = start + offset
+            run = next(
+                (
+                    candidate
+                    for candidate in row_runs
+                    if candidate["col"] <= position
+                    < candidate["col"] + len(candidate["text"])
+                ),
+                None,
+            )
+            foregrounds.append(run["fg"] if run else None)
+        if not foregrounds:
+            return None, f"{text!r} has no nonempty cells"
+        distinct = set(foregrounds)
+        if len(distinct) != 1:
+            shown = ", ".join(
+                sorted("default" if fg is None else fg for fg in distinct)
+            )
+            return None, f"{text!r} has mixed foregrounds: {shown}"
+        fg = foregrounds[0]
+        if fg is None:
+            return None, f"{text!r} has the default foreground"
+        return fg, f"{text!r} foreground {fg}"
+    return None, f"{text!r} is not on screen"
+
+
+def check_style_different_foreground(
+    ansi: str, left: str, right: str
+) -> tuple[bool, str]:
+    """True when `left` and `right` each have one distinct foreground.
+
+    Both texts must be on screen with a single non-default foreground across
+    their nonempty cells, and those foregrounds must differ.
+    """
+    runs = decoder.decode(ansi)
+    left_fg, left_detail = _uniform_foreground(runs, left)
+    if left_fg is None:
+        return False, f"left {left_detail}"
+    right_fg, right_detail = _uniform_foreground(runs, right)
+    if right_fg is None:
+        return False, f"right {right_detail}"
+    ok = left_fg != right_fg
+    return ok, (
+        f"foreground of {left!r} is {left_fg} and of {right!r} is {right_fg} "
+        f"({'different' if ok else 'same'})"
+    )
+
+
 def check_no_message(snapshot: dict, pattern: str) -> tuple[bool, str]:
     """True when no `:messages` line or notification matches `pattern`."""
     try:
@@ -670,6 +748,11 @@ def format_expectation(expectation: Expectation) -> str:
         return f"expect no_message /{expectation.pattern}/"
     if expectation.kind == "style":
         return f'expect style "{expectation.text}" {expectation.mode}'
+    if expectation.kind == "style-different-foreground":
+        return (
+            f'expect style "{expectation.text}" different-foreground-from '
+            f'"{expectation.other_text}"'
+        )
     if expectation.kind == "cursor":
         return f'expect cursor on "{expectation.text}"'
     if expectation.kind == "latency":
@@ -728,6 +811,10 @@ def evaluate(
         return check_no_message(snapshot, expectation.pattern or "")
     if expectation.kind == "style":
         return check_style(ansi, expectation.text or "", expectation.mode or "")
+    if expectation.kind == "style-different-foreground":
+        return check_style_different_foreground(
+            ansi, expectation.text or "", expectation.other_text or ""
+        )
     if expectation.kind == "cursor":
         return check_cursor(snapshot, screen, expectation.text or "")
     if expectation.kind == "latency":
