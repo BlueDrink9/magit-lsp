@@ -12,8 +12,10 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - test: Template refresh detection distinguishes the actual draft URI from controller edits that merely mention it, if confirmed as the cause.
   - Done: 450811b
   - Verified: `make test-rust FILTER="--test capability_lattice"` @ 450811b → ok: rust (4/4; false positive was the `.magit` status-document applyEdit listing the draft path)
-- [ ] **AH-FULL: Rerun full suite after requested log fixes**
+- [x] **AH-FULL: Rerun full suite after requested log fixes**
   - check: Run `make test` serially and record all suite outcomes; resolve failures before marking done.
+  - Done: fa4f196
+  - Verified: `make test` @ fa4f196 → exit 0, serial full run: `ok: build` (warnings log `build/test-logs/build.zCIWcP`), `ok: rust` (1066 passed, 0 failed; log `build/test-logs/rust.Goae3J`), `ok: lua`, `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode`, `ok: keybindings`. No failures; no source changes.
 - [x] **AH-DOWNLOAD: Fix VSCode verified-download test failures**
   - test: Preserve exact archive version/target identity, artifact VSIX selection and unsupported-host guidance coverage against the current supported-platform contract.
   - check: Diagnose the four failures in `build/test-logs/vscode.cTMokC` and pass `make vscode-test` without weakening coverage.
