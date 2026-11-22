@@ -42,7 +42,10 @@ REPORT_ROW_RE = re.compile(r"^\s*([\d.]+)%\s+(\d+)\s+(.+)$")
 SAMPLE_HEADER_RE = re.compile(r"^\s*(\S+)\s+\d+(?:/\d+)?\s+[\d.]+:\s+\d+\s+\S+:")
 DURATION_RE = re.compile(r"<(\d+\.\d+)>\s*$")
 SYSCALL_RE = re.compile(r"^\s*(\d+)\s+([\d.]+)\s+([A-Za-z_]\w*)\(")
-EXECVE_RE = re.compile(r'execve\("([^"]*)"')
+UNFINISHED_RE = re.compile(r"^\s*(\d+)\s+[\d.]+\s+([A-Za-z_]\w*)\(.*<unfinished \.\.\.>\s*$")
+RESUMED_RE = re.compile(r"^\s*(\d+)\s+[\d.]+\s+<\.\.\. ([A-Za-z_]\w*) resumed>(.*)$")
+RETURN_RE = re.compile(r"\)\s*=\s*(-?\d+)")
+QUOTED_RE = re.compile(r'"([^"]*)"')
 PROCESS_NAMES = {
     "execve", "execveat", "clone", "clone3", "fork", "vfork", "wait4",
     "waitid", "waitpid", "exit", "exit_group", "kill", "tkill", "tgkill",
@@ -81,42 +84,122 @@ def preflight(tracer: str, artifact: Path) -> None:
         raise SystemExit(f"strace probe produced no execve evidence: {probe}")
 
 
-def parse_trace(path: Path) -> dict:
-    """Summarize one launch's traced syscalls without attributing wall time."""
+def exec_path(name: str, line: str) -> str | None:
+    """Return the program path from an execve/execveat record line."""
+    if name not in ("execve", "execveat"):
+        return None
+    match = QUOTED_RE.search(line)
+    return match.group(1) if match else None
+
+
+def call_succeeded(line: str) -> bool:
+    """Whether a completed syscall record reports a zero return value."""
+    returns = RETURN_RE.findall(line)
+    return bool(returns) and returns[-1] == "0"
+
+
+def parse_trace_text(text: str, name: str, byte_count: int) -> dict:
+    """Summarize syscall text, pairing `<unfinished ...>`/`<... resumed>`.
+
+    A call split by strace across two records is counted once, when it
+    completes, and its resumed duration is attributed to that call. Unmatched
+    halves are reported instead of contributing an unreported zero duration.
+    """
     durations: dict[str, float] = {}
     counts: dict[str, int] = {}
     execs: list[str] = []
+    successful_git_execs = 0
+    exec_failures = 0
     server_pid: str | None = None
     server_exits = 0
     pids: set[str] = set()
-    for line in path.read_text(errors="replace").splitlines():
+    pending: dict[tuple[str, str], str | None] = {}
+    unfinished: dict[str, int] = {}
+    unmatched_resumed = 0
+    resumed_without_duration = 0
+
+    def note_pid(pid: str) -> None:
+        nonlocal server_pid
+        if server_pid is None:
+            server_pid = pid
+        pids.add(pid)
+
+    def note_exit(pid: str, syscall: str) -> None:
+        nonlocal server_exits
+        if pid == server_pid and syscall in ("exit", "exit_group"):
+            server_exits += 1
+
+    def note_exec(syscall: str, path: str | None, line: str) -> None:
+        nonlocal successful_git_execs, exec_failures
+        if path is None:
+            return
+        execs.append(path)
+        if call_succeeded(line):
+            if path.rsplit("/", 1)[-1] == "git":
+                successful_git_execs += 1
+        else:
+            exec_failures += 1
+
+    for line in text.splitlines():
+        entry = UNFINISHED_RE.match(line)
+        if entry:
+            pid, syscall = entry.group(1), entry.group(2)
+            note_pid(pid)
+            key = (pid, syscall)
+            if key in pending:
+                unfinished[syscall] = unfinished.get(syscall, 0) + 1
+            pending[key] = exec_path(syscall, line)
+            continue
+        resumed = RESUMED_RE.match(line)
+        if resumed:
+            pid, syscall = resumed.group(1), resumed.group(2)
+            note_pid(pid)
+            key = (pid, syscall)
+            known = key in pending
+            path = pending.pop(key, None) if known else None
+            if not known:
+                unmatched_resumed += 1
+            counts[syscall] = counts.get(syscall, 0) + 1
+            duration = DURATION_RE.search(line)
+            if duration:
+                durations[syscall] = durations.get(syscall, 0.0) + float(duration.group(1))
+            else:
+                resumed_without_duration += 1
+            note_exit(pid, syscall)
+            if known:
+                note_exec(syscall, path, line)
+            continue
         match = SYSCALL_RE.match(line)
         if not match:
             continue
-        pid = match.group(1)
-        server_pid = server_pid or pid
-        pids.add(pid)
-        name = match.group(3)
-        if pid == server_pid and name in ("exit", "exit_group"):
-            server_exits += 1
-        counts[name] = counts.get(name, 0) + 1
+        pid, syscall = match.group(1), match.group(3)
+        note_pid(pid)
+        counts[syscall] = counts.get(syscall, 0) + 1
         duration = DURATION_RE.search(line)
         if duration:
-            durations[name] = durations.get(name, 0.0) + float(duration.group(1))
-        if name in ("execve", "execveat"):
-            execs.extend(EXECVE_RE.findall(line))
-    git_execs = [path_ for path_ in execs if path_.rsplit("/", 1)[-1] == "git"]
+            durations[syscall] = durations.get(syscall, 0.0) + float(duration.group(1))
+        note_exit(pid, syscall)
+        note_exec(syscall, exec_path(syscall, line), line)
+    for (_, syscall) in pending:
+        unfinished[syscall] = unfinished.get(syscall, 0) + 1
+    unmatched_unfinished = sum(unfinished.values())
     traced_ms = sum(durations.values()) * 1000.0
-    process_calls = sum(counts.get(name, 0) for name in PROCESS_NAMES)
-    process_ms = sum(durations.get(name, 0.0) for name in PROCESS_NAMES) * 1000.0
-    file_calls = sum(count for name, count in counts.items() if name not in PROCESS_NAMES)
-    file_ms = sum(duration for name, duration in durations.items() if name not in PROCESS_NAMES) * 1000.0
+    process_calls = sum(counts.get(syscall, 0) for syscall in PROCESS_NAMES)
+    process_ms = sum(durations.get(syscall, 0.0) for syscall in PROCESS_NAMES) * 1000.0
+    file_calls = sum(count for syscall, count in counts.items() if syscall not in PROCESS_NAMES)
+    file_ms = sum(duration for syscall, duration in durations.items()
+                  if syscall not in PROCESS_NAMES) * 1000.0
     return {
-        "trace": path.name,
-        "bytes": path.stat().st_size,
+        "trace": name,
+        "bytes": byte_count,
         "pids": len(pids),
         "execs": execs,
-        "git_execs": len(git_execs),
+        "git_execs": successful_git_execs,
+        "failed_exec_probes": exec_failures,
+        "unmatched_unfinished": unmatched_unfinished,
+        "unmatched_resumed": unmatched_resumed,
+        "resumed_without_duration": resumed_without_duration,
+        "unfinished_by_syscall": unfinished,
         "process_calls": process_calls,
         "wait4_calls": counts.get("wait4", 0),
         "wait4_ms": durations.get("wait4", 0.0) * 1000.0,
@@ -125,8 +208,100 @@ def parse_trace(path: Path) -> dict:
         "traced_ms": traced_ms,
         "process_minus_wait_ms": max(0.0, process_ms - durations.get("wait4", 0.0) * 1000.0),
         "server_exits": server_exits,
-        "by_syscall": {name: {"calls": count, "ms": durations.get(name, 0.0) * 1000.0}
-                       for name, count in counts.items()},
+        "by_syscall": {syscall: {"calls": count, "ms": durations.get(syscall, 0.0) * 1000.0}
+                       for syscall, count in counts.items()},
+    }
+
+
+def parse_trace(path: Path) -> dict:
+    """Summarize one launch's traced syscalls without attributing wall time."""
+    text = path.read_text(errors="replace")
+    return parse_trace_text(text, path.name, path.stat().st_size)
+
+
+def parser_self_check() -> dict:
+    """Prove resumed accounting through in-memory split and unsplit records.
+
+    The split variant interleaves a blocked `wait4` entry/resume with a
+    different PID's `clone` entry/resume; it must yield the same counts and
+    durations as the single-record variant. Failed PATH probes must stay out of
+    the successful Git exec count, and each unmatched half must be reported.
+    """
+    unsplit = (
+        '1000 1000.000000 execve("/usr/bin/git", ["git"], 0x0) = 0 <0.001000>\n'
+        '1000 1000.002000 execve("/missing/bin/git", ["git"], 0x0) = -1 ENOENT'
+        " (No such file or directory) <0.000012>\n"
+        '1000 1000.005000 wait4(-1, 0x0, 0, NULL) = 1234 <0.100000>\n'
+        '1000 1000.106000 clone(child_stack=NULL, flags=0x0) = 1235 <0.002000>\n'
+    )
+    split = (
+        '1000 1000.000000 execve("/usr/bin/git", ["git"], 0x0) = 0 <0.001000>\n'
+        '1000 1000.002000 execve("/missing/bin/git", ["git"], 0x0) = -1 ENOENT'
+        " (No such file or directory) <0.000012>\n"
+        "1000 1000.005000 wait4(-1,  <unfinished ...>\n"
+        "1001 1000.010000 clone(child_stack=NULL,  <unfinished ...>\n"
+        "1001 1000.020000 <... clone resumed>) = 1235 <0.002000>\n"
+        "1000 1000.105000 <... wait4 resumed>0x0, 0, NULL) = 1234 <0.100000>\n"
+    )
+    incomplete = (
+        "2000 2000.000000 wait4(-1,  <unfinished ...>\n"
+        "2001 2001.000000 <... clone resumed>) = 7 <0.005000>\n"
+    )
+    plain = parse_trace_text(unsplit, "unsplit.trace", len(unsplit))
+    resumed = parse_trace_text(split, "split.trace", len(split))
+    broken = parse_trace_text(incomplete, "incomplete.trace", len(incomplete))
+
+    def same(left: float, right: float) -> bool:
+        return abs(left - right) < 1e-6
+
+    failures = []
+    if not (plain["wait4_calls"] == resumed["wait4_calls"] == 1):
+        failures.append(f"wait4 calls {plain['wait4_calls']} != {resumed['wait4_calls']}")
+    if not same(plain["wait4_ms"], resumed["wait4_ms"]):
+        failures.append(f"wait4 ms {plain['wait4_ms']} != {resumed['wait4_ms']}")
+    plain_clone = plain["by_syscall"]["clone"]
+    resumed_clone = resumed["by_syscall"]["clone"]
+    if not plain_clone["calls"] == resumed_clone["calls"] == 1:
+        failures.append(f"clone calls {plain_clone['calls']} != {resumed_clone['calls']}")
+    if not same(plain_clone["ms"], resumed_clone["ms"]):
+        failures.append(f"clone ms {plain_clone['ms']} != {resumed_clone['ms']}")
+    if not (plain["git_execs"] == resumed["git_execs"] == 1):
+        failures.append(f"successful Git execs {plain['git_execs']} != {resumed['git_execs']}")
+    if not (plain["failed_exec_probes"] == resumed["failed_exec_probes"] == 1):
+        failures.append(
+            f"failed exec probes {plain['failed_exec_probes']} != {resumed['failed_exec_probes']}")
+    if broken["unmatched_unfinished"] != 1:
+        failures.append(f"unmatched unfinished {broken['unmatched_unfinished']} != 1")
+    if broken["unmatched_resumed"] != 1:
+        failures.append(f"unmatched resumed {broken['unmatched_resumed']} != 1")
+    if failures:
+        raise SystemExit("parser self-check failed: " + "; ".join(failures))
+
+    print(f"parser check: split wait4={resumed['wait4_calls']}/"
+          f"{resumed['wait4_ms']:.3f}ms clone={resumed_clone['calls']}/"
+          f"{resumed_clone['ms']:.3f}ms == unsplit wait4={plain['wait4_calls']}/"
+          f"{plain['wait4_ms']:.3f}ms clone={plain_clone['calls']}/{plain_clone['ms']:.3f}ms")
+    print(f"parser check: successful Git execs={resumed['git_execs']}, "
+          f"failed exec probes excluded={resumed['failed_exec_probes']}, "
+          f"unmatched unfinished={broken['unmatched_unfinished']}, "
+          f"unmatched resumed={broken['unmatched_resumed']}")
+    return {
+        "split": {
+            "wait4_calls": resumed["wait4_calls"],
+            "wait4_ms": resumed["wait4_ms"],
+            "clone_calls": resumed_clone["calls"],
+            "clone_ms": resumed_clone["ms"],
+        },
+        "unsplit": {
+            "wait4_calls": plain["wait4_calls"],
+            "wait4_ms": plain["wait4_ms"],
+            "clone_calls": plain_clone["calls"],
+            "clone_ms": plain_clone["ms"],
+        },
+        "successful_git_execs": resumed["git_execs"],
+        "failed_exec_probes_excluded": resumed["failed_exec_probes"],
+        "unmatched_unfinished": broken["unmatched_unfinished"],
+        "unmatched_resumed": broken["unmatched_resumed"],
     }
 
 
@@ -201,6 +376,9 @@ def aggregate(profiles: list[dict]) -> dict:
         "launches": len(profiles),
         "per_launch_medians": {
             "server_git_execs": median([profile["git_execs"] for profile in profiles]),
+            "failed_exec_probes": median([profile["failed_exec_probes"] for profile in profiles]),
+            "unmatched_unfinished": median([profile["unmatched_unfinished"] for profile in profiles]),
+            "unmatched_resumed": median([profile["unmatched_resumed"] for profile in profiles]),
             "process_calls": median([profile["process_calls"] for profile in profiles]),
             "file_calls": median([profile["file_calls"] for profile in profiles]),
             "file_ms": median([profile["file_ms"] for profile in profiles]),
@@ -733,6 +911,7 @@ def main_strace() -> int:
     if not tracer:
         raise SystemExit("strace is not available on PATH; cannot capture syscall evidence")
 
+    parser_check = parser_self_check()
     artifact = repo / "build/startup-strace" / f"{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{os.getpid()}"
     artifact.mkdir(parents=True, exist_ok=False)
     preflight(tracer, artifact)
@@ -771,6 +950,7 @@ def main_strace() -> int:
         "tracer_version": subprocess.check_output([tracer, "-V"], text=True).splitlines()[0],
         "artifact": str(artifact.relative_to(repo)),
         "syscall_filter": "%process,%file",
+        "parser_check": parser_check,
         "aggregate": aggregate(profiles),
         "launches": profiles,
     }
@@ -779,9 +959,13 @@ def main_strace() -> int:
     medians = summary["aggregate"]["per_launch_medians"]
     print(f"traced server launches: {len(profiles)} (from {EXPECTED_SERVER_LAUNCHES} expected fresh processes)")
     print("per-launch median: "
-          f"git execs={medians['server_git_execs']:g}, process syscalls={medians['process_calls']:g}, "
+          f"successful Git execs={medians['server_git_execs']:g} "
+          f"(failed exec probes={medians['failed_exec_probes']:g}), "
+          f"process syscalls={medians['process_calls']:g}, "
           f"file syscalls={medians['file_calls']:g}, file syscall time={medians['file_ms']:.1f} ms, "
           f"wait4 calls={medians['wait4_calls']:g}, wait4 blocking={medians['wait4_ms']:.1f} ms")
+    print(f"unmatched syscall halves per launch: unfinished={medians['unmatched_unfinished']:g}, "
+          f"resumed={medians['unmatched_resumed']:g}")
     print("top traced syscalls by median syscall time (overlaps; not wall time):")
     for entry in summary["aggregate"]["ranked_syscalls_by_median_traced_ms"]:
         print(f"  {entry['syscall']:<16} {entry['median_ms']:8.3f} ms  calls={entry['median_calls']:g}")

@@ -244,6 +244,43 @@ visible `Head:` status in a valid window, not terminal redraw or first-window
 creation. Raw traces keep local paths and arguments and remain in ignored
 `build/`; only aggregates are recorded here.
 
+**RV-03 correction (2026-11-22):** the 2026-11-21 parser accepted only
+`syscall(...)` records. It dropped duration-bearing `<... syscall resumed>`
+records emitted by `strace -f` and counted failed `execve` PATH probes as Git
+executions. The totals above remain as originally recorded provenance and are
+not relabeled, but the following are **invalidated**: every `by_syscall`
+duration that could come from a split record, the `wait4` blocking total
+(4.3 ms over 104 calls), the Git-exec column, and the conclusion that cost
+"sits ... not in `wait4` blocking". They must not be cited as parser-supported
+measurements.
+
+The corrected parser pairs unfinished/resumed records by PID and syscall,
+counts each completed call once, attributes the resumed duration, reports
+unmatched halves, and counts only successful Git `exec` results. Its in-memory
+self-check runs as part of `make nvim-startup-strace` and reported:
+
+```
+parser check: split wait4=1/100.000ms clone=1/2.000ms == unsplit wait4=1/100.000ms clone=1/2.000ms
+parser check: successful Git execs=1, failed exec probes excluded=1, unmatched unfinished=1, unmatched resumed=1
+```
+
+A fresh corrected run (`build/startup-strace/20261122T071210-565053/`, six
+launches, no unmatched halves or failed exec probes):
+
+| Launches | Successful Git execs | Filesystem syscalls | Traced syscall time, ms | `wait4` calls / blocking ms |
+|---|---:|---:|---:|---:|
+| Fixture ×3 | 27 each | 3,324 each | 123.1 / 105.7 / 127.5 | 32/31/32 · 1.21/1.28/1.19 |
+| Worktree ×3 | 57 / 63 / 57 | 28,279 / 30,520 / 28,271 | 1,002.0 / 546.2 / 971.5 | 57/63/57 · 2.62/2.41/5.00 |
+
+Per-launch medians were `wait4` 1.8 ms over 44.5 calls, successful Git execs
+42, and 0 unmatched halves. The fresh ranking is led by `newfstatat` (122.9 ms,
+7,111.5 calls), `statx` (72.1 ms, 4,231.5), `openat` (67.6 ms, 3,000), `execve`
+(23.6 ms, 43) and `clone` (15.8 ms, 41); `wait4` is outside the top ten. This is
+fresh evidence for this repository state, not a correction or comparison of
+the invalidated 2026-11-21 numbers: the worktree activity differs, and the
+overlap, overhead, debug-build and endpoint caveats above still apply. Summed
+syscall durations are not wall or CPU time.
+
 ### CPU sampling (2026-11-22)
 
 `make nvim-startup-perf` exits 0 (`ok: build`; `ok: nvim-startup-perf`). It
