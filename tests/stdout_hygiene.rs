@@ -23,6 +23,10 @@ fn initialize(server: &mut Server) {
     server.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
 }
 
+/// Open the status view and wait until the status acquisition has installed its
+/// contents. This client negotiates no presentation and may receive no pushed
+/// renders, so poll the server-owned render until the loading placeholder is
+/// gone (the readiness idiom of tests/plain_harness.rs).
 fn open_status(server: &mut Server, id: i64, repo: &Path) {
     server.send(json!({
         "jsonrpc": "2.0",
@@ -34,6 +38,38 @@ fn open_status(server: &mut Server, id: i64, repo: &Path) {
             "viewport": {"cols": 80, "rows": 24},
         },
     }));
+    let opened = server.response_with_id(id);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let mut resync_id = id + 100;
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "status view {view_id} did not publish acquired contents"
+        );
+        server.send(json!({
+            "jsonrpc": "2.0",
+            "id": resync_id,
+            "method": "view/resync",
+            "params": {"viewId": view_id},
+        }));
+        let resync = server.response_with_id(resync_id);
+        let lines = resync["result"]["text"]
+            .as_array()
+            .unwrap_or_else(|| panic!("full status resync: {resync}"));
+        if !lines.is_empty()
+            && !lines.iter().any(|line| {
+                line.as_str()
+                    .is_some_and(|line| line.contains("Loading repository status"))
+            })
+        {
+            break;
+        }
+        resync_id += 1;
+    }
 }
 
 /// Send `shutdown` then `exit`, and drain the responses.
@@ -53,7 +89,6 @@ fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
     let mut server = Server::spawn(&[]);
     initialize(&mut server);
     open_status(&mut server, 2, tmp.path());
-    server.response_with_id(2);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -89,7 +124,6 @@ fn log_file_receives_logs_and_stdout_stays_clean() {
     )]);
     initialize(&mut server);
     open_status(&mut server, 2, tmp.path());
-    server.response_with_id(2);
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 3,

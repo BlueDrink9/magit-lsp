@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -160,6 +160,69 @@ class ParserTest(unittest.TestCase):
         with self.assertRaisesRegex(scenario.ScenarioError, "unknown client"):
             scenario.parse_scenario(write_temp("fixture: clean\nclient: helix\n---\nwait\n"))
 
+    def test_startup_defaults_to_ready_and_accepts_held(self) -> None:
+        default = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\nwait\n", "startup-default.scn")
+        )
+        self.assertEqual(default.startup, "ready")
+        held = scenario.parse_scenario(write_temp(
+            "fixture: clean\nstartup: held\n---\n"
+            "wait status entered\nrelease status\n",
+            "startup-held.scn",
+        ))
+        self.assertEqual(held.startup, "held")
+        self.assertEqual(
+            [statement.kind for statement in held.statements],
+            ["wait-status-entered", "release-status"],
+        )
+
+    def test_invalid_startup_mode_is_rejected(self) -> None:
+        with self.assertRaisesRegex(scenario.ScenarioError, "unknown startup mode"):
+            scenario.parse_scenario(
+                write_temp("fixture: clean\nstartup: early\n---\nwait\n", "bad-startup.scn")
+            )
+
+    def test_gate_statements_require_held_startup(self) -> None:
+        for line in ("wait status entered", "release status"):
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(scenario.ScenarioError, "needs `startup: held`"):
+                    scenario.parse_scenario(
+                        write_temp(f"fixture: clean\n---\n{line}\n", "gate-ready.scn")
+                    )
+
+    def test_gate_statements_wait_for_entry_and_release_once(self) -> None:
+        case = scenario.parse_scenario(write_temp(
+            "fixture: clean\nstartup: held\n---\n"
+            "wait status entered\nrelease status\n",
+            "gate-held.scn",
+        ))
+        gate = Mock()
+        run = SimpleNamespace(gate=gate)
+        with patch.object(scenario, "_clear_command_line"):
+            result = scenario._run_live(run, case, "80x24", "standard", [], False)
+        self.assertTrue(result.ok, result.reason)
+        gate.wait_entered.assert_called_once_with()
+        gate.release.assert_called_once_with()
+
+    def test_gate_entry_failure_reports_the_statement(self) -> None:
+        case = scenario.parse_scenario(write_temp(
+            "fixture: clean\nstartup: held\n---\nwait status entered\n",
+            "gate-missing.scn",
+        ))
+        gate = Mock()
+        gate.wait_entered.side_effect = RuntimeError("first-status Git gate was not entered")
+        with (
+            patch.object(scenario, "_clear_command_line"),
+            patch.object(driver, "capture", return_value="loading screen"),
+        ):
+            result = scenario._run_live(
+                SimpleNamespace(gate=gate), case, "80x24", "standard", [], False
+            )
+        self.assertFalse(result.ok)
+        self.assertIn("gate-missing.scn:4", result.reason)
+        self.assertIn("first-status Git gate was not entered", result.reason)
+        self.assertEqual(result.screen, "loading screen")
+
     def test_wait_state_requires_a_structured_path_equality(self) -> None:
         statement = scenario.parse_statement("wait state draft == true", "case:1")
         self.assertEqual(statement.kind, "wait-state")
@@ -211,6 +274,21 @@ class ParserTest(unittest.TestCase):
         self.assertIn("original native assertion", result.reason)
         self.assertIn("cleanup unproven", result.reason)
         self.assertEqual(result.screen, "actual screen")
+
+    def test_held_startup_mode_is_passed_to_the_driver(self) -> None:
+        case = scenario.parse_scenario(write_temp(
+            "fixture: clean\nstartup: held\n---\nwait\n"))
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            run = SimpleNamespace(home_path=base, gate=None)
+            with (
+                patch.object(driver, "start", return_value=run) as start,
+                patch.object(scenario, "_run_live", return_value=scenario.ComboResult(ok=True)),
+                patch.object(driver, "stop", return_value={"cleanup_verified": True}),
+            ):
+                result = scenario._run_combo(case, "80x24", "standard", [])
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(start.call_args.kwargs["startup_mode"], "held")
 
     def test_invalid_size_is_rejected(self) -> None:
         with self.assertRaises(driver.DriverError):

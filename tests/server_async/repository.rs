@@ -760,16 +760,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         "initialize response: {response}"
     );
 
-    server.send(json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "view/open",
-        "params": {
-            "kind": "status",
-            "args": {"repo_path": repo},
-            "viewport": {"cols": 80, "rows": 24},
-        },
-    }));
+    server.send(open_view_message(2, &repo));
     let opened = server.response_with_id(2);
     let view_id = opened["result"]["id"]
         .as_str()
@@ -791,15 +782,21 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     let initial = server.recv();
     assert_eq!(initial["method"], json!("view/render"), "{initial}");
     assert_eq!(initial["params"]["viewId"], json!(view_id));
-    assert_eq!(initial["params"]["version"], json!(1));
+    let loading_version = initial["params"]["version"].as_u64().unwrap();
     assert!(initial["params"]["baseVersion"].is_null());
-    assert!(initial["params"]["text"].is_array());
+    assert_eq!(
+        initial["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    let ready = server.wait_for_view_render_after(&view_id, loading_version);
+    let version = ready["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
     let line = first_hunk_line(&mut server, &uri);
 
     server.send(json!({
         "jsonrpc": "2.0",
         "method": "view/rendered",
-        "params": {"viewId": view_id, "version": 1},
+        "params": {"viewId": view_id, "version": version},
     }));
     server.send(json!({
         "jsonrpc": "2.0",
@@ -808,7 +805,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         "params": {
             "viewId": view_id,
             "command": "status.stage",
-            "version": 1,
+            "version": version,
             "cursor": {"line": line, "column": 0},
         },
     }));
@@ -827,8 +824,8 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     let render = render.expect("render notification");
     assert_eq!(response["result"]["effects"], json!([]));
     assert_eq!(render["params"]["viewId"], json!(view_id));
-    assert_eq!(render["params"]["version"], json!(2));
-    assert_eq!(render["params"]["baseVersion"], json!(1));
+    assert_eq!(render["params"]["version"], json!(version + 1));
+    assert_eq!(render["params"]["baseVersion"], json!(version));
     assert!(render["params"]["text"].is_null());
     assert!(!render["params"]["edits"]
         .as_array()
@@ -872,10 +869,16 @@ fn view_resize_notification_reflows_an_acked_menu_incrementally() {
     assert_eq!(initial_status["method"], json!("view/render"));
     let status_keymap = server.recv();
     assert_eq!(status_keymap["method"], json!("view/keymap"));
+    let ready = server.wait_for_view_render_after(
+        status_id,
+        initial_status["params"]["version"].as_u64().unwrap(),
+    );
+    let ready_version = ready["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":status_id,"version":ready_version}}));
     server.send(json!({
         "jsonrpc": "2.0",
         "method": "view/rendered",
-        "params": {"viewId": status_id, "version": 1},
+        "params": {"viewId": status_id, "version": ready_version},
     }));
 
     server.send(json!({
@@ -1083,6 +1086,16 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         keymap_keys(&keymap, "status.stage"),
         Some(vec!["s".to_string()])
     );
+    let ready = server.wait_for_view_render_after(
+        &view_id,
+        render["params"]["version"]
+            .as_u64()
+            .expect("render version"),
+    );
+    let version = ready["params"]["version"]
+        .as_u64()
+        .expect("ready render version");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
 
     assert!(render["params"]["text"].is_array());
     let line = first_hunk_line(&mut server, &uri);
@@ -1090,7 +1103,7 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
     server.send(json!({
         "jsonrpc": "2.0",
         "method": "view/rendered",
-        "params": {"viewId": view_id, "version": 1},
+        "params": {"viewId": view_id, "version": version},
     }));
     server.send(json!({
         "jsonrpc": "2.0",
@@ -1098,7 +1111,7 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         "method": "view/key",
         "params": {
             "viewId": view_id,
-            "version": 1,
+            "version": version,
             "key": "s",
             "editorMode": "normal",
             "cursor": {"line": line, "column": 0},
@@ -1118,7 +1131,7 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
     let response = response.expect("view/key response");
     let staged_render = staged_render.expect("render after view/key");
     assert_eq!(response["result"]["effects"], json!([]), "{response}");
-    assert_eq!(staged_render["params"]["version"], json!(2));
+    assert_eq!(staged_render["params"]["version"], json!(version + 1));
     assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
 
     shutdown_and_exit(&mut server);
@@ -1496,9 +1509,13 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
         let uri = opened["result"]["uri"].as_str().unwrap().to_string();
         assert_eq!(server.recv()["method"], "view/render");
         assert_eq!(server.recv()["method"], "view/keymap");
+        let ready = server.wait_for_view_render_after(&view, 1);
+        let version = ready["params"]["version"].as_u64().unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+            "params":{"viewId":view,"version":version}}));
         let line = first_hunk_line(&mut server, &uri);
         server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
-            "params":{"viewId":view,"command":"status.discard","version":1,"cursor":{"line":line,"column":0}}}));
+            "params":{"viewId":view,"command":"status.discard","version":version,"cursor":{"line":line,"column":0}}}));
         let prompt = loop {
             let message = server.recv();
             if message["method"] == "view/prompt" {
@@ -1509,7 +1526,7 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
                 "discard finished without prompting: {message}"
             );
         };
-        server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view,"version":1}}));
+        server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view,"version":version}}));
         server.send(json!({"jsonrpc":"2.0", "method":"view/resize", "params":{"viewId":view,"cols":60,"rows":24}}));
         server.send(
             json!({"jsonrpc":"2.0", "id":4, "method":"view/resync", "params":{"viewId":view}}),
@@ -1518,10 +1535,10 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
             server.response_with_id(4)["result"]["version"]
                 .as_u64()
                 .unwrap()
-                >= 1
+                >= version
         );
         server.send(json!({"jsonrpc":"2.0", "id":5, "method":"view/key",
-            "params":{"viewId":view,"version":1,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
+            "params":{"viewId":view,"version":version,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
         let refused = server.response_with_id(5);
         assert!(refused["result"]["effects"][0]["text"]
             .as_str()
@@ -1615,10 +1632,13 @@ fn a12_selection_stage_reports_index_lock_as_successful_error_effect() {
     let uri = opened["result"]["uri"].as_str().unwrap().to_string();
     let render = server.recv();
     assert_eq!(render["method"], "view/render");
-    let version = render["params"]["version"]
+    let loading_version = render["params"]["version"]
         .as_u64()
         .expect("initial render version");
     assert_eq!(server.recv()["method"], "view/keymap");
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let version = ready["params"]["version"].as_u64().expect("ready version");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
     // The changed-line symbol range comes from the server's structured outline,
     // not by interpreting rendered text.
     let (start_line, end_line) = first_hunk_range(&mut server, &uri);
@@ -1805,12 +1825,22 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
         for (attempt, signed) in [(0, true), (1, false)] {
             let id = 10 + attempt * 10;
             let mut progress = Vec::new();
+            let mut begun: Vec<(String, String)> = Vec::new();
             server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
                 "params":{"viewId":view,"command":"commit.create",
                     "args": if signed { json!({"switches":[],"options":{"=S":""}}) } else { json!({"switches":[],"options":{}}) }}}));
             let edit = loop {
                 let message = server.recv();
                 if let Some(event) = progress_event(&message) {
+                    if event.1 == "begin" {
+                        begun.push((
+                            event.0.clone(),
+                            message["params"]["value"]["message"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        ));
+                    }
                     progress.push(event);
                 }
                 if message["id"] == id {
@@ -1840,7 +1870,8 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
             let mut cancelled = false;
             loop {
                 if signed && cancel && !cancelled {
-                    if let Some((token, _)) = progress.iter().find(|(_, phase)| phase == "begin") {
+                    if let Some((token, _)) = begun.iter().find(|(_, command)| command == "commit")
+                    {
                         let deadline = Instant::now() + Duration::from_secs(10);
                         while !observed.exists() {
                             assert!(Instant::now() < deadline, "configured signer did not start");
@@ -1855,6 +1886,15 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                 }
                 let message = server.recv();
                 if let Some(event) = progress_event(&message) {
+                    if event.1 == "begin" {
+                        begun.push((
+                            event.0.clone(),
+                            message["params"]["value"]["message"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        ));
+                    }
                     progress.push(event);
                 }
                 if message["method"] == "view/effects" {
@@ -1867,21 +1907,49 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                         failure = Some(effect.clone());
                     }
                 }
-                if progress.iter().any(|(_, phase)| phase == "end")
-                    && (!signed || failure.is_some())
-                {
+                let all_ended = begun.iter().all(|(token, _)| {
+                    progress
+                        .iter()
+                        .any(|(ended, phase)| ended == token && phase == "end")
+                });
+                if begun.len() == 2 && all_ended && (!signed || failure.is_some()) {
                     break;
                 }
             }
             assert_eq!(
-                progress
-                    .iter()
-                    .map(|(_, phase)| phase.as_str())
-                    .filter(|phase| *phase != "report")
-                    .collect::<Vec<_>>(),
-                ["create", "begin", "end"]
+                begun.len(),
+                2,
+                "the commit request and worker must both begin: {progress:?}"
             );
-            assert!(progress.windows(2).all(|pair| pair[0].0 == pair[1].0));
+            let request = begun
+                .iter()
+                .find(|(_, command)| command == "view/invoke")
+                .expect("the commit request progress");
+            let worker = begun
+                .iter()
+                .find(|(_, command)| command == "commit")
+                .expect("the commit worker progress");
+            assert_ne!(
+                request.0, worker.0,
+                "request and worker must not share a token: {progress:?}"
+            );
+            for (token, command) in [request, worker] {
+                let phases: Vec<&str> = progress
+                    .iter()
+                    .filter(|(event_token, _)| event_token == token)
+                    .map(|(_, phase)| phase.as_str())
+                    .collect();
+                assert_eq!(phases.first(), Some(&"create"), "{command}: {progress:?}");
+                assert_eq!(phases.get(1), Some(&"begin"), "{command}: {progress:?}");
+                assert_eq!(phases.last(), Some(&"end"), "{command}: {progress:?}");
+                assert!(phases.len() >= 3, "{command}: {progress:?}");
+                assert!(
+                    phases[2..phases.len() - 1]
+                        .iter()
+                        .all(|phase| *phase == "report"),
+                    "{command}: {progress:?}"
+                );
+            }
             if signed {
                 assert_eq!(cancelled, cancel);
                 let failure = failure.expect("readable signing failure");
@@ -1992,16 +2060,25 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     }));
 
     let mut progress: Vec<(String, String)> = Vec::new();
+    let mut begun: Vec<(String, String)> = Vec::new();
     let mut response = None;
     let mut failure = None;
-    let saw_end = |progress: &[(String, String)]| progress.iter().any(|(_, phase)| phase == "end");
-    while response.is_none() || failure.is_none() || !saw_end(&progress) {
+    loop {
         let message = server.recv();
         if message["id"] == json!(3) {
             response = Some(message);
             continue;
         }
         if let Some(event) = progress_event(&message) {
+            if event.1 == "begin" {
+                begun.push((
+                    event.0.clone(),
+                    message["params"]["value"]["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ));
+            }
             progress.push(event);
         }
         if message["method"] == json!("window/showMessage")
@@ -2011,6 +2088,14 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
             })
         {
             failure = Some(message);
+        }
+        let all_ended = begun.iter().all(|(token, _)| {
+            progress
+                .iter()
+                .any(|(ended, phase)| ended == token && phase == "end")
+        });
+        if response.is_some() && failure.is_some() && begun.len() == 2 && all_ended {
+            break;
         }
     }
 
@@ -2024,16 +2109,40 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
         "the commit must announce itself before the worker starts: {response}"
     );
 
-    let phases: Vec<String> = progress.iter().map(|(_, phase)| phase.clone()).collect();
     assert_eq!(
-        phases,
-        vec!["create".to_string(), "begin".to_string(), "end".to_string()],
-        "a failed commit still ends its progress: {progress:?}"
+        begun.len(),
+        2,
+        "the commit request and worker must both begin: {progress:?}"
     );
-    assert!(
-        progress.windows(2).all(|pair| pair[0].0 == pair[1].0),
-        "create, begin and end must share one token: {progress:?}"
+    let request = begun
+        .iter()
+        .find(|(_, command)| command == "view/invoke")
+        .expect("the commit request progress");
+    let worker = begun
+        .iter()
+        .find(|(_, command)| command == "commit")
+        .expect("the commit worker progress");
+    assert_ne!(
+        request.0, worker.0,
+        "request and worker must not share a token: {progress:?}"
     );
+    for (token, command) in [request, worker] {
+        let phases: Vec<&str> = progress
+            .iter()
+            .filter(|(event_token, _)| event_token == token)
+            .map(|(_, phase)| phase.as_str())
+            .collect();
+        assert_eq!(phases.first(), Some(&"create"), "{command}: {progress:?}");
+        assert_eq!(phases.get(1), Some(&"begin"), "{command}: {progress:?}");
+        assert_eq!(phases.last(), Some(&"end"), "{command}: {progress:?}");
+        assert!(phases.len() >= 3, "{command}: {progress:?}");
+        assert!(
+            phases[2..phases.len() - 1]
+                .iter()
+                .all(|phase| *phase == "report"),
+            "{command}: {progress:?}"
+        );
+    }
 
     let failure = failure.expect("the failed commit effect");
     let error = failure["params"]["message"].as_str().unwrap();

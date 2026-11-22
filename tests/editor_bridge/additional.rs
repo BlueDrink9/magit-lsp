@@ -553,12 +553,18 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
             server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
             let enabled = capabilities["window"]["workDoneProgress"] == true;
+            // A mutation request announces its own progress run, and the
+            // commit worker announces a second one: await both before the
+            // edit so the unanswered-create count is deterministic.
+            let expected_creates = 2 * usize::from(enabled);
+            let mut creates = 0;
             let mut create = None;
             let mut edit = None;
-            while edit.is_none() || (enabled && create.is_none()) {
+            while edit.is_none() || creates < expected_creates {
                 let message = server.recv_raw();
                 if message["method"] == "window/workDoneProgress/create" {
                     create = Some(message.clone());
+                    creates += 1;
                 }
                 if let Some(found) = edit_document(&message) {
                     edit = Some(found);
@@ -581,7 +587,7 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
                     .iter()
                     .filter(|m| m["method"] == "window/workDoneProgress/create")
                     .count(),
-                usize::from(enabled)
+                expected_creates
             );
             if disconnect {
                 server.close_stdin();

@@ -596,8 +596,11 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
         .as_str()
         .expect("view URI")
         .to_string();
-    let v1_symbols = status_view::build(&repo.status().expect("initial status")).document_symbols();
-    let initial_render = server
+    // Opening is asynchronous: the first render is a loading placeholder with
+    // no structure, and the acquired status arrives as a later render. Take
+    // that ready render as the acknowledged baseline so the expected symbols
+    // match the structure the server actually published.
+    let loading_render = server
         .notifications
         .iter()
         .find(|message| message["method"] == json!("view/render"))
@@ -608,9 +611,21 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
                 break message;
             }
         });
+    let loading_version = loading_render["params"]["version"]
+        .as_u64()
+        .expect("loading version");
+    let initial_render = server.wait_for_view_render_after(&view_id, loading_version);
+    assert!(
+        initial_render["params"]["text"]
+            .to_string()
+            .contains("Head:"),
+        "status completion was not published: {initial_render}"
+    );
     let v1 = initial_render["params"]["version"]
         .as_u64()
         .expect("v1 version");
+    assert!(loading_version < v1, "loading render must precede status");
+    let v1_symbols = status_view::build(&repo.status().expect("initial status")).document_symbols();
     server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view_id,"version":v1}}));
 
     write(&tmp.path().join("new.txt"), "new file\n");
@@ -618,21 +633,12 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
         "params":{"viewId":view_id,"command":"common.refresh"}}));
     let refreshed = server.response_with_id(3);
     assert_eq!(refreshed["result"]["effects"], json!([]), "{refreshed}");
-    let v2_render = server
-        .notifications
-        .iter()
-        .find(|message| {
-            message["method"] == json!("view/render") && message["params"]["version"] != json!(v1)
-        })
-        .cloned()
-        .unwrap_or_else(|| loop {
-            let message = server.recv();
-            if message["method"] == json!("view/render") {
-                break message;
-            }
-        });
+    let v2_render = server.wait_for_view_render_after(&view_id, v1);
     let v2 = v2_render["params"]["version"].as_u64().expect("v2 version");
-    assert_ne!(v1, v2);
+    assert!(
+        v1 < v2,
+        "refresh render must follow the acknowledged baseline"
+    );
     let v2_tree = status_view::build(&repo.status().expect("updated status"));
     let new_file_line = line_of(&v2_tree, "new.txt", NodeKind::File, None, None);
     let v2_symbols = v2_tree.document_symbols();

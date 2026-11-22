@@ -418,6 +418,19 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 
 `wait state <path> == <value>` polls structured native state with the same bounded timeout as `wait`; it does not infer readiness from document text. For example, `wait state draft == true` waits until Plain Neovim has actually opened `COMMIT_EDITMSG`, not merely displayed its pending URI.
 
+`startup: held` opts into early startup for loading-phase tests. The driver returns once the RPC socket answers instead of waiting for the first rendered view, and a Git wrapper holds the first `status` subprocess until released; the default `startup: ready` keeps the existing ready wait. In the body, `wait status entered` polls the explicit entered marker and `release status` releases that first subprocess once; later Git calls pass straight through. The statements are rejected at parse time unless `startup: held`, an unknown mode is rejected at parse time, and normal teardown releases a still-held gate even when an expectation fails. Example:
+
+```
+fixture: modified-two-files
+startup: held
+---
+wait status entered
+expect screen contains "Loading"
+release status
+wait
+```
+
+
 `client: plain` uses `tests/ui/plain_init.lua` and stock `vim.lsp.start`, without loading `lua/magit-lsp/`. The test-only `PlainUI` observations expose native buffer/client state, not fabricated Rich view metadata; `PlainUI.action` selects a server-returned command through Neovim's built-in code-action API. Plain snapshots also write `.json` state, and each combination retains `lsp.log` plus `cleanup.json` with owned editor/server PIDs and verified teardown. Run `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn` and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` for the focused 80x24 scenarios. These do not replace the retained `make plain-neovim` workflow or its distinct 120x100 coverage.
 
 For opt-in commit-input diagnosis, run the focused scenario with `MAGIT_LSP_UI_PROBE=1`; the harness records Enter token tmux arguments/timestamps in run-specific files under `build/ui/probes/`, and Plain Neovim records Enter and commit-buffer text, typed key/key translation, detailed mode/blocking state, cursor, command-line type, messages, changedtick/document-version, mappings, options and relevant autocmd observations there. It also records scoped `.magit`/`COMMIT_EDITMSG` workspace/applyEdit versions and results, warning print/notify before/after call state and traceback, and `ModeChanged` transitions using a shared monotonically increasing event sequence. Probing is restricted to those fixture buffers; files are diagnostic, not pass/fail oracles.

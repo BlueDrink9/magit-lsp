@@ -13,7 +13,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use toml_edit::{Array, Document, InlineTable, Item, Table, Value as TomlValue};
 
 /// Environment variable naming the config file when no flag is given.
@@ -486,7 +488,45 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
 }
 
 /// Parse a shipped profile's bindings.
+///
+/// Shipped profiles are immutable for the process lifetime, so each profile is
+/// parsed and validated once; later calls clone the cached result, keeping the
+/// returned value independently owned and mutable.
 pub fn profile_keys(profile: Profile) -> Result<KeysConfig, ConfigError> {
+    profile_cache(profile)
+        .get_or_init(|| parse_profile_keys(profile))
+        .clone()
+}
+
+/// The process-wide parse cache, one slot per shipped profile.
+fn profile_cache(profile: Profile) -> &'static OnceLock<Result<KeysConfig, ConfigError>> {
+    static CACHES: [OnceLock<Result<KeysConfig, ConfigError>>; 2] =
+        [OnceLock::new(), OnceLock::new()];
+    &CACHES[profile_slot(profile)]
+}
+
+/// The cache slot index for `profile`.
+fn profile_slot(profile: Profile) -> usize {
+    match profile {
+        Profile::Standard => 0,
+        Profile::Vim => 1,
+    }
+}
+
+/// Counts successful and failed embedded-profile parses in unit-test builds.
+#[cfg(test)]
+fn profile_parse_count(profile: Profile) -> usize {
+    PROFILE_PARSES[profile_slot(profile)].load(Ordering::Relaxed)
+}
+
+/// Per-profile parse counter backing the cache-reuse regression test.
+#[cfg(test)]
+static PROFILE_PARSES: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
+
+/// Read and validate one shipped profile's source.
+fn parse_profile_keys(profile: Profile) -> Result<KeysConfig, ConfigError> {
+    #[cfg(test)]
+    PROFILE_PARSES[profile_slot(profile)].fetch_add(1, Ordering::Relaxed);
     let source = profile.source();
     let file = profile.file_label();
     let doc = Document::<String>::parse(source.to_string())
@@ -1647,4 +1687,51 @@ fn hash_files(files: &[PathBuf]) -> u64 {
         }
     }
     hasher.finish()
+}
+
+#[cfg(test)]
+mod profile_cache_tests {
+    use super::*;
+
+    #[test]
+    fn repeated_lookups_reuse_one_cached_parse() {
+        // The first lookup parses the embedded TOML; unit tests share this
+        // process cache, so a successful profile parses exactly once.
+        let primed = profile_keys(Profile::Standard).expect("embedded profile parses");
+        assert_eq!(
+            profile_parse_count(Profile::Standard),
+            1,
+            "the first lookup parses the embedded profile once"
+        );
+
+        let mut mutated = profile_keys(Profile::Standard).expect("embedded profile parses");
+        mutated.scopes.clear();
+
+        assert_eq!(
+            profile_parse_count(Profile::Standard),
+            1,
+            "later lookups reuse the cached parse instead of re-reading TOML"
+        );
+        assert_eq!(
+            profile_keys(Profile::Standard).expect("embedded profile parses"),
+            primed,
+            "a caller mutating its own result cannot poison the cache"
+        );
+    }
+
+    #[test]
+    fn switching_profiles_caches_each_parse_separately() {
+        let standard = profile_keys(Profile::Standard).expect("embedded profile parses");
+        let vim = profile_keys(Profile::Vim).expect("embedded profile parses");
+        assert_ne!(standard, vim, "profiles keep independent bindings");
+        assert_eq!(profile_parse_count(Profile::Standard), 1);
+        assert_eq!(profile_parse_count(Profile::Vim), 1);
+
+        let _ = profile_keys(Profile::Vim).expect("embedded profile parses");
+        assert_eq!(
+            profile_parse_count(Profile::Vim),
+            1,
+            "repeated lookups for one profile do not reparse"
+        );
+    }
 }

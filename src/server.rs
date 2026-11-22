@@ -1689,42 +1689,33 @@ fn is_request_method(method: &str) -> bool {
 
 /// The repository a mutation must lock; only the staging commands write.
 fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<String> {
-    // Prompting work retains its ordering turn, but new commands must reach
-    // the session's readable refusal rather than queue behind human input.
-    if matches!(method, ViewKeyRequest::METHOD | ViewInvokeRequest::METHOD) {
-        if let Some(repo) = params
-            .get("viewId")
-            .and_then(Value::as_str)
-            .and_then(|id| shared.repo_for_view(id))
-        {
-            let published = shared
-                .published
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(&repo)
-                .cloned();
-            if published.is_some_and(|views| views.has_pending_prompt()) {
-                return None;
-            }
-        }
-    }
-    // Keys run any command, so serialise every key press with its repo's views.
-    if method == ViewKeyRequest::METHOD {
-        let view_id = params.get("viewId").and_then(Value::as_str)?;
-        return shared.repo_for_view(view_id);
-    }
-    if method != ViewInvokeRequest::METHOD {
-        return None;
-    }
-    let command = params.get("command").and_then(Value::as_str)?;
+    // View lifecycle requests compete with status completion for publication,
+    // so close, mode changes and every invoke (including refresh) join the
+    // repository's ordering. Read-only requests stay outside it.
     if !matches!(
-        command,
-        "status.stage" | "status.unstage" | "status.stage-all" | "status.unstage-all"
+        method,
+        ViewKeyRequest::METHOD
+            | ViewInvokeRequest::METHOD
+            | ViewCloseRequest::METHOD
+            | ViewSetModeRequest::METHOD
     ) {
         return None;
     }
     let view_id = params.get("viewId").and_then(Value::as_str)?;
-    shared.repo_for_view(view_id)
+    let repo = shared.repo_for_view(view_id)?;
+    // Prompting work retains its ordering turn, but new commands must reach
+    // the session's readable refusal rather than queue behind human input.
+    // Closing or changing mode must not wait for an answer either.
+    let published = shared
+        .published
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&repo)
+        .cloned();
+    if published.is_some_and(|views| views.has_pending_prompt()) {
+        return None;
+    }
+    Some(repo)
 }
 
 /// The optional key trace id a client attaches to a request (§A.4).

@@ -293,6 +293,22 @@ fn positional_requests_return_null_in_text_mode() {
         .to_string();
     let uri = opened["result"]["uri"].as_str().expect("uri").to_string();
 
+    // Opening is asynchronous: the response precedes the loading render, and
+    // the acquired status arrives later as a separate render.
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render", "{loading}");
+    assert_eq!(loading["params"]["viewId"], json!(view_id), "{loading}");
+    let loading_version = loading["params"]["version"]
+        .as_u64()
+        .expect("loading version");
+    let ready = server.wait_for_view_render_after(&view_id, loading_version);
+    assert!(
+        ready["params"]["text"]
+            .to_string()
+            .contains("Staged changes"),
+        "status completion was not published: {ready}"
+    );
+
     // Ask the server which version the client really holds; never assume 1.
     server.send(json!({
         "jsonrpc": "2.0",

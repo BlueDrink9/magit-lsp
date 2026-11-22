@@ -238,6 +238,14 @@ function M.trace_id()
   return trace_press
 end
 
+--- Start a trace correlation for a status-view open request.
+---@return integer
+function M.open_trace_id()
+  trace_press = trace_press + 1
+  M.trace("view_open_requested", {})
+  return trace_press
+end
+
 --- Record a server progress token starting; `idle` waits for it to end.
 ---@param token string|integer
 ---@param value table|nil
@@ -489,6 +497,7 @@ hooks.view_open = M.view_open
 hooks.view_close = M.view_close
 hooks.key_pressed = M.key_pressed
 hooks.trace_id = M.trace_id
+hooks.open_trace_id = M.open_trace_id
 hooks.key_sent = M.key_sent
 
 return M

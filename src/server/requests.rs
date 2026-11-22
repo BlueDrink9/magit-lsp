@@ -18,7 +18,7 @@ pub(super) async fn handle_request(
     }
     let turn = turn;
 
-    let (response, notifications) = if !is_request_method(&method) {
+    let (response, notifications, deferred) = if !is_request_method(&method) {
         (
             Response::new_err(
                 id,
@@ -26,11 +26,20 @@ pub(super) async fn handle_request(
                 format!("unknown method: {method}"),
             ),
             Vec::new(),
+            Vec::new(),
         )
     } else if let Some(active) = turn.as_ref() {
+        let lock_wait = std::time::Instant::now();
         active.wait().await;
         let lock = repository_lock(&shared.repo_locks, &active.repo_path).await;
         let _guard = lock.lock().await;
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "phase_repository_lock_wait",
+                serde_json::json!({ "duration_ms": lock_wait.elapsed().as_secs_f64() * 1000.0 }),
+            );
+        }
         if trace_id > 0 {
             runner::trace(
                 trace_id,
@@ -87,6 +96,12 @@ pub(super) async fn handle_request(
         }
         let _ = sender.send(notification);
     }
+    for work in deferred {
+        let shared = shared.clone();
+        tokio::spawn(async move {
+            work.run(shared).await;
+        });
+    }
     // Release the mutation slot only after this request's messages are queued,
     // so responses for one repository keep their request order.
     drop(turn);
@@ -96,6 +111,29 @@ pub(super) async fn handle_request(
 pub(super) struct Dispatched {
     pub(super) result: Value,
     pub(super) notifications: Vec<Message>,
+    pub(super) deferred: Vec<DeferredStatus>,
+}
+
+pub(super) struct DeferredStatus {
+    pub(super) repo_path: String,
+    pub(super) view_id: String,
+    pub(super) generation: u64,
+    /// Correlation id of the originating request, carried onto the deferred
+    /// blocking acquisition so its Git/status phases stay traceable.
+    pub(super) trace_id: u64,
+}
+
+impl DeferredStatus {
+    async fn run(self, shared: Shared) {
+        super::view_execution::acquire_status(
+            shared,
+            self.repo_path,
+            self.view_id,
+            self.generation,
+            self.trace_id,
+        )
+        .await;
+    }
 }
 
 impl Dispatched {
@@ -103,6 +141,7 @@ impl Dispatched {
         Self {
             result,
             notifications: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
@@ -110,7 +149,13 @@ impl Dispatched {
         Self {
             result,
             notifications,
+            deferred: Vec::new(),
         }
+    }
+
+    pub(super) fn with_deferred(mut self, deferred: DeferredStatus) -> Self {
+        self.deferred.push(deferred);
+        self
     }
 }
 
@@ -123,7 +168,7 @@ async fn dispatch_response(
     shared: &Shared,
     cancel: Option<CancelHandle>,
     trace_id: u64,
-) -> (Response, Vec<Message>) {
+) -> (Response, Vec<Message>, Vec<DeferredStatus>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
@@ -138,10 +183,11 @@ async fn dispatch_response(
         Ok(Ok(dispatched)) => (
             Response::new_ok(id, dispatched.result),
             dispatched.notifications,
+            dispatched.deferred,
         ),
         Ok(Err(error)) => {
             tracing::warn!(method = %method, error = %error, "request failed");
-            (error_response(id, error), Vec::new())
+            (error_response(id, error), Vec::new(), Vec::new())
         }
         Err(error) => (
             Response::new_err(
@@ -149,6 +195,7 @@ async fn dispatch_response(
                 ErrorCode::InternalError as i32,
                 format!("request task failed: {error}"),
             ),
+            Vec::new(),
             Vec::new(),
         ),
     }
@@ -158,6 +205,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     let params = request.params.clone();
     match request.method.as_str() {
         "initialize" => {
+            let initialize_started = std::time::Instant::now();
             let mut notifications = Vec::new();
             let init = params
                 .get("initializationOptions")
@@ -296,6 +344,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             server_caps["experimental"]["magit"]["protocolVersion"] = serde_json::json!(1);
             server_caps["experimental"]["magit"]["effective"] =
                 serde_json::json!({"capabilities":effective_caps,"quirks":enabled});
+            runner::trace_current(
+                "phase_initialize_server",
+                serde_json::json!({ "duration_ms": initialize_started.elapsed().as_secs_f64() * 1000.0 }),
+            );
             Ok(Dispatched::with(
                 serde_json::json!({
                     "capabilities": server_caps,
