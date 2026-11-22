@@ -167,10 +167,46 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
         },
     }));
     let opened = server.response_with_id(2);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
     let uri = opened["result"]["uri"]
         .as_str()
         .expect("view uri")
         .to_string();
+
+    // This client negotiates no presentation and may receive no pushed renders,
+    // so poll the server-owned render until the status acquisition installs its
+    // contents (the same readiness pattern as tests/plain_harness.rs).
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut resync_id = 4;
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "status view {view_id} did not publish acquired contents"
+        );
+        server.send(json!({
+            "jsonrpc": "2.0",
+            "id": resync_id,
+            "method": "view/resync",
+            "params": {"viewId": view_id},
+        }));
+        let resync = server.response_with_id(resync_id);
+        let lines = resync["result"]["text"]
+            .as_array()
+            .unwrap_or_else(|| panic!("full status resync: {resync}"));
+        resync["result"]["version"].as_u64().expect("view version");
+        if !lines.is_empty()
+            && !lines.iter().any(|line| {
+                line.as_str()
+                    .is_some_and(|line| line.contains("Loading repository status"))
+            })
+        {
+            break;
+        }
+        resync_id += 1;
+    }
 
     server.send(json!({
         "jsonrpc": "2.0",
