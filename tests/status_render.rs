@@ -244,19 +244,19 @@ fn tokens_cover_sections_files_hunks_and_diff_lines() {
         section_line,
         0,
         "Unstaged changes".len(),
-        "magit.section"
+        "heading"
     ));
     assert!(has_token(
         &tree,
         section_line,
         "Unstaged changes".len() + 1,
         "(1)".len(),
-        "magit.count"
+        "muted"
     ));
 
     let file_line = line_of(&tree, "  M f.txt");
-    assert!(has_token(&tree, file_line, 2, 1, "magit.file.modified"));
-    assert!(has_token(&tree, file_line, 4, "f.txt".len(), "magit.file"));
+    assert!(has_token(&tree, file_line, 2, 1, "changed"));
+    assert!(has_token(&tree, file_line, 4, "f.txt".len(), "path"));
 
     let hunk_line = tree
         .lines
@@ -268,31 +268,25 @@ fn tokens_cover_sections_files_hunks_and_diff_lines() {
         hunk_line,
         0,
         tree.lines[hunk_line].len(),
-        "magit.hunk.header"
+        "muted"
     ));
 
     let added = line_of(&tree, "    +line3 CHANGED");
     let removed = line_of(&tree, "    -line3");
-    assert!(has_token(
-        &tree,
-        added,
-        0,
-        tree.lines[added].len(),
-        "magit.diff.added"
-    ));
+    assert!(has_token(&tree, added, 0, tree.lines[added].len(), "added"));
     assert!(has_token(
         &tree,
         removed,
         0,
         tree.lines[removed].len(),
-        "magit.diff.removed"
+        "removed"
     ));
 
     let staged_file = line_of(&tree, "  A g.txt");
     let staged_token =
-        token_with_type(&tree, staged_file, "magit.file.added").expect("staged file status token");
+        token_with_type(&tree, staged_file, "added").expect("staged file status token");
     assert_eq!(staged_token.modifiers, vec!["staged".to_string()]);
-    let staged_path = token_with_type(&tree, staged_file, "magit.file").expect("staged path token");
+    let staged_path = token_with_type(&tree, staged_file, "path").expect("staged path token");
     assert_eq!(staged_path.modifiers, vec!["staged".to_string()]);
 }
 
