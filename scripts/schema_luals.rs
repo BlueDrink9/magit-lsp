@@ -35,8 +35,10 @@ pub fn protocol_annotations() -> Result<Annotations, String> {
             continue;
         }
         let name = root_name(&artifact.schema)?;
+        if !body.is_empty() {
+            body.push('\n');
+        }
         body.push_str(&render_root(&artifact.schema, &name)?);
-        body.push('\n');
     }
     Ok(Annotations {
         path: ANNOTATION_PATH,

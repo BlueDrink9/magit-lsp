@@ -293,19 +293,22 @@ pub const LUA_SHARED_PATH: &str = "lua/magit-lsp/shared.lua";
 /// Repository-relative path of the generated VSCode shared-list module.
 pub const VSCODE_SHARED_PATH: &str = "clients/vscode/types/shared-lists.js";
 
-/// Render one wire name as a single-quoted Lua string literal.
-fn lua_string(name: &str) -> String {
-    let mut out = String::from("'");
+/// Render one wire name as a double-quoted Lua string literal.
+///
+/// Double quotes and backslashes are escaped so the output matches StyLua's
+/// `AutoPreferDouble` hook-formatted bytes.
+pub fn lua_string(name: &str) -> String {
+    let mut out = String::from("\"");
     for character in name.chars() {
         match character {
-            '\'' | '\\' => {
+            '"' | '\\' => {
                 out.push('\\');
                 out.push(character);
             }
             _ => out.push(character),
         }
     }
-    out.push('\'');
+    out.push('"');
     out
 }
 

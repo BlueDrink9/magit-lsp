@@ -972,14 +972,23 @@ fn shared_client_lists_are_generated_from_the_typed_constants() {
     );
     let lua = &files[0].text;
     assert!(
-        lua.contains("local optional_effects = { 'visitFile', 'clipboard', 'editDocument' }"),
+        lua.contains("local optional_effects = { \"visitFile\", \"clipboard\", \"editDocument\" }"),
         "the Lua module carries the typed optional effects"
     );
     assert!(
         lua.contains(
-            "local optional_prompt_kinds = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' }"
+            "local optional_prompt_kinds = { \"confirm\", \"text\", \"choice\", \"multiChoice\", \"secret\" }"
         ),
         "the Lua module carries the typed optional prompt kinds"
+    );
+    assert!(
+        lua.ends_with("}\n") && !lua.ends_with("\n\n"),
+        "the Lua module ends with exactly one newline"
+    );
+    assert_eq!(
+        generate_schema::lua_string("a\"b\\c'd"),
+        "\"a\\\"b\\\\c'd\"",
+        "Lua strings escape double quotes and backslashes, leaving single quotes alone"
     );
     let javascript = &files[1].text;
     assert!(
@@ -1388,6 +1397,14 @@ fn luals_annotations_generation_is_deterministic() {
     assert!(
         first.text.starts_with("---@meta\n"),
         "annotations are a LuaLS meta file"
+    );
+    assert!(
+        first.text.contains("\n\n"),
+        "annotation roots stay separated by a blank line"
+    );
+    assert!(
+        first.text.ends_with('\n') && !first.text.ends_with("\n\n"),
+        "annotations end with exactly one newline"
     );
     assert!(
         first.text.lines().all(|line| line.len() <= 120),
