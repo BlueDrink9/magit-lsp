@@ -257,6 +257,8 @@ pub struct OpenView {
     mode: ViewMode,
     /// A refresh arrived while in text mode; it is applied on exit.
     dirty: bool,
+    /// A generation-validated completion is stored for publication on text-mode exit.
+    pending_completion: bool,
     /// Global detail level, including levels with no visible children.
     visibility_level: u8,
     /// Where the session publishes this view; consulted for resync markers.
@@ -360,7 +362,13 @@ impl OpenView {
     fn leave_text_mode(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
         self.mode = ViewMode::Interactive;
         self.descriptor.mode = ViewMode::Interactive;
-        if std::mem::take(&mut self.dirty) {
+        // A completion acquired during text mode already holds the current
+        // backing state: publish it rather than reading Git again. A refresh
+        // queued after that completion is superseded by the same stored result.
+        let completed = std::mem::take(&mut self.pending_completion);
+        if completed {
+            self.dirty = false;
+        } else if std::mem::take(&mut self.dirty) {
             self.view.on_refresh()?;
         }
         self.render_with_delivery(cursor, None, RenderDelivery::Full)
@@ -572,6 +580,7 @@ fn initialize_open_view(
         key_cursor: None,
         mode: descriptor.mode,
         dirty: false,
+        pending_completion: false,
         visibility_level: 4,
         published: PublishedViews::default(),
         repo_path: repo_path_owned,
@@ -809,6 +818,12 @@ impl Session {
         if !status.install_fresh_state(fresh) {
             return Ok(None);
         }
+        // Text mode owns the buffer: keep the installed result unpublished and
+        // unversioned until leaving text mode renders it as a full replace.
+        if view.mode() == ViewMode::Text {
+            view.pending_completion = true;
+            return Ok(None);
+        }
         let tree = view.render_tree();
         let render =
             view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
@@ -834,6 +849,12 @@ impl Session {
             return Ok(None);
         };
         if !status.fail_loading(message, generation) {
+            return Ok(None);
+        }
+        // Text mode owns the buffer: keep the installed error unpublished and
+        // unversioned until leaving text mode renders it as a full replace.
+        if view.mode() == ViewMode::Text {
+            view.pending_completion = true;
             return Ok(None);
         }
         let tree = view.render_tree();

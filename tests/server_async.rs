@@ -36,6 +36,103 @@ fn status_open_held_git_acknowledged_completion_uses_exact_base() {
 
 #[cfg(unix)]
 #[test]
+fn status_open_text_mode_defers_held_completion_until_exit() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(
+        &tmp.path().join("status-open-text.txt"),
+        "fresh while editing\n",
+    );
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let toggled = server.response_with_id(3);
+    assert!(toggled["error"].is_null(), "{toggled}");
+    let mode_render = server.recv();
+    assert_eq!(mode_render["method"], "view/render", "{mode_render}");
+    assert_eq!(mode_render["params"]["mode"], "text", "{mode_render}");
+    assert_eq!(mode_render["params"]["version"], json!(version));
+    assert!(!gate.is_released(), "text mode entered while Git is held");
+
+    gate.release();
+    // The acquired success must stay unpublished and unversioned in text mode.
+    let quiet = server.drain_notifications();
+    assert!(
+        !quiet.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "completion rendered into text mode: {quiet:?}"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let held = server.response_with_id(4);
+    assert_eq!(held["result"]["version"], json!(version));
+    assert_eq!(
+        held["result"]["text"],
+        json!(["Loading repository status…"])
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let exited = server.response_with_id(5);
+    assert!(exited["error"].is_null(), "{exited}");
+    let ready = server.recv();
+    assert_eq!(ready["method"], "view/render", "{ready}");
+    assert_eq!(ready["params"]["mode"], "interactive", "{ready}");
+    assert_eq!(
+        ready["params"]["version"],
+        json!(version + 1),
+        "the stored completion advances the version exactly once, on exit"
+    );
+    assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
+    assert!(ready["params"].get("edits").is_none(), "{ready}");
+    let text: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        text.iter()
+            .any(|line| line.contains("status-open-text.txt")),
+        "{text:?}"
+    );
+    assert!(!text
+        .iter()
+        .any(|line| line.contains("Loading repository status")));
+    assert_eq!(
+        gate.invocation_count(),
+        1,
+        "exiting text mode must expose the acquired result without another Git read"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(6);
+    assert_eq!(resync["result"]["version"], ready["params"]["version"]);
+    assert_eq!(resync["result"]["text"], ready["params"]["text"]);
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
 fn status_open_close_drops_held_success_without_resurrection() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
@@ -250,8 +347,34 @@ fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
     let saved_git = tmp.path().join(".git-held");
     std::fs::rename(&git_dir, &saved_git).unwrap();
     gate.release();
-    let failed =
-        server.wait_for_view_render_after(view, loading["params"]["version"].as_u64().unwrap());
+    // The failure is generation-validated and stored, but text mode owns the
+    // buffer: it must not render or advance the displayed version yet.
+    let quiet = server.drain_notifications();
+    assert!(
+        !quiet.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "held error rendered into text mode: {quiet:?}"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let held = server.response_with_id(5);
+    assert_eq!(held["result"]["version"], loading["params"]["version"]);
+    assert_eq!(held["result"]["text"], loading["params"]["text"]);
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let exited = server.response_with_id(6);
+    assert!(exited["error"].is_null(), "{exited}");
+    let failed = server.recv();
+    assert_eq!(failed["method"], "view/render", "{failed}");
+    assert_eq!(failed["params"]["mode"], "interactive", "{failed}");
+    assert_eq!(
+        failed["params"]["version"],
+        loading["params"]["version"].as_u64().unwrap() + 1
+    );
+    assert!(failed["params"].get("baseVersion").is_none(), "{failed}");
+    assert!(failed["params"].get("edits").is_none(), "{failed}");
     std::fs::rename(&saved_git, &git_dir).unwrap();
     let lines: Vec<String> = serde_json::from_value(failed["params"]["text"].clone()).unwrap();
     assert!(
