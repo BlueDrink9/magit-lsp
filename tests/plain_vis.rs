@@ -20,7 +20,8 @@ fn setup_with(
     String,
     String,
 ) {
-    setup_with_encoding(profile, initial, "utf-16")
+    let (repo, server, editor, uri, text, _) = setup_with_encoding(profile, initial, "utf-16");
+    (repo, server, editor, uri, text)
 }
 
 fn setup_with_encoding(
@@ -33,6 +34,7 @@ fn setup_with_encoding(
     FakeEditor,
     String,
     String,
+    Vec<String>,
 ) {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit(
@@ -52,7 +54,15 @@ fn setup_with_encoding(
     init["params"]["workspaceFolders"] =
         json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init);
-    assert!(server.response_with_id(1)["error"].is_null());
+    let initialize = server.response_with_id(1);
+    assert!(initialize["error"].is_null());
+    let legend = initialize["result"]["capabilities"]["semanticTokensProvider"]["legend"]
+        ["tokenTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|token| token.as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
     let mut editor = FakeEditor::new(profile);
     server.send(editor.open(&uri, initial));
@@ -62,7 +72,7 @@ fn setup_with_encoding(
         server.send(frame);
     }
     let text = editor.text(&uri).to_owned();
-    (repo, server, editor, uri, text)
+    (repo, server, editor, uri, text, legend)
 }
 
 fn setup_large(
@@ -136,8 +146,9 @@ fn next_edit(server: &mut stdio::TestServer) -> Value {
 #[test]
 fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invalid_columns() {
     for (encoding, expected) in [("utf-8", 8), ("utf-16", 6), ("utf-32", 5)] {
-        let (_repo, mut server, mut editor, uri, text) =
+        let (_repo, mut server, mut editor, uri, text, legend) =
             setup_with_encoding(Profile::Standard, "old\n", encoding);
+        let path_token_index = legend.iter().position(|role| role == "path").unwrap() as u64;
         let links = request(
             &mut server,
             "textDocument/documentLink",
@@ -205,7 +216,7 @@ fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invali
             } else {
                 group[1].as_u64().unwrap()
             };
-            if token_line == file_line && group[3].as_u64() == Some(2) {
+            if token_line == file_line && group[3].as_u64() == Some(path_token_index) {
                 assert!(
                     token_start
                         <= text
