@@ -348,6 +348,9 @@ test("generated and mirrored bindings require editor focus and exclude widgets",
 
 test("canonical status Enter, fold and refresh bindings keep the focus gate", () => {
   const generated = require("../package.json").contributes.keybindings;
+  // A shared binding is emitted once without a scope term; the rest stay scoped.
+  const forStatus = (entry) =>
+    !entry.when.includes("magit.scope ==") || entry.when.includes("magit.scope == 'status'");
   const required = [
     ["enter", "common.visit"],
     ["tab", "common.toggle-section"],
@@ -357,10 +360,7 @@ test("canonical status Enter, fold and refresh bindings keep the focus gate", ()
   for (const [key, command] of required) {
     const matches = generated.filter(
       (entry) =>
-        entry.key === key &&
-        entry.args &&
-        entry.args.command === command &&
-        entry.when.includes("magit.scope == 'status'"),
+        entry.key === key && entry.args && entry.args.command === command && forStatus(entry),
     );
     assert.equal(matches.length, 1, `${key} -> ${command} for status`);
     const terms = matches[0].when.split(" && ");
@@ -376,6 +376,48 @@ test("canonical status Enter, fold and refresh bindings keep the focus gate", ()
       assert(terms.includes(term), `${key}: missing ${term}`);
     }
   }
+});
+
+test("generated bindings compact common keys and avoid denied workbench shortcuts", () => {
+  const entries = require("../package.json").contributes.keybindings;
+  for (const key of ["ctrl+p", "ctrl+shift+p", "ctrl+w", "ctrl+tab", "f1", "alt+tab"]) {
+    assert.equal(
+      entries.filter((entry) => entry.key === key).length,
+      0,
+      `${key} must not shadow a workbench command`,
+    );
+  }
+  const common = entries.filter((entry) => !entry.when.includes("magit.scope =="));
+  assert(common.length > 0, "no binding is shared by every scope");
+  for (const entry of common) {
+    assert.equal(
+      entries.filter(
+        (candidate) =>
+          candidate.key === entry.key && candidate.args?.command === entry.args?.command,
+      ).length,
+      1,
+      `${entry.key} -> ${entry.args?.command} is emitted only once`,
+    );
+    const terms = entry.when.split(" && ");
+    // Every shared entry still excludes widget focus and, except the toggle,
+    // text mode; only the scope term is dropped.
+    for (const term of [
+      "magit.active",
+      "editorTextFocus",
+      "!quickInputVisible",
+      "!suggestWidgetVisible",
+      "!findWidgetVisible",
+      "!renameInputVisible",
+    ]) {
+      assert(terms.includes(term), `${entry.key}: missing ${term}`);
+    }
+  }
+  const toggle = entries.filter((entry) => entry.args?.command === "common.toggle-text-mode");
+  assert.equal(toggle.length, 1, "the text-mode toggle is emitted once");
+  assert(
+    !toggle[0].when.includes("magit.scope ==") && !toggle[0].when.includes("magit.textMode"),
+    "the toggle is active in both text modes and every scope",
+  );
 });
 
 test("semantic-token types map to theme scopes", () => {

@@ -73,13 +73,18 @@ fn vscode_matches_snapshots() {
                 && entry["args"]["command"]
                     .as_str()
                     .is_some_and(|id| magit_lsp::commands::registry().get(id).is_some())));
+        // Shared bindings drop the scope term but keep the focus gate; every
+        // other entry keeps its scope term (`vscode_compacts_shared_bindings`).
+        const FOCUS_GATE: &str = "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible";
         for entry in &entries {
             assert!(entry["args"]["command"].is_string(), "entry: {entry}");
+            let when = entry["when"].as_str().expect("when clause");
+            // The merged toggle is the focus gate alone.
             assert!(
-                entry["when"]
-                    .as_str()
-                    .expect("when clause")
-                    .starts_with("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '"),
+                when == FOCUS_GATE
+                    || when
+                        .strip_prefix(FOCUS_GATE)
+                        .is_some_and(|rest| rest.starts_with(" && ")),
                 "entry: {entry}"
             );
         }
@@ -94,6 +99,53 @@ fn vscode_matches_snapshots() {
         })
         .expect("status.stage-all binding");
     assert_eq!(stage_all.key, "shift+s");
+}
+
+#[test]
+fn vscode_compacts_shared_bindings_once() {
+    let entries = manifest::vscode_entries(&manifest_for(Profile::Standard));
+    let common: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.scope == "common" && !entry.when.contains("magit.scope =="))
+        .collect();
+    assert!(
+        !common.is_empty(),
+        "no binding is shared by every concrete scope"
+    );
+    for entry in &common {
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|candidate| candidate.key == entry.key
+                    && candidate.binding == entry.binding)
+                .count(),
+            1,
+            "{} -> {} is emitted once",
+            entry.key,
+            entry.binding
+        );
+    }
+
+    // The toggle is the one key active in both modes, so it is emitted once
+    // without a scope or text-mode term instead of a per-scope pair.
+    let toggle: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.binding == "common.toggle-text-mode")
+        .collect();
+    assert_eq!(toggle.len(), 1, "toggle entries: {toggle:?}");
+    assert!(!toggle[0].when.contains("magit.scope =="), "{toggle:?}");
+    assert!(!toggle[0].when.contains("magit.textMode"), "{toggle:?}");
+
+    // Everything not shared keeps its exact scope term and text-mode gate.
+    let scoped = entries
+        .iter()
+        .find(|entry| entry.scope == "status" && entry.binding == "status.stage")
+        .expect("status.stage binding");
+    assert!(
+        scoped.when.contains("magit.scope == 'status'"),
+        "{scoped:?}"
+    );
+    assert!(scoped.when.ends_with("&& !magit.textMode"), "{scoped:?}");
 }
 
 #[test]

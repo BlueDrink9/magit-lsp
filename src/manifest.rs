@@ -193,12 +193,42 @@ pub struct VscodeEntry {
     pub when: String,
 }
 
-/// The generated VSCode keybindings, in manifest order.
+/// The generated VSCode keybindings: compacted shared bindings, then the
+/// per-scope remainder in manifest order.
+///
+/// A binding every concrete scope carries with the same command, keys and
+/// modes is emitted once, first, as a `common` entry whose `when` clause omits
+/// the scope term, and the per-scope loops skip it. Its effective condition is
+/// the union of the per-scope terms it replaces, so the compaction changes no
+/// behaviour. Every other entry keeps its exact scope term. Text mode keeps
+/// exactly the toggle bound, so the toggle is emitted once without a mode term
+/// instead of the two per-scope entries it used to need.
 pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
     let mut entries = Vec::new();
     for profile in &manifest.profiles {
+        let shared = shared_bindings(&profile.scopes);
+        for binding in &shared {
+            // The only key active in both modes is the text-mode toggle.
+            let both_modes = binding.command == "common.toggle-text-mode";
+            for key in &binding.keys {
+                let chord = KeyChord::parse(key).expect("manifest keys are canonical");
+                entries.push(VscodeEntry {
+                    profile: profile.profile.clone(),
+                    scope: "common".to_string(),
+                    key: chord.to_vscode(),
+                    binding: binding.command.clone(),
+                    when: when_clause(None, both_modes),
+                });
+            }
+        }
         for scope in &profile.scopes {
             for binding in &scope.bindings {
+                if shared
+                    .iter()
+                    .any(|candidate| same_binding(candidate, binding))
+                {
+                    continue;
+                }
                 for key in &binding.keys {
                     let chord = KeyChord::parse(key).expect("manifest keys are canonical");
                     entries.push(VscodeEntry {
@@ -206,19 +236,8 @@ pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
                         scope: scope.scope.clone(),
                         key: chord.to_vscode(),
                         binding: binding.command.clone(),
-                        when: when_clause(&scope.scope, false),
+                        when: when_clause(Some(&scope.scope), false),
                     });
-                    // Text mode keeps exactly the toggle command bound. Capture
-                    // mode is dynamic (`type`), so it has no static entries.
-                    if binding.command == "common.toggle-text-mode" {
-                        entries.push(VscodeEntry {
-                            profile: profile.profile.clone(),
-                            scope: scope.scope.clone(),
-                            key: chord.to_vscode(),
-                            binding: binding.command.clone(),
-                            when: when_clause(&scope.scope, true),
-                        });
-                    }
                 }
             }
         }
@@ -226,12 +245,50 @@ pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
     entries
 }
 
-fn when_clause(scope: &str, text_mode: bool) -> String {
-    if text_mode {
-        format!("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '{scope}' && magit.textMode")
-    } else {
-        format!("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '{scope}' && !magit.textMode")
+/// Whether two bindings agree on the fields the VSCode emission cares about.
+fn same_binding(left: &Binding, right: &Binding) -> bool {
+    left.command == right.command && left.keys == right.keys && left.modes == right.modes
+}
+
+/// Bindings every concrete scope binds identically.
+///
+/// The synthetic `common` scope is the base of the view scopes and no view
+/// reports it, so it takes no part in the comparison.
+fn shared_bindings<'a>(scopes: &'a [ScopeManifest]) -> Vec<&'a Binding> {
+    let mut concrete = scopes.iter().filter(|scope| scope.scope != "common");
+    let Some(first) = concrete.next() else {
+        return Vec::new();
+    };
+    let rest: Vec<&ScopeManifest> = concrete.collect();
+    first
+        .bindings
+        .iter()
+        .filter(|binding| {
+            rest.iter().all(|scope| {
+                scope
+                    .bindings
+                    .iter()
+                    .any(|candidate| same_binding(candidate, binding))
+            })
+        })
+        .collect()
+}
+
+/// The `when` clause of one entry.
+///
+/// `scope` is `None` for a shared entry, whose clause must then hold in every
+/// magit view; `both_modes` drops the text-mode term for the toggle.
+fn when_clause(scope: Option<&str>, both_modes: bool) -> String {
+    let mut when = String::from(
+        "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible",
+    );
+    if let Some(scope) = scope {
+        when.push_str(&format!(" && magit.scope == '{scope}'"));
     }
+    if !both_modes {
+        when.push_str(" && !magit.textMode");
+    }
+    when
 }
 
 /// One Neovim `lhs` binding.
