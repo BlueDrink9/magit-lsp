@@ -94,6 +94,63 @@ stronger evidence. Tracing adds overhead. This is instrumented wall-time
 profiling, not CPU profiling; external `perf`/`strace` evidence is still needed
 to attribute CPU, scheduler and syscall costs.
 
+### Profile-cache before/after comparison (2026-11-22)
+
+For PERF-PROFILE-CACHE-MEASURE, the same committed harness and debug profile
+were run serially from `git archive` exports of the matched pre-change commit
+`50633c6` (tree `7b8bba306c0eece49d494998ddac02f534f52dd2`) and the profile-cache
+commit `dcfe893` (tree `f0a7eca1df0a87953e059d2068bfd68bf9541a54`), extracted
+to `build/startup-compare/50633c6/` and `build/startup-compare/dcfe893/` and
+checked out without `.git`. Both exports carry the identical committed Lua
+helper (`33d1c569704cf5f6ce4f87d404ba5439f1e39227`); the modified working-copy
+helper was not used or copied. The two source trees differ only in
+`src/config.rs` and `tests/keymap.rs`, and each export built and ran its own
+`target/debug/magit-lsp` (`sha256`
+`cc71f42e9202b5d6e23143faf8d0c7ee56617d319b17510123335ef10b4e2c1d` for
+`50633c6` versus
+`610f7a423b103da17b0410d4b4baf9d8def2d0342649467c12e2f3da265e9042` for
+`dcfe893`), so no run profiled the other revision's binary. Command per export:
+`make nvim-startup-check`; run order was baseline, cached, baseline, cached,
+baseline on the same host (NVIM v0.12.6, Python 3.14.10, Linux
+`5a848ea725d4` / kernel `7.2.11-200.fc44.x86_64`), three harness samples per
+run, opt-in tracing enabled by the harness for every run. All runs exited 0.
+Raw `summary.json`, per-sample JSON and merged traces are retained at
+`build/startup-diagnosis/profile-cache-compare/baseline-50633c6/<timestamp>/`
+and `.../cached-dcfe893/<timestamp>/` (generated, git-ignored, not committed).
+
+| Fixture case | `50633c6` median (range), ms | `dcfe893` median (range), ms | Delta |
+|---|---:|---:|---:|
+| Fresh Neovim/server to visible `Head:` status | 558.1 (538.8–582.8) | 285.2 (259.2–334.1) | −273.0 ms (−48.9 %) |
+| Initialized server, wipe and reopen | 213.1 (206.5–266.7) | 186.5 (170.5–190.4) | −26.6 ms (−12.5 %) |
+| Already-open view, focus only | 0.061 (0.0–0.2) | 0.059 (0.0–0.1) | negligible |
+
+Medians and ranges pool the samples of each run set (9 samples over three
+baseline runs, 6 over two cached runs); per-run cold medians were
+565.5/546.6/569.6 ms baseline and 261.4/293.6 ms cached, so the cold ranges are
+disjoint. To avoid basing the delta on unequal sample counts, the first two
+baseline runs match the two cached runs at six samples each: cold
+552.4 (538.8–572.4) → 285.2 (259.2–334.1) ms, −267.2 ms (−48.4 %), and reopen
+228.1 (206.5–266.7) → 186.5 (170.5–190.4) ms, −41.5 ms (−18.2 %). The third
+baseline run only widened the pooled baseline ranges. The measured endpoint is the fresh status buffer: the loading render
+contains only `Loading repository status…`, and the harness polling and record
+check both require a visible `Head:` line, so first-visible loading is not
+counted as a sample; `already_open_focus` is focus-only. The worktree row is
+excluded from the claim: the exports have no `.git`, so repository discovery
+from the export directory walked up to this checkout's parent working tree,
+which was the same dirty repository for both revisions (worktree cold
+1367.8 → 1117.0 ms, reopen 1074.0 → 1098.7 ms). That is neither standalone nor
+a clean checkout and shows no reopen improvement.
+
+Within the traced fixture cold samples, `phase_view_open_total` medians fell
+from 185.5 to 113.3 ms and `phase_status_listing` from 287.7 to 246.2 ms; the
+remaining part of the wall-clock difference falls in the server
+initialize/startup window that the harness records as an uncorrelated
+boundary. The comparison is debug-build wall time with three samples per run,
+tracing overhead in both sides, and varying host/filesystem cache state; it
+does not isolate the removed TOML parsing in CPU samples, so it establishes the
+observed startup improvement of this commit, not an exclusive per-symbol
+attribution.
+
 ## Ranked diagnosis and next discriminating experiments
 
 ### Granular instrumented run (2026-11-21)
