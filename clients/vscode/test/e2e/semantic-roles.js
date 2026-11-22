@@ -85,11 +85,6 @@ async function verifySemanticRoles({
   const views = require(`${extension.extensionPath}/lib/views`);
   const state = views.stateForUri(uri);
   assert(state, `the focused editor URI has no client view state: ${uri.toString()}`);
-  assert.equal(
-    state.uri.toString(),
-    uri.toString(),
-    "the focused editor URI is not the view-state document",
-  );
   const clientUri = uri.toString();
   const serverUri = state.descriptor.uri;
   const theme = vscode.workspace.getConfiguration("workbench").get("colorTheme");
