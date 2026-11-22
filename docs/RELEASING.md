@@ -400,6 +400,11 @@ proceeds only by pushing a version-aligned `vX.Y.Z` tag at the approved commit,
 with both workflows already merged to the default branch. Before that push the
 maintainer must:
 
+* protect the default branch with branch protection or an equivalent ruleset.
+  The publisher verifies only the branch metadata's `protected` status through
+  `GET /repos/{owner}/{repo}/branches/{branch}`, which the validation job's
+  `contents: read` token supports; the detailed protection/ruleset rules remain
+  a maintainer prerequisite and are not revalidated at publication;
 * protect the release tag and require reviewers on the `release-publish`
   environment;
 * register trusted publishing for this exact owner/repository, the

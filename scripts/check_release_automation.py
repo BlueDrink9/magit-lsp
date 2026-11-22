@@ -2173,9 +2173,19 @@ def prepare_publication_runtime(event_path):
     expected_ref = f'refs/heads/{default_branch}'
     if ref != expected_ref:
         fail(f'publication orchestration ref is {ref!r}, expected default {expected_ref!r}')
-    status, body = fetch_api(repository, f'/branches/{default_branch}/protection', token)
+    # The validation job's token has only contents/actions read. "Get a branch"
+    # requires Contents: read, while branch protection requires
+    # Administration: read, which no workflow permission can grant. Only the
+    # branch's ordinary ``protected`` metadata is checked here; detailed
+    # protection/ruleset settings stay an explicit maintainer prerequisite.
+    status, body = fetch_api(repository, f'/branches/{default_branch}', token)
     if status != 200:
-        fail(f'publication default branch protection returned HTTP {status}')
+        fail(f'publication default branch metadata returned HTTP {status}')
+    branch_document = parse_json(body, 'publication default branch metadata')
+    if not isinstance(branch_document, dict):
+        fail('publication default branch metadata: expected object')
+    if branch_document.get('protected') is not True:
+        fail('publication default branch metadata does not report a protected branch')
     status, body = fetch_api(repository, f'/git/ref/heads/{default_branch}', token)
     if status != 200:
         fail(f'publication default branch ref returned HTTP {status}')
@@ -3818,7 +3828,7 @@ def run_self_tests():
     runtime_total_artifacts = len(runtime_coherent_artifacts)
     runtime_responses = {
         '': {'default_branch': 'main'},
-        '/branches/main/protection': {},
+        '/branches/main': {'name': 'main', 'protected': True},
         '/git/ref/heads/main': {'object': {'sha': SELF_TEST_SHA}},
         f'/actions/runs/{SELF_TEST_RUN_ID}': run_binding_fixture(),
         f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=1':
@@ -3834,11 +3844,20 @@ def run_self_tests():
         f'/git/ref/tags/v{SELF_TEST_VERSION}': json.loads(tag_ref_body()),
     }
     runtime_calls = []
+    runtime_overrides = {}
     def runtime_fetch(repository, path, token):
         runtime_calls.append((repository, path))
+        if path in runtime_overrides:
+            return runtime_overrides[path]
         if path not in runtime_responses:
             return 404, '{}'
         return 200, json.dumps(runtime_responses[path])
+    # The runtime must never request the Administration-only protection
+    # endpoint; its declared contents/actions read token only supports the
+    # ordinary branch metadata (Contents: read).
+    if '/protection' in inspect.getsource(prepare_publication_runtime):
+        fail('self-test: the runtime must not request the Administration-only '
+             'branch protection endpoint')
     saved_env = {key: os.environ.get(key) for key in (
         'GITHUB_REPOSITORY', 'GITHUB_REF', 'GITHUB_SHA',
         'GITHUB_EVENT_NAME', 'GH_TOKEN', 'PUBLICATION_HANDOFF_DIR')}
@@ -4088,6 +4107,36 @@ def run_self_tests():
                                  if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
             if missing_runtime_paths:
                 fail(f'self-test: runtime collector missed API paths {missing_runtime_paths!r}; calls={runtime_calls!r}')
+            if (SELF_TEST_REPOSITORY, '/branches/main') not in runtime_calls:
+                fail('self-test: runtime collector must read the protected branch metadata')
+            if any('/protection' in path for _, path in runtime_calls):
+                fail('self-test: runtime collector requested the Administration-only '
+                     'branch protection endpoint')
+            # Branch protection is read through ordinary branch metadata. Only a
+            # positive boolean counts; forbidden, missing, unprotected and
+            # malformed responses all fail closed.
+            for label, override, expected in (
+                    ('forbidden',
+                     (403, '{"message":"Resource not accessible by integration"}'),
+                     'branch metadata returned HTTP 403'),
+                    ('missing', (404, '{}'),
+                     'branch metadata returned HTTP 404'),
+                    ('unprotected',
+                     (200, json.dumps({'name': 'main', 'protected': False})),
+                     'does not report a protected branch'),
+                    ('missing status', (200, json.dumps({'name': 'main'})),
+                     'does not report a protected branch'),
+                    ('non-boolean status',
+                     (200, json.dumps({'name': 'main', 'protected': 'true'})),
+                     'does not report a protected branch'),
+                    ('malformed', (200, '[]'), 'metadata: expected object')):
+                runtime_overrides['/branches/main'] = override
+                with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                        patch.object(runtime_transport_module, 'request', runtime_transport):
+                    expect_check(f'runtime collector rejects {label} branch metadata',
+                                 prepare_publication_runtime, str(event_path),
+                                 expected=expected)
+            runtime_overrides.clear()
             # The VSIX is fetched through the same verifier the installed
             # consumers use: exact run/attempt/listing and byte digest checks.
             for fragment in (f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100',
