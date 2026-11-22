@@ -192,7 +192,7 @@ mod tests {
         // "é" is two UTF-8 bytes but one UTF-16 code unit; "😀" is four bytes
         // and two code units.
         let lines = vec!["é😀 x".to_string()];
-        let tokens = vec![token(0, 0, "é😀".len(), "magit.file")];
+        let tokens = vec![token(0, 0, "é😀".len(), "path")];
         let data = encode_lines(&lines, &tokens);
         assert_eq!(data.len(), 1);
         assert_eq!(data[0].length, 3);
@@ -202,9 +202,9 @@ mod tests {
     fn overlapping_and_unknown_tokens_are_dropped() {
         let lines = vec!["abcdef".to_string()];
         let tokens = vec![
-            token(0, 2, 3, "magit.file"),
-            token(0, 3, 2, "magit.file.added"),
-            token(0, 0, 1, "magit.unknown"),
+            token(0, 2, 3, "path"),
+            token(0, 3, 2, "added"),
+            token(0, 0, 1, "unknown-role"),
         ];
         let data = encode_lines(&lines, &tokens);
         assert_eq!(data.len(), 1);
@@ -215,10 +215,7 @@ mod tests {
     #[test]
     fn tokens_are_delta_encoded_in_document_order() {
         let lines = vec!["aaaa".to_string(), "bbbb".to_string()];
-        let tokens = vec![
-            token(1, 2, 2, "magit.count"),
-            token(0, 0, 2, "magit.section"),
-        ];
+        let tokens = vec![token(1, 2, 2, "muted"), token(0, 0, 2, "heading")];
         let data = encode_lines(&lines, &tokens);
         assert_eq!(
             data.iter()
@@ -231,7 +228,7 @@ mod tests {
     #[test]
     fn modifiers_become_legend_bits() {
         let lines = vec!["abc".to_string()];
-        let mut staged = token(0, 0, 3, "magit.file");
+        let mut staged = token(0, 0, 3, "path");
         staged.modifiers = vec!["staged".to_string(), "unknown".to_string()];
         let data = encode_lines(&lines, &[staged]);
         assert_eq!(data[0].token_modifiers_bitset, 1);
