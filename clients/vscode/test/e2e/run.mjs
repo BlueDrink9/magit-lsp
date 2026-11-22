@@ -218,8 +218,10 @@ if (focusedDownload || focusedVsix || focusedCommands) {
  * PIDs whose command line names this run's unique directory.
  *
  * `ps` is used instead of `pgrep`, which this environment does not provide.
- * The match covers the editor, the extension host and the cached server, so a
- * killed editor cannot leave a server behind.
+ * The match sees only processes launched with the isolated profile/workspace
+ * paths in their command line. A server started from the shared repository
+ * build (`${root}/target/debug/magit-lsp`, no arguments) or an extension host
+ * without those paths is invisible here, so this is not a whole-run sweep.
  *
  * @param {string} base
  * @returns {number[]}
@@ -402,8 +404,11 @@ if (
 }
 stopOwned(directory);
 versionFixture?.cleanup();
-// Prove the focused semantic run leaves no editor, extension host or server
-// behind. `stopOwned` signals them; give them a bounded moment to disappear.
+// Check the focused semantic run against what `ownedPids` can observe:
+// processes launched with this run's isolated profile/workspace paths. The
+// shared-build server and an extension host without those paths are outside
+// this check. `stopOwned` signals the observed processes; give them a bounded
+// moment to disappear.
 let semanticOrphans = [];
 if (focusedSemanticRoles) {
   const orphanDeadline = Date.now() + 2000;
@@ -413,8 +418,8 @@ if (focusedSemanticRoles) {
   semanticOrphans = ownedPids(directory);
   console.log(
     semanticOrphans.length
-      ? `FAIL e2e: run-owned processes survived cleanup: ${semanticOrphans.join(", ")}`
-      : "PASS e2e: no run-owned orphan processes remain",
+      ? `FAIL e2e: processes launched with the isolated profile/workspace paths survived cleanup: ${semanticOrphans.join(", ")}`
+      : "PASS e2e: no processes launched with the isolated profile/workspace paths remain",
   );
 }
 console.log(`VSCode text evidence: ${directory}`);
@@ -500,7 +505,7 @@ if (!evidenceReady) {
               : focusedCommands
                 ? "Missing native server management command evidence; see the isolated evidence directory above."
                 : focusedSemanticRoles
-                  ? "Missing complete native T028 semantic-role evidence or run-owned processes survived; see the isolated evidence directory above."
+                  ? "Missing complete native T028 semantic-role evidence or isolated-path processes survived; see the isolated evidence directory above."
                   : process.env.MAGIT_VSCODE_A34_ONLY === "1"
                     ? "Missing A34 evidence; see the isolated evidence directory above."
                     : process.env.MAGIT_VSCODE_A33_ONLY === "1"

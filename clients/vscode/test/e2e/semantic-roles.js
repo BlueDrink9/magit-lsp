@@ -267,7 +267,10 @@ async function verifySemanticRoles({
         limitations:
           "One default dark scheme (Default Dark Modern) on the real Linux " +
           "VSCode host; no theme matrix or scheme transition. Foregrounds are computed " +
-          "CSS colours of the rendered content cells, not screenshots.",
+          "CSS colours of the rendered content cells, not screenshots. Process cleanup " +
+          "evidence covers only processes whose command lines name the isolated " +
+          "profile/workspace paths; the shared-build server and an extension host " +
+          "without those paths are a blind spot that check cannot observe.",
       },
       null,
       2,
