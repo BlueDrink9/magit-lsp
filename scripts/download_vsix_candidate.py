@@ -22,13 +22,33 @@ PNPM_VERSION = '10.13.1'
 DownloadError = transport.DownloadError
 
 
+def expected_lock_digests(locks):
+    """Validate explicit expected lock digests for every tracked lock file.
+
+    locks must map exactly LOCKS to lowercase sha256 hex digests; the result is
+    compared to the manifest verbatim, so no digest is normalized or filled in.
+    """
+    if not isinstance(locks, dict) or set(locks) != set(LOCKS):
+        raise DownloadError(f'expected locks must name exactly {", ".join(LOCKS)}')
+    if any(not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{64}', value)
+           for value in locks.values()):
+        raise DownloadError('invalid expected lock digest')
+    return dict(locks)
+
+
 def fetch_candidate(repository, run_id, attempt, source_sha, original_ref, event, version,
-                    output, token, *, checkout='.', opener=transport.request):
-    """Validate and unpack the exact run-bound VSIX artifact into output."""
+                    output, token, *, checkout='.', expected_locks=None, opener=transport.request):
+    """Validate and unpack the exact run-bound VSIX artifact into output.
+
+    expected_locks, when supplied, is the digest map of the bound release source
+    and replaces the lockfiles read from the publisher checkout.
+    """
     if not re.fullmatch(r'[0-9a-f]{40}', str(source_sha)):
         raise DownloadError('invalid source SHA')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?', str(version)):
         raise DownloadError('invalid VSIX version')
+    if expected_locks is not None:
+        expected_locks = expected_lock_digests(expected_locks)
     owner, sep, repo = repository.partition('/')
     if not sep or not owner or not repo or not all((run_id, attempt, original_ref, event)):
         raise DownloadError('invalid repository or missing run binding')
@@ -64,7 +84,8 @@ def fetch_candidate(repository, run_id, attempt, source_sha, original_ref, event
         members = transport.exact_zip(payload, {f'magit-lsp-{version}.vsix', 'vsix-manifest.json'})
         manifest_bytes = members['vsix-manifest.json']
         manifest = json.loads(manifest_bytes)
-        expected_locks = {name: hashlib.sha256((Path(checkout) / name).read_bytes()).hexdigest() for name in LOCKS}
+        expected_locks = expected_locks if expected_locks is not None else {
+            name: hashlib.sha256((Path(checkout) / name).read_bytes()).hexdigest() for name in LOCKS}
         expected = {'source_sha': source_sha, 'original_ref': original_ref, 'event': event,
                     'run_id': str(run_id), 'run_attempt': str(attempt), 'version': str(version),
                     'lock_hashes': expected_locks, 'pnpm_version': PNPM_VERSION}

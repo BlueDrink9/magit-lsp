@@ -34,6 +34,11 @@ def zipped(files):
     return stream.getvalue()
 
 
+def unreachable(*_args, **_kwargs):
+    """Fail if the downloader opens a response after a boundary rejection."""
+    raise AssertionError('unexpected network request')
+
+
 class VsixCandidateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -60,7 +65,15 @@ class VsixCandidateTests(unittest.TestCase):
                           'workflow_run': {'id': self.run_id}}
         self.identity = {'id': 23, 'name': downloader.IDENTITY_ARTIFACT, 'expired': False}
 
-    def execute(self, *, listing=None, identity=None, payload=None, candidate=None):
+    def publish(self, manifest):
+        """Rebuild the candidate payload around a manifest variant."""
+        data = zipped([(f'magit-lsp-{self.version}.vsix', self.vsix),
+                       ('vsix-manifest.json', json.dumps(manifest).encode())])
+        self.payload = data
+        self.candidate = dict(self.candidate, digest=hashlib.sha256(data).hexdigest())
+
+    def execute(self, *, listing=None, identity=None, payload=None, candidate=None,
+                expected_locks=None, checkout=None, opener=None):
         candidate = candidate or self.candidate
         identity = identity or {'artifact_id': str(candidate['id']), 'artifact_digest': candidate['digest'],
                                 'run_id': self.run_id, 'run_attempt': self.attempt}
@@ -81,7 +94,9 @@ class VsixCandidateTests(unittest.TestCase):
         output = self.root / 'handoff'
         with patch.object(transport, 'json_get', lambda url, _token: json.loads(responses[url])):
             return downloader.fetch_candidate('o/r', self.run_id, self.attempt, self.source,
-                self.ref, self.event, self.version, output, 'secret', checkout=self.root, opener=fake)
+                self.ref, self.event, self.version, output, 'secret',
+                checkout=self.root if checkout is None else checkout,
+                expected_locks=expected_locks, opener=opener or fake)
 
     def test_handoff_binds_immutable_artifact_provenance_and_exact_bytes(self):
         result = self.execute()
@@ -147,6 +162,45 @@ class VsixCandidateTests(unittest.TestCase):
                        ('vsix-manifest.json', json.dumps(manifest).encode())])
         with self.assertRaises(downloader.DownloadError):
             self.execute(payload=data, candidate=dict(self.candidate, digest=hashlib.sha256(data).hexdigest()))
+
+    def test_explicit_expected_locks_accept_release_source_and_reject_mismatch(self):
+        release = {name: hashlib.sha256(('release source ' + name).encode()).hexdigest()
+                   for name in downloader.LOCKS}
+        self.publish(dict(self.manifest, lock_hashes=release))
+        result = self.execute(expected_locks=release, checkout=self.root / 'absent-checkout')
+        manifest = json.loads(Path(result['manifest']).read_text())
+        self.assertEqual(manifest['lock_hashes'], release)
+        wrong = dict(release, **{downloader.LOCKS[0]: '0' * 64})
+        for label, expectations in (('checkout locks', self.manifest['lock_hashes']),
+                                    ('one wrong digest', wrong)):
+            with self.subTest(label=label), self.assertRaises(downloader.DownloadError):
+                self.execute(expected_locks=expectations, checkout=self.root / 'absent-checkout')
+
+    def test_explicit_expected_locks_validate_digest_set_at_boundary(self):
+        release = {name: 'a' * 64 for name in downloader.LOCKS}
+        self.publish(dict(self.manifest, lock_hashes=release))
+        for label, expectations in (
+                ('missing lock', {name: release[name] for name in downloader.LOCKS[1:]}),
+                ('unknown lock', dict(release, **{'Cargo.toml': 'a' * 64})),
+                ('uppercase digest', dict(release, **{downloader.LOCKS[0]: 'A' * 64})),
+                ('short digest', dict(release, **{downloader.LOCKS[0]: 'a' * 63})),
+                ('non-string digest', dict(release, **{downloader.LOCKS[0]: 7})),
+                ('wrong container', [release[name] for name in downloader.LOCKS])):
+            with self.subTest(label=label), self.assertRaises(downloader.DownloadError):
+                self.execute(expected_locks=expectations, opener=unreachable)
+
+    def test_omitted_expectations_keep_checkout_lock_and_integrity_guards(self):
+        self.execute()
+        release = {name: hashlib.sha256(('release source ' + name).encode()).hexdigest()
+                   for name in downloader.LOCKS}
+        self.publish(dict(self.manifest, lock_hashes=release))
+        with self.assertRaises(downloader.DownloadError):
+            self.execute()
+        for name in downloader.LOCKS:
+            self.publish(dict(self.manifest, lock_hashes=dict(self.manifest['lock_hashes'],
+                                                               **{name: '0' * 64})))
+            with self.subTest(lock=name), self.assertRaises(downloader.DownloadError):
+                self.execute()
 
 
 if __name__ == '__main__':
