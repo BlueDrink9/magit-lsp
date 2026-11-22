@@ -1,0 +1,16 @@
+# T028: real added and removed hunk-body content use distinct foregrounds.
+# One default scheme; evidence is decoded ANSI plus the fixture's Git bytes.
+fixture: modified-two-files
+---
+sh: git rev-parse HEAD > .git/roles-head; git show :f.txt > .git/roles-index-f; git show :g.txt > .git/roles-index-g; cp f.txt .git/roles-worktree-f; cp g.txt .git/roles-worktree-g; sha256sum .git/index > .git/roles-index-sha; git diff -- f.txt | grep -qx -- '-line9' && git diff -- f.txt | grep -qx -- '+NEW line' && grep -qx 'NEW line' f.txt && ! grep -qx 'line9' f.txt && git --no-optional-locks diff --cached --quiet
+wait
+keys standard: M-4
+keys vim: z r
+wait
+goto "+NEW line"
+wait
+expect screen contains "-line9"
+expect screen contains "+NEW line"
+expect style "+NEW line" different-foreground-from "-line9"
+snapshot: added-removed-foregrounds
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/roles-head)" && git show :f.txt | cmp -s - .git/roles-index-f && git show :g.txt | cmp -s - .git/roles-index-g && cmp -s f.txt .git/roles-worktree-f && cmp -s g.txt .git/roles-worktree-g && sha256sum -c --quiet .git/roles-index-sha && git --no-optional-locks diff --cached --quiet
