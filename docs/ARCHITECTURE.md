@@ -667,20 +667,26 @@ T028 tests semantic roles and resolved styles against supported built-in
 schemes. Test that roles resolve to readable styles and user overrides work;
 do not lock acceptance to a token-to-group table or rendered HTML/image.
 
-| Token type | Meaning | Neovim link | VSCode scope |
-| --- | --- | --- | --- |
-| `magit.section` | Section titles ("Unstaged changes") | `Title` | `markup.heading` |
-| `magit.count` | `(3)` after a title | `Comment` | `comment` |
-| `magit.file` | File path in a diff header | `Directory` | `entity.name.tag` |
-| `magit.file.modified` / `.added` / `.deleted` / `.renamed` / `.untracked` | status word | `Changed` / `Added` / `Removed` / `Changed` / `Comment` | `markup.changed` / `markup.inserted` / `markup.deleted` / `markup.changed` / `comment` |
-| `magit.hunk.header` | `@@ -1,3 +1,4 @@` | `Special` | `meta.diff.range` |
-| `magit.diff.added` / `.removed` | `+` / `-` lines | `@diff.plus`→`Added`; `@diff.minus`→`Removed` | `markup.inserted` / `markup.deleted` |
-| `magit.diff.context` | context lines | `Normal` (no token) | — |
-| `magit.hash` | commit hash | `Constant` | `constant.numeric` |
-| `magit.ref.local` / `.remote` / `.tag` / `.head` | refs | `Type` / `Special` / `Label` / `Type` (+ bold) | `entity.name.type` … |
-| `magit.author` / `magit.date` | log columns | `Identifier` / `Comment` | `variable` / `comment` |
-| `magit.menu.*` | see §3.11 | `Title`, `Statement`, `Keyword`, `Normal`, `Special`, `String`, `Comment`, `String`, `Comment`, `Comment` | as appropriate |
-| `magit.message.warn` / `.error` | inline notices | `WarningMsg` / `ErrorMsg` | `markup.deleted` |
+The canonical role table is `src/semantic_roles.json`: eleven token types, in
+legend order, each with a suggested Neovim highlight group and VS Code TextMate
+scope. The server advertises the names in
+`semanticTokensProvider.legend.tokenTypes` and repeats the type-to-group mapping
+in the non-standard `legend.tokenTypeGroups`, so a client needs no token table
+of its own.
+
+| Token type | Neovim group | VS Code scope |
+| --- | --- | --- |
+| `heading` | `Title` | `entity.name.section` |
+| `muted` | `Comment` | `comment` |
+| `added` | `Added` | `markup.inserted` |
+| `removed` | `Removed` | `markup.deleted` |
+| `changed` | `Changed` | `markup.changed` |
+| `path` | `Directory` | `entity.name.filename` |
+| `identifier` | `Identifier` | `entity.name` |
+| `ref` | `Constant` | `entity.name.tag` |
+| `key` | `Keyword` | `keyword.other` |
+| `warning` | `WarningMsg` | `message.warning` |
+| `error` | `ErrorMsg` | `message.error` |
 
 Modifiers: `staged`, `selected`, `planned`, `disabled`, `bold`. Neovim applies
 `@lsp.mod.<modifier>.<filetype>` above the type group, so modifier links only
