@@ -370,7 +370,14 @@ async function run() {
     const commandOf = (line) => line.split(/\s+/).slice(1).join(" ");
     const launched = listing.filter((line) => commandOf(line) === expected);
     assert.equal(launched.length, 1, "exactly one server process runs the seeded executable");
-    const sourceBinary = path.resolve(__dirname, "../../../..", "target/debug/magit-lsp");
+    const sourceBinary =
+      process.env.MAGIT_LSP_SERVER_PATH ||
+      path.resolve(
+        __dirname,
+        "../../../..",
+        "target/debug",
+        `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+      );
     assert.equal(
       listing.filter((line) => commandOf(line) === sourceBinary).length,
       0,
@@ -515,7 +522,14 @@ async function run() {
       const commandOf = (line) => line.split(/\s+/).slice(1).join(" ");
       const launched = listing.filter((line) => commandOf(line) === expected);
       assert.equal(launched.length, 1, "exactly one server process runs the seeded executable");
-      const sourceBinary = path.resolve(__dirname, "../../../..", "target/debug/magit-lsp");
+      const sourceBinary =
+        process.env.MAGIT_LSP_SERVER_PATH ||
+        path.resolve(
+          __dirname,
+          "../../../..",
+          "target/debug",
+          `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+        );
       assert.equal(
         expected === sourceBinary,
         false,
@@ -637,7 +651,14 @@ async function run() {
       assert.equal(infoText.includes(expected), true, "server-info names the launched executable");
 
       const { releasePayload } = require("./download-startup.js");
-      const sourceBinary = path.resolve(__dirname, "../../../..", "target/debug/magit-lsp");
+      const sourceBinary =
+        process.env.MAGIT_LSP_SERVER_PATH ||
+        path.resolve(
+          __dirname,
+          "../../../..",
+          "target/debug",
+          `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+        );
       const seededBytes = fs.readFileSync(expected);
       // Serve a distinguishable copy of the built server so the forced
       // replacement is observable. The running cache binary is never written:

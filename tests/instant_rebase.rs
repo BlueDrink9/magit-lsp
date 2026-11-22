@@ -136,6 +136,7 @@ fn instant_fixup_with_duplicate_subject_folds_selected_full_oid() {
         .any(|oid| oid == selected));
 }
 
+#[cfg(unix)]
 #[test]
 fn commit_msg_hook_suffix_rejects_marker_before_rebase_and_retains_hook_result() {
     let (dir, repo, ids) = repo();
@@ -174,6 +175,7 @@ fn commit_msg_hook_suffix_rejects_marker_before_rebase_and_retains_hook_result()
     assert!(!dir.path().join(".git/rebase-apply").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn post_commit_cancellation_retains_marker_and_never_launches_autosquash() {
     let (dir, repo, ids) = repo();

@@ -8,6 +8,7 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 fn apply(server: &mut stdio::TestServer) -> Value {
@@ -46,7 +47,10 @@ fn open(
     repo: &fixtures::RepoFixture,
     client_name: &str,
 ) -> (stdio::TestServer, FakeEditor, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
@@ -56,8 +60,7 @@ fn open(
     init["params"]["clientInfo"] = json!({"name":client_name,"version":"1"});
     init["params"]["initializationOptions"] =
         json!({"plain":{"keys":{"default":true,"clients":{"Plain Test Client":false}}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     server.response_with_id(1);
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -220,7 +223,10 @@ fn prompt_and_commit_draft_never_offer_plain_key_toggle() {
         .unwrap()["command"]["arguments"][0]
         .clone();
     draft_server.send(json!({"jsonrpc":"2.0","id":25,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[create]}}));
-    let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", draft_repo.path().display());
+    let draft_uri = uri_from_path(&draft_repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut attached = false;
     loop {
         let message = draft_server.recv();

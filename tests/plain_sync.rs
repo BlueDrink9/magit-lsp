@@ -4,7 +4,18 @@ mod common;
 
 use common::stdio::TestServer;
 use magit_lsp::docstore::{Change, DocStore, Encoding};
-use serde_json::json;
+use magit_lsp::file_uri::uri_from_path;
+use serde_json::{json, Value};
+
+/// Receive server frames until `method` arrives, skipping unrelated messages.
+fn next_method(server: &mut TestServer, method: &str) -> Value {
+    loop {
+        let frame = server.recv_raw();
+        if frame["method"] == method {
+            return frame;
+        }
+    }
+}
 
 #[test]
 fn sequential_changes_are_atomic_and_encoding_aware() {
@@ -87,23 +98,66 @@ fn ranged_and_rangeless_changes_reject_atomically_and_track_lifecycle() {
 
 #[test]
 fn stdio_advertises_incremental_sync_and_accepts_document_lifecycle() {
+    let (repo, _) = common::RepoFixture::new()
+        .commit("initial", [("f.txt", common::TEN_LINES)])
+        .modify_standard()
+        .build();
+    let path = repo.path().join(".magit");
+    common::write(&path, "stale disk text\n");
+    let disk_before = std::fs::read(&path).unwrap();
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
+    let root_uri = uri_from_path(repo.path())
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = TestServer::spawn(&[]);
-    let initialized =
-        server.initialize(json!({"general":{"positionEncodings":["utf-8","utf-16"]}}));
+    let initialized = server.initialize_params(json!({
+        "processId": null,
+        "rootUri": null,
+        "capabilities": {
+            "workspace": {"applyEdit": true},
+            "general": {"positionEncodings": ["utf-8", "utf-16"]},
+            "textDocument": {"codeAction": {"dynamicRegistration": true}}
+        },
+        "workspaceFolders": [{"uri": root_uri, "name": "repo"}]
+    }));
     let caps = &initialized["result"]["capabilities"];
     assert_eq!(caps["textDocumentSync"]["openClose"], true);
     assert_eq!(caps["textDocumentSync"]["change"], 2);
     assert_eq!(caps["textDocumentSync"]["save"]["includeText"], true);
     assert_eq!(caps["positionEncoding"], "utf-8");
-    let uri = "file:///tmp/plain-sync-test";
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"text","version":1,"text":"aλ\r\nz😀"}}}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":3},"contentChanges":[{"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":3}},"text":"!"},{"text":"bundled full replacement"}]}}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":4},"contentChanges":[{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"text":"bad"}]}}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":6},"contentChanges":[{"text":"repair full replacement"}]}}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":uri},"text":"saved replacement"}}));
+
+    // Opening a presentation document must reach the portable render path
+    // rather than the managed-draft rejection.
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"text","version":1,"text":"stale editor text\n"}}}));
+    let apply = next_method(&mut server, "workspace/applyEdit");
+    assert_eq!(std::fs::read(&path).unwrap(), disk_before);
+    let edit = &apply["params"]["edit"];
+    let edits = edit["documentChanges"]
+        .as_array()
+        .map(|documents| documents[0]["edits"].as_array().expect("edits"))
+        .unwrap_or_else(|| edit["changes"][&uri].as_array().expect("edits"));
+    let authoritative = edits[0]["newText"]
+        .as_str()
+        .expect("whole-document authoritative text")
+        .to_owned();
+    assert!(authoritative.contains("f.txt"));
+    server.send(json!({"jsonrpc":"2.0","id":apply["id"],"result":{"applied":true}}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":2},"contentChanges":[{"text":authoritative}]}}));
+
+    // Normal save and close synchronization applies to the accepted document;
+    // the portable path must not reject the lifecycle after the open.
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":uri},"text":authoritative}}));
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":uri}}}));
     server.shutdown_and_exit();
-    assert!(server.finish(std::time::Duration::from_secs(10)).success());
+    let (status, messages) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success(), "{messages:?}");
+    assert!(messages
+        .iter()
+        .all(|frame| frame["method"] != "view/render"));
 }
 
 #[test]

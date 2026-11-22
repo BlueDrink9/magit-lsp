@@ -945,6 +945,31 @@ class StartPathTest(unittest.TestCase):
     def test_explicit_server_binary_override_survives_environment_isolation(self) -> None:
         self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/test-magit-lsp"}, Path("/tmp/test-magit-lsp"))
 
+    def test_external_artifact_path_with_spaces_is_propagated_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "artifact with spaces" / "magit-lsp"
+            binary.parent.mkdir()
+            binary.write_text("binary", encoding="utf-8")
+            binary.chmod(0o755)
+            with patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": str(binary)}, clear=True):
+                self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/ordinary"}, binary)
+
+    def test_invalid_external_artifact_fails_before_fixture_or_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            non_executable = Path(directory) / "not executable"
+            non_executable.write_text("binary", encoding="utf-8")
+            for explicit in (str(Path(directory) / "missing"), str(non_executable), "relative/path"):
+                with (
+                    patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": explicit,
+                                            "MAGIT_LSP_BIN": "/tmp/fallback"}, clear=True),
+                    patch.object(driver, "check_tools") as check_tools,
+                    patch.object(driver.fixtures, "build") as build,
+                ):
+                    with self.assertRaisesRegex(driver.DriverError, "MAGIT_LSP_TEST_BINARY"):
+                        driver.start("clean")
+                check_tools.assert_not_called()
+                build.assert_not_called()
+
     def _assert_server_binary(self, extra_env: dict[str, str] | None, expected: Path) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"
@@ -955,7 +980,11 @@ class StartPathTest(unittest.TestCase):
                 captured.update(env)
                 raise RuntimeError("stop after environment capture")
 
+            isolated_env = dict(extra_env or {})
+            if "MAGIT_LSP_TEST_BINARY" in os.environ:
+                isolated_env["MAGIT_LSP_TEST_BINARY"] = os.environ["MAGIT_LSP_TEST_BINARY"]
             with (
+                patch.dict(os.environ, isolated_env, clear=True),
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build"),
@@ -994,6 +1023,124 @@ class StartPathTest(unittest.TestCase):
             run = captured["run"]
             self.assertEqual(run.socket_path, driver.run_socket_path(run.id))
             self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
+
+
+class NativeArtifactMakeTargetTest(unittest.TestCase):
+    def test_vscode_artifact_target_validates_inputs_and_passes_spaced_paths_without_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            capture = root / "capture"
+            node = fake_bin / "node"
+            node.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAPTURE"\nprintf "%s\\n" "$RELEASE_VSIX" >> "$CAPTURE"\nprintf "%s\\n" "$MAGIT_VSCODE_ARTIFACT_ONLY" >> "$CAPTURE"\n', encoding="utf-8")
+            node.chmod(0o755)
+            for tool in ("cargo", "pnpm"):
+                fake = fake_bin / tool
+                fake.write_text(f'#!/bin/sh\necho {tool}-called >> "$CAPTURE"\n', encoding="utf-8")
+                fake.chmod(0o755)
+            paths = {}
+            for name in ("server binary", "candidate archive.tar.gz", "release manifest.json", "candidate client.vsix"):
+                item = root / name
+                item.write_text("fixture", encoding="utf-8")
+                item.chmod(0o755)
+                paths[name] = item
+            variables = [
+                f"MAGIT_LSP_SERVER_PATH={paths['server binary']}",
+                f"RELEASE_ARTIFACT={paths['candidate archive.tar.gz']}",
+                f"RELEASE_MANIFEST={paths['release manifest.json']}",
+                f"RELEASE_VSIX={paths['candidate client.vsix']}",
+            ]
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture), DISPLAY=":99")
+            result = subprocess.run(["make", "-s", "native-vscode-artifact-check", *variables], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(str(paths["candidate client.vsix"]), capture.read_text(encoding="utf-8"))
+            calls = capture.read_text(encoding="utf-8")
+            self.assertNotIn("cargo-called", calls)
+            self.assertNotIn("pnpm-called", calls)
+            for index, expected in enumerate(("MAGIT_LSP_SERVER_PATH is required", "RELEASE_ARTIFACT is required", "RELEASE_MANIFEST is required", "RELEASE_VSIX is required")):
+                missing = variables[:index] + variables[index + 1 :]
+                failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *missing], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn(expected, failed.stderr)
+            for variable in ("MAGIT_LSP_SERVER_PATH", "RELEASE_ARTIFACT", "RELEASE_MANIFEST", "RELEASE_VSIX"):
+                supplied = [entry for entry in variables if not entry.startswith(f"{variable}=")]
+                failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *supplied, f"{variable}=relative/input"], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("absolute", failed.stderr)
+            non_executable = root / "not executable"
+            non_executable.write_text("fixture", encoding="utf-8")
+            invalid_server = [entry for entry in variables if not entry.startswith("MAGIT_LSP_SERVER_PATH=")]
+            failed = subprocess.run(["make", "-s", "native-vscode-artifact-check", *invalid_server, f"MAGIT_LSP_SERVER_PATH={non_executable}"], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("not executable", failed.stderr)
+            self.assertIn("1", capture.read_text(encoding="utf-8"))
+            self.assertNotIn("build", " ".join(variables))
+            makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+            self.assertIn("native-vscode-artifact-check:\n", makefile)
+            self.assertIn("vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps", makefile)
+
+    def test_rust_artifact_target_defaults_to_server_async_and_selects_suites(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "verified artifact" / "magit-lsp"
+            binary.parent.mkdir()
+            binary.write_text("fake server", encoding="utf-8")
+            binary.chmod(0o755)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            capture = root / "calls"
+            python = fake_bin / "python3"
+            python.write_text("#!/bin/sh\necho python-called >> \"$CAPTURE\"\n", encoding="utf-8")
+            python.chmod(0o755)
+            cargo = fake_bin / "cargo"
+            cargo.write_text(
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$MAGIT_LSP_TEST_BINARY\" \"$*\" >> \"$CAPTURE\"\n",
+                encoding="utf-8",
+            )
+            cargo.chmod(0o755)
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture))
+            for selector, expected in (
+                (None, "test -q --test server_async"),
+                ("--test server_async --test editor_bridge --test rebase_interactive",
+                 "test -q --test server_async --test editor_bridge --test rebase_interactive"),
+            ):
+                capture.unlink(missing_ok=True)
+                command = ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={binary}"]
+                if selector:
+                    command.append(f"FILTER={selector}")
+                result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = capture.read_text(encoding="utf-8")
+                self.assertEqual(calls.count("python-called"), 1)
+                self.assertEqual(calls.splitlines()[-1], f"{binary}|{expected}")
+                self.assertNotIn("build", calls)
+
+    def test_missing_artifact_fails_before_python_or_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            capture = root / "calls"
+            python = fake_bin / "python3"
+            python.write_text("#!/bin/sh\necho called >> \"$CAPTURE\"\n", encoding="utf-8")
+            python.chmod(0o755)
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture))
+            non_executable = root / "not executable"
+            non_executable.write_text("fake server", encoding="utf-8")
+            for selected, expected in (
+                ("", "MAGIT_LSP_TEST_BINARY is required"),
+                ("relative/server", "must be an absolute path"),
+                (str(non_executable), "is not an executable file"),
+                (str(root / "missing"), "is not an executable file"),
+            ):
+                result = subprocess.run(
+                    ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={selected}"],
+                    cwd=ROOT, env=env, text=True, capture_output=True, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+            self.assertFalse(capture.exists())
 
 
 class NativeSessionTest(unittest.TestCase):

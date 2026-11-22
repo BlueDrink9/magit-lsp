@@ -8,6 +8,7 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 fn setup_with(
@@ -44,15 +45,17 @@ fn setup_with_encoding(
         .modify("f.txt", "ONE\ntwo\nthree\n")
         .modify("😀.txt", "ONE\ntwo\nthree\n")
         .build();
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     if profile == Profile::CrlfNormalise {
         fixtures::write(&repo.path().join(".magit"), "disk\r\n");
     }
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"general":{"positionEncodings":[encoding]},"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":false}},"textDocument":{"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     let initialize = server.response_with_id(1);
     assert!(initialize["error"].is_null());
@@ -106,7 +109,10 @@ fn setup_large(
         .modify("large.txt", changed)
         .modify("small.txt", "changed\nafter\n")
         .build();
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("user.toml");
     let env = if limit.is_some() {
@@ -118,8 +124,7 @@ fn setup_large(
     let mut server = stdio::TestServer::spawn(&env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["error"].is_null());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));

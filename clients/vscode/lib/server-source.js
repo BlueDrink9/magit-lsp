@@ -1,15 +1,15 @@
-'use strict';
+"use strict";
 
-const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
 
-const { releaseVersion, resolveServer } = require('./server-download');
+const { releaseVersion, resolveServer } = require("./server-download");
 
 /** Values accepted for `magit-lsp.server.source`. */
-const SOURCES = Object.freeze(['auto', 'system', 'managed']);
+const SOURCES = Object.freeze(["auto", "system", "managed"]);
 
 /** Bare command probed on PATH for a user-installed server. */
-const PATH_COMMAND = 'magit-lsp';
+const PATH_COMMAND = "magit-lsp";
 
 /** Bound on the version probe so a hung executable cannot block startup. */
 const PROBE_MILLISECONDS = 10000;
@@ -22,7 +22,7 @@ class ServerSourceError extends Error {
   /** @param {string} reason user-facing reason without the product prefix */
   constructor(reason) {
     super(`magit-lsp: ${reason}`);
-    this.name = 'ServerSourceError';
+    this.name = "ServerSourceError";
   }
 }
 
@@ -43,8 +43,8 @@ function fail(reason) {
  * @returns {'auto'|'system'|'managed'}
  */
 function sourceSetting(value) {
-  if (value === undefined || value === null || value === '') return 'auto';
-  if (typeof value !== 'string' || !SOURCES.includes(value)) {
+  if (value === undefined || value === null || value === "") return "auto";
+  if (typeof value !== "string" || !SOURCES.includes(value)) {
     fail(
       `unsupported "magit-lsp.server.source" value ${JSON.stringify(value)}; ` +
         'expected "auto", "system" or "managed"',
@@ -90,20 +90,20 @@ function validateExplicit(configured) {
  * @returns {{found: boolean, version?: string, command?: string, error?: string}}
  */
 function probePath(env) {
-  const result = spawnSync(PATH_COMMAND, ['--version'], {
+  const result = spawnSync(PATH_COMMAND, ["--version"], {
     env,
-    encoding: 'utf8',
+    encoding: "utf8",
     timeout: PROBE_MILLISECONDS,
     windowsHide: true,
   });
-  if (result.error && /** @type {NodeJS.ErrnoException} */ (result.error).code === 'ENOENT') {
+  if (result.error && /** @type {NodeJS.ErrnoException} */ (result.error).code === "ENOENT") {
     return { found: false };
   }
   if (result.error) return { found: true, error: result.error.message || String(result.error) };
   if (result.status !== 0) {
     return { found: true, error: `--version exited ${result.status ?? result.signal}` };
   }
-  const match = VERSION_OUTPUT.exec(String(result.stdout ?? '').trim());
+  const match = VERSION_OUTPUT.exec(String(result.stdout ?? "").trim());
   if (!match) {
     return { found: true, error: '--version did not print "magit-lsp <X.Y.Z>"' };
   }
@@ -144,7 +144,7 @@ function probePath(env) {
 async function resolveServerSource(options) {
   const source = sourceSetting(options?.source);
   const pinned = releaseVersion(options?.version);
-  const configured = typeof options?.path === 'string' ? options.path.trim() : '';
+  const configured = typeof options?.path === "string" ? options.path.trim() : "";
   const resolveManaged = options?.managed ?? resolveServer;
 
   /**
@@ -158,18 +158,18 @@ async function resolveServerSource(options) {
       cacheRoot: options?.cacheRoot,
       ...(options?.runtime ? { runtime: options.runtime } : {}),
     });
-    return { command: resolved.executable, origin: 'managed', version: resolved.version };
+    return { command: resolved.executable, origin: "managed", version: resolved.version };
   }
 
-  if (source === 'managed') return managed();
+  if (source === "managed") return managed();
 
   if (configured) {
     validateExplicit(configured);
-    return { command: configured, origin: 'explicit', version: null };
+    return { command: configured, origin: "explicit", version: null };
   }
 
   const probe = probePath(options?.env ?? process.env);
-  if (source === 'system') {
+  if (source === "system") {
     const advice =
       'set "magit-lsp.server.path" to a magit-lsp executable or set ' +
       '"magit-lsp.server.source" to "managed"';
@@ -188,7 +188,7 @@ async function resolveServerSource(options) {
     /** @type {ResolvedServerSource} */
     const resolved = {
       command: /** @type {string} */ (probe.command),
-      origin: 'system',
+      origin: "system",
       version: /** @type {string} */ (probe.version),
     };
     return resolved;
@@ -198,7 +198,7 @@ async function resolveServerSource(options) {
     /** @type {ResolvedServerSource} */
     const resolved = {
       command: /** @type {string} */ (probe.command),
-      origin: 'system',
+      origin: "system",
       version: /** @type {string} */ (probe.version),
     };
     return resolved;

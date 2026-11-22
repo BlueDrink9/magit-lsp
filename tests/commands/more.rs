@@ -441,16 +441,26 @@ fn complete_file_discard_identity_fresh_and_stale_matrix() {
 fn file_discard_decline_and_open_prompt_changes_preserve_exact_state() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
-    for kind in [
-        "binary",
-        "mode",
-        "added-mode",
-        "type",
-        "collapsed",
-        "untracked",
-        "untracked-link",
-        "directory",
-    ] {
+    let kinds: &[&str] = {
+        #[cfg(unix)]
+        {
+            &[
+                "binary",
+                "mode",
+                "added-mode",
+                "type",
+                "collapsed",
+                "untracked",
+                "untracked-link",
+                "directory",
+            ]
+        }
+        #[cfg(not(unix))]
+        {
+            &["binary", "collapsed", "untracked", "directory"]
+        }
+    };
+    for &kind in kinds {
         for accept in [false, true] {
             let (tmp, _) = RepoFixture::new()
                 .commit("init", [("base.txt", "base\n")])
@@ -594,6 +604,7 @@ fn stale_binary_whole_file_selection_validates_all_members_before_mutation() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn discarding_an_untracked_directory_symlink_never_deletes_its_target() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};

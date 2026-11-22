@@ -23,13 +23,19 @@
 //! become `hash-N` by first-seen position. Versions, order and payloads are not
 //! relaxed: an unexpected frame or a divergent expectation fails.
 
+#[path = "common/editor_model/mod.rs"]
+mod editor_model;
 #[path = "../scripts/example_recordings.rs"]
 mod example_recordings;
+#[path = "common/fake_editor.rs"]
+mod fake_editor;
 #[path = "common/mod.rs"]
 mod fixtures;
 
+use fake_editor::{FakeEditor, Profile};
 use fixtures::schema::{read_schema, schema_errors};
-use serde_json::{Map, Value};
+use magit_lsp::file_uri::uri_from_path;
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -708,6 +714,86 @@ fn commit_edit_abort_example_records_the_cancellation() {
     );
 }
 
+/// An explicit status refresh while a commit draft is pending renders its row.
+///
+/// Template delivery no longer pushes a detached status render, so this guards
+/// the behavior that deletion must preserve: pending-draft rows come from the
+/// session's registry lookup on every explicit render.
+///
+/// A scheduling red against the removed detached refresh is not reproducible
+/// deterministically: the extra frame came from an OS thread racing the client
+/// handshake, and forcing that order would need sleeps or production hooks.
+#[cfg(unix)]
+#[test]
+fn explicit_status_refresh_while_a_commit_draft_is_pending_renders_its_row() {
+    let (repo, _git) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let root = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .root()
+        .to_string_lossy()
+        .to_string();
+    let owner = "pending-row-refresh";
+    let mut session =
+        magit_lsp::session::Session::new_with_draft_owner(root.clone(), Some(owner.to_owned()));
+    session
+        .open(
+            "v1",
+            magit_lsp::view::ViewKind::Status,
+            magit_lsp::view::Placement::Main,
+            fixtures::STATUS_VIEWPORT,
+        )
+        .expect("open the status view");
+    assert!(
+        !session
+            .rendered_text("v1")
+            .expect("status render")
+            .contains(".git/COMMIT_EDITMSG"),
+        "no pending row exists before the draft"
+    );
+
+    let run_id = magit_lsp::editor::registry()
+        .create(&root, owner, magit_lsp::editor::DraftKind::CommitMessage)
+        .expect("create a pending commit draft");
+    let pending = magit_lsp::editor::registry().pending_for(owner, &root);
+    assert_eq!(
+        pending.len(),
+        1,
+        "one pending draft for this owner and repo"
+    );
+    let pending_uri = pending[0].uri.clone();
+
+    let render = session
+        .refresh("v1")
+        .expect("refresh the status view")
+        .expect("the pending row changes the status render");
+    let text = render
+        .text
+        .as_deref()
+        .map(|lines| lines.join("\n"))
+        .or_else(|| session.rendered_text("v1"))
+        .expect("status render text");
+    assert!(
+        text.lines().any(|line| line.trim() == pending_uri),
+        "the explicit refresh renders the pending draft row {pending_uri}: {text}"
+    );
+
+    assert!(
+        magit_lsp::editor::registry().resolve(&run_id, magit_lsp::editor::Reply::Abort),
+        "the pending draft is cleaned up"
+    );
+    session.refresh("v1").expect("refresh after the abort");
+    assert!(
+        !session
+            .rendered_text("v1")
+            .expect("status render")
+            .contains(&pending_uri),
+        "the row disappears once the draft is no longer pending"
+    );
+}
+
 #[test]
 fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let lines = example_lines("rich-lifecycle.jsonl");
@@ -1253,6 +1339,22 @@ impl HashNormalizer {
     }
 }
 
+/// Replace this run's repository root and binary path with the recording's
+/// placeholders.
+///
+/// This is the repository-root/binary half of [`canonical_frame`]'s contract,
+/// shared so a persisted client echo uses the same placeholders as a captured
+/// server frame. Replaying a recorded frame expands them back to the live
+/// values.
+fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
+    text.replace(
+        &format!("file://{root}"),
+        &format!("file://{RECORDED_ROOT}"),
+    )
+    .replace(root, RECORDED_ROOT)
+    .replace(binary, RECORDED_BINARY)
+}
+
 /// The recorded comparison form of a frame.
 ///
 /// The current server omits `jsonrpc` on outbound frames, recorded runs used a
@@ -1281,13 +1383,7 @@ fn canonical_frame(
     });
     hashes.normalize_frame(&mut value);
     let text = serde_json::to_string(&value).expect("serialise observed frame");
-    let text = text
-        .replace(
-            &format!("file://{root}"),
-            &format!("file://{RECORDED_ROOT}"),
-        )
-        .replace(root, RECORDED_ROOT)
-        .replace(binary, RECORDED_BINARY);
+    let text = canonical_paths(&text, root, binary);
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
@@ -1517,7 +1613,14 @@ fn replay_example_mode(
                             if let Some(refreshed) = &refreshed {
                                 message["params"]["contentChanges"][0]["text"] =
                                     Value::String(refreshed.clone());
-                                regenerated[index] = captured_line(line, &message)
+                                // The live server receives the refreshed text with
+                                // this run's real paths, but the artifact must keep
+                                // the recording's placeholders like every captured
+                                // server frame; strict replay expands them again.
+                                let mut persisted = message.clone();
+                                persisted["params"]["contentChanges"][0]["text"] =
+                                    Value::String(canonical_paths(refreshed, &root, binary));
+                                regenerated[index] = captured_line(line, &persisted)
                                     .map_err(|error| format!("{where_}: {error}"))?;
                             }
                             let sent_text = refreshed.unwrap_or_else(|| update.text.clone());
@@ -2119,6 +2222,40 @@ fn regeneration_echo_leaves_authored_client_edits_unchanged() {
         .collect();
     replay_example_mode(name, &reparsed, false)
         .expect("the captured commit example replays strictly");
+    // The captured echo of the pending-draft row must persist the recording's
+    // root placeholder, never this run's temporary repository root; a stale
+    // run root makes the strict replay above fail on the next run.
+    let pending_echo = reparsed
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
+                && line.message["params"]["textDocument"]["uri"]
+                    .as_str()
+                    .is_some_and(|uri| uri.ends_with(".magit"))
+                && line.message["params"]["contentChanges"][0]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("/.git/COMMIT_EDITMSG"))
+        })
+        .map(|line| {
+            line.message["params"]["contentChanges"][0]["text"]
+                .as_str()
+                .unwrap()
+        })
+        .expect("the captured pending-draft echo");
+    let pending_uri = format!("file://{RECORDED_ROOT}/.git/COMMIT_EDITMSG");
+    assert!(
+        pending_echo.contains(&pending_uri),
+        "the captured echo keeps the recording's repository placeholder: {pending_echo}"
+    );
+    let placeholder_prefix = format!("file://{RECORDED_ROOT}/");
+    for (start, _) in pending_echo.match_indices("file://") {
+        assert!(
+            pending_echo[start..].starts_with(&placeholder_prefix),
+            "a captured echo must not retain a run-specific root: {pending_echo}"
+        );
+    }
     let authored = reparsed
         .iter()
         .find_map(|line| {
@@ -2288,4 +2425,422 @@ fn first_difference_reports_missing_key() {
     assert_eq!(path, "$.result.command");
     assert!(expected_value.is_some());
     assert_eq!(json_excerpt(observed_value), "<missing>");
+}
+
+/// Capabilities for a Plain client that accepts edits and shows documents.
+fn plain_capabilities() -> Value {
+    json!({
+        "general": {"positionEncodings": ["utf-8", "utf-16"]},
+        "textDocument": {"codeAction": {"disabledSupport": true}},
+        "window": {"showDocument": {"support": true}},
+        "workspace": {
+            "applyEdit": true,
+            "executeCommand": {"dynamicRegistration": true},
+            "workspaceEdit": {"documentChanges": true}
+        }
+    })
+}
+
+/// Open the repository's `.magit` status document as a Plain client.
+fn open_plain_status(
+    repo: &fixtures::RepoFixture,
+) -> (fixtures::stdio::TestServer, FakeEditor, String) {
+    let status_uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native status path has a file URI")
+        .as_str()
+        .to_owned();
+    let root_uri = uri_from_path(repo.path())
+        .expect("native root has a file URI")
+        .as_str()
+        .to_owned();
+    let mut server = fixtures::stdio::TestServer::spawn(&[]);
+    let mut init = fixtures::stdio::initialize_message();
+    init["params"]["capabilities"] = plain_capabilities();
+    init["params"]["workspaceFolders"] = json!([{"uri": root_uri, "name": "repo"}]);
+    server.send(init);
+    let initialized = server.response_with_id(1);
+    assert!(
+        initialized["result"]["capabilities"]["codeActionProvider"] == true,
+        "Plain initialize failed: {initialized}"
+    );
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&status_uri, "stale\n"));
+    loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            break;
+        }
+    }
+    (server, editor, status_uri)
+}
+
+/// Send one request, answering server requests, and keep every other frame.
+///
+/// Returns the response carrying the request's id; `frames` collects the
+/// notifications and requests observed first, so callers can assert on the
+/// edits the server published before answering.
+fn plain_request(
+    server: &mut fixtures::stdio::TestServer,
+    editor: &mut FakeEditor,
+    frames: &mut Vec<Value>,
+    message: Value,
+) -> Value {
+    let id = message["id"].clone();
+    server.send(message);
+    loop {
+        let received = server.recv();
+        if received["method"].is_string() {
+            frames.push(received.clone());
+            if !received["id"].is_null() {
+                for reply in editor.dispatch(&received) {
+                    server.send(reply);
+                }
+            }
+            continue;
+        }
+        if received["id"] == id {
+            return received;
+        }
+        frames.push(received);
+    }
+}
+
+/// Request code actions for one status or draft line.
+fn plain_code_actions(
+    server: &mut fixtures::stdio::TestServer,
+    editor: &mut FakeEditor,
+    frames: &mut Vec<Value>,
+    uri: &str,
+    line: u32,
+) -> Vec<Value> {
+    let id = fake_editor::allocate_request_id() + 1000;
+    let response = plain_request(
+        server,
+        editor,
+        frames,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/codeAction",
+            "params": {
+                "textDocument": {"uri": uri},
+                "range": {
+                    "start": {"line": line, "character": 0},
+                    "end": {"line": line, "character": 0}
+                },
+                "context": {"diagnostics": []}
+            }
+        }),
+    );
+    response["result"].as_array().cloned().unwrap_or_default()
+}
+
+/// The semantic arguments of the offered action whose command is `command`.
+fn action_args<'a>(actions: &'a [Value], command: &str) -> Option<&'a Value> {
+    actions.iter().find_map(|action| {
+        let args = &action["command"]["arguments"][0];
+        (args["command"] == command).then_some(args)
+    })
+}
+
+/// Execute one offered Plain action and return the command response.
+fn plain_execute(
+    server: &mut fixtures::stdio::TestServer,
+    editor: &mut FakeEditor,
+    frames: &mut Vec<Value>,
+    args: &Value,
+) -> Value {
+    let id = fake_editor::allocate_request_id() + 1000;
+    plain_request(
+        server,
+        editor,
+        frames,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "workspace/executeCommand",
+            "params": {"command": "magit.command", "arguments": [args]}
+        }),
+    )
+}
+
+/// Ask the session for the same refresh entry the file watcher uses.
+fn plain_refresh(
+    server: &mut fixtures::stdio::TestServer,
+    editor: &mut FakeEditor,
+    frames: &mut Vec<Value>,
+    view_id: &str,
+) -> Value {
+    let id = fake_editor::allocate_request_id() + 1000;
+    plain_request(
+        server,
+        editor,
+        frames,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "view/invoke",
+            "params": {"viewId": view_id, "command": "common.refresh"}
+        }),
+    )
+}
+
+/// Whether a server request is an edit of `uri`.
+fn edits_uri(frame: &Value, uri: &str) -> bool {
+    frame["method"] == "workspace/applyEdit"
+        && frame["params"]["edit"]["documentChanges"]
+            .as_array()
+            .is_some_and(|changes| {
+                changes
+                    .iter()
+                    .any(|change| change["textDocument"]["uri"] == uri)
+            })
+}
+
+/// Direct `commit.create` delivers the pending row before an unchanged refresh.
+#[cfg(unix)]
+#[test]
+fn direct_commit_create_publishes_pending_draft_row_before_refresh() {
+    let (repo, _git) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .staged_file("f.txt", "after\n")
+        .build();
+    let draft_uri = uri_from_path(&repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native draft path has a file URI")
+        .as_str()
+        .to_owned();
+    let (mut server, mut editor, status_uri) = open_plain_status(&repo);
+    let mut frames = Vec::new();
+    let line = editor
+        .text(&status_uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .unwrap() as u32;
+    let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &status_uri, line);
+    let open = action_args(&actions, "open.commit").expect("status offers commit");
+    let view_id = open["target"]["viewId"]
+        .as_str()
+        .expect("view id")
+        .to_owned();
+    // The adapter opens the editor document before a commit operation can
+    // wait for the user to edit and confirm it.
+    server.send(editor.open(&draft_uri, "stale\n"));
+    frames.clear();
+    let response = plain_request(
+        &mut server,
+        &mut editor,
+        &mut frames,
+        json!({
+            "jsonrpc":"2.0", "id":fake_editor::allocate_request_id()+1000, "method":"view/invoke",
+            "params":{"viewId":view_id,"command":"commit.create"}
+        }),
+    );
+    assert!(
+        response.get("error").is_none(),
+        "direct commit.create failed: {response}"
+    );
+    let published = editor.text(&status_uri).to_owned();
+    assert!(
+        published.contains(".git/COMMIT_EDITMSG"),
+        "initial direct invocation delivers row: {published}"
+    );
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| edits_uri(frame, &status_uri))
+            .count(),
+        1,
+        "one initial status edit: {frames:#?}"
+    );
+    server.send(editor.open(&draft_uri, "stale\n"));
+    frames.clear();
+    let refreshed = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        refreshed.get("error").is_none(),
+        "refresh failed: {refreshed}"
+    );
+    assert!(
+        !frames.iter().any(|frame| edits_uri(frame, &status_uri)),
+        "unchanged refresh emits no status edit"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while editor.text(&draft_uri) == "stale\n" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "commit template never attached"
+        );
+        let received = server.recv();
+        if received["method"].is_string() && !received["id"].is_null() {
+            for frame in editor.dispatch(&received) {
+                server.send(frame);
+            }
+        }
+    }
+    let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &draft_uri, 0);
+    let abort = action_args(&actions, "common.cancel").expect("draft offers abort");
+    let aborted = plain_execute(&mut server, &mut editor, &mut frames, abort);
+    assert_eq!(aborted["result"]["type"], "aborted");
+    frames.clear();
+    let _ = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        !editor.text(&status_uri).contains(".git/COMMIT_EDITMSG"),
+        "abort clears pending row"
+    );
+    server.shutdown_and_exit();
+    let (exit, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(exit.success());
+}
+
+/// A commit run's published status already contains the pending draft row.
+///
+/// The draft is admitted at the operation boundary, after the command's status
+/// render is published, so the server must re-publish the focused status once
+/// the draft exists. Otherwise the operation publishes a status document
+/// without the row and the next watcher refresh appends it as a second edit.
+/// This drives the real Plain server through the offered commit action and then
+/// invokes the watcher's refresh entry: an unchanged repository must emit no
+/// further status edit while the draft is pending.
+#[cfg(unix)]
+#[test]
+fn commit_start_publishes_pending_draft_row_before_any_refresh() {
+    let (repo, _git) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .staged_file("f.txt", "after\n")
+        .build();
+    let draft_uri = uri_from_path(&repo.path().join(".git/COMMIT_EDITMSG"))
+        .expect("native draft path has a file URI")
+        .as_str()
+        .to_owned();
+    let (mut server, mut editor, status_uri) = open_plain_status(&repo);
+    let mut frames = Vec::new();
+
+    // Open the commit menu from the staged row.
+    let staged_line = editor
+        .text(&status_uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("status shows the staged f.txt row") as u32;
+    let actions = plain_code_actions(
+        &mut server,
+        &mut editor,
+        &mut frames,
+        &status_uri,
+        staged_line,
+    );
+    let open_commit = action_args(&actions, "open.commit")
+        .expect("open.commit is offered for the staged row")
+        .clone();
+    let view_id = open_commit["target"]["viewId"]
+        .as_str()
+        .expect("the offered action names the status view")
+        .to_owned();
+    let opened = plain_execute(&mut server, &mut editor, &mut frames, &open_commit);
+    assert!(
+        opened.get("error").is_none(),
+        "open.commit failed: {opened}"
+    );
+
+    // Pre-open the draft buffer so the adapter attaches the commit template.
+    server.send(editor.open(&draft_uri, "stale\n"));
+
+    // Find the menu's commit-creation item.
+    let mut create = None;
+    let menu_lines = editor.text(&status_uri).lines().count() as u32;
+    'menu: for line in 0..menu_lines {
+        let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &status_uri, line);
+        for action in actions {
+            let args = &action["command"]["arguments"][0];
+            if args["command"] == "menu.run-action" && args["target"]["itemKey"].is_string() {
+                create = Some(args.clone());
+                break 'menu;
+            }
+        }
+    }
+    let create = create.unwrap_or_else(|| {
+        panic!(
+            "the commit menu offers its creation item; document:\n{}\nframes:\n{:#?}",
+            editor.text(&status_uri),
+            frames
+        )
+    });
+    let before_commit = editor.text(&status_uri).to_owned();
+
+    // The operation boundary: the draft is admitted and the status republished.
+    frames.clear();
+    let committed = plain_execute(&mut server, &mut editor, &mut frames, &create);
+    assert!(
+        committed.get("error").is_none(),
+        "the commit command failed: {committed}"
+    );
+    let published = editor.text(&status_uri).to_owned();
+    assert_ne!(
+        published, before_commit,
+        "the commit command republishes the status document"
+    );
+    assert!(
+        published.contains(".git/COMMIT_EDITMSG"),
+        "the operation's published status already includes the pending draft row: {published}"
+    );
+
+    // The watcher's refresh entry must see an unchanged tree for the pending run.
+    frames.clear();
+    let refreshed = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        refreshed.get("error").is_none(),
+        "refresh failed: {refreshed}"
+    );
+    assert!(
+        !frames.iter().any(|frame| edits_uri(frame, &status_uri)),
+        "an unchanged repository emits no extra status applyEdit while the draft is pending: {frames:#?}"
+    );
+    assert_eq!(
+        editor.text(&status_uri),
+        published,
+        "the pending status text is unchanged by the refresh"
+    );
+
+    // The template edit attaches the pre-opened draft; abort to end the run.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while editor.text(&draft_uri) == "stale\n" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the commit template never attached to the pre-opened draft"
+        );
+        let received = server.recv();
+        if received["method"].is_string() && !received["id"].is_null() {
+            for frame in editor.dispatch(&received) {
+                server.send(frame);
+            }
+        }
+    }
+    let actions = plain_code_actions(&mut server, &mut editor, &mut frames, &draft_uri, 0);
+    let abort =
+        action_args(&actions, "common.cancel").expect("the attached draft offers Abort commit");
+    let aborted = plain_execute(&mut server, &mut editor, &mut frames, abort);
+    assert!(aborted.get("error").is_none(), "Abort failed: {aborted}");
+    assert_eq!(aborted["result"]["type"], "aborted");
+
+    frames.clear();
+    let restored = plain_refresh(&mut server, &mut editor, &mut frames, &view_id);
+    assert!(
+        restored.get("error").is_none(),
+        "refresh failed: {restored}"
+    );
+    let status = editor.text(&status_uri).to_owned();
+    assert!(
+        !status.contains(".git/COMMIT_EDITMSG"),
+        "the aborted draft's row is gone: {status}"
+    );
+    assert!(
+        status.contains("f.txt"),
+        "the status view is restored after the abort: {status}"
+    );
+
+    server.shutdown_and_exit();
+    let (exit, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(exit.success());
 }

@@ -23,6 +23,44 @@ The examples below use this absolute server location; change it if installed
 elsewhere. Add `~/.local/bin` to PATH **before launching the editor** if using
 PATH discovery. GUI editors may not inherit a shell's PATH.
 
+## Mason server package (prepared, not submitted)
+
+[`clients/mason/package.yaml`](../clients/mason/package.yaml) is a prepared
+Mason registry submission for the **server**, not the Lua client. It is not in
+the hosted registry; `:MasonInstall magit-lsp` is not a published installation
+path. Install the client separately using a method below.
+
+For local Linux x86_64 GNU verification, run:
+
+```sh
+nix develop -c make mason-install-check
+```
+
+This fetches actual mason.nvim `v2.3.1` at
+`2a6940af80375532e5e9e7c1f2fc6319a1b7a69d` into disposable storage and uses its
+registry, compiler and installer (including vendored dependencies). It derives
+the private registry's JSON mechanically from the production YAML, rejecting
+unhandled content; no package fields are overridden. Only registry selection
+(`github:local/magit-registry@fixture`) and `github.download_url_template` are
+redirected to loopback HTTP. No runtime registry clone or YAML compiler tool
+is needed.
+
+The archive is produced by `scripts/package-release.sh` from the freshly built
+**debug** 0.2.0 server, not a hosted/release-mode binary. A corrupt archive must
+fail real tar unpack without a receipt or executable; replacing the served
+bytes with the valid archive must install successfully in the same Mason root.
+The check asserts receipt/source parity, binlink, `--version`, LSP initialize
+and rendered status using that installed executable. A test-only launcher
+records process identity before executing the installed binlink; it does not
+copy or extract the installed binary. HOME/XDG, manager, registry and install
+state are isolated and removed, owned editor/server processes are stopped,
+and structured evidence is retained in `build/ui/mason-install/`.
+
+This is local Linux/debug-fixture evidence only: no upstream registry
+submission, live release download, clean-machine installation, Windows/macOS
+verification or publication is claimed. Git/network access is needed to fetch
+the pinned manager; Neovim 0.11+, curl and tar/gzip must already be available.
+
 ## Neovim native packages
 
 Install only the client by placing the repository in a native `start` package:
@@ -31,6 +69,10 @@ Install only the client by placing the repository in a native `start` package:
 git clone https://github.com/BlueDrink9/magit-lsp.git \
   "${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/magit/start/magit-lsp"
 ```
+
+The client ships `doc/magit.txt`: `:h magit` documents `:Magit [directory]`,
+minimal setup, server discovery and protocol-version troubleshooting. Run
+`:helptags ALL` if your package manager does not generate help tags.
 
 Add this to `init.lua`. `MagitStatus` is a **user command defined by this
 example**, not a built-in plugin command:
@@ -92,8 +134,9 @@ is no `cargo run` fallback. Profiles are `vim` (Neovim default) and `standard`.
 A general LSP client needs no plugin: this `init.lua` starts the external server
 for repository `.magit` documents and commit drafts and keeps the session in
 Plain presentation. It declares no `capabilities.experimental.magit` block and
-disables `window.showDocument`, so the server advertises only standard methods
-and Plain actions; see [client implementation
+relies on Neovim's built-in `window.showDocument` support, so the server
+advertises only standard methods and Plain actions and can reveal prompt
+documents and commit drafts with no custom handler; see [client implementation
 levels](CLIENT_SPEC.md#client-implementation-levels). The test harness loads this
 exact block, so it is the tested reference setup.
 
@@ -108,7 +151,6 @@ local function attach_magit(buf)
     return
   end
   local capabilities = vim.lsp.protocol.make_client_capabilities()
-  capabilities.window.showDocument = { support = false }
   vim.lsp.start({
     name = 'magit-lsp',
     cmd = { server },
@@ -133,10 +175,10 @@ Start Neovim in the repository root (the snippet passes `vim.fn.getcwd()` as
 rendered into that buffer; the `.magit` file on disk is presentation only and is
 not written by the server. To act, put the cursor on a rendered row and run
 `:lua vim.lsp.buf.code_action()`. Commit prompts open the real
-`.git/COMMIT_EDITMSG` draft: edit it with ordinary Neovim input and choose the
-offered **Confirm commit** or **Abort commit** code action. The optional
-`$MAGIT_LSP_BIN` override in the snippet matches the plugin's server-discovery
-rule; without it the server is read from `~/.local/bin`.
+`.git/COMMIT_EDITMSG` draft automatically; edit it with ordinary Neovim input
+and choose the offered **Confirm commit** or **Abort commit** code action.
+The optional `$MAGIT_LSP_BIN` override in the snippet matches the plugin's
+server-discovery rule; without it the server is read from `~/.local/bin`.
 
 `make plain-neovim` boots this exact block in an isolated Neovim configuration
 with a temporary repository and asserts the rendered status text and Git state.

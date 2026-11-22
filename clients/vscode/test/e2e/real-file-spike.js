@@ -1,14 +1,21 @@
-'use strict';
+"use strict";
 // Isolated test extension and extension-host suite; never loads production code.
-const vscode = require('vscode');
-const fs = require('fs');
-const { execFileSync } = require('child_process');
-const assert = require('node:assert/strict');
+const vscode = require("vscode");
+const fs = require("fs");
+const { execFileSync } = require("child_process");
+const assert = require("node:assert/strict");
 const base = process.env.MAGIT_REAL_FILE_EVIDENCE;
 const root = process.env.MAGIT_REAL_FILE_ROOT;
-const trace = () => fs.existsSync(`${base}/wire.jsonl`)
-  ? fs.readFileSync(`${base}/wire.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-const count = (method) => trace().filter(m => m.method === method).length;
+const trace = () =>
+  fs.existsSync(`${base}/wire.jsonl`)
+    ? fs
+        .readFileSync(`${base}/wire.jsonl`, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map(JSON.parse)
+    : [];
+const count = (method) => trace().filter((m) => m.method === method).length;
 
 /** Await a condition with a bounded deadline, not a fixed settling delay. */
 function until(check, label, timeout = 5000) {
@@ -17,300 +24,663 @@ function until(check, label, timeout = 5000) {
     const timer = setInterval(() => {
       try {
         const result = check();
-        if (result) { clearInterval(timer); resolve(result); }
-        else if (Date.now() >= deadline) { clearInterval(timer); reject(new Error(`Deadline: ${label}`)); }
-      } catch (error) { clearInterval(timer); reject(error); }
+        if (result) {
+          clearInterval(timer);
+          resolve(result);
+        } else if (Date.now() >= deadline) {
+          clearInterval(timer);
+          reject(new Error(`Deadline: ${label}`));
+        }
+      } catch (error) {
+        clearInterval(timer);
+        reject(error);
+      }
     }, 25);
   });
 }
 
 /** Attach the actual languageclient to real files in the disposable repository. */
 exports.activate = async function activate(context) {
-  const { LanguageClient } = require(`${root}/clients/vscode/node_modules/vscode-languageclient/node`);
-  const client = new LanguageClient('real-file-spike', 'Real file observer', {
-    command: 'python3', args: [`${root}/tests/spikes/real_file_lsp.py`, '--record', `${base}/wire.jsonl`],
-  }, { documentSelector: [{ scheme: 'file', pattern: `${base}/repo/.git/COMMIT_EDITMSG` }],
-    middleware: { window: { showDocument: async (params, next) => {
-      if (params.external) return next(params);
-      fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'showDocument', uri: params.uri, preview: false }) + '\n');
-      // languageclient 9's default handler ignores a preview property on params.
-      await vscode.window.showTextDocument(vscode.Uri.parse(params.uri), {
-        preview: false, preserveFocus: params.takeFocus !== true,
-        selection: params.selection && client.protocol2CodeConverter.asRange(params.selection),
-      });
-      return { success: true };
-    } } },
-  });
-  context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(d =>
-    fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'open', uri: d.uri.toString(), language: d.languageId }) + '\n')));
-  context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(d =>
-    fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'close', uri: d.uri.toString(), language: d.languageId }) + '\n')));
-  context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(event => {
-    const uri = vscode.Uri.file(`${base}/repo/.git/COMMIT_EDITMSG`).toString();
-    const matchingTabs = vscode.window.tabGroups.all.flatMap(group => group.tabs)
-      .filter(tab => tab.input && tab.input.uri && tab.input.uri.toString() === uri).length;
-    const closed = event.closed.map(tab => ({
-      uri: tab.input && tab.input.uri ? tab.input.uri.toString() : null,
-      isCommitEditMsg: !!(tab.input && tab.input.uri && tab.input.uri.toString() === uri),
-    }));
-    fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'tabs', timestamp: new Date().toISOString(), closed, matchingTabs,
-      qualified: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0,
-      savedDiskText: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0
-        ? fs.readFileSync(vscode.Uri.parse(uri).fsPath, 'utf8') : null,
-      groups: vscode.window.tabGroups.all.map(group => ({ viewColumn: group.viewColumn,
-        uris: group.tabs.map(tab => tab.input?.uri?.toString() || null) })),
-    }) + '\n');
-  }));
-  context.subscriptions.push(vscode.extensions.onDidChange(() => fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'extensionsChanged', timestamp: new Date().toISOString() }) + '\n')));
-  fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'activate', timestamp: new Date().toISOString() }) + '\n');
+  const { LanguageClient } = require(
+    `${root}/clients/vscode/node_modules/vscode-languageclient/node`,
+  );
+  const client = new LanguageClient(
+    "real-file-spike",
+    "Real file observer",
+    {
+      command: "python3",
+      args: [`${root}/tests/spikes/real_file_lsp.py`, "--record", `${base}/wire.jsonl`],
+    },
+    {
+      documentSelector: [{ scheme: "file", pattern: `${base}/repo/.git/COMMIT_EDITMSG` }],
+      middleware: {
+        window: {
+          showDocument: async (params, next) => {
+            if (params.external) return next(params);
+            fs.appendFileSync(
+              `${base}/api.jsonl`,
+              JSON.stringify({ event: "showDocument", uri: params.uri, preview: false }) + "\n",
+            );
+            // languageclient 9's default handler ignores a preview property on params.
+            await vscode.window.showTextDocument(vscode.Uri.parse(params.uri), {
+              preview: false,
+              preserveFocus: params.takeFocus !== true,
+              selection:
+                params.selection && client.protocol2CodeConverter.asRange(params.selection),
+            });
+            return { success: true };
+          },
+        },
+      },
+    },
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((d) =>
+      fs.appendFileSync(
+        `${base}/api.jsonl`,
+        JSON.stringify({ event: "open", uri: d.uri.toString(), language: d.languageId }) + "\n",
+      ),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument((d) =>
+      fs.appendFileSync(
+        `${base}/api.jsonl`,
+        JSON.stringify({ event: "close", uri: d.uri.toString(), language: d.languageId }) + "\n",
+      ),
+    ),
+  );
+  context.subscriptions.push(
+    vscode.window.tabGroups.onDidChangeTabs((event) => {
+      const uri = vscode.Uri.file(`${base}/repo/.git/COMMIT_EDITMSG`).toString();
+      const matchingTabs = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tab.input && tab.input.uri && tab.input.uri.toString() === uri).length;
+      const closed = event.closed.map((tab) => ({
+        uri: tab.input && tab.input.uri ? tab.input.uri.toString() : null,
+        isCommitEditMsg: !!(tab.input && tab.input.uri && tab.input.uri.toString() === uri),
+      }));
+      fs.appendFileSync(
+        `${base}/api.jsonl`,
+        JSON.stringify({
+          event: "tabs",
+          timestamp: new Date().toISOString(),
+          closed,
+          matchingTabs,
+          qualified: closed.some((tab) => tab.isCommitEditMsg) && matchingTabs === 0,
+          savedDiskText:
+            closed.some((tab) => tab.isCommitEditMsg) && matchingTabs === 0
+              ? fs.readFileSync(vscode.Uri.parse(uri).fsPath, "utf8")
+              : null,
+          groups: vscode.window.tabGroups.all.map((group) => ({
+            viewColumn: group.viewColumn,
+            uris: group.tabs.map((tab) => tab.input?.uri?.toString() || null),
+          })),
+        }) + "\n",
+      );
+    }),
+  );
+  context.subscriptions.push(
+    vscode.extensions.onDidChange(() =>
+      fs.appendFileSync(
+        `${base}/api.jsonl`,
+        JSON.stringify({ event: "extensionsChanged", timestamp: new Date().toISOString() }) + "\n",
+      ),
+    ),
+  );
+  fs.appendFileSync(
+    `${base}/api.jsonl`,
+    JSON.stringify({ event: "activate", timestamp: new Date().toISOString() }) + "\n",
+  );
   await client.start();
   if (process.env.MAGIT_REAL_FILE_LIFECYCLE) {
-    setImmediate(() => observeLifecycle(client).catch(error => {
-      fs.writeFileSync(`${base}/lifecycle-error.json`, JSON.stringify({ error: error.stack }));
-    }));
+    setImmediate(() =>
+      observeLifecycle(client).catch((error) => {
+        fs.writeFileSync(`${base}/lifecycle-error.json`, JSON.stringify({ error: error.stack }));
+      }),
+    );
     return { client };
   }
-  if (process.env.MAGIT_REAL_FILE_NATIVE === '1') setImmediate(() => exports.run().catch(error => console.error(error)));
+  if (process.env.MAGIT_REAL_FILE_NATIVE === "1")
+    setImmediate(() => exports.run().catch((error) => console.error(error)));
   return { client };
 };
 
 /** Retain actual extension deactivation separately from subscription disposal. */
 exports.deactivate = function deactivate() {
-  fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'deactivate', timestamp: new Date().toISOString() }) + '\n');
+  fs.appendFileSync(
+    `${base}/api.jsonl`,
+    JSON.stringify({ event: "deactivate", timestamp: new Date().toISOString() }) + "\n",
+  );
 };
 
 /** Observe one real native lifecycle action; the external supervisor owns completion. */
 async function observeLifecycle(client) {
-  const log = data => fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ timestamp: new Date().toISOString(), ...data }) + '\n');
+  const log = (data) =>
+    fs.appendFileSync(
+      `${base}/api.jsonl`,
+      JSON.stringify({ timestamp: new Date().toISOString(), ...data }) + "\n",
+    );
   const uri = vscode.Uri.file(`${base}/repo/.git/COMMIT_EDITMSG`);
-  const tabs = () => vscode.window.tabGroups.all.flatMap(g => g.tabs).filter(t => t.input?.uri?.toString() === uri.toString());
+  const tabs = () =>
+    vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .filter((t) => t.input?.uri?.toString() === uri.toString());
   if (fs.existsSync(`${base}/lifecycle-action.json`)) {
-    log({ event: 'lifecycle-reactivated', matchingTabs: tabs().length,
-      workspace: vscode.workspace.workspaceFolders?.map(f => f.uri.toString()) });
-    fs.writeFileSync(`${base}/reactivated.json`, JSON.stringify({ timestamp: new Date().toISOString() }));
+    log({
+      event: "lifecycle-reactivated",
+      matchingTabs: tabs().length,
+      workspace: vscode.workspace.workspaceFolders?.map((f) => f.uri.toString()),
+    });
+    fs.writeFileSync(
+      `${base}/reactivated.json`,
+      JSON.stringify({ timestamp: new Date().toISOString() }),
+    );
     return;
   }
-  assert.equal((await client.sendRequest('spike/show', { uri: uri.toString(), takeFocus: true })).success, true);
-  await until(() => count('textDocument/didOpen') && tabs().length === 1, 'permanent lifecycle draft');
+  assert.equal(
+    (await client.sendRequest("spike/show", { uri: uri.toString(), takeFocus: true })).success,
+    true,
+  );
+  await until(
+    () => count("textDocument/didOpen") && tabs().length === 1,
+    "permanent lifecycle draft",
+  );
   assert.equal(tabs()[0].isPreview, false);
   assert.equal(vscode.window.activeTextEditor.document.isDirty, false);
-  const cdp = (method, params = {}) => JSON.parse(execFileSync(process.execPath, [
-    `${root}/clients/vscode/test/e2e/real-file-spike.mjs`, '--cdp', process.env.MAGIT_REAL_FILE_CDP, method, JSON.stringify(params),
-  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 10000 }));
-  await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.replace(/\s/g, ' ').includes('spike message'), 'painted lifecycle draft');
-  fs.writeFileSync(`${base}/pre-action.json`, JSON.stringify({ text: cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value, uri: uri.toString(), dirty: vscode.window.activeTextEditor.document.isDirty }));
+  const cdp = (method, params = {}) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          `${root}/clients/vscode/test/e2e/real-file-spike.mjs`,
+          "--cdp",
+          process.env.MAGIT_REAL_FILE_CDP,
+          method,
+          JSON.stringify(params),
+        ],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8", timeout: 10000 },
+      ),
+    );
+  await until(
+    () =>
+      cdp("Runtime.evaluate", { expression: "document.body.innerText" })
+        .result.value.replace(/\s/g, " ")
+        .includes("spike message"),
+    "painted lifecycle draft",
+  );
+  fs.writeFileSync(
+    `${base}/pre-action.json`,
+    JSON.stringify({
+      text: cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value,
+      uri: uri.toString(),
+      dirty: vscode.window.activeTextEditor.document.isDirty,
+    }),
+  );
   const action = process.env.MAGIT_REAL_FILE_LIFECYCLE;
-  const command = { 'close-window': 'workbench.action.closeWindow', 'reload-window': 'workbench.action.reloadWindow',
-    'workspace-change': 'vscode.openFolder' }[action];
-  const args = action === 'workspace-change' ? [vscode.Uri.file(`${base}/other-workspace`), { forceReuseWindow: true }] : [];
-  const record = { event: 'lifecycle-action', action, command, args, timestamp: new Date().toISOString(),
-    matchingTabs: tabs().length, dirty: false, isPreview: tabs()[0].isPreview };
+  const command = {
+    "close-window": "workbench.action.closeWindow",
+    "reload-window": "workbench.action.reloadWindow",
+    "workspace-change": "vscode.openFolder",
+  }[action];
+  const args =
+    action === "workspace-change"
+      ? [vscode.Uri.file(`${base}/other-workspace`), { forceReuseWindow: true }]
+      : [];
+  const record = {
+    event: "lifecycle-action",
+    action,
+    command,
+    args,
+    timestamp: new Date().toISOString(),
+    matchingTabs: tabs().length,
+    dirty: false,
+    isPreview: tabs()[0].isPreview,
+  };
   log(record);
   fs.writeFileSync(`${base}/lifecycle-action.json`, JSON.stringify(record, null, 2));
   try {
     await vscode.commands.executeCommand(command, ...args);
-    log({ event: 'lifecycle-command-resolved', command });
+    log({ event: "lifecycle-command-resolved", command });
   } catch (error) {
     // A native restart can cancel the issuing host's command RPC. Completion is
     // still proved externally by exit/reactivation, never by this rejection.
-    log({ event: 'lifecycle-command-rejected', command, error: error.stack });
+    log({ event: "lifecycle-command-rejected", command, error: error.stack });
   }
 }
 
 /** Exercise the real editor, retaining observations even when the hard gate fails. */
 exports.run = async function run() {
-  const result = { gate: 'incomplete', cases: {} };
+  const result = { gate: "incomplete", cases: {} };
   let client;
-  const cdp = (method, params = {}) => JSON.parse(execFileSync(process.execPath, [
-    `${root}/clients/vscode/test/e2e/real-file-spike.mjs`, '--cdp', process.env.MAGIT_REAL_FILE_CDP, method, JSON.stringify(params),
-  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 10000 }));
+  const cdp = (method, params = {}) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          `${root}/clients/vscode/test/e2e/real-file-spike.mjs`,
+          "--cdp",
+          process.env.MAGIT_REAL_FILE_CDP,
+          method,
+          JSON.stringify(params),
+        ],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8", timeout: 10000 },
+      ),
+    );
   try {
-    ({ client } = await vscode.extensions.getExtension('spike.real-file-spike').activate());
+    ({ client } = await vscode.extensions.getExtension("spike.real-file-spike").activate());
     const windowId = await until(() => {
       try {
-        const ids = execFileSync('xdotool', ['search', '--name', base], { encoding: 'utf8' }).trim().split('\n');
+        const ids = execFileSync("xdotool", ["search", "--name", base], { encoding: "utf8" })
+          .trim()
+          .split("\n");
         return ids.length === 1 && ids[0];
-      } catch (_) { return false; }
-    }, 'isolated window');
-    try { execFileSync('bspc', ['node', windowId, '-t', 'floating'], { stdio: 'ignore' }); } catch (_) { /* other WM */ }
-    execFileSync('xdotool', ['windowsize', '--sync', windowId, '1200', '760']);
-    await until(() => cdp('Runtime.evaluate', { expression: 'innerWidth >= 1100' }).result.value, 'window geometry');
+      } catch (_) {
+        return false;
+      }
+    }, "isolated window");
+    try {
+      execFileSync("bspc", ["node", windowId, "-t", "floating"], { stdio: "ignore" });
+    } catch (_) {
+      /* other WM */
+    }
+    execFileSync("xdotool", ["windowsize", "--sync", windowId, "1200", "760"]);
+    await until(
+      () => cdp("Runtime.evaluate", { expression: "innerWidth >= 1100" }).result.value,
+      "window geometry",
+    );
     const uri = vscode.Uri.file(`${base}/repo/.git/COMMIT_EDITMSG`);
-    const api = () => fs.existsSync(`${base}/api.jsonl`)
-      ? fs.readFileSync(`${base}/api.jsonl`, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-    const qualifiedClosures = () => api().filter(item => item.event === 'tabs' && item.qualified);
-    const matchingTabs = () => vscode.window.tabGroups.all.flatMap(g => g.tabs)
-      .filter(tab => tab.input?.uri?.toString() === uri.toString());
-    const show = () => client.sendRequest('spike/show', { uri: uri.toString(), takeFocus: true });
+    const api = () =>
+      fs.existsSync(`${base}/api.jsonl`)
+        ? fs
+            .readFileSync(`${base}/api.jsonl`, "utf8")
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map(JSON.parse)
+        : [];
+    const qualifiedClosures = () => api().filter((item) => item.event === "tabs" && item.qualified);
+    const matchingTabs = () =>
+      vscode.window.tabGroups.all
+        .flatMap((g) => g.tabs)
+        .filter((tab) => tab.input?.uri?.toString() === uri.toString());
+    const show = () => client.sendRequest("spike/show", { uri: uri.toString(), takeFocus: true });
     result.cases.show = await show();
     assert.equal(result.cases.show.success, true);
-    assert.equal(api().filter(item => item.event === 'showDocument').length, 1, 'real middleware invoked');
-    result.cases.preview = { isPreview: vscode.window.tabGroups.all.flatMap(g => g.tabs)
-      .find(tab => tab.input && tab.input.uri && tab.input.uri.toString() === uri.toString()).isPreview };
-    if (result.cases.preview.isPreview) throw new Error('showDocument opened preview tab');
-    await until(() => count('textDocument/didOpen'), 'wire didOpen');
+    assert.equal(
+      api().filter((item) => item.event === "showDocument").length,
+      1,
+      "real middleware invoked",
+    );
+    result.cases.preview = {
+      isPreview: vscode.window.tabGroups.all
+        .flatMap((g) => g.tabs)
+        .find((tab) => tab.input && tab.input.uri && tab.input.uri.toString() === uri.toString())
+        .isPreview,
+    };
+    if (result.cases.preview.isPreview) throw new Error("showDocument opened preview tab");
+    await until(() => count("textDocument/didOpen"), "wire didOpen");
     const doc = vscode.window.activeTextEditor.document;
     result.cases.language = doc.languageId;
-    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.replace(/\s/g, ' ').includes('spike message'), 'painted editor');
+    await until(
+      () =>
+        cdp("Runtime.evaluate", { expression: "document.body.innerText" })
+          .result.value.replace(/\s/g, " ")
+          .includes("spike message"),
+      "painted editor",
+    );
     const otherUri = vscode.Uri.file(`${base}/repo/other.txt`);
-    fs.writeFileSync(otherUri.fsPath, 'unrelated file: switching is not closure\n');
+    fs.writeFileSync(otherUri.fsPath, "unrelated file: switching is not closure\n");
     await vscode.window.showTextDocument(otherUri, { preview: false });
-    await until(() => vscode.window.activeTextEditor?.document.uri.toString() === otherUri.toString(), 'switched away');
+    await until(
+      () => vscode.window.activeTextEditor?.document.uri.toString() === otherUri.toString(),
+      "switched away",
+    );
     assert.equal(matchingTabs().length, 1);
-    assert.equal(qualifiedClosures().length, 0, 'switching away must not qualify');
+    assert.equal(qualifiedClosures().length, 0, "switching away must not qualify");
     await show();
-    assert.equal(qualifiedClosures().length, 0, 'switching back must not qualify');
+    assert.equal(qualifiedClosures().length, 0, "switching back must not qualify");
     result.cases.focusSwitch = { qualifiedClosureDelta: 0, matchingTabs: matchingTabs().length };
-    await vscode.commands.executeCommand('workbench.action.splitEditorRight');
-    await until(() => matchingTabs().length === 2, 'same URI in two groups');
-    assert.equal(vscode.window.tabGroups.all.filter(g => g.tabs.some(tab => tab.input?.uri?.toString() === uri.toString())).length, 2);
-    await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
+    await vscode.commands.executeCommand("workbench.action.splitEditorRight");
+    await until(() => matchingTabs().length === 2, "same URI in two groups");
+    assert.equal(
+      vscode.window.tabGroups.all.filter((g) =>
+        g.tabs.some((tab) => tab.input?.uri?.toString() === uri.toString()),
+      ).length,
+      2,
+    );
+    await vscode.commands.executeCommand("workbench.action.focusFirstEditorGroup");
     await show();
-    const eventsBefore = api().filter(item => item.event === 'tabs' && item.closed.some(tab => tab.isCommitEditMsg)).length;
-    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-    await until(() => matchingTabs().length === 1 && api().filter(item => item.event === 'tabs' && item.closed.some(tab => tab.isCommitEditMsg)).length > eventsBefore, 'nonlast close observed');
-    assert.equal(qualifiedClosures().length, 0, 'tab in another group prevents qualification');
+    const eventsBefore = api().filter(
+      (item) => item.event === "tabs" && item.closed.some((tab) => tab.isCommitEditMsg),
+    ).length;
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+    await until(
+      () =>
+        matchingTabs().length === 1 &&
+        api().filter(
+          (item) => item.event === "tabs" && item.closed.some((tab) => tab.isCommitEditMsg),
+        ).length > eventsBefore,
+      "nonlast close observed",
+    );
+    assert.equal(qualifiedClosures().length, 0, "tab in another group prevents qualification");
     result.cases.nonlastClose = { matchingTabs: matchingTabs().length, qualifiedClosureDelta: 0 };
-    await vscode.commands.executeCommand('workbench.action.focusNextGroup');
+    await vscode.commands.executeCommand("workbench.action.focusNextGroup");
     await show();
-    assert.equal(matchingTabs().length, 1, 'show focuses existing remaining tab');
-    const before = count('textDocument/didClose');
+    assert.equal(matchingTabs().length, 1, "show focuses existing remaining tab");
+    const before = count("textDocument/didClose");
     const qualifiedBefore = qualifiedClosures().length;
     const start = Date.now();
-    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-    await until(() => qualifiedClosures().length > qualifiedBefore, 'last matching tab closed');
-    assert.equal(qualifiedClosures().length - qualifiedBefore, 1, 'last close qualifies exactly once');
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+    await until(() => qualifiedClosures().length > qualifiedBefore, "last matching tab closed");
+    assert.equal(
+      qualifiedClosures().length - qualifiedBefore,
+      1,
+      "last close qualifies exactly once",
+    );
     assert.equal(matchingTabs().length, 0);
-    result.cases.nativeClose = { elapsedMs: Date.now() - start, tabCount: vscode.window.tabGroups.all.flatMap(g => g.tabs).length,
-      documentClosed: doc.isClosed, wireCloseDelta: count('textDocument/didClose') - before,
-      qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore };
-    result.cases.didCloseObservation = { delta: count('textDocument/didClose') - before,
-      supportedFallbackWithoutDidClose: count('textDocument/didClose') === before };
+    result.cases.nativeClose = {
+      elapsedMs: Date.now() - start,
+      tabCount: vscode.window.tabGroups.all.flatMap((g) => g.tabs).length,
+      documentClosed: doc.isClosed,
+      wireCloseDelta: count("textDocument/didClose") - before,
+      qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore,
+    };
+    result.cases.didCloseObservation = {
+      delta: count("textDocument/didClose") - before,
+      supportedFallbackWithoutDidClose: count("textDocument/didClose") === before,
+    };
     // Unrelated closed events while the draft is absent must not qualify.
-    const otherTab = vscode.window.tabGroups.all.flatMap(g => g.tabs).find(tab => tab.input?.uri?.toString() === otherUri.toString());
+    const otherTab = vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .find((tab) => tab.input?.uri?.toString() === otherUri.toString());
     assert.ok(otherTab);
     assert.equal(await vscode.window.tabGroups.close(otherTab), true);
-    await until(() => api().some(item => item.event === 'tabs' && item.closed.some(tab => tab.uri === otherUri.toString())), 'unrelated close observed');
+    await until(
+      () =>
+        api().some(
+          (item) =>
+            item.event === "tabs" && item.closed.some((tab) => tab.uri === otherUri.toString()),
+        ),
+      "unrelated close observed",
+    );
     assert.equal(qualifiedClosures().length, qualifiedBefore + 1);
     result.cases.unrelatedClose = { qualifiedClosureDelta: 0 };
     await show();
-    await until(() => matchingTabs().length === 1, 'reopened tab');
+    await until(() => matchingTabs().length === 1, "reopened tab");
     let editor = vscode.window.activeTextEditor;
-    result.cases.dirtyEdit = await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'dirty native text\n'));
-    await until(() => editor.document.isDirty, 'dirty editor');
-    if (process.env.MAGIT_REAL_FILE_NATIVE === '1') {
-    let closeSettled = false;
-    const closing = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { closeSettled = true; });
-    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native dirty save dialog');
-    result.cases.dirtyDialog = { dirty: editor.document.isDirty, closeSettled };
-    cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-    await closing;
-    result.cases.dirtyCancel = { stillOpen: !editor.document.isClosed, dirty: editor.document.isDirty,
-      matchingTabs: matchingTabs().length, qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1 };
-    assert.equal(result.cases.dirtyCancel.stillOpen, true);
-    assert.equal(result.cases.dirtyCancel.dirty, true);
-    assert.equal(result.cases.dirtyCancel.matchingTabs, 1);
-    assert.equal(result.cases.dirtyCancel.qualifiedClosureDelta, 0);
-    const savedText = 'dirty native text\ndirty native text\nspike message\n';
-    // Save by itself must not qualify; qualification is caused by tab closure.
-    await editor.document.save();
-    await until(() => count('textDocument/didSave') > 0, 'dirty save wire');
-    assert.equal(qualifiedClosures().length, qualifiedBefore + 1, 'save alone must not qualify');
-    result.cases.saveAlone = { savedText: fs.readFileSync(uri.fsPath, 'utf8'),
-      qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1, matchingTabs: matchingTabs().length };
-    assert.equal(result.cases.saveAlone.savedText, editor.document.getText());
-    assert.equal(result.cases.saveAlone.matchingTabs, 1);
-    await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'dirty native text\n'));
-    await until(() => editor.document.isDirty, 'dirty again after save-alone probe');
-    // Native dialog default action is Save; drive the actual focused control.
-    let saveSettled = false;
-    const savingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { saveSettled = true; });
-    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Save dialog');
-    cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await savingClose;
-    await until(() => qualifiedClosures().length === qualifiedBefore + 2, 'Save-on-close qualification');
-    result.cases.dirtySave = { savedText: fs.readFileSync(uri.fsPath, 'utf8'), qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1,
-      closeSettled: saveSettled, matchingTabs: matchingTabs().length };
-    assert.equal(result.cases.dirtySave.savedText, savedText);
-    assert.equal(qualifiedClosures().at(-1).savedDiskText, savedText);
-    assert.equal(result.cases.dirtySave.qualifiedClosureDelta, 1);
-    assert.equal(result.cases.dirtySave.matchingTabs, 0);
-    await show();
-    await until(() => matchingTabs().length === 1, 'reopened for discard');
-    const discardEditor = vscode.window.activeTextEditor;
-    const discardText = fs.readFileSync(uri.fsPath, 'utf8');
-    const discardEdit = await discardEditor.edit(edit => edit.replace(new vscode.Range(discardEditor.document.positionAt(0), discardEditor.document.positionAt(discardEditor.document.getText().length)), 'discarded text\n'));
-    assert.equal(discardEdit, true);
-    await until(() => discardEditor.document.isDirty, 'discard editor dirty');
-    // Discard reverts the live document: retain the synchronized UNSAVED text now.
-    const unsavedText = discardEditor.document.getText();
-    assert.equal(unsavedText, 'discarded text\n');
-    assert.notEqual(unsavedText, discardText);
-    await until(() => trace().some(item => item.method === 'textDocument/didChange'
-      && item.params.textDocument.uri === uri.toString()
-      && item.params.textDocument.version === discardEditor.document.version
-      && item.params.contentChanges[0].text === unsavedText), 'unsaved discard text synchronized');
-    let discardSettled = false;
-    const discardingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { discardSettled = true; });
-    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Discard dialog');
-    // Tab from the default Save button to Don't Save, then activate it.
-    // One forward tab from default Save wraps to Don't Save.
-    for (let i = 0; i < 1; i++) {
-      cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-      cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-    }
-    cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
-    await discardingClose;
-    await until(() => qualifiedClosures().length === qualifiedBefore + 3, "Don't Save qualification");
-    result.cases.dirtyDiscard = { unsavedText, diskText: fs.readFileSync(uri.fsPath, 'utf8'),
-      expectedDiskText: discardText, qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 2,
-      closeSettled: discardSettled, matchingTabs: matchingTabs().length };
-    assert.equal(result.cases.dirtyDiscard.diskText, discardText);
-    assert.equal(qualifiedClosures().at(-1).savedDiskText, discardText);
-    assert.notEqual(result.cases.dirtyDiscard.unsavedText, discardText);
-    assert.equal(result.cases.dirtyDiscard.qualifiedClosureDelta, 1);
-    assert.equal(result.cases.dirtyDiscard.matchingTabs, 0);
-    await show();
-    await until(() => matchingTabs().length === 1, 'reopened after discard');
-    editor = vscode.window.activeTextEditor;
-    assert.equal(editor.document.isClosed, false);
-    assert.equal(editor.document.getText(), discardText);
+    result.cases.dirtyEdit = await editor.edit((edit) =>
+      edit.insert(new vscode.Position(0, 0), "dirty native text\n"),
+    );
+    await until(() => editor.document.isDirty, "dirty editor");
+    if (process.env.MAGIT_REAL_FILE_NATIVE === "1") {
+      let closeSettled = false;
+      const closing = vscode.commands
+        .executeCommand("workbench.action.closeActiveEditor")
+        .then(() => {
+          closeSettled = true;
+        });
+      await until(
+        () =>
+          cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value.includes(
+            "Do you want to save",
+          ),
+        "native dirty save dialog",
+      );
+      result.cases.dirtyDialog = { dirty: editor.document.isDirty, closeSettled };
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      await closing;
+      result.cases.dirtyCancel = {
+        stillOpen: !editor.document.isClosed,
+        dirty: editor.document.isDirty,
+        matchingTabs: matchingTabs().length,
+        qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1,
+      };
+      assert.equal(result.cases.dirtyCancel.stillOpen, true);
+      assert.equal(result.cases.dirtyCancel.dirty, true);
+      assert.equal(result.cases.dirtyCancel.matchingTabs, 1);
+      assert.equal(result.cases.dirtyCancel.qualifiedClosureDelta, 0);
+      const savedText = "dirty native text\ndirty native text\nspike message\n";
+      // Save by itself must not qualify; qualification is caused by tab closure.
+      await editor.document.save();
+      await until(() => count("textDocument/didSave") > 0, "dirty save wire");
+      assert.equal(qualifiedClosures().length, qualifiedBefore + 1, "save alone must not qualify");
+      result.cases.saveAlone = {
+        savedText: fs.readFileSync(uri.fsPath, "utf8"),
+        qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1,
+        matchingTabs: matchingTabs().length,
+      };
+      assert.equal(result.cases.saveAlone.savedText, editor.document.getText());
+      assert.equal(result.cases.saveAlone.matchingTabs, 1);
+      await editor.edit((edit) => edit.insert(new vscode.Position(0, 0), "dirty native text\n"));
+      await until(() => editor.document.isDirty, "dirty again after save-alone probe");
+      // Native dialog default action is Save; drive the actual focused control.
+      let saveSettled = false;
+      const savingClose = vscode.commands
+        .executeCommand("workbench.action.closeActiveEditor")
+        .then(() => {
+          saveSettled = true;
+        });
+      await until(
+        () =>
+          cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value.includes(
+            "Do you want to save",
+          ),
+        "native Save dialog",
+      );
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+      await savingClose;
+      await until(
+        () => qualifiedClosures().length === qualifiedBefore + 2,
+        "Save-on-close qualification",
+      );
+      result.cases.dirtySave = {
+        savedText: fs.readFileSync(uri.fsPath, "utf8"),
+        qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1,
+        closeSettled: saveSettled,
+        matchingTabs: matchingTabs().length,
+      };
+      assert.equal(result.cases.dirtySave.savedText, savedText);
+      assert.equal(qualifiedClosures().at(-1).savedDiskText, savedText);
+      assert.equal(result.cases.dirtySave.qualifiedClosureDelta, 1);
+      assert.equal(result.cases.dirtySave.matchingTabs, 0);
+      await show();
+      await until(() => matchingTabs().length === 1, "reopened for discard");
+      const discardEditor = vscode.window.activeTextEditor;
+      const discardText = fs.readFileSync(uri.fsPath, "utf8");
+      const discardEdit = await discardEditor.edit((edit) =>
+        edit.replace(
+          new vscode.Range(
+            discardEditor.document.positionAt(0),
+            discardEditor.document.positionAt(discardEditor.document.getText().length),
+          ),
+          "discarded text\n",
+        ),
+      );
+      assert.equal(discardEdit, true);
+      await until(() => discardEditor.document.isDirty, "discard editor dirty");
+      // Discard reverts the live document: retain the synchronized UNSAVED text now.
+      const unsavedText = discardEditor.document.getText();
+      assert.equal(unsavedText, "discarded text\n");
+      assert.notEqual(unsavedText, discardText);
+      await until(
+        () =>
+          trace().some(
+            (item) =>
+              item.method === "textDocument/didChange" &&
+              item.params.textDocument.uri === uri.toString() &&
+              item.params.textDocument.version === discardEditor.document.version &&
+              item.params.contentChanges[0].text === unsavedText,
+          ),
+        "unsaved discard text synchronized",
+      );
+      let discardSettled = false;
+      const discardingClose = vscode.commands
+        .executeCommand("workbench.action.closeActiveEditor")
+        .then(() => {
+          discardSettled = true;
+        });
+      await until(
+        () =>
+          cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value.includes(
+            "Do you want to save",
+          ),
+        "native Discard dialog",
+      );
+      // Tab from the default Save button to Don't Save, then activate it.
+      // One forward tab from default Save wraps to Don't Save.
+      for (let i = 0; i < 1; i++) {
+        cdp("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: "Tab",
+          code: "Tab",
+          windowsVirtualKeyCode: 9,
+        });
+        cdp("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Tab",
+          code: "Tab",
+          windowsVirtualKeyCode: 9,
+        });
+      }
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+      cdp("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+      await discardingClose;
+      await until(
+        () => qualifiedClosures().length === qualifiedBefore + 3,
+        "Don't Save qualification",
+      );
+      result.cases.dirtyDiscard = {
+        unsavedText,
+        diskText: fs.readFileSync(uri.fsPath, "utf8"),
+        expectedDiskText: discardText,
+        qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 2,
+        closeSettled: discardSettled,
+        matchingTabs: matchingTabs().length,
+      };
+      assert.equal(result.cases.dirtyDiscard.diskText, discardText);
+      assert.equal(qualifiedClosures().at(-1).savedDiskText, discardText);
+      assert.notEqual(result.cases.dirtyDiscard.unsavedText, discardText);
+      assert.equal(result.cases.dirtyDiscard.qualifiedClosureDelta, 1);
+      assert.equal(result.cases.dirtyDiscard.matchingTabs, 0);
+      await show();
+      await until(() => matchingTabs().length === 1, "reopened after discard");
+      editor = vscode.window.activeTextEditor;
+      assert.equal(editor.document.isClosed, false);
+      assert.equal(editor.document.getText(), discardText);
     } else {
-      result.cases.dirtyDialog = 'not tested here: extensionTestsPath suppresses native save confirmation; separate normal host required';
+      result.cases.dirtyDialog =
+        "not tested here: extensionTestsPath suppresses native save confirmation; separate normal host required";
     }
     await editor.document.save();
-    await until(() => count('textDocument/didSave'), 'save wire');
-    fs.writeFileSync(uri.fsPath, 'replacement template\n');
+    await until(() => count("textDocument/didSave"), "save wire");
+    fs.writeFileSync(uri.fsPath, "replacement template\n");
     await show();
     result.cases.reusedShow = { text: editor.document.getText(), dirty: editor.document.isDirty };
-    const refresh = await client.sendRequest('spike/apply', { edit: { documentChanges: [{
-      textDocument: { uri: uri.toString(), version: editor.document.version },
-      edits: [{ range: { start: { line: 0, character: 0 }, end: { line: editor.document.lineCount, character: 0 } }, newText: 'server refreshed template\n' }],
-    }] } });
-    result.cases.applyEdit = { response: refresh, text: editor.document.getText(), dirty: editor.document.isDirty };
-    const opens = count('textDocument/didOpen'), closes = count('textDocument/didClose');
+    const refresh = await client.sendRequest("spike/apply", {
+      edit: {
+        documentChanges: [
+          {
+            textDocument: { uri: uri.toString(), version: editor.document.version },
+            edits: [
+              {
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: editor.document.lineCount, character: 0 },
+                },
+                newText: "server refreshed template\n",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    result.cases.applyEdit = {
+      response: refresh,
+      text: editor.document.getText(),
+      dirty: editor.document.isDirty,
+    };
+    const opens = count("textDocument/didOpen"),
+      closes = count("textDocument/didClose");
     const languageClosures = qualifiedClosures().length;
-    await vscode.languages.setTextDocumentLanguage(editor.document, 'plaintext');
-    await until(() => count('textDocument/didOpen') > opens && count('textDocument/didClose') > closes, 'language change close/open');
-    result.cases.languageChange = { openDelta: count('textDocument/didOpen') - opens, closeDelta: count('textDocument/didClose') - closes };
-    result.cases.languageChange.qualifiedClosureDelta = qualifiedClosures().length - languageClosures;
+    await vscode.languages.setTextDocumentLanguage(editor.document, "plaintext");
+    await until(
+      () => count("textDocument/didOpen") > opens && count("textDocument/didClose") > closes,
+      "language change close/open",
+    );
+    result.cases.languageChange = {
+      openDelta: count("textDocument/didOpen") - opens,
+      closeDelta: count("textDocument/didClose") - closes,
+    };
+    result.cases.languageChange.qualifiedClosureDelta =
+      qualifiedClosures().length - languageClosures;
     result.cases.languageChange.matchingTabs = matchingTabs().length;
-    assert.equal(result.cases.languageChange.qualifiedClosureDelta, 0, 'language change must not qualify');
+    assert.equal(
+      result.cases.languageChange.qualifiedClosureDelta,
+      0,
+      "language change must not qualify",
+    );
     assert.equal(result.cases.languageChange.matchingTabs, 1);
-    assert.equal(qualifiedClosures().length, process.env.MAGIT_REAL_FILE_NATIVE === '1' ? 3 : 1,
-      'only actual last draft tab closes qualify');
-    fs.writeFileSync(`${base}/final-text.json`, JSON.stringify({ text: cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value, uri: editor.document.uri.toString(), dirty: editor.document.isDirty }));
-    result.pending = ['shutdown', 'reload', 'workspace-change'];
-    result.gate = 'pass';
+    assert.equal(
+      qualifiedClosures().length,
+      process.env.MAGIT_REAL_FILE_NATIVE === "1" ? 3 : 1,
+      "only actual last draft tab closes qualify",
+    );
+    fs.writeFileSync(
+      `${base}/final-text.json`,
+      JSON.stringify({
+        text: cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value,
+        uri: editor.document.uri.toString(),
+        dirty: editor.document.isDirty,
+      }),
+    );
+    result.pending = ["shutdown", "reload", "workspace-change"];
+    result.gate = "pass";
   } catch (error) {
     result.error = error.stack;
-    try { fs.writeFileSync(`${base}/failure-dom.txt`, cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value); } catch (_) { /* retain error */ }
+    try {
+      fs.writeFileSync(
+        `${base}/failure-dom.txt`,
+        cdp("Runtime.evaluate", { expression: "document.body.innerText" }).result.value,
+      );
+    } catch (_) {
+      /* retain error */
+    }
   } finally {
     fs.writeFileSync(`${base}/result.json`, JSON.stringify(result, null, 2));
     if (client) await client.stop();
   }
-  if (result.error || result.gate !== 'pass') throw new Error(JSON.stringify(result));
+  if (result.error || result.gate !== "pass") throw new Error(JSON.stringify(result));
 };

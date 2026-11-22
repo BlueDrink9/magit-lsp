@@ -17,26 +17,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Provision the formatter tools explicitly: this job must not assume a Nix
-      # dev shell is active. rustfmt matches the stable toolchain used by the
-      # test job; the StyLua pin matches scripts/format.py and the flake package.
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.13.1
-
-      - name: Install pinned StyLua
-        run: cargo install stylua --version 2.6.0 --locked
+      # Every Linux job body runs inside the flake's locked dev shell
+      # (flake.lock), so rustfmt, StyLua, Node and pnpm come from one pinned
+      # nixpkgs revision instead of ad hoc installs.
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: Install VSCode dependencies
-        run: make vscode-deps
+        run: nix develop --no-update-lock-file -c make vscode-deps V=1
 
       - name: Check changed committed sources
         env:
@@ -51,7 +38,7 @@ jobs:
           else
             base=$PUSH_BEFORE
           fi
-          python3 scripts/format.py --base "$base"
+          nix develop --no-update-lock-file -c python3 scripts/format.py --base "$base"
 
   release-contract:
     runs-on: ubuntu-24.04
@@ -60,10 +47,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+
       - name: Test download and packaging contracts (no Rust release build)
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/release -p 'test_*.py' -v
-          shellcheck scripts/install.sh scripts/package-release.sh
+        run: nix develop --no-update-lock-file -c make release-contract-check V=1
 
   test:
     runs-on: ubuntu-24.04
@@ -72,28 +59,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
-      # TODO: cache the Rust target dir and Neovim once CI time matters.
-      - uses: rhysd/action-setup-vim@v1
-        with:
-          neovim: true
-          version: stable
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.13.1
+      # TODO: cache the Nix store once CI time matters.
 
       # The vscode Make target installs locked dependencies when needed.
 
       - name: make vscode-test
-        run: make vscode-test
+        run: nix develop --no-update-lock-file -c make vscode-test V=1
 
       - name: make test-rust test-lua
-        run: make test-rust test-lua
+        run: nix develop --no-update-lock-file -c make test-rust test-lua V=1
 
 
   coverage:
@@ -107,20 +83,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          # cargo-llvm-cov drives llvm-cov/llvm-profdata from this component, so
-          # the instrumentation matches the active rustc.
-          components: llvm-tools-preview
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+      # cargo-llvm-cov and the LLVM tools come from the same locked dev shell, so
+      # llvm-cov/llvm-profdata always match the rustc that instruments the tests.
 
       # The same target as local use. It runs the ordinary Rust suite under
       # instrumentation, so a failing test fails this job instead of yielding a
       # coverage report; the report and command log are still uploaded below.
       - name: make coverage-rust
-        run: make coverage-rust
+        run: nix develop --no-update-lock-file -c make coverage-rust V=1
 
       - name: Upload Rust coverage report
         if: always()
@@ -153,10 +125,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: make docs-artifacts-check docs-check
-        run: make docs-artifacts-check docs-check
+        run: nix develop --no-update-lock-file -c make docs-artifacts-check docs-check V=1
 
   ui-test:
     runs-on: ubuntu-24.04
@@ -165,25 +137,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
-
-      - uses: rhysd/action-setup-vim@v1
-        with:
-          neovim: true
-          version: stable
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       # Build first: the client starts the binary, and compiling inside the
       # harness's 15 s socket wait would time out.
       - name: make build
-        run: make build
+        run: nix develop --no-update-lock-file -c make build V=1
 
       - name: make ui-unit ui-test
-        run: make ui-unit ui-test
-        env:
-          CI: "1"
+        run: nix develop --no-update-lock-file -c env CI=1 make ui-unit ui-test V=1
 
       - name: Upload UI artefacts
         if: failure()
@@ -193,7 +155,14 @@ jobs:
           path: build/ui/
 
 
-  # Test on other operating systems, just rust tests.
+  # Test on other operating systems, just rust tests. These lanes stay on each
+  # runner's native toolchain: Nix has no native Windows support, and the lanes
+  # exist to cover native OS behavior, so they are a deliberate exception to the
+  # locked Linux shell rather than a claim of Nix coverage. Windows support is
+  # deferred, so only its lane is informational; the macOS lanes stay required.
+  # This workflow remains read-only source checks: no release job consumes this
+  # matrix, and the required-platform debug-then-release server sequence and
+  # artifact acceptance live only in release.yml.
   native-test:
     name: Rust (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -203,10 +172,16 @@ jobs:
         include:
           - os: windows-2025
             target: x86_64-pc-windows-msvc
+            informational: true
           - os: macos-26
             target: aarch64-apple-darwin
+            informational: false
           - os: macos-26-intel
             target: x86_64-apple-darwin
+            informational: false
+    # Only the Windows lane may fail without failing the workflow. No job
+    # declares `needs: native-test`, so its result gates nothing else either.
+    continue-on-error: ${{ matrix.informational }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

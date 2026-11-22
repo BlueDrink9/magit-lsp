@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Native commit-message files for VSCode (§3.10).
@@ -9,7 +9,7 @@
  * closed event confirms saved disk text; document-close is never confirmation.
  */
 
-const vscode = require('vscode');
+const vscode = require("vscode");
 
 const {
   SCHEME,
@@ -18,16 +18,15 @@ const {
   inactiveContext,
   isEditEffect,
   languageForKind,
-} = require('./edit');
-const { activateView, focusView, tabUri } = require('./views');
-const { store } = require('./store');
-const { message } = require('./util');
+} = require("./edit");
+const { activateView, focusView, tabUri } = require("./views");
+const { store } = require("./store");
+const { message } = require("./util");
 
 /** Maximum live or saved UTF-8 draft size (§3.10). */
 const MAX_BYTES = 1024 * 1024;
 // A late effect must not reopen a terminal run, even when its URI is reused.
 const seenRuns = new WeakMap();
-
 
 /**
  * Set several context keys in one call.
@@ -36,7 +35,7 @@ const seenRuns = new WeakMap();
  */
 async function setContext(values) {
   for (const [key, value] of Object.entries(values)) {
-    await vscode.commands.executeCommand('setContext', key, value);
+    await vscode.commands.executeCommand("setContext", key, value);
   }
 }
 
@@ -58,12 +57,14 @@ function forUri(uri) {
  * @returns {boolean}
  */
 function live(record) {
-  return Boolean(record)
-    && store.drafts.get(record.runId) === record
-    && !record.closing
-    && !store.disposing
-    && Boolean(record.document)
-    && (!record.document.isClosed || record.nativeClosed);
+  return (
+    Boolean(record) &&
+    store.drafts.get(record.runId) === record &&
+    !record.closing &&
+    !store.disposing &&
+    Boolean(record.document) &&
+    (!record.document.isClosed || record.nativeClosed)
+  );
 }
 
 /**
@@ -75,10 +76,12 @@ function live(record) {
  * @returns {boolean}
  */
 function ownsBarrier(record, client, generation) {
-  return live(record)
-    && store.client === client
-    && !record.disconnected
-    && record.generation === generation;
+  return (
+    live(record) &&
+    store.client === client &&
+    !record.disconnected &&
+    record.generation === generation
+  );
 }
 
 /**
@@ -117,10 +120,10 @@ function baseViewId(record) {
 function readable(error) {
   const text = message(error).trim();
   if (!text) {
-    return 'the commit draft could not be synchronized';
+    return "the commit draft could not be synchronized";
   }
-  if (text.startsWith('{') || text.startsWith('[') || text === '[object Object]') {
-    return 'the commit draft could not be synchronized';
+  if (text.startsWith("{") || text.startsWith("[") || text === "[object Object]") {
+    return "the commit draft could not be synchronized";
   }
   return text;
 }
@@ -135,8 +138,9 @@ function readable(error) {
 function fail(record, reason) {
   record.generation += 1;
   record.syncError = readable(reason);
-  const text = `magit-lsp: commit draft: ${record.syncError}`
-    + ' Your text is retained; retry saving or cancel the draft.';
+  const text =
+    `magit-lsp: commit draft: ${record.syncError}` +
+    " Your text is retained; retry saving or cancel the draft.";
   if (record.lastError !== text) {
     record.lastError = text;
     store.output.appendLine(text);
@@ -165,13 +169,13 @@ function recover(record) {
 async function notify(record, method, params, quiet) {
   const client = record.client;
   if (!client || store.client !== client || record.disconnected) {
-    if (!quiet) fail(record, 'the draft connection is unavailable');
+    if (!quiet) fail(record, "the draft connection is unavailable");
     return false;
   }
   try {
     await store.clientReady;
     if (store.client !== client || record.disconnected) {
-      throw new Error('the draft connection was replaced');
+      throw new Error("the draft connection was replaced");
     }
     await client.sendNotification(method, params);
     return true;
@@ -197,7 +201,7 @@ async function request(record, method, payload) {
   const client = record.client;
   const generation = record.generation;
   if (!client || store.client !== client || record.disconnected) {
-    fail(record, 'the draft connection is unavailable');
+    fail(record, "the draft connection is unavailable");
     return undefined;
   }
   try {
@@ -227,10 +231,10 @@ async function attach(record) {
   if (record.attached) {
     return true;
   }
-  const ok = await notify(record, 'textDocument/didOpen', {
+  const ok = await notify(record, "textDocument/didOpen", {
     textDocument: {
       uri: record.uri.toString(),
-      languageId: 'gitcommit',
+      languageId: "gitcommit",
       version: record.version,
       text: record.text,
     },
@@ -253,20 +257,22 @@ async function flush(record) {
     return false;
   }
   const text = record.document.getText();
-  if (Buffer.byteLength(text, 'utf8') > MAX_BYTES) {
-    fail(record, 'the commit draft exceeds the 1 MiB limit; shorten it before saving');
+  if (Buffer.byteLength(text, "utf8") > MAX_BYTES) {
+    fail(record, "the commit draft exceeds the 1 MiB limit; shorten it before saving");
     return false;
   }
   if (text !== record.text || record.syncError) {
     const version = record.version + 1;
     if (!Number.isSafeInteger(version)) {
-      fail(record, 'the draft version limit was reached; copy your text and reopen');
+      fail(record, "the draft version limit was reached; copy your text and reopen");
       return false;
     }
-    if (!(await notify(record, 'textDocument/didChange', {
-      textDocument: { uri: record.uri.toString(), version },
-      contentChanges: [{ text }],
-    }))) {
+    if (
+      !(await notify(record, "textDocument/didChange", {
+        textDocument: { uri: record.uri.toString(), version },
+        contentChanges: [{ text }],
+      }))
+    ) {
       return false;
     }
     record.version = version;
@@ -284,7 +290,10 @@ async function flush(record) {
  */
 function enqueue(record, action) {
   const next = record.queue.then(action, action);
-  record.queue = next.then(() => {}, () => {});
+  record.queue = next.then(
+    () => {},
+    () => {},
+  );
   return next;
 }
 
@@ -294,8 +303,11 @@ function enqueue(record, action) {
  * @param {object} record
  */
 async function waitIdle(record) {
-  for (let attempt = 0; attempt < 100 && record.busy
-    && !record.closing && !record.disconnected; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < 100 && record.busy && !record.closing && !record.disconnected;
+    attempt += 1
+  ) {
     const queue = record.queue;
     await queue.catch(() => {});
     if (record.queue === queue && record.busy) {
@@ -342,14 +354,20 @@ async function operate(record, action) {
   let ok = false;
   try {
     // Gate native editing while awaiting exact-version confirmation.
-    await vscode.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession', record.uri);
+    await vscode.commands.executeCommand(
+      "workbench.action.files.setActiveEditorReadonlyInSession",
+      record.uri,
+    );
     await enqueue(record, async () => {
       ok = await action();
     });
   } catch (error) {
     if (live(record)) fail(record, error);
   } finally {
-    await vscode.commands.executeCommand('workbench.action.files.resetActiveEditorReadonlyInSession', record.uri);
+    await vscode.commands.executeCommand(
+      "workbench.action.files.resetActiveEditorReadonlyInSession",
+      record.uri,
+    );
     unlock(record);
     if (!record.syncError && record.document?.getText() !== record.text) scheduleFlush(record);
   }
@@ -388,12 +406,14 @@ function scheduleFlush(record) {
  * @returns {boolean}
  */
 function acknowledged(result, type, record, version) {
-  return Boolean(result)
-    && result.type === type
-    && result.runId === record.runId
-    && result.uri === record.uri.toString()
-    && result.version === version
-    && Object.keys(result).every((key) => ['type', 'runId', 'uri', 'version'].includes(key));
+  return (
+    Boolean(result) &&
+    result.type === type &&
+    result.runId === record.runId &&
+    result.uri === record.uri.toString() &&
+    result.version === version &&
+    Object.keys(result).every((key) => ["type", "runId", "uri", "version"].includes(key))
+  );
 }
 
 /**
@@ -423,18 +443,20 @@ async function closeTab(record) {
  * @returns {boolean}
  */
 function ownsTeardown(record, guard) {
-  return store.drafts.get(record.runId) === record
-    && store.draftUris.get(record.uri.toString()) === record.runId
-    && !store.disposing
-    && store.client === guard.client
-    && record.client === guard.client
-    && !record.disconnected
-    && record.generation === guard.generation
-    && record.version === guard.version
-    && record.text === guard.text
-    && record.document
-    && !record.document.isClosed
-    && record.document.getText() === guard.text;
+  return (
+    store.drafts.get(record.runId) === record &&
+    store.draftUris.get(record.uri.toString()) === record.runId &&
+    !store.disposing &&
+    store.client === guard.client &&
+    record.client === guard.client &&
+    !record.disconnected &&
+    record.generation === guard.generation &&
+    record.version === guard.version &&
+    record.text === guard.text &&
+    record.document &&
+    !record.document.isClosed &&
+    record.document.getText() === guard.text
+  );
 }
 
 /**
@@ -450,10 +472,14 @@ async function forget(record, guard) {
   }
   try {
     await vscode.commands.executeCommand(
-      'workbench.action.files.setActiveEditorReadonlyInSession', record.uri
+      "workbench.action.files.setActiveEditorReadonlyInSession",
+      record.uri,
     );
     if (guard && !ownsTeardown(record, guard)) {
-      fail(record, 'the commit draft changed or disconnected during abort teardown; text was retained');
+      fail(
+        record,
+        "the commit draft changed or disconnected during abort teardown; text was retained",
+      );
       return false;
     }
     record.closing = true;
@@ -465,7 +491,10 @@ async function forget(record, guard) {
       record.closing = false;
       store.activeDraftId = record.runId;
       await setContext(editingContext(record.effect));
-      fail(record, 'the commit draft changed or disconnected during abort teardown; text was retained');
+      fail(
+        record,
+        "the commit draft changed or disconnected during abort teardown; text was retained",
+      );
       return false;
     }
     record.attached = false;
@@ -473,7 +502,7 @@ async function forget(record, guard) {
     // workbench does not offer a second Save dialog during terminal teardown.
     record.discarding = true;
     if (record.document && !record.document.isClosed) {
-      await vscode.commands.executeCommand('workbench.action.files.revert', record.uri);
+      await vscode.commands.executeCommand("workbench.action.files.revert", record.uri);
     }
     await closeTab(record);
     store.drafts.delete(record.runId);
@@ -488,7 +517,8 @@ async function forget(record, guard) {
   } finally {
     try {
       await vscode.commands.executeCommand(
-        'workbench.action.files.resetActiveEditorReadonlyInSession', record.uri
+        "workbench.action.files.resetActiveEditorReadonlyInSession",
+        record.uri,
       );
     } catch (error) {
       store.output.appendLine(`commit draft editable restore failed: ${message(error)}`);
@@ -505,18 +535,23 @@ async function forget(record, guard) {
  */
 async function finish(record, reason) {
   const version = record.savedVersion;
-  const result = await request(record, 'workspace/executeCommand', { command: 'magit.command', arguments: [{
-    command: 'common.confirm',
-    runId: record.runId,
-    uri: record.uri.toString(),
-    version: reason === 'confirm' ? record.version : version,
-    source: reason === 'confirm' ? 'synchronized' : 'saved-file',
-  }] });
+  const result = await request(record, "workspace/executeCommand", {
+    command: "magit.command",
+    arguments: [
+      {
+        command: "common.confirm",
+        runId: record.runId,
+        uri: record.uri.toString(),
+        version: reason === "confirm" ? record.version : version,
+        source: reason === "confirm" ? "synchronized" : "saved-file",
+      },
+    ],
+  });
   if (!result) {
     return false;
   }
-  if (!acknowledged(result, 'confirmed', record, reason === 'confirm' ? record.version : version)) {
-    fail(record, 'unexpected commit draft finish acknowledgement');
+  if (!acknowledged(result, "confirmed", record, reason === "confirm" ? record.version : version)) {
+    fail(record, "unexpected commit draft finish acknowledgement");
     return false;
   }
   await forget(record);
@@ -534,9 +569,9 @@ async function confirm(record) {
   return operate(record, async () => {
     if (!(await flush(record))) return false;
     if (record.document.getText() === record.text) {
-      return finish(record, 'confirm');
+      return finish(record, "confirm");
     }
-    fail(record, 'the commit draft changed while confirming; save or retry confirm');
+    fail(record, "the commit draft changed while confirming; save or retry confirm");
     return false;
   });
 }
@@ -551,7 +586,7 @@ async function close(record) {
   if (!live(record)) return;
   // Do not flush/finish here: Save is observed through didSave and Don't Save
   // must retain the prior disk bytes. Only onTabsChanged can confirm.
-  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
 }
 
 /**
@@ -569,23 +604,31 @@ async function cancel(record) {
   const generation = record.generation;
   const client = record.client;
   if (!client || !ownsBarrier(record, client, generation)) {
-    fail(record, 'the server connection is unavailable; draft was not aborted');
+    fail(record, "the server connection is unavailable; draft was not aborted");
     return;
   }
   if (!(await flush(record))) return;
   if (!ownsBarrier(record, client, generation)) return;
   const version = record.version;
   const text = record.document.getText();
-  const result = await request(record, 'workspace/executeCommand', { command: 'magit.command', arguments: [{
-    command: 'common.cancel', runId: record.runId, uri: record.uri.toString(), version,
-  }] });
+  const result = await request(record, "workspace/executeCommand", {
+    command: "magit.command",
+    arguments: [
+      {
+        command: "common.cancel",
+        runId: record.runId,
+        uri: record.uri.toString(),
+        version,
+      },
+    ],
+  });
   if (!result) return;
-  if (!acknowledged(result, 'aborted', record, version)) {
-    fail(record, 'unexpected commit draft abort acknowledgement');
+  if (!acknowledged(result, "aborted", record, version)) {
+    fail(record, "unexpected commit draft abort acknowledgement");
     return;
   }
   if (record.version !== version || record.text !== text || record.document.getText() !== text) {
-    fail(record, 'the commit draft changed while aborting; newer text was retained');
+    fail(record, "the commit draft changed while aborting; newer text was retained");
     return;
   }
   await forget(record, { client, generation, version, text });
@@ -598,9 +641,14 @@ async function cancel(record) {
  * @param {string|undefined} originViewId
  */
 async function open(effect, originViewId) {
-  if (!Number.isInteger(effect?.version) || effect.version < 1
-    || !isEditEffect({ ...effect, version: 1 })) {
-    vscode.window.showErrorMessage('magit-lsp: invalid managed commit draft announcement; no document was opened.');
+  if (
+    !Number.isInteger(effect?.version) ||
+    effect.version < 1 ||
+    !isEditEffect({ ...effect, version: 1 })
+  ) {
+    vscode.window.showErrorMessage(
+      "magit-lsp: invalid managed commit draft announcement; no document was opened.",
+    );
     return;
   }
   const existing = store.drafts.get(effect.runId);
@@ -612,7 +660,10 @@ async function open(effect, originViewId) {
     return;
   }
   let seen = seenRuns.get(store.client);
-  if (!seen) { seen = new Set(); seenRuns.set(store.client, seen); }
+  if (!seen) {
+    seen = new Set();
+    seenRuns.set(store.client, seen);
+  }
   if (seen.has(effect.runId) || effect.version !== 1 || store.draftUris.has(effect.uri)) return;
   seen.add(effect.runId);
   const uri = vscode.Uri.parse(effect.uri);
@@ -649,10 +700,7 @@ async function open(effect, originViewId) {
     record.document = document;
     record.changingLanguage = true;
     try {
-      await vscode.languages.setTextDocumentLanguage(
-        document,
-        languageForKind(effect.kind)
-      );
+      await vscode.languages.setTextDocumentLanguage(document, languageForKind(effect.kind));
     } catch (error) {
       store.output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
     } finally {
@@ -663,8 +711,11 @@ async function open(effect, originViewId) {
     record.document = document;
     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
     record.document = document;
-    record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => tabUri(tab) === record.uri.toString()));
+    record.tabs = new Set(
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tabUri(tab) === record.uri.toString()),
+    );
   } catch (error) {
     store.output.appendLine(`commit draft document failed: ${message(error)}`);
     seen.delete(record.runId);
@@ -693,15 +744,14 @@ async function handleInvoke(args) {
   if (!record) {
     return false;
   }
-  const command = typeof args === 'string'
-    ? args
-    : args && /** @type {{command?: string}} */ (args).command;
+  const command =
+    typeof args === "string" ? args : args && /** @type {{command?: string}} */ (args).command;
   const action = draftAction(command);
-  if (action === 'confirm') {
+  if (action === "confirm") {
     await confirm(record);
-  } else if (action === 'cancel') {
+  } else if (action === "cancel") {
     await cancel(record);
-  } else if (action === 'close') {
+  } else if (action === "close") {
     await close(record);
   } else if (command) {
     store.output.appendLine(`commit draft ignored command: ${command}`);
@@ -759,26 +809,37 @@ async function onClosed(document) {
  */
 function onTabsChanged(event) {
   if (store.disposing || !event) return;
-  const closed = new Set((event.closed || [])
-    .map((tab) => tabUri(tab))
-    .filter((uri) => typeof uri === 'string'));
-  const open = new Set(vscode.window.tabGroups.all
-    .flatMap((group) => group.tabs)
-    .map((tab) => tabUri(tab))
-    .filter((uri) => typeof uri === 'string'));
+  const closed = new Set(
+    (event.closed || []).map((tab) => tabUri(tab)).filter((uri) => typeof uri === "string"),
+  );
+  const open = new Set(
+    vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .map((tab) => tabUri(tab))
+      .filter((uri) => typeof uri === "string"),
+  );
   for (const record of store.drafts.values()) {
     const ownedClose = (event.closed || []).some((tab) => record.tabs?.has(tab));
-    record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => tabUri(tab) === record.uri.toString()));
-    if (!ownedClose || !closed.has(record.uri.toString()) || !record.attached || record.closing
-      || record.changingLanguage || record.disconnected) {
+    record.tabs = new Set(
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tabUri(tab) === record.uri.toString()),
+    );
+    if (
+      !ownedClose ||
+      !closed.has(record.uri.toString()) ||
+      !record.attached ||
+      record.closing ||
+      record.changingLanguage ||
+      record.disconnected
+    ) {
       continue;
     }
     if (open.has(record.uri.toString())) {
       continue;
     }
     record.nativeClosed = true;
-    void enqueue(record, () => finish(record, 'normal-close'));
+    void enqueue(record, () => finish(record, "normal-close"));
   }
 }
 
@@ -790,24 +851,24 @@ function onTabsChanged(event) {
 function setup(context) {
   store.disposing = false;
   if (vscode.workspace.onDidSaveTextDocument) {
-    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
-      const record = forUri(document.uri);
-      if (!live(record)) return;
-      void enqueue(record, async () => {
-        if (await flush(record)) {
-          record.savedText = document.getText();
-          record.savedVersion = record.version;
-          recover(record);
-        }
-      });
-    }));
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        const record = forUri(document.uri);
+        if (!live(record)) return;
+        void enqueue(record, async () => {
+          if (await flush(record)) {
+            record.savedText = document.getText();
+            record.savedVersion = record.version;
+            recover(record);
+          }
+        });
+      }),
+    );
   }
   // Virtual documents are retained after their tab closes, so a raw workbench
   // close never fires `onDidCloseTextDocument`; watch the tabs instead for the
   // ambiguous teardown that must cancel (§3.10).
-  context.subscriptions.push(
-    vscode.window.tabGroups.onDidChangeTabs(onTabsChanged)
-  );
+  context.subscriptions.push(vscode.window.tabGroups.onDidChangeTabs(onTabsChanged));
 }
 
 /**

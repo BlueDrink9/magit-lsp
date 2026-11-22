@@ -126,8 +126,14 @@ mod editor_history_tests {
     use super::*;
     use crate::protocol::{DraftFinishParams, DraftFinishReason};
 
+    /// A Git repository whose path is already the canonical repository identity.
+    ///
+    /// Drafts remember the canonical root, and `pending_for` matches that exact
+    /// identity, so the fixture must not hand out a noncanonical path: macOS
+    /// temp roots are reported as `/var/...` but resolve as `/private/var/...`.
     fn repository() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let dir = tempfile::tempdir_in(base).unwrap();
         assert!(std::process::Command::new("git")
             .args(["init", "-q"])
             .arg(dir.path())
@@ -486,6 +492,43 @@ mod editor_history_tests {
             )
             .unwrap();
         assert_eq!(retained(&registry, repo.path()), ["native saved\n"]);
+    }
+
+    #[test]
+    fn delivery_guard_keeps_an_opened_draft_pending_through_a_symlinked_root() {
+        let registry = EditRegistry::new();
+        let dir = repository();
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+        // A helper may reach the repository through a symlinked parent, as with
+        // macOS `/var/...` versus `/private/var/...`; the draft still owns the
+        // canonical identity and only that identity resolves its pending entry.
+        let (run, uri) = joined(&registry, &alias);
+        let _waiting = registry.lock().get_mut(&run).unwrap().waiting.take();
+        let delivery = registry.begin_delivery(&run);
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_open(context, 1, b"initial\n")
+            })
+            .unwrap();
+        assert!(
+            !registry.abort_unopened_delivery(&run, delivery),
+            "an opened draft is never canceled by a late delivery failure"
+        );
+        assert_eq!(
+            registry
+                .pending_for("owner", dir.path().to_str().unwrap())
+                .len(),
+            1,
+            "the opened draft stays pending for the canonical identity"
+        );
+        assert!(
+            registry
+                .pending_for("owner", alias.to_str().unwrap())
+                .is_empty(),
+            "a noncanonical path is not the repository identity"
+        );
+        assert!(registry.resolve(&run, Reply::Abort));
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub(super) fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(Strin
         };
         DocumentFormat::from_text(&document.text)
     };
-    let Some(path) = file_uri_path(&uri) else {
+    let Some(path) = crate::file_uri::path_from_uri(&uri) else {
         return None;
     };
     if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) {
@@ -53,7 +53,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
         )
     };
     let config = shared.config.config();
-    let Some(path) = file_uri_path(&uri) else {
+    let Some(path) = crate::file_uri::path_from_uri(&uri) else {
         return;
     };
     if !crate::config::is_presentation_file(&path, &config.presentation_files) {
@@ -558,6 +558,7 @@ fn plain_key_step(
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .encoding;
+    let mut coalesced = None;
     let (repo, incarnation, view_id, generation, prior, mut state) = {
         let mut documents = shared
             .plain_documents
@@ -566,6 +567,35 @@ fn plain_key_step(
         let Some(entry) = documents.get_mut(uri) else {
             return PlainKeyStep::Continue;
         };
+        // Incremental clients may debounce the applyEdit echo and the next
+        // user edit into one notification. Split only at the exact outstanding
+        // echo, not at an arbitrary retained render or a guessed text diff.
+        if let Some((_, version, hash)) = entry.key_state.repair_echo {
+            if change.pre.version < version && version < change.post_version {
+                for count in 1..change.changes.len() {
+                    let mut pre = change.pre.clone();
+                    if pre
+                        .change(version, &change.changes[..count], encoding)
+                        .is_ok()
+                        && crate::presentation::plain::hash_text(&pre.text) == hash
+                    {
+                        entry.controller.observe(version, pre.text.clone());
+                        entry.key_state.repair_echo = None;
+                        if !entry.key_executing {
+                            entry.key_state.classifier = State::Ready;
+                        }
+                        coalesced = Some(super::drafts::AcceptedChange {
+                            pre,
+                            changes: change.changes[count..].to_vec(),
+                            post_version: change.post_version,
+                            post_text: change.post_text.clone(),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+        let change = coalesced.as_ref().unwrap_or(change);
         // Recognize only the exact version/hash produced by the outstanding
         // repair, before treating its mutated pre-text as fresh key input.
         if entry
@@ -603,6 +633,7 @@ fn plain_key_step(
             state,
         )
     };
+    let change = coalesced.as_ref().unwrap_or(change);
     let timeout = shared
         .config
         .for_repository(Path::new(&repo))
@@ -828,7 +859,7 @@ fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> 
             });
             match (view_id, snapshot) {
                 (Some(view_id), Some(snapshot)) => {
-                    route_plain_render(shared, &view_id, Some(snapshot));
+                    route_plain_render(shared, &view_id, Some(snapshot), None);
                 }
                 _ => repair_plain_authoritative(shared, &uri, incarnation),
             }
@@ -1218,32 +1249,11 @@ pub(super) fn deliver_plain_effects(shared: &Arc<Shared>, effects: Vec<Effect>) 
                 if kind == editor::COMMIT_MESSAGE_KIND {
                     arm_draft_open_timeout(shared, run_id.clone());
                 }
-                let repo = shared
-                    .progress
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .values()
-                    .find(|run| run.edit_id.as_deref() == Some(&run_id))
-                    .and_then(|run| run.repo.clone());
-                if let Some(repo) = repo {
-                    let shared = shared.clone();
-                    // The emitter that delivers these effects runs inside
-                    // `handle_edit` while `editor::registry().lock()` is held, so
-                    // the refresh must run off the emitting thread: it re-enters
-                    // that lock through `EditRegistry::pending_for` and would
-                    // self-deadlock inline. This detached thread only reads
-                    // registry state and delivers renders through the sender.
-                    std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
-                        Ok(renders) => {
-                            for render in renders {
-                                if let Some(message) = deliver_render(&shared, render) {
-                                    let _ = shared.sender.send(message);
-                                }
-                            }
-                        }
-                        Err(error) => report_pending_refresh_error(&shared, error),
-                    });
-                }
+                // Pending-draft rows arrive with explicit renders and run
+                // outcomes, which append them from the registry. Do not push an
+                // extra detached render while delivering the template: that
+                // unsolicited frame races the commit handshake and consumes
+                // outbound ids between `window/showDocument` and confirmation.
             }
             message @ Effect::Message { .. } => {
                 for notification in effect_notifications(&shared.client, vec![message]) {
@@ -1370,7 +1380,7 @@ pub(super) fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Mess
         .unwrap_or_else(|p| p.into_inner())
         .values()
         .find_map(|views| views.current_snapshot(&render.view_id));
-    if route_plain_render(shared, &render.view_id, snapshot) {
+    if route_plain_render(shared, &render.view_id, snapshot, render.cursor) {
         None
     } else {
         Some(custom_ui(&shared.client).render(render))
@@ -1382,6 +1392,7 @@ pub(super) fn route_plain_render(
     shared: &Shared,
     view_id: &str,
     snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>,
+    cursor: Option<Cursor>,
 ) -> bool {
     if shared
         .client
@@ -1429,10 +1440,28 @@ pub(super) fn route_plain_render(
             if !matches!(scope.as_str(), "prompt" | "log.select" | "commit-message") {
                 append_plain_keys_header(shared, &entry.repo, entry.keys_override, &mut tree);
             }
-            entry
+            let entering = entry
                 .controller
-                .render_actions(tree, view_id.to_owned(), generation, scope, menu)
-                .map(|request| (entry.incarnation, uri.clone(), request))
+                .latest_action_meta()
+                .is_some_and(|(_, previous, _, _, _)| previous != view_id);
+            let selection = cursor.filter(|_| entering).and_then(|cursor| {
+                // The selection includes the server-owned heading and prompt,
+                // not just the first commit, which may leave both off-screen.
+                let heading = tree.node("log:header")?;
+                tree.node("log:prompt")?;
+                Some(lsp_types::Range::new(
+                    lsp_types::Position::new(heading.start_line as u32, 0),
+                    lsp_types::Position::new(cursor.line as u32, cursor.column as u32),
+                ))
+            });
+            let request =
+                entry
+                    .controller
+                    .render_actions(tree, view_id.to_owned(), generation, scope, menu);
+            if let Some(selection) = selection {
+                entry.controller.navigate_after_edit(selection);
+            }
+            request.map(|request| (entry.incarnation, uri.clone(), request))
         })
     };
     if let Some((incarnation, uri, request)) = request {
@@ -1526,14 +1555,27 @@ pub(super) fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, ed
                     entry.key_state.repair_echo = None;
                     if !entry.key_executing { entry.key_state.classifier = crate::presentation::keys::State::Ready; }
                 }
+                let navigation = entry.controller.take_navigation(edit.id, applied);
                 let next = entry.controller.response(edit.id, applied);
                 let warning = entry.controller.take_format_warning();
-                (next, warning)
+                (next, warning, navigation)
             })
         };
-        if let Some((next, warning)) = next {
+        if let Some((next, warning, navigation)) = next {
             if warning { let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into())); }
             if let Some(next) = next { send_plain_edit(&shared, uri.clone(), incarnation, next); }
+            if let Some(selection) = navigation {
+                let supported = shared.client.lock().unwrap_or_else(|p| p.into_inner())
+                    .plain.as_ref().is_some_and(|caps| caps.show_document);
+                if supported && !shared.closing.load(Ordering::SeqCst) {
+                    if let Ok((pending, receiver)) = shared.register_outbound("window/showDocument",
+                        serde_json::json!({"uri":uri,"external":false,"takeFocus":true,"selection":selection})) {
+                        let shared = shared.clone();
+                        let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+                        runtime.spawn(async move { let _ = shared.await_outbound(pending, receiver).await; });
+                    }
+                }
+            }
             if applied {
                 let shared = shared.clone();
                 let uri = uri.clone();

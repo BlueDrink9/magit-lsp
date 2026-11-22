@@ -28,6 +28,10 @@ from ui_lib.process_identity import record_command, signal_owned
 ROOT = Path(__file__).resolve().parents[1]
 SESSION = "helix"
 STAGE_TITLE = "Stage the change at point"
+COMMIT_MENU_TITLE = "Open the commit menu"
+COMMIT_TITLE = "Commit"
+CONFIRM_TITLE = "Confirm commit"
+ABORT_TITLE = "Abort commit"
 
 
 def run(args: list[str], *, timeout: float = 15, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -78,14 +82,51 @@ def selected_menu_title(socket: str) -> str | None:
             continue
         text = ANSI.sub("", line)
         text = re.sub(r"^\s*\d+\s{2,}", "", text).strip()
+        text = text.rstrip("▐│|").rstrip()
         if text:
             return text
     return None
 
 
+def matches_title(text: str | None, title: str) -> bool:
+    """Match the exact offered title at the start of a reverse-video row.
+
+    Helix can paint the popup over the buffer without clearing the rest of the
+    row, so the captured row may continue with underlying buffer text. Accept
+    the title only as a whole prefix followed by a boundary space, never as a
+    loose substring or as a prefix of a longer title.
+    """
+    return text == title or (text is not None and text.startswith(title + " "))
+
+
 def has_session(socket: str) -> bool:
     """Return whether the owned tmux session still exists."""
     return tmux(socket, "has-session", "-t", SESSION, check=False).returncode == 0
+
+
+def choose_action(socket: str, title: str, label: str) -> str:
+    """Wait for the native code-action picker and select the exact offered title."""
+    selected = wait_for(
+        lambda: selected_menu_title(socket),
+        lambda value: value is not None,
+        f"{label} code-action picker",
+    )
+    for _ in range(200):
+        if matches_title(selected, title):
+            break
+        previous = selected
+        send_keys(socket, "Down")
+        selected = wait_for(
+            lambda: selected_menu_title(socket),
+            lambda value: value is not None and value != previous,
+            "native menu selection movement",
+            timeout=5,
+        )
+    else:
+        raise RuntimeError(f"native code action menu never selected {title!r}: {selected!r}")
+    screen = capture(socket)
+    send_keys(socket, "Enter")
+    return screen
 
 
 def wait_for(read: object, predicate: object, label: str, timeout: float = 45) -> object:
@@ -231,6 +272,54 @@ def wire_summary(rows: list[dict[str, object]], magic_uri: str, target_line: int
         "executed_command": executed[0].get("arguments", [{}])[0].get("command"),
         "apply_edit_acknowledged": True,
         "rows": len(rows),
+    }
+
+
+def draft_wire_summary(rows: list[dict[str, object]], draft_uri: str) -> dict[str, object]:
+    """Assert the owned draft attached as git-commit and offered its actions."""
+    opened = [
+        raw(row).get("params", {})
+        for row in inbound(rows, "textDocument/didOpen")
+        if raw(row).get("params", {}).get("textDocument", {}).get("uri") == draft_uri
+    ]
+    if not opened:
+        raise RuntimeError(f"no didOpen for the owned draft {draft_uri}")
+    languages = {item.get("textDocument", {}).get("languageId") for item in opened}
+    if languages != {"git-commit"}:
+        raise RuntimeError(f"draft didOpen languageId is not git-commit: {languages!r}")
+
+    requested = [
+        row for row in inbound(rows, "textDocument/codeAction")
+        if raw(row).get("params", {}).get("textDocument", {}).get("uri") == draft_uri
+    ]
+    if not requested:
+        raise RuntimeError(f"no codeAction request for the owned draft {draft_uri}")
+    offered = response_for(rows, raw(requested[-1]).get("id"))
+    if offered is None:
+        raise RuntimeError("no codeAction response for the owned draft")
+    titles = [item.get("title") for item in offered.get("result") or [] if isinstance(item, dict)]
+    for title in (CONFIRM_TITLE, ABORT_TITLE):
+        if title not in titles:
+            raise RuntimeError(f"draft action {title!r} was not offered: {titles!r}")
+
+    aborted = [
+        (row, (raw(row).get("params", {}).get("arguments") or [{}])[0])
+        for row in inbound(rows, "workspace/executeCommand")
+        if raw(row).get("params", {}).get("command") == "magit.command"
+        and (raw(row).get("params", {}).get("arguments") or [{}])[0].get("command") == "common.cancel"
+        and (raw(row).get("params", {}).get("arguments") or [{}])[0].get("uri") == draft_uri
+    ]
+    if not aborted:
+        raise RuntimeError("the draft Abort commit action was never invoked")
+    response = response_for(rows, raw(aborted[-1][0]).get("id"))
+    if response is None or "error" in response:
+        raise RuntimeError(f"draft abort did not succeed: {response!r}")
+
+    return {
+        "did_open_uri": draft_uri,
+        "language_ids": sorted(languages),
+        "offered_titles": titles,
+        "aborted": True,
     }
 
 
@@ -438,7 +527,7 @@ def main() -> None:
         (directory / "code-action.screen").write_text(picker)
         selected = selected_menu_title(socket)
         for _ in range(len(picker.splitlines())):
-            if selected == STAGE_TITLE:
+            if matches_title(selected, STAGE_TITLE):
                 break
             previous = selected
             send_keys(socket, "Down")
@@ -490,6 +579,111 @@ def main() -> None:
         assert git_state["index_g_after"] == before["index_g"], (git_state["index_g_after"], before["index_g"])
         assert git_state["worktree_f_after"] == before["worktree_f"], "f.txt worktree changed"
         assert git_state["worktree_g_after"] == before["worktree_g"], "g.txt worktree changed"
+
+        status_row = next(index for index, line in enumerate(staged.splitlines()) if "f.txt" in line)
+        send_keys(socket, "Escape")
+        send_text(socket, "gg")
+        send_keys(socket, *(["j"] * status_row))
+        send_keys(socket, "Space", "a")
+        (directory / "commit-menu-action.screen").write_text(
+            choose_action(socket, COMMIT_MENU_TITLE, "open commit menu")
+        )
+        menu = wait_for(
+            lambda: capture(socket),
+            lambda screen: "git commit" in screen,
+            "server-rendered commit menu",
+        )
+        (directory / "commit-menu.screen").write_text(menu)
+        commit_row = next(
+            index for index, line in enumerate(menu.splitlines())
+            if re.search(r"(?:^|\s)Commit\s*$", line)
+        )
+        send_keys(socket, "Escape")
+        send_text(socket, "gg")
+        send_keys(socket, *(["j"] * commit_row))
+        send_keys(socket, "Space", "a")
+        (directory / "commit-action.screen").write_text(
+            choose_action(socket, COMMIT_TITLE, "create commit")
+        )
+        issued = wait_for(
+            lambda: capture(socket),
+            lambda screen: ".git/COMMIT_EDITMSG" in screen,
+            "issued commit draft",
+        )
+        (directory / "commit-issued.screen").write_text(issued)
+        send_keys(socket, "Escape")
+        send_text(socket, f":open {repo / '.git/COMMIT_EDITMSG'}")
+        send_keys(socket, "Enter")
+        draft_screen = wait_for(
+            lambda: capture(socket),
+            lambda screen: "COMMIT_EDITMSG" in screen and "Please enter the commit message" in screen,
+            "opened commit draft",
+        )
+        (directory / "commit-draft.screen").write_text(draft_screen)
+        draft_rows = wait_for(
+            lambda: read_wire(directory / "wire.jsonl"),
+            lambda entries: any(
+                str(raw(row).get("params", {}).get("textDocument", {}).get("uri", "")).endswith(
+                    "/.git/COMMIT_EDITMSG"
+                )
+                for row in inbound(entries, "textDocument/didOpen")
+            ),
+            "owned commit draft didOpen",
+        )
+        draft_uri = next(
+            str(raw(row).get("params", {}).get("textDocument", {}).get("uri"))
+            for row in inbound(draft_rows, "textDocument/didOpen")
+            if str(raw(row).get("params", {}).get("textDocument", {}).get("uri", "")).endswith(
+                "/.git/COMMIT_EDITMSG"
+            )
+        )
+        send_keys(socket, "Space", "a")
+        (directory / "draft-action.screen").write_text(
+            choose_action(socket, ABORT_TITLE, "abort commit")
+        )
+
+        def abort_answered(entries: list[dict[str, object]]) -> bool:
+            for row in inbound(entries, "workspace/executeCommand"):
+                args = (raw(row).get("params", {}).get("arguments") or [{}])[0]
+                if args.get("command") != "common.cancel" or args.get("uri") != draft_uri:
+                    continue
+                response = response_for(entries, raw(row).get("id"))
+                if response is not None and "error" not in response:
+                    return True
+            return False
+
+        rows = wait_for(
+            lambda: read_wire(directory / "wire.jsonl"),
+            abort_answered,
+            "draft abort result",
+        )
+        report["draft_wire"] = draft_wire_summary(rows, draft_uri)
+
+        send_keys(socket, "Escape")
+        send_text(socket, f":open {repo / '.magit'}")
+        send_keys(socket, "Enter")
+        retired = wait_for(
+            lambda: capture(socket),
+            lambda screen: "Staged changes (1)" in screen and "COMMIT_EDITMSG" not in screen,
+            "draft abort retirement",
+        )
+        (directory / "commit-aborted.screen").write_text(retired)
+
+        after_abort = {
+            "head": git(repo, env, "rev-parse", "HEAD").strip(),
+            "staged_paths": git(repo, env, "diff", "--cached", "--name-only").splitlines(),
+            "index_f": git(repo, env, "rev-parse", ":f.txt").strip(),
+            "index_g": git(repo, env, "rev-parse", ":g.txt").strip(),
+            "worktree_f": digest(repo / "f.txt"),
+            "worktree_g": digest(repo / "g.txt"),
+        }
+        report["git_after_abort"] = after_abort
+        assert after_abort["head"] == before["head"], after_abort
+        assert after_abort["staged_paths"] == ["f.txt"], after_abort
+        assert after_abort["index_f"] == expected_blob, after_abort
+        assert after_abort["index_g"] == before["index_g"], after_abort
+        assert after_abort["worktree_f"] == before["worktree_f"], "f.txt worktree changed"
+        assert after_abort["worktree_g"] == before["worktree_g"], "g.txt worktree changed"
     except BaseException as error:
         failure = error
         try:
@@ -510,7 +704,9 @@ def main() -> None:
     print(
         f"{report['helix']}; documented TOML {report['documented_toml_lines']} lines; "
         f"staged f.txt as {report['git_after']['index_f_after']}; "
-        f"HEAD {report['git_after']['head_after']} unchanged; cleanup clean; "
+        f"draft didOpen {report['draft_wire']['language_ids']} with "
+        f"{report['draft_wire']['offered_titles']}; "
+        f"HEAD {report['git_after_abort']['head']} unchanged; cleanup clean; "
         f"evidence: {directory}"
     )
 

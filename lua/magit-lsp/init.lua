@@ -156,8 +156,12 @@ end
 
 --- Open a status view for `root`, starting its session when needed.
 ---
---- Opening is asynchronous; the view is focused once the server has described
---- it. Calling this for an already-open root focuses it immediately.
+--- Opening uses the current session when `root` is omitted, otherwise `root`
+--- or the current directory. A repository without a session starts one
+--- through `setup()` (asynchronously, with its usual readable errors); an
+--- existing session is reused, so its configuration is preserved. Opening is
+--- asynchronous; the view is focused once the server has described it.
+--- Calling this for an already-open root focuses it immediately.
 ---@param root string|nil defaults to the current session or cwd
 function M.open(root)
   local record = M.status_view(root)
@@ -165,13 +169,28 @@ function M.open(root)
     view.focus(record.key)
     return record.descriptor
   end
-  local session = root and M.sessions[root] or nil
-  if not session then
+  local session
+  if root then
+    session = M.sessions[root]
+    if not session then
+      return M.setup({
+        root_dir = root,
+        status = { placement = options.status.placement },
+      })
+    end
+  else
     local current = view.current()
     session = current and session_for_view(current) or nil
-  end
-  if not session then
-    return nil, "no magit-lsp session is open"
+    if not session then
+      local cwd = vim.fn.getcwd()
+      session = M.sessions[cwd]
+      if not session then
+        return M.setup({
+          root_dir = cwd,
+          status = { placement = options.status.placement },
+        })
+      end
+    end
   end
   open_status(session)
 end

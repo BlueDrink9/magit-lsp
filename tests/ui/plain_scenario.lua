@@ -19,6 +19,9 @@ vim.lsp.handlers["workspace/applyEdit"] = function(...)
     end
     local file = assert(io.open(vim.env.MAGIT_LSP_UI_PROBE_FILE, "a"))
     _G.plain_probe_sequence = (_G.plain_probe_sequence or 0) + 1
+    local cursor = buf and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_get_cursor(0) or nil
+    local document_changes = params and params.edit and params.edit.documentChanges or {}
+    local edits = document_changes[1] and document_changes[1].edits or {}
     file:write(
       vim.json.encode({
         sequence = _G.plain_probe_sequence,
@@ -31,35 +34,23 @@ vim.lsp.handlers["workspace/applyEdit"] = function(...)
         traceback = debug.traceback(),
         mode = vim.api.nvim_get_mode(),
         cmdtype = vim.fn.getcmdtype(),
+        topline = vim.fn.line("w0"),
+        winline = vim.fn.winline(),
+        win_height = vim.api.nvim_win_get_height(0),
+        edit_count = #edits,
+        first_range = edits[1] and edits[1].range or nil,
+        cursor = cursor and { row = cursor[1] - 1, col = cursor[2] } or nil,
+        lines = buf and vim.api.nvim_buf_line_count(buf) or nil,
       }),
       "\n"
     )
     file:close()
   end
   log("applyEdit-before")
-  local before = buf and vim.api.nvim_buf_line_count(buf) or 0
   local result = apply(...)
   log("applyEdit-after", result)
   if result and result.applied then
     applied = applied + 1
-  end
-  -- A server prompt transition replaces the whole document with a shorter one.
-  -- The window keeps its previous top line, so the new leading prompt rows can
-  -- start above the viewport; restore visibility without touching the cursor.
-  if result and result.applied and buf and params and params.edit then
-    local after = vim.api.nvim_buf_line_count(buf)
-    local first = (params.edit.documentChanges or {})[1]
-    local edits = first and first.edits or {}
-    local range = edits[1] and edits[1].range
-    if
-      before > after
-      and range
-      and range.start.line == 0
-      and range.start.character == 0
-      and vim.fn.line("w0") > 1
-    then
-      vim.fn.winrestview({ topline = 1, topfill = 0 })
-    end
   end
   -- Retain the presentation text this server edit applied so scenarios can poll
   -- for a repair without inferring convergence from document content.
@@ -90,6 +81,22 @@ function PlainUI.idle()
   return client ~= nil and client.initialized and next(client.requests) == nil
 end
 
+--- Return the fixture's staged paths, newline-joined, or nil when unreadable.
+---
+--- A test-only observation: scenarios gate asynchronous key completion on the
+--- repository index itself instead of on a pre-existing buffer equality.
+function PlainUI.staged_names()
+  local repo = vim.env.PLAIN_REPO
+  if not repo then
+    return nil
+  end
+  local names = vim.fn.systemlist({ "git", "-C", repo, "diff", "--cached", "--name-only" })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return table.concat(names, "\n")
+end
+
 --- Observe native buffer/client state without synthesizing server structure.
 function PlainUI.snapshot()
   local buf = vim.api.nvim_get_current_buf()
@@ -103,6 +110,11 @@ function PlainUI.snapshot()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
   local authoritative = _G.plain_authoritative_text
+  local staged_names = PlainUI.staged_names()
+  local staged_count = 0
+  for _ in (staged_names or ""):gmatch("[^\n]+") do
+    staged_count = staged_count + 1
+  end
   return {
     ready = applied > 0 and client ~= nil and client.initialized,
     idle = PlainUI.idle(),
@@ -110,6 +122,13 @@ function PlainUI.snapshot()
     text = text,
     -- The buffer equals the last applied server text, so no local edit remains.
     authoritative_match = authoritative ~= nil and authoritative == text,
+    -- The last applied server text declares the same staged count Git reports.
+    -- This is a text-level render completion check, not structure recovered by
+    -- parsing that text; scenarios still navigate through `goto`.
+    staged_section_rendered = staged_count > 0
+      and authoritative ~= nil
+      and authoritative:find("Staged changes (" .. staged_count .. ")", 1, true) ~= nil,
+    staged_names = staged_names,
     modified = vim.bo.modified,
     mode = vim.api.nvim_get_mode().mode,
     changedtick = vim.api.nvim_buf_get_changedtick(0),

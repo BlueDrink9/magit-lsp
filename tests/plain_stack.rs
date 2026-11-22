@@ -8,6 +8,7 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 #[test]
@@ -76,12 +77,14 @@ fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
         .commit("second", [("f.txt", "one\ntwo\nthree\n")])
         .modify("f.txt", "ONE\ntwo\nthree\n")
         .build();
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["error"].is_null());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -171,14 +174,16 @@ fn plain_menu_switches_use_retained_targets_and_restore_caller() {
         .commit("second", [("f.txt", "one\ntwo\nthree\n")])
         .modify("f.txt", "ONE\ntwo\nthree\n")
         .build();
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let presentation_path = repo.path().join(".magit");
     let presentation_before = std::fs::read(&presentation_path).ok();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["error"].is_null());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));

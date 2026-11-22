@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * A readable message for an unknown error value.

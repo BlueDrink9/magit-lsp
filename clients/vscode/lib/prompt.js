@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Pure mapping between `view/prompt` parameters and QuickPick items/answers.
@@ -8,7 +8,7 @@
  */
 
 /** The id of the synthetic "type a value" row of an `allowCustom` choice. */
-const CUSTOM_ID = '__custom__';
+const CUSTOM_ID = "__custom__";
 
 /**
  * The rows a prompt offers, in display order.
@@ -20,11 +20,11 @@ function promptItems(params) {
   if (!params) {
     return [];
   }
-  if (params.kind === 'confirm') {
-    const yes = { id: 'yes', label: params.yesLabel || 'Yes' };
-    const no = { id: 'no', label: params.noLabel || 'No' };
+  if (params.kind === "confirm") {
+    const yes = { id: "yes", label: params.yesLabel || "Yes" };
+    const no = { id: "no", label: params.noLabel || "No" };
     // A destructive question focuses "No" first.
-    return (params.destructive || params.default === false) ? [no, yes] : [yes, no];
+    return params.destructive || params.default === false ? [no, yes] : [yes, no];
   }
 
   /** @type {{id: string, label: string, description?: string, detail?: string}[]} */
@@ -34,8 +34,8 @@ function promptItems(params) {
     description: item.description,
     detail: item.detail,
   }));
-  if (params.kind === 'choice' && params.allowCustom) {
-    items.push({ id: CUSTOM_ID, label: 'Enter custom value…' });
+  if (params.kind === "choice" && params.allowCustom) {
+    items.push({ id: CUSTOM_ID, label: "Enter custom value…" });
   }
   return items;
 }
@@ -52,22 +52,22 @@ function answerFor(params, picked) {
     return { cancelled: true };
   }
   switch (params.kind) {
-    case 'confirm':
-      return { cancelled: false, value: picked.id === 'yes' };
-    case 'text':
+    case "confirm":
+      return { cancelled: false, value: picked.id === "yes" };
+    case "text":
       // Neovim's `inputsecret` cannot distinguish Esc from an empty answer,
       // so an empty secret answer is a cancel in both clients.
-      if (params.secret && picked === '') {
+      if (params.secret && picked === "") {
         return { cancelled: true };
       }
       return { cancelled: false, value: String(picked) };
-    case 'choice':
+    case "choice":
       if (picked.id === CUSTOM_ID) {
         // The caller must run a text prompt and use `customChoice`.
         return { cancelled: false, custom: true };
       }
       return { cancelled: false, value: { id: picked.id } };
-    case 'multiChoice': {
+    case "multiChoice": {
       const rows = Array.isArray(picked) ? picked : [picked];
       return { cancelled: false, value: { ids: rows.map((row) => row.id) } };
     }

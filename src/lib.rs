@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod docstore;
 pub mod editor;
 pub mod errors;
+pub mod file_uri;
 pub mod git;
 pub mod instant_rebase;
 pub mod keyhandler;

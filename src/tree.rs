@@ -8,11 +8,11 @@
 use crate::docstore::Encoding;
 use lsp_types::{
     DocumentLink, DocumentSymbol, FoldingRange, FoldingRangeKind, Location, Position, Range,
-    SymbolKind, Uri,
+    SymbolKind,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
+use std::path::Path;
 
 /// Stable identity of a node, derived from what the node is, never its position.
 pub type NodeId = String;
@@ -457,7 +457,10 @@ impl Tree {
             .filter_map(|link| {
                 Some(DocumentLink {
                     range: self.link_range(link, encoding),
-                    target: Some(file_uri(repo_root, &link.path)?),
+                    target: Some(crate::file_uri::uri_for_repo_path(
+                        Path::new(repo_root),
+                        &link.path,
+                    )?),
                     tooltip: Some(link.path.clone()),
                     data: None,
                 })
@@ -484,7 +487,7 @@ impl Tree {
             _ => return None,
         };
         Some(Location {
-            uri: file_uri(repo_root, path)?,
+            uri: crate::file_uri::uri_for_repo_path(Path::new(repo_root), path)?,
             range: Range::new(Position::new(new_line, 0), Position::new(new_line, 0)),
         })
     }
@@ -658,24 +661,6 @@ fn symbol_kind(kind: &str) -> SymbolKind {
         "hunk" => SymbolKind::METHOD,
         _ => SymbolKind::OBJECT,
     }
-}
-
-/// A `file://` URI for `path` inside `repo_root`, percent-encoding as needed.
-fn file_uri(repo_root: &str, path: &str) -> Option<Uri> {
-    let mut full = String::from(repo_root.trim_end_matches('/'));
-    full.push('/');
-    full.push_str(path);
-
-    let mut encoded = String::from("file://");
-    for byte in full.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
-                encoded.push(char::from(byte));
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    Uri::from_str(&encoded).ok()
 }
 
 /// Length of `text` in UTF-16 code units, the unit LSP columns use.

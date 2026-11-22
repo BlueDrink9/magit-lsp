@@ -843,6 +843,20 @@ def start(
     `MAGIT_LSP_PLACEMENT`) to Neovim's otherwise cleared environment.
     `client` selects the Rich adapter or the plugin-free Plain initialization.
     """
+    external_binary = os.environ.get("MAGIT_LSP_TEST_BINARY")
+    if external_binary is not None:
+        binary_path = Path(external_binary)
+        if (
+            not binary_path.is_absolute()
+            or not binary_path.is_file()
+            or not os.access(binary_path, os.X_OK)
+        ):
+            raise DriverError(
+                "MAGIT_LSP_TEST_BINARY must be an absolute path to an executable file"
+            )
+        server_binary = external_binary
+    else:
+        server_binary = str(Path(__file__).resolve().parents[2] / "target" / "debug" / "magit-lsp")
     check_tools()
     if client not in ("rich", "plain"):
         raise DriverError(f"unknown client `{client}`; expected rich or plain")
@@ -883,13 +897,15 @@ def start(
                 "COLORTERM": "truecolor" if color == "truecolor" else "",
                 "NVIM_APPNAME": "magit-ui",
                 "MAGIT_LSP_PROFILE": profile,
-                "MAGIT_LSP_BIN": str(Path(__file__).resolve().parents[2] / "target" / "debug" / "magit-lsp"),
+                "MAGIT_LSP_BIN": server_binary,
                 "MAGIT_LSP_TRACE": str(run.trace_path),
                 "MAGIT_LSP_UI_ROOT": str(run.repo_path),
             }
         )
         if extra_env:
             env.update(extra_env)
+        if external_binary is not None:
+            env["MAGIT_LSP_BIN"] = server_binary
 
         socket = startup.inspect_socket(run.socket_path)
         if socket.too_long:

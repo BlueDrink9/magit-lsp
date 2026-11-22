@@ -20,6 +20,18 @@ RUST = {".rs"}
 FORMATTERS = ("rustfmt", "stylua", "prettier")
 STYLUA_CONFIGS = (".stylua.toml", "stylua.toml")
 SKIP_PARTS = {"node_modules", "target", "vendor", "fixtures", "generated"}
+# Generated client references are written byte-for-byte by the schema generator
+# (`scripts/generate_schema.rs`), and freshness checks compare fresh generator
+# output against these committed bytes. Formatting them would only make the
+# generator look stale, so exclude these exact paths from every source mode.
+GENERATOR_OWNED = frozenset(
+    {
+        "lua/magit-lsp/types.lua",
+        "lua/magit-lsp/shared.lua",
+        "clients/vscode/types/protocol.d.ts",
+        "clients/vscode/types/shared-lists.js",
+    }
+)
 
 
 def run_git(*args: str, check: bool = True) -> bytes:
@@ -85,6 +97,8 @@ def base_tree() -> str:
 
 def eligible(path: str) -> bool:
     """Return whether path is an owned formatter input rather than generated or fixture data."""
+    if path in GENERATOR_OWNED:
+        return False
     parts = Path(path).parts
     if any(part.lower() in SKIP_PARTS for part in parts):
         return False
@@ -289,6 +303,9 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         raise RuntimeError("Git index changed concurrently; retry the commit")
     updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
     git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
+    # Working-tree sources are never written here: a hook cannot compare-and-swap
+    # against a concurrent editor save, so synchronization stays deferred.
+    print("format: formatted staged content; working-tree files are left unchanged", file=sys.stderr)
     return 0
 
 

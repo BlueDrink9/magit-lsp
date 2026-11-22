@@ -1,0 +1,27 @@
+# NVIM-CMD-NATIVE: the automatically registered `:Magit` command reaches the
+# real server and reopens the repository's server-owned status view after the
+# user wipes it. Evidence is the rendered repository status (section counts and
+# fixture file names) plus unchanged Git state, not merely buffer existence.
+fixture: modified-two-files
+size: 100x40
+---
+expect screen contains "Unstaged changes (2)"
+keys: ":bwipeout!" Enter
+wait
+expect screen not-contains "Unstaged changes"
+sh: printf 'command-visible\n' > command-visible.txt
+expect screen not-contains "command-visible.txt"
+keys: ":Magit" Enter
+wait
+expect screen contains "Unstaged changes (2)"
+expect screen contains "f.txt"
+expect screen contains "Untracked files (1)"
+expect screen contains "command-visible.txt"
+expect view_stack.count == 1
+snapshot: reopened-by-command
+sh: git status --porcelain | tr '\n' '|' > .git/command-status && test "$(cat .git/command-status)" = ' M f.txt| M g.txt|?? command-visible.txt|'
+keys: ":Magit" Enter
+wait
+expect view_stack.count == 1
+expect screen contains "command-visible.txt"
+snapshot: focused-existing-view

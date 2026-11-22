@@ -1,6 +1,7 @@
 mod common;
 
 use common::stdio::TestServer;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::presentation::resolve::{resolve, Resolution};
 use std::path::Path;
 
@@ -55,7 +56,9 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
     assert!(
         matches!(resolve(None, &[a.clone(), nested.clone()], None), Resolution::Choose(xs) if xs.len() == 2)
     );
+    #[cfg(unix)]
     let alias = temp.path().join("alias");
+    #[cfg(unix)]
     std::os::unix::fs::symlink(&a, &alias).unwrap();
     let linked = temp.path().join("linked");
     git(
@@ -74,6 +77,7 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
     assert_ne!(discovered.root(), original.root());
     assert_ne!(discovered.git_dir(), original.git_dir());
     assert_eq!(discovered.common_dir(), original.common_dir());
+    #[cfg(unix)]
     assert!(matches!(
         resolve(None, &[a.clone(), alias], None),
         Resolution::Resolved(_)
@@ -85,17 +89,10 @@ fn real_binary_accepts_workspace_file_uri_and_preserves_explicit_rich_open() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo é #%");
     repo(&root);
-    let uri = format!(
-        "file://{}",
-        root.to_string_lossy()
-            .replace('%', "%25")
-            .replace(' ', "%20")
-            .replace('#', "%23")
-            .replace('é', "%C3%A9")
-    );
+    let uri = uri_from_path(&root).expect("native path has a file URI");
     let mut server = TestServer::spawn(&[]);
     let mut init = common::stdio::initialize_message();
-    init["params"]["rootUri"] = serde_json::Value::String(uri);
+    init["params"]["rootUri"] = serde_json::Value::String(uri.as_str().to_owned());
     init["params"]["capabilities"] = serde_json::json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full",
         "layout":["main","side","bottom","float"],

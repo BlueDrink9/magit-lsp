@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Mutable state shared by the extension's modules.
@@ -10,7 +10,7 @@
  */
 
 /** Virtual-document scheme for every server-owned view. */
-const SCHEME = 'magit';
+const SCHEME = "magit";
 
 const store = {
   /** Semantic-token invalidation event, registered after initialization. */

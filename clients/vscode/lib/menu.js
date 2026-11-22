@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * A QuickPick separator row built from a menu group title.
@@ -37,18 +37,18 @@
  */
 function describeItem(item, status) {
   const parts = [];
-  if ('flag' in item && item.flag) {
+  if ("flag" in item && item.flag) {
     parts.push(item.flag);
   }
-  if (item.kind === 'switch') {
-    parts.push(item.on ? 'on' : 'off');
-  } else if (item.kind === 'option' && item.value !== undefined && item.value !== null) {
+  if (item.kind === "switch") {
+    parts.push(item.on ? "on" : "off");
+  } else if (item.kind === "option" && item.value !== undefined && item.value !== null) {
     parts.push(item.value);
   }
-  if (status.status === 'planned') {
-    parts.push(status.roadmapId ? `planned ${status.roadmapId}` : 'planned');
+  if (status.status === "planned") {
+    parts.push(status.roadmapId ? `planned ${status.roadmapId}` : "planned");
   }
-  return parts.join(' · ');
+  return parts.join(" · ");
 }
 
 /**
@@ -60,18 +60,18 @@ function describeItem(item, status) {
 function quickPickItem(item) {
   const status = item.status;
   return {
-    kind: 'item',
+    kind: "item",
     label: `${item.key}  ${item.label}`,
     description: describeItem(item, status),
     key: item.key,
     itemKind: item.kind,
     status: status.status,
-    roadmapId: 'roadmapId' in status ? status.roadmapId : undefined,
+    roadmapId: "roadmapId" in status ? status.roadmapId : undefined,
     reason: undefined,
-    on: item.kind === 'switch' ? Boolean(item.on) : undefined,
-    value: item.kind === 'option' ? item.value : undefined,
-    flag: 'flag' in item ? item.flag : undefined,
-    command: item.kind === 'action' ? item.command : undefined,
+    on: item.kind === "switch" ? Boolean(item.on) : undefined,
+    value: item.kind === "option" ? item.value : undefined,
+    flag: "flag" in item ? item.flag : undefined,
+    command: item.kind === "action" ? item.command : undefined,
     activationSteps: item.activationSteps,
   };
 }
@@ -89,7 +89,7 @@ function quickPickItems(menu) {
   /** @type {QuickPickRow[]} */
   const rows = [];
   for (const group of (menu && menu.groups) || []) {
-    rows.push({ kind: 'separator', label: group.title });
+    rows.push({ kind: "separator", label: group.title });
     for (const item of group.items || []) {
       rows.push(quickPickItem(item));
     }
@@ -98,8 +98,8 @@ function quickPickItems(menu) {
 }
 
 const SPECIAL_CHARS = {
-  ' ': 'Space',
-  '+': 'Plus',
+  " ": "Space",
+  "+": "Plus",
 };
 
 /**
@@ -123,7 +123,7 @@ function charToKey(character) {
  * @returns {string[]}
  */
 function routeTyped(value) {
-  if (typeof value !== 'string') {
+  if (typeof value !== "string") {
     return [];
   }
   return Array.from(value).map(charToKey);

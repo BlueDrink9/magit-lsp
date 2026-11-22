@@ -37,7 +37,8 @@ keys: i
 keys: s
 keys: Escape
 wait
-wait state authoritative_match == true
+wait state staged_names == "g.txt"
+wait state staged_section_rendered == true
 goto "Staged changes (1)"
 expect screen contains "Staged changes (1)"
 expect screen not-contains "s  M g.txt"

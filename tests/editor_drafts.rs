@@ -3,6 +3,7 @@
 
 use magit_lsp::editor::draft::{Draft, DraftContext, MAX_DRAFT_BYTES};
 use magit_lsp::editor::{Reply, COMMIT_MESSAGE_KIND};
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::git::GitRepo;
 use magit_lsp::protocol::DraftFinishReason::{Confirm, NormalClose};
 use std::fs;
@@ -118,7 +119,12 @@ fn opaque_run_uri_and_helper_are_distinct_and_repository_bound() {
     assert_ne!(draft.run_id(), other.run_id());
     assert_ne!(draft.helper_token(), other.helper_token());
     assert_ne!(draft.run_id(), draft.helper_token());
-    assert_eq!(draft.uri(), format!("file://{}", first.target.display()));
+    assert_eq!(
+        draft.uri(),
+        uri_from_path(&first.target)
+            .expect("native path has a file URI")
+            .as_str()
+    );
     assert!(draft
         .uri()
         .contains(&first.repo.root().to_string_lossy().to_string()));
@@ -584,6 +590,51 @@ fn symlinks_hardlinks_directories_and_fifo_are_not_helper_targets() {
         )
         .unwrap();
     assert_eq!(fs::read_to_string(neighbor).unwrap(), "protected");
+}
+
+#[test]
+fn ancestor_substitution_before_join_is_refused_and_restoration_recovers() {
+    let fixture = Fixture::new();
+    let replacement = Fixture::new();
+    fs::write(&replacement.target, "replacement template\n").unwrap();
+    let (mut draft, access) = fixture.awaiting();
+    let token = draft.helper_token().to_string();
+    let root = fs::canonicalize(fixture.repo.root()).unwrap();
+    let moved = root.with_file_name(format!(
+        "{}-moved",
+        root.file_name().unwrap().to_string_lossy()
+    ));
+    fs::rename(&root, &moved).unwrap();
+    let replacement_root = fs::canonicalize(replacement.repo.root()).unwrap();
+    symlink(&replacement_root, &root).unwrap();
+    let original_message = moved.join(".git/COMMIT_EDITMSG");
+    let replacement_message = replacement_root.join(".git/COMMIT_EDITMSG");
+    let original_before = fs::read(&original_message).unwrap();
+    let replacement_before = fs::read(&replacement_message).unwrap();
+    assert!(draft
+        .accept_helper(
+            access.context(),
+            &token,
+            COMMIT_MESSAGE_KIND,
+            &fixture.target
+        )
+        .is_err());
+    assert!(draft.initial().is_none());
+    assert!(draft.live().is_none());
+    assert!(draft.saved().is_none());
+    assert_eq!(fs::read(&original_message).unwrap(), original_before);
+    assert_eq!(fs::read(&replacement_message).unwrap(), replacement_before);
+    fs::remove_file(&root).unwrap();
+    fs::rename(&moved, &root).unwrap();
+    draft
+        .accept_helper(
+            access.context(),
+            &token,
+            COMMIT_MESSAGE_KIND,
+            &fixture.target,
+        )
+        .unwrap();
+    assert_eq!(draft.initial(), Some(TEMPLATE));
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! The editor bridge end to end (R-3.4): a real `git commit` waits for the
 //! client to confirm the real commit-message file, then continues or aborts.
 
+#![cfg(unix)]
+
 mod common;
 
 use common::stdio::*;

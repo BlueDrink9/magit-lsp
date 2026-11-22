@@ -8,7 +8,7 @@
 pub mod recording_prompt_ui;
 
 use magit_lsp::git::GitRepo;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Once;
 use tempfile::TempDir;
@@ -151,6 +151,7 @@ pub fn two_hunk_changes() -> String {
 /// changes are applied last so they stay in the worktree.
 pub struct RepoFixture {
     dir: TempDir,
+    root: PathBuf,
     commits: Vec<(String, Vec<(String, String)>)>,
     renames: Vec<(String, String)>,
     staged: Vec<(String, String)>,
@@ -163,8 +164,31 @@ impl RepoFixture {
     /// Start a fixture whose repository is created by [`Self::build`].
     pub fn new() -> Self {
         apply_determinism_env();
+        Self::with_tempdir(TempDir::new().expect("tempdir"))
+    }
+
+    /// Start a fixture inside `parent`, whose repository is created by
+    /// [`Self::build`].
+    ///
+    /// `parent` may be reached through a symbolic link: [`Self::path`] always
+    /// reports the canonical root. The fixture owns the directory it creates
+    /// and removes it on drop.
+    pub fn new_in(parent: &Path) -> Self {
+        apply_determinism_env();
+        let dir = tempfile::Builder::new()
+            .prefix("magit-lsp-fixture")
+            .tempdir_in(parent)
+            .expect("tempdir in parent");
+        Self::with_tempdir(dir)
+    }
+
+    /// Wrap `dir`, recording its canonical root so it matches the repository
+    /// identity that [`GitRepo::open`] derives.
+    fn with_tempdir(dir: TempDir) -> Self {
+        let root = std::fs::canonicalize(dir.path()).expect("canonicalize fixture root");
         Self {
-            dir: TempDir::new().expect("tempdir"),
+            dir,
+            root,
             commits: Vec::new(),
             renames: Vec::new(),
             staged: Vec::new(),
@@ -236,7 +260,7 @@ impl RepoFixture {
     /// Create the repository on disk and open it.
     pub fn build(self) -> (RepoFixture, GitRepo) {
         apply_determinism_env();
-        let path = self.dir.path().to_path_buf();
+        let path = self.root.clone();
         git(&path, &["init", "-q"]);
         git(&path, &["symbolic-ref", "HEAD", "refs/heads/main"]);
         git(&path, &["config", "user.email", FIXED_EMAIL]);
@@ -268,9 +292,9 @@ impl RepoFixture {
         (self, repo)
     }
 
-    /// Root directory of the temporary repository.
+    /// Canonical root directory of the temporary repository.
     pub fn path(&self) -> &Path {
-        self.dir.path()
+        &self.root
     }
 
     /// Run `git` inside the repository.

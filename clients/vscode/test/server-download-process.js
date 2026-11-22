@@ -1,8 +1,8 @@
-'use strict';
+"use strict";
 
-const fs = require('node:fs');
+const fs = require("node:fs");
 
-const { resolveServer } = require('../lib/server-download');
+const { resolveServer } = require("../lib/server-download");
 
 /**
  * Independent resolver process sharing one cache root with its parent test.
@@ -29,14 +29,14 @@ function report(message) {
   if (process.send) process.send(message);
 }
 
-process.on('message', (message) => {
-  if (message?.type === 'continue') {
+process.on("message", (message) => {
+  if (message?.type === "continue") {
     releaseGate();
     return;
   }
-  if (message?.type !== 'resolve') return;
+  if (message?.type !== "resolve") return;
   run(message).catch((error) => {
-    report({ type: 'failed', name: error?.name, message: error?.message });
+    report({ type: "failed", name: error?.name, message: error?.message });
   });
 });
 
@@ -52,9 +52,9 @@ async function run(plan) {
   /** @type {import('../lib/server-download').Transport} */
   const transport = async (url) => {
     if (plan.failure) throw new Error(plan.failure);
-    report({ type: 'transport', url });
+    report({ type: "transport", url });
     await gate;
-    return url.endsWith('.sha256') ? sidecar : archive;
+    return url.endsWith(".sha256") ? sidecar : archive;
   };
   try {
     const result = await resolveServer({
@@ -63,8 +63,8 @@ async function run(plan) {
       transport,
       runtime: plan.runtime,
     });
-    report({ type: 'resolved', executable: result.executable, version: result.version });
+    report({ type: "resolved", executable: result.executable, version: result.version });
   } catch (error) {
-    report({ type: 'failed', name: error?.name, message: error?.message });
+    report({ type: "failed", name: error?.name, message: error?.message });
   }
 }

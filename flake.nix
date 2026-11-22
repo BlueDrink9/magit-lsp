@@ -21,7 +21,7 @@
         {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "magit-lsp";
-            version = "0.1.0";
+            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
             src = pkgs.lib.cleanSource ./.;
             cargoLock.lockFile = ./Cargo.lock;
             meta = {
@@ -37,6 +37,37 @@
           pkgs = import nixpkgs { inherit system; };
           llvm = pkgs.rustPlatform.rust.rustc.llvmPackages.llvm;
 
+          # Release compilation: pinned Rust/Cargo, but the native OS
+          # supplies the linker, C runtime and SDK.
+          #
+          # Intentionally does NOT inherit from dev/test:
+          # no Nix C compiler wrapper and no test editors.
+          releaseNative = pkgs.mkShellNoCC {
+            packages = with pkgs; [
+              rustc
+              cargo
+              git
+              gnumake
+              python3
+            ];
+          };
+
+          # Functional acceptance of already-built release artifacts.
+          # This shell intentionally has no Rust compiler or Cargo.
+          #
+          # Clean portability smoke tests run separately on hosted
+          # machines without Nix.
+          releaseAcceptance = pkgs.mkShellNoCC {
+            packages = with pkgs; [
+              git
+              python3
+              neovim
+              tmux
+              nodejs_24
+              pnpm_10
+            ];
+          };
+
           # Development tools, excluding test editors.
           dev = pkgs.mkShell {
             packages = with pkgs; [
@@ -46,13 +77,14 @@
               gnumake
               lua5_4
               lua-language-server
-              nodejs
+              nodejs_24
               pnpm_10
               python3
               pyright
               rust-analyzer
               rustc
               rustfmt
+              shellcheck
               stylua
               typescript-language-server
               ps  # used for tests to check child processes
@@ -63,6 +95,9 @@
               # jscpd.packages.${system}.default
               actionlint # Check github action workflows
               cargo-llvm-cov
+
+              perf
+              strace
             ];
 
             shellHook = ''
@@ -102,6 +137,8 @@
           default = test;
           inherit dev;
           inherit test vscode;
+          release-native = releaseNative;
+          release-acceptance = releaseAcceptance;
         });
     };
 }

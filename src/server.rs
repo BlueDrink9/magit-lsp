@@ -479,7 +479,7 @@ impl Shared {
                             .unwrap_or_else(|p| p.into_inner())
                             .get(&repo_for_handler)
                             .and_then(|views| views.current_snapshot(&render.view_id));
-                        if !route_plain_render(&shared, &render.view_id, snapshot) {
+                        if !route_plain_render(&shared, &render.view_id, snapshot, render.cursor) {
                             let _ = shared.sender.send(custom_ui(&shared.client).render(render));
                         }
                     }
@@ -1469,14 +1469,14 @@ fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolv
             folder
                 .get("uri")
                 .and_then(Value::as_str)
-                .and_then(file_uri_path)
+                .and_then(crate::file_uri::path_from_uri)
         }));
     }
     if paths.is_empty() {
         if let Some(path) = params
             .get("rootUri")
             .and_then(Value::as_str)
-            .and_then(file_uri_path)
+            .and_then(crate::file_uri::path_from_uri)
         {
             paths.push(path);
         }
@@ -1501,44 +1501,9 @@ fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolv
     repositories
 }
 
-fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
-    let rest = uri.strip_prefix("file://")?;
-    let path = if let Some(local) = rest.strip_prefix("localhost/") {
-        format!("/{local}")
-    } else if rest.starts_with('/') {
-        rest.to_owned()
-    } else {
-        return None;
-    };
-    let bytes = path.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hi = *bytes.get(i + 1)?;
-            let lo = *bytes.get(i + 2)?;
-            decoded.push((hex(hi)? << 4) | hex(lo)?);
-            i += 3;
-        } else {
-            decoded.push(bytes[i]);
-            i += 1;
-        }
-    }
-    Some(std::path::PathBuf::from(String::from_utf8(decoded).ok()?))
-}
-
-fn hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod repository_uri_tests {
-    use super::file_uri_path;
+    use crate::file_uri::path_from_uri as file_uri_path;
 
     #[test]
     fn file_uri_decoding_is_complete_and_rejects_nonlocal_or_malformed_uris() {
@@ -1595,7 +1560,7 @@ fn is_plain_provider_uri(shared: &Shared, uri: &str) -> bool {
         .plain
         .is_some();
     negotiated
-        && file_uri_path(uri).is_some_and(|path| {
+        && crate::file_uri::path_from_uri(uri).is_some_and(|path| {
             crate::config::is_presentation_file(&path, &shared.config.config().presentation_files)
         })
 }

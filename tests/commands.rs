@@ -5,6 +5,7 @@ mod common;
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, EffectKind, Scope};
 use magit_lsp::config::Profile;
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::protocol::{Cursor, EditDocumentMode, Effect, MessageLevel};
 
 /// Every command id named in TASKS.md §5.1–§5.5.
@@ -751,7 +752,10 @@ fn visit_reports_the_server_resolved_worktree_location() {
     let line = test.goto_text("f.txt", "line3 CHANGED");
     let outcome = test.invoke_at("common.visit", Cursor { line, column: 0 });
 
-    let uri = format!("file://{}/f.txt", tmp.path().display());
+    let uri = uri_from_path(&tmp.path().join("f.txt"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     assert_eq!(
         outcome.effects,
         vec![Effect::VisitFile {
@@ -979,6 +983,7 @@ fn file_row_does_not_stage_changes_added_after_its_render() {
     assert!(tmp.git(&["diff"]).contains("new hidden change"));
 }
 
+#[cfg(unix)]
 #[test]
 fn mode_only_change_after_render_is_rejected_without_staging() {
     use std::os::unix::fs::PermissionsExt;
@@ -1105,6 +1110,7 @@ fn unchanged_binary_file_row_stages_successfully() {
     assert!(tmp.git(&["diff"]).is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn unchanged_type_change_file_row_stages_successfully() {
     use std::os::unix::fs::symlink;
@@ -1345,12 +1351,30 @@ fn an_unknown_command_is_a_protocol_error() {
 
 // Independent byte/mode snapshots, including symlink targets and directory
 // membership. Do not use the production identity routine to prove no mutation.
-fn identity_worktree(path: &std::path::Path) -> Vec<(std::path::PathBuf, u32, Vec<u8>)> {
-    use std::os::unix::fs::PermissionsExt;
+// On Unix the second element is the full permission mode; elsewhere it is the
+// file type, keeping path/type/content identity without invented permissions.
+#[cfg(unix)]
+type IdentityMode = u32;
+#[cfg(not(unix))]
+type IdentityMode = std::fs::FileType;
+
+fn identity_mode(metadata: &std::fs::Metadata) -> IdentityMode {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode()
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.file_type()
+    }
+}
+
+fn identity_worktree(path: &std::path::Path) -> Vec<(std::path::PathBuf, IdentityMode, Vec<u8>)> {
     fn visit(
         root: &std::path::Path,
         path: &std::path::Path,
-        out: &mut Vec<(std::path::PathBuf, u32, Vec<u8>)>,
+        out: &mut Vec<(std::path::PathBuf, IdentityMode, Vec<u8>)>,
     ) {
         let metadata = std::fs::symlink_metadata(path).unwrap();
         let bytes = if metadata.file_type().is_symlink() {
@@ -1366,7 +1390,7 @@ fn identity_worktree(path: &std::path::Path) -> Vec<(std::path::PathBuf, u32, Ve
         };
         out.push((
             path.strip_prefix(root).unwrap().to_path_buf(),
-            metadata.permissions().mode(),
+            identity_mode(&metadata),
             bytes,
         ));
         if metadata.is_dir() {
@@ -1393,7 +1417,7 @@ fn identity_worktree(path: &std::path::Path) -> Vec<(std::path::PathBuf, u32, Ve
 struct TargetState {
     head: Option<Vec<u8>>,
     index: Option<Vec<u8>>,
-    worktree: Vec<(std::path::PathBuf, u32, Vec<u8>)>,
+    worktree: Vec<(std::path::PathBuf, IdentityMode, Vec<u8>)>,
 }
 
 fn target_state(tmp: &RepoFixture) -> TargetState {

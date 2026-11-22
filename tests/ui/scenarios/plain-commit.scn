@@ -16,9 +16,7 @@ expect screen contains "Commit"
 snapshot: commit-menu
 keys: ":lua PlainUI.action('menu.run-action','c')" Enter
 wait
-# The documented Plain config declares no `window.showDocument` support, so the
-# server only tells the user which draft to open; open it as a user would.
-keys: ":edit .git/COMMIT_EDITMSG" Enter
+# Standard showDocument opens the commit draft; wait for the auto-opened buffer.
 wait state draft == true
 wait
 snapshot: opened-draft

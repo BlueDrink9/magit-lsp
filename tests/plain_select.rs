@@ -9,6 +9,7 @@ mod fake_editor;
 use common::stdio;
 use common::{RepoFixture, TestSession, WIDE_VIEWPORT};
 use fake_editor::{FakeEditor, Profile as EditorProfile};
+use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::protocol::Cursor;
 use magit_lsp::tree::NodeKind;
 use serde_json::{json, Value};
@@ -25,15 +26,17 @@ fn next_apply(server: &mut stdio::TestServer) -> Value {
 
 /// Open the repository's `.magit` status document as a Plain client.
 fn open_plain(repo: &RepoFixture) -> (stdio::TestServer, FakeEditor, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
         "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
         "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
     });
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     let initialized = server.response_with_id(1);
     assert_eq!(

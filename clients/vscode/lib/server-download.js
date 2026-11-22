@@ -1,27 +1,31 @@
-'use strict';
+"use strict";
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const zlib = require('node:zlib');
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const zlib = require("node:zlib");
 
-const { message } = require('./util');
+const { message } = require("./util");
 
 /** GitHub repository publishing magit-lsp release archives. */
-const REPOSITORY = 'BlueDrink9/magit-lsp';
+const REPOSITORY = "BlueDrink9/magit-lsp";
 
-/** The only published release asset: Linux x86_64 GNU with glibc 2.35+. */
-const ASSET = 'x86_64-unknown-linux-gnu';
+/** Approved release assets mapped from extension-host platform and architecture. */
+const ASSETS = Object.freeze({
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "darwin-arm64": "aarch64-apple-darwin",
+  "darwin-x64": "x86_64-apple-darwin",
+});
 
 /** GNU libc version the released Linux binary requires. */
 const MINIMUM_GLIBC = [2, 35];
 
 /** Files every release archive contains below its versioned stem directory. */
-const ARCHIVE_FILES = ['magit-lsp', 'LICENSE', 'LICENSE-APACHE', 'INSTALL.md'];
+const ARCHIVE_FILES = ["magit-lsp", "LICENSE", "LICENSE-APACHE", "INSTALL.md"];
 
 /** Member name Python's tarfile uses for the pax extended header it emits. */
-const PAX_HEADER_NAME = '././@PaxHeader';
+const PAX_HEADER_NAME = "././@PaxHeader";
 
 /**
  * Resource bounds for one resolution.
@@ -53,7 +57,7 @@ class ServerDownloadError extends Error {
   /** @param {string} reason user-facing reason without the product prefix */
   constructor(reason) {
     super(`magit-lsp: ${reason}`);
-    this.name = 'ServerDownloadError';
+    this.name = "ServerDownloadError";
   }
 }
 
@@ -77,8 +81,8 @@ function fail(reason) {
  * @returns {string} normalized `X.Y.Z`
  */
 function releaseVersion(value) {
-  if (typeof value !== 'string') fail('extension version must be a string');
-  const version = value.startsWith('v') ? value.slice(1) : value;
+  if (typeof value !== "string") fail("extension version must be a string");
+  const version = value.startsWith("v") ? value.slice(1) : value;
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
     fail(`unsupported release version ${JSON.stringify(value)}; expected a stable X.Y.Z version`);
   }
@@ -94,7 +98,7 @@ function hostGlibc() {
   try {
     const report = /** @type {any} */ (process.report?.getReport?.());
     const version = report?.header?.glibcVersionRuntime;
-    return typeof version === 'string' ? version : null;
+    return typeof version === "string" ? version : null;
   } catch {
     return null;
   }
@@ -107,7 +111,7 @@ function hostGlibc() {
  * @returns {boolean}
  */
 function supportedGlibc(value) {
-  const match = typeof value === 'string' ? /^(\d+)\.(\d+)/.exec(value) : null;
+  const match = typeof value === "string" ? /^(\d+)\.(\d+)/.exec(value) : null;
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
@@ -117,7 +121,7 @@ function supportedGlibc(value) {
 /**
  * Pick the release asset for the reported host.
  *
- * Only the published Linux x86_64 GNU asset is ever selected. Any other host is
+ * Only explicitly published assets are selected. Any other host is
  * told how to point the client at a server it installed itself rather than
  * being handed a binary it cannot run.
  *
@@ -130,16 +134,19 @@ function releaseAsset(runtime) {
   const glibc = runtime.glibc === undefined ? hostGlibc() : runtime.glibc;
   const shape = `${platform}-${arch}`;
   const guidance = 'set "magit-lsp.server.path" to a magit-lsp executable instead';
-  if (platform !== 'linux' || arch !== 'x64') {
-    fail(`no release asset for ${shape}: only ${ASSET} is published; ${guidance}`);
-  }
-  if (!supportedGlibc(glibc)) {
+  const asset = Object.hasOwn(ASSETS, shape) ? ASSETS[shape] : undefined;
+  if (!asset) {
     fail(
-      `no release asset for ${shape}: GNU glibc ${MINIMUM_GLIBC.join('.')} or newer is ` +
-        `required (found ${glibc || 'none'}); ${guidance}`,
+      `no release asset for ${shape}: supported targets are ${Object.values(ASSETS).join(", ")}; ${guidance}`,
     );
   }
-  return ASSET;
+  if (platform === "linux" && !supportedGlibc(glibc)) {
+    fail(
+      `no release asset for ${shape}: GNU glibc ${MINIMUM_GLIBC.join(".")} or newer is ` +
+        `required (found ${glibc || "none"}); ${guidance}`,
+    );
+  }
+  return asset;
 }
 
 /**
@@ -149,7 +156,7 @@ function releaseAsset(runtime) {
  * @returns {string} lowercase hex digest
  */
 function sha256(bytes) {
-  return crypto.createHash('sha256').update(bytes).digest('hex');
+  return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
 /**
@@ -161,7 +168,7 @@ function sha256(bytes) {
  * @returns {string}
  */
 function cacheEntry(cacheRoot, version, asset) {
-  return path.join(cacheRoot, 'server', `v${version}`, asset);
+  return path.join(cacheRoot, "server", `v${version}`, asset);
 }
 
 /**
@@ -174,13 +181,13 @@ function cacheEntry(cacheRoot, version, asset) {
  * @param {string} version normalized release version
  * @returns {string|undefined} verified executable path
  */
-function cachedExecutable(entry, version) {
-  const executable = path.join(entry, 'magit-lsp');
+function cachedExecutable(entry, version, asset) {
+  const executable = path.join(entry, "magit-lsp");
   try {
     const stat = fs.lstatSync(executable);
     if (!stat.isFile()) return undefined;
-    const manifest = JSON.parse(fs.readFileSync(path.join(entry, 'manifest.json'), 'utf8'));
-    if (!manifest || manifest.version !== version || manifest.asset !== ASSET) return undefined;
+    const manifest = JSON.parse(fs.readFileSync(path.join(entry, "manifest.json"), "utf8"));
+    if (!manifest || manifest.version !== version || manifest.asset !== asset) return undefined;
     if (!/^[0-9a-f]{64}$/.test(manifest.digest) || manifest.size !== stat.size) return undefined;
     if (sha256(fs.readFileSync(executable)) !== manifest.digest) return undefined;
     return executable;
@@ -229,17 +236,18 @@ function entryLock(entry) {
 function removeStaleLock(lock) {
   let owner;
   try {
-    const [host, pid] = fs.readFileSync(path.join(lock, 'owner'), 'utf8').trim().split(/\s+/);
+    const [host, pid] = fs.readFileSync(path.join(lock, "owner"), "utf8").trim().split(/\s+/);
     owner = { host, pid: Number(pid) };
   } catch {
     return false;
   }
-  if (owner.host !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) return false;
+  if (owner.host !== os.hostname() || !Number.isSafeInteger(owner.pid) || owner.pid <= 0)
+    return false;
   try {
     process.kill(owner.pid, 0);
     return false;
   } catch (error) {
-    if (error.code !== 'ESRCH') return false;
+    if (error.code !== "ESRCH") return false;
   }
   try {
     fs.rmSync(lock, { recursive: true, force: true });
@@ -266,16 +274,18 @@ function acquireEntryLock(entry) {
     try {
       fs.mkdirSync(lock);
       try {
-        fs.writeFileSync(path.join(lock, 'owner'), `${os.hostname()} ${process.pid}\n`);
+        fs.writeFileSync(path.join(lock, "owner"), `${os.hostname()} ${process.pid}\n`);
       } catch {}
       return lock;
     } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
+      if (error.code !== "EEXIST") throw error;
     }
     if (removeStaleLock(lock)) continue;
     pause(LIMITS.lockWaitMilliseconds);
   }
-  fail(`timed out waiting for another process to finish installing magit-lsp; remove ${lock} if no other VS Code window is installing`);
+  fail(
+    `timed out waiting for another process to finish installing magit-lsp; remove ${lock} if no other VS Code window is installing`,
+  );
 }
 
 /**
@@ -310,9 +320,9 @@ function withEntryLock(entry, action) {
  * @param {string} version normalized release version
  * @returns {void}
  */
-function removeInvalidEntry(entry, version) {
-  if (cachedExecutable(entry, version)) return;
-  for (const name of ['magit-lsp', 'manifest.json']) {
+function removeInvalidEntry(entry, version, asset) {
+  if (cachedExecutable(entry, version, asset)) return;
+  for (const name of ["magit-lsp", "manifest.json"]) {
     try {
       fs.rmSync(path.join(entry, name), { force: true });
     } catch {}
@@ -320,8 +330,8 @@ function removeInvalidEntry(entry, version) {
   try {
     fs.rmdirSync(entry);
   } catch (error) {
-    if (error.code === 'ENOENT') return;
-    if (error.code === 'ENOTEMPTY' || error.code === 'EEXIST') {
+    if (error.code === "ENOENT") return;
+    if (error.code === "ENOTEMPTY" || error.code === "EEXIST") {
       fail(`cannot replace the cached magit-lsp ${version}: ${entry} contains unexpected files`);
     }
     throw error;
@@ -335,7 +345,7 @@ function removeInvalidEntry(entry, version) {
  * @returns {string}
  */
 function escapePattern(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -348,7 +358,7 @@ function escapePattern(text) {
 function parseSidecar(sidecar, archiveName) {
   if (sidecar.length === 0) fail(`empty checksum sidecar for ${archiveName}`);
   const pattern = new RegExp(`^([0-9a-f]{64}) {2}${escapePattern(archiveName)}\\n$`);
-  const match = pattern.exec(sidecar.toString('utf8'));
+  const match = pattern.exec(sidecar.toString("utf8"));
   if (!match) fail(`invalid checksum sidecar for ${archiveName}`);
   return match[1];
 }
@@ -378,7 +388,7 @@ function checkedBytes(value, limit, label) {
 function tarField(header, offset, length) {
   const field = header.subarray(offset, offset + length);
   const end = field.indexOf(0);
-  return (end === -1 ? field : field.subarray(0, end)).toString('utf8');
+  return (end === -1 ? field : field.subarray(0, end)).toString("utf8");
 }
 
 /**
@@ -391,9 +401,9 @@ function tarField(header, offset, length) {
  */
 function tarNumber(header, offset, length) {
   const text = tarField(header, offset, length).trim();
-  if (!/^[0-7]+$/.test(text)) fail('corrupt release archive header');
+  if (!/^[0-7]+$/.test(text)) fail("corrupt release archive header");
   const value = Number.parseInt(text, 8);
-  if (!Number.isSafeInteger(value)) fail('corrupt release archive header');
+  if (!Number.isSafeInteger(value)) fail("corrupt release archive header");
   return value;
 }
 
@@ -413,23 +423,23 @@ function parsePaxMetadata(content) {
   let offset = 0;
   while (offset < content.length) {
     const space = content.indexOf(0x20, offset);
-    if (space === -1) fail('corrupt release archive pax header');
-    const lengthText = content.toString('ascii', offset, space);
-    if (!/^[1-9][0-9]*$/.test(lengthText)) fail('corrupt release archive pax header');
+    if (space === -1) fail("corrupt release archive pax header");
+    const lengthText = content.toString("ascii", offset, space);
+    if (!/^[1-9][0-9]*$/.test(lengthText)) fail("corrupt release archive pax header");
     const length = Number.parseInt(lengthText, 10);
     if (!Number.isSafeInteger(length) || length < space - offset + 4) {
-      fail('corrupt release archive pax header');
+      fail("corrupt release archive pax header");
     }
-    if (offset + length > content.length) fail('corrupt release archive pax header');
+    if (offset + length > content.length) fail("corrupt release archive pax header");
     const record = content.subarray(space + 1, offset + length);
-    if (record[record.length - 1] !== 0x0a) fail('corrupt release archive pax header');
+    if (record[record.length - 1] !== 0x0a) fail("corrupt release archive pax header");
     const body = record.subarray(0, record.length - 1);
     const equals = body.indexOf(0x3d);
-    if (equals <= 0) fail('corrupt release archive pax header');
-    const key = body.toString('ascii', 0, equals);
-    const value = body.toString('utf8', equals + 1);
-    if (key !== 'mtime') fail(`unsupported archive pax metadata ${JSON.stringify(key)}`);
-    if (!/^-?[0-9]+(?:\.[0-9]+)?$/.test(value)) fail('corrupt release archive pax header');
+    if (equals <= 0) fail("corrupt release archive pax header");
+    const key = body.toString("ascii", 0, equals);
+    const value = body.toString("utf8", equals + 1);
+    if (key !== "mtime") fail(`unsupported archive pax metadata ${JSON.stringify(key)}`);
+    if (!/^-?[0-9]+(?:\.[0-9]+)?$/.test(value)) fail("corrupt release archive pax header");
     offset += length;
   }
 }
@@ -467,18 +477,18 @@ function tarMembers(buffer) {
     for (let index = 0; index < 512; index += 1) {
       checksum += index >= 148 && index < 156 ? 0x20 : header[index];
     }
-    if (checksum !== expected) fail('corrupt release archive header');
-    if (tarField(header, 257, 6) !== 'ustar') fail('unsupported release archive format');
-    if (members.length >= LIMITS.members) fail('release archive has too many members');
+    if (checksum !== expected) fail("corrupt release archive header");
+    if (tarField(header, 257, 6) !== "ustar") fail("unsupported release archive format");
+    if (members.length >= LIMITS.members) fail("release archive has too many members");
     const size = tarNumber(header, 124, 12);
-    if (size < 0 || offset + 512 + size > buffer.length) fail('release archive is truncated');
+    if (size < 0 || offset + 512 + size > buffer.length) fail("release archive is truncated");
     const prefix = tarField(header, 345, 155);
     const name = prefix ? `${prefix}/${tarField(header, 0, 100)}` : tarField(header, 0, 100);
     const type = String.fromCharCode(header[156] === 0 ? 0x30 : header[156]);
-    if (type === 'x') {
-      if (paxPending) fail('corrupt release archive pax header');
+    if (type === "x") {
+      if (paxPending) fail("corrupt release archive pax header");
       if (name !== PAX_HEADER_NAME) fail(`unsupported archive pax member ${JSON.stringify(name)}`);
-      if (size <= 0 || size > LIMITS.memberBytes) fail('invalid size for archive pax header');
+      if (size <= 0 || size > LIMITS.memberBytes) fail("invalid size for archive pax header");
       parsePaxMetadata(buffer.subarray(offset + 512, offset + 512 + size));
       paxPending = true;
       offset += 512 + Math.ceil(size / 512) * 512;
@@ -488,8 +498,8 @@ function tarMembers(buffer) {
     members.push({ name, type, size, content: buffer.subarray(offset + 512, offset + 512 + size) });
     offset += 512 + Math.ceil(size / 512) * 512;
   }
-  if (paxPending) fail('corrupt release archive pax header');
-  if (members.length === 0) fail('release archive is empty');
+  if (paxPending) fail("corrupt release archive pax header");
+  if (members.length === 0) fail("release archive is empty");
   return members;
 }
 
@@ -516,17 +526,19 @@ function extractBinary(archive, stem) {
   /** @type {Buffer|undefined} */
   let binary;
   for (const member of tarMembers(tar)) {
-    if (!expected.has(member.name)) fail(`unexpected archive member ${JSON.stringify(member.name)}`);
-    if (member.type !== '0') fail(`archive member ${member.name} is not a regular file`);
+    if (!expected.has(member.name))
+      fail(`unexpected archive member ${JSON.stringify(member.name)}`);
+    if (member.type !== "0") fail(`archive member ${member.name} is not a regular file`);
     if (seen.has(member.name)) fail(`duplicate archive member ${member.name}`);
     seen.add(member.name);
     const limit = member.name === binaryName ? LIMITS.binaryBytes : LIMITS.memberBytes;
-    if (member.size <= 0 || member.size > limit) fail(`invalid size for archive member ${member.name}`);
+    if (member.size <= 0 || member.size > limit)
+      fail(`invalid size for archive member ${member.name}`);
     if (member.name === binaryName) binary = member.content;
   }
   const missing = [...expected].filter((name) => !seen.has(name));
-  if (missing.length > 0) fail(`archive is missing ${missing.join(', ')}`);
-  if (!binary) fail('archive is missing the magit-lsp binary');
+  if (missing.length > 0) fail(`archive is missing ${missing.join(", ")}`);
+  if (!binary) fail("archive is missing the magit-lsp binary");
   return binary;
 }
 
@@ -563,19 +575,19 @@ async function discardResponse(response) {
 async function fetchBytes(url, limit) {
   let current = new URL(url);
   for (let hop = 0; hop <= LIMITS.redirects; hop += 1) {
-    if (current.protocol !== 'https:') fail(`refusing non-HTTPS download of ${current.href}`);
+    if (current.protocol !== "https:") fail(`refusing non-HTTPS download of ${current.href}`);
     /** @type {Response} */
     let response;
     try {
       response = await fetch(current, {
-        redirect: 'manual',
+        redirect: "manual",
         signal: AbortSignal.timeout(LIMITS.requestMilliseconds),
       });
     } catch (error) {
       fail(`download failed for ${current.href}: ${message(error)}`);
     }
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get('location');
+      const location = response.headers.get("location");
       await discardResponse(response);
       if (!location) fail(`redirect without a location for ${current.href}`);
       try {
@@ -589,7 +601,7 @@ async function fetchBytes(url, limit) {
       await discardResponse(response);
       fail(`download failed: HTTP ${response.status} for ${current.href}`);
     }
-    const advertised = Number(response.headers.get('content-length'));
+    const advertised = Number(response.headers.get("content-length"));
     if (Number.isFinite(advertised) && advertised > limit) {
       await discardResponse(response);
       fail(`download exceeds the ${limit}-byte limit for ${current.href}`);
@@ -649,47 +661,47 @@ async function install(entry, version, asset, transport, force = false) {
     const sidecar = checkedBytes(
       await transport(`${base}/${archiveName}.sha256`, LIMITS.sidecarBytes),
       LIMITS.sidecarBytes,
-      'checksum sidecar',
+      "checksum sidecar",
     );
     const digest = parseSidecar(sidecar, archiveName);
     const archive = checkedBytes(
       await transport(`${base}/${archiveName}`, LIMITS.archiveBytes),
       LIMITS.archiveBytes,
-      'release archive',
+      "release archive",
     );
     if (sha256(archive) !== digest) fail(`archive checksum does not match ${archiveName}.sha256`);
     const binary = extractBinary(archive, stem);
     fs.mkdirSync(parent, { recursive: true });
-    staging = fs.mkdtempSync(path.join(parent, '.staging-'));
-    const stagedBinary = path.join(staging, 'magit-lsp');
+    staging = fs.mkdtempSync(path.join(parent, ".staging-"));
+    const stagedBinary = path.join(staging, "magit-lsp");
     fs.writeFileSync(stagedBinary, binary);
     fs.chmodSync(stagedBinary, 0o755);
-    const handle = fs.openSync(stagedBinary, 'r');
+    const handle = fs.openSync(stagedBinary, "r");
     try {
       fs.fsyncSync(handle);
     } finally {
       fs.closeSync(handle);
     }
     const manifest = { version, asset, size: binary.length, digest: sha256(binary) };
-    fs.writeFileSync(path.join(staging, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.writeFileSync(path.join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     return withEntryLock(entry, () => {
       if (!force) {
-        const winner = cachedExecutable(entry, version);
+        const winner = cachedExecutable(entry, version, asset);
         if (winner) return winner;
       }
       /** @type {string|undefined} retired directory holding the displaced entry */
       let retired;
-      if (force && cachedExecutable(entry, version)) {
-        retired = fs.mkdtempSync(path.join(parent, '.retired-'));
-        fs.renameSync(entry, path.join(retired, 'entry'));
+      if (force && cachedExecutable(entry, version, asset)) {
+        retired = fs.mkdtempSync(path.join(parent, ".retired-"));
+        fs.renameSync(entry, path.join(retired, "entry"));
       }
       try {
-        removeInvalidEntry(entry, version);
+        removeInvalidEntry(entry, version, asset);
         fs.renameSync(staging, entry);
       } catch (error) {
         if (retired) {
           try {
-            fs.renameSync(path.join(retired, 'entry'), entry);
+            fs.renameSync(path.join(retired, "entry"), entry);
           } catch {}
         }
         throw error;
@@ -700,7 +712,7 @@ async function install(entry, version, asset, transport, force = false) {
           fs.rmSync(retired, { recursive: true, force: true });
         } catch {}
       }
-      return path.join(entry, 'magit-lsp');
+      return path.join(entry, "magit-lsp");
     });
   } catch (error) {
     throw error instanceof ServerDownloadError
@@ -731,7 +743,7 @@ const inFlight = new Map();
  * Resolve a verified magit-lsp executable for one extension version.
  *
  * The release tag is exactly the requested version, never `latest`. Only the
- * published Linux x86_64 GNU asset is installed; any other host fails with
+ * published host asset is installed; any other host fails with
  * guidance to set `magit-lsp.server.path`. A cached binary is re-verified before
  * it is returned, concurrent calls in this process share one download, and
  * extension hosts sharing the cache publish complete entries by directory
@@ -746,13 +758,13 @@ const inFlight = new Map();
 async function resolveServer(options) {
   const version = releaseVersion(options?.version);
   const cacheRoot = options?.cacheRoot;
-  if (typeof cacheRoot !== 'string' || cacheRoot.trim() === '') {
-    fail('a cache directory is required');
+  if (typeof cacheRoot !== "string" || cacheRoot.trim() === "") {
+    fail("a cache directory is required");
   }
   const asset = releaseAsset(options?.runtime ?? {});
   const entry = cacheEntry(cacheRoot, version, asset);
   const force = options?.force === true;
-  const cached = force ? undefined : cachedExecutable(entry, version);
+  const cached = force ? undefined : cachedExecutable(entry, version, asset);
   if (cached) return { executable: cached, version };
   const transport = options?.transport ?? fetchBytes;
   let pending = force ? undefined : inFlight.get(entry);
@@ -763,13 +775,13 @@ async function resolveServer(options) {
       // host's freshly published winner from being deleted; publication
       // repeats the check authoritatively, so a failure here is not fatal.
       try {
-        withEntryLock(entry, () => removeInvalidEntry(entry, version));
+        withEntryLock(entry, () => removeInvalidEntry(entry, version, asset));
       } catch {}
     }
     // Re-check after clearing so an install that finished while we waited for
     // the lock is reused instead of downloaded again. A forced install always
     // downloads, so it never reuses that settled entry.
-    const settled = force ? undefined : cachedExecutable(entry, version);
+    const settled = force ? undefined : cachedExecutable(entry, version, asset);
     if (settled) return { executable: settled, version };
     pending = install(entry, version, asset, transport, force);
     if (!force) {

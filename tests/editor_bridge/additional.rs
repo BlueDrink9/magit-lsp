@@ -1,5 +1,25 @@
 use super::*;
 
+/// A fixture created below a symbolic parent reports the canonical root, the
+/// same repository identity that discovery and the editor registry compare.
+#[test]
+fn fixture_path_is_canonical_below_a_symlinked_parent() {
+    use std::os::unix::fs::symlink;
+
+    let parent = TempDir::new().expect("tempdir");
+    let alias = parent.path().join("alias");
+    symlink(parent.path(), &alias).expect("symlink parent");
+    let (fixture, repo) = RepoFixture::new_in(&alias)
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let name = fixture.path().file_name().expect("fixture directory name");
+    let expected = std::fs::canonicalize(parent.path())
+        .expect("canonical parent")
+        .join(name);
+    assert_eq!(fixture.path(), expected.as_path());
+    assert_eq!(repo.root(), expected.as_path());
+}
+
 #[test]
 fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
     use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
@@ -21,7 +41,7 @@ fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
 
     for message in ["First scoped message\n", "Second scoped message\n"] {
         write(&message_path, "template\n");
-        let mut helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        let mut helper = Command::new(server_binary())
             .arg("--editor-helper")
             .arg(&message_path)
             .env(SOCKET_ENV, socket)
@@ -122,7 +142,7 @@ fn assert_real_scoped_squash_edits_and_cancel(
             "",
             socket,
             &operation,
-            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            &server_binary(),
             Some(&worker_scope),
         )
         .unwrap()
@@ -220,7 +240,7 @@ fn assert_real_scoped_squash_edits_and_cancel(
             "",
             socket,
             &operation,
-            Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
+            &server_binary(),
             Some(&worker_scope),
         )
         .unwrap()
@@ -273,7 +293,7 @@ fn assert_scoped_helper_denials_and_cleanup(
     let owner = "scoped-denial-test";
     let registry = registry();
     let launch = |path: &Path, credential: &str| {
-        Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        Command::new(server_binary())
             .arg("--editor-helper")
             .arg(path)
             .env(SOCKET_ENV, socket)
@@ -1058,12 +1078,18 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
 /// Both carry the edit id the server injected into their environment, so they
 /// are exactly the processes this test owns through its own server. Git may
 /// also run the helper through `sh -c`, which execs and keeps the same pid.
+///
+/// Linux process inspection is the only identity evidence for these pids, so
+/// this guard exists only there; other Unix systems prove the waiters ended
+/// through the server's shutdown contract instead.
+#[cfg(target_os = "linux")]
 struct OwnedEdit {
     edit_id: String,
     socket: PathBuf,
     pids: Vec<u32>,
 }
 
+#[cfg(target_os = "linux")]
 impl OwnedEdit {
     /// Release the ownership once every process ended by itself.
     fn finished(&mut self) {
@@ -1071,6 +1097,7 @@ impl OwnedEdit {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for OwnedEdit {
     fn drop(&mut self) {
         if self.pids.is_empty() {
@@ -1110,6 +1137,7 @@ impl Drop for OwnedEdit {
 }
 
 /// Kill one owned process; only this test's own Git and helper need it.
+#[cfg(target_os = "linux")]
 fn kill_pid(pid: u32) {
     let _ = Command::new("kill").arg(pid.to_string()).status();
 }
@@ -1120,6 +1148,7 @@ fn kill_pid(pid: u32) {
 /// server process, so an id alone cannot distinguish this test's Git and
 /// helper processes from another server's. A missing or unreadable `/proc`
 /// is a hard error, never a silent pass.
+#[cfg(target_os = "linux")]
 fn owned_environ(environ: &[u8], edit_id: &str, socket: &Path) -> bool {
     let id_marker = format!("MAGIT_LSP_EDIT_ID={edit_id}\0");
     let socket_marker = format!("MAGIT_LSP_SOCKET={}\0", socket.to_string_lossy());
@@ -1129,12 +1158,14 @@ fn owned_environ(environ: &[u8], edit_id: &str, socket: &Path) -> bool {
 }
 
 /// A live process carrying the markers: its pid and its command line.
+#[cfg(target_os = "linux")]
 struct OwnedProcess {
     pid: u32,
     command: String,
 }
 
 /// The processes whose environment carries the edit id and socket path.
+#[cfg(target_os = "linux")]
 fn edit_processes(edit_id: &str, socket: &Path) -> Result<Vec<OwnedProcess>, String> {
     let mut processes = Vec::new();
     let entries =
@@ -1164,6 +1195,7 @@ fn edit_processes(edit_id: &str, socket: &Path) -> Result<Vec<OwnedProcess>, Str
 }
 
 /// Wait until both the Git commit and its editor helper are running.
+#[cfg(target_os = "linux")]
 fn wait_for_edit_processes(edit_id: &str, socket: &Path) -> OwnedEdit {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -1195,9 +1227,11 @@ fn wait_for_edit_processes(edit_id: &str, socket: &Path) -> OwnedEdit {
 /// step 7).
 ///
 /// `close_stdin` is the same EOF every real client produces, so this observes
-/// the natural shutdown rather than a killed process. The owned Git commit and
-/// its helper are watched by pid, so a server exit alone cannot count as the
-/// abort, and the assertion happens before any cleanup could fake a pass.
+/// the natural shutdown rather than a killed process. On Linux the owned Git
+/// commit and its helper are also watched by pid, so a server exit alone cannot
+/// count as the abort there; on other Unix systems the server's shutdown
+/// contract is the portable waiter proof, and the assertion happens before any
+/// cleanup could fake a pass.
 #[test]
 fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let (tmp, _repo) = staged_repo();
@@ -1207,7 +1241,6 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     let response = server.initialize(rich_capabilities());
-    let socket = server.socket_path();
     assert!(
         response["result"]["capabilities"].is_object(),
         "initialize response: {response}"
@@ -1218,10 +1251,19 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
 
     let edit = start_commit(&mut server, &status);
     let edit_id = edit["runId"].as_str().expect("run id").to_string();
+    assert!(!edit_id.is_empty(), "the pending edit carries a run id");
     sync_draft(&mut server, &edit, "Never confirmed\n");
     write(&tmp.path().join(".git/COMMIT_EDITMSG"), "Never confirmed\n");
 
+    // `start_commit` only returns after the server delivered the editDocument
+    // effect, so the editor helper had reached this server while Git's commit
+    // waited on it. Only Linux exposes the process environments that let the
+    // test identify those two processes, so the pid guard is Linux-only.
+    #[cfg(target_os = "linux")]
+    let socket = server.socket_path();
+    #[cfg(target_os = "linux")]
     let mut owned = wait_for_edit_processes(&edit_id, &socket);
+    #[cfg(target_os = "linux")]
     assert!(
         !owned.pids.is_empty(),
         "no Git commit was running for the edit {edit_id:?}"
@@ -1232,10 +1274,18 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let server_gone = server.try_wait().is_some();
-        let git_gone = edit_processes(&edit_id, &socket)
+        // Outside Linux there is no portable process-environment interface,
+        // and an inspection failure is never treated as absence. The server
+        // is the portable waiter proof: it joins the commit worker, which
+        // waits for Git, and Git waits for its editor helper before exiting,
+        // so `server_gone` means both waiters terminated.
+        #[cfg(target_os = "linux")]
+        let waiters_gone = edit_processes(&edit_id, &socket)
             .expect("/proc inspection")
             .is_empty();
-        if server_gone && git_gone {
+        #[cfg(not(target_os = "linux"))]
+        let waiters_gone = true;
+        if server_gone && waiters_gone {
             break;
         }
         assert!(
@@ -1245,6 +1295,7 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
         thread::sleep(Duration::from_millis(20));
     }
     // Every process ended by itself; the guard must not kill anything now.
+    #[cfg(target_os = "linux")]
     owned.finished();
 
     assert_eq!(
@@ -1294,7 +1345,7 @@ pub(super) fn answer_askpass(
     question: &str,
     answer: &str,
 ) -> Output {
-    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+    let helper = Command::new(server_binary())
         .arg("--askpass")
         .arg(question)
         .env("MAGIT_LSP_SOCKET", socket)
@@ -1437,7 +1488,7 @@ fn a_cancelled_askpass_prompt_makes_the_helper_fail() {
     );
     let socket = server.socket_path();
 
-    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+    let helper = Command::new(server_binary())
         .arg("--askpass")
         .arg("Password:")
         .env("MAGIT_LSP_SOCKET", &socket)

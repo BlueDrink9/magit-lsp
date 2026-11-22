@@ -10,6 +10,7 @@ mod stdio;
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::dispatch::ActionTarget;
 use magit_lsp::errors::STALE_VIEW;
+use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
 
 #[test]
@@ -62,12 +63,14 @@ fn open_plain_with_capabilities_and_env(
     capabilities: Value,
     env: &[(&str, &str)],
 ) -> (stdio::TestServer, FakeEditor, String) {
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = capabilities;
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     let initialized = server.response_with_id(1);
     assert_eq!(
@@ -601,7 +604,10 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
         .build();
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("user.toml");
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut identity: Option<Value> = None;
     for (style, expected, repo_override) in [
         ("plain", "Stage the change at point", false),
@@ -623,8 +629,7 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
         )]);
         let mut init = stdio::initialize_message();
         init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
-        init["params"]["workspaceFolders"] =
-            json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+        init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
         server.send(init);
         assert!(server.response_with_id(1)["result"].is_object());
         server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -669,12 +674,14 @@ fn selection_range_offers_exact_target_and_stages_only_selected_change() {
         .commit("initial", [("f.txt", "one\ntwo\nthree\n")])
         .build();
     fixtures::write(&repo.path().join("f.txt"), "ONE\ntwo\nTHREE\n");
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -972,12 +979,14 @@ fn cursor_actions_target_file_or_owning_hunk_once() {
         .commit("initial", [("a.txt", "before\nkeep\nafter\n")])
         .build();
     fixtures::write(&repo.path().join("a.txt"), "changed\nkeep\nafter\n");
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -1063,15 +1072,17 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
         .commit("initial", [("f-😀.txt", "one\ntwo\n")])
         .build();
     fixtures::write(&repo.path().join("f-😀.txt"), "changed\ntwo\n");
-    let uri = format!("file://{}/.magit", repo.path().display());
+    let uri = uri_from_path(&repo.path().join(".magit"))
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
         "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
         "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
     });
-    init["params"]["workspaceFolders"] =
-        json!([{"uri":format!("file://{}", repo.path().display()),"name":"repo"}]);
+    init["params"]["workspaceFolders"] = json!([{"uri":uri_from_path(repo.path()).expect("native path has a file URI").as_str(),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));

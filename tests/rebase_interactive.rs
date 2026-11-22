@@ -1,5 +1,6 @@
 mod common;
 
+use common::stdio::server_binary;
 use common::{git, write, TestSession, STATUS_VIEWPORT};
 use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
@@ -17,7 +18,7 @@ fn sequence_editor_helper_copies_exact_bytes_for_paths_with_quotes() {
     let destination = dir.path().join("todo ' destination");
     let bytes = b"pick abc\0def\n";
     std::fs::write(&source, bytes).unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+    let status = Command::new(server_binary())
         .args(["--sequence-editor-helper", "prepared"])
         .arg(&destination)
         .env(PLAN_FILE_ENV, &source)
@@ -28,11 +29,33 @@ fn sequence_editor_helper_copies_exact_bytes_for_paths_with_quotes() {
 }
 
 #[test]
+fn an_invalid_explicit_helper_selection_fails_without_a_cargo_fallback() {
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "sequence_editor_helper_copies_exact_bytes_for_paths_with_quotes",
+            "--nocapture",
+        ])
+        .env(common::stdio::SERVER_BINARY_ENV, "relative/magit-lsp")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "invalid helper selection succeeded"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("must be an absolute path"),
+        "the helper selection was not refused: {stderr}"
+    );
+}
+
+#[test]
 fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
     let dir = TempDir::new().unwrap();
     let destination = dir.path().join("todo");
     std::fs::write(&destination, b"unrelated").unwrap();
-    let binary = env!("CARGO_BIN_EXE_magit-lsp");
+    let binary = server_binary();
     for (args, source) in [
         (
             vec!["--sequence-editor-helper", "prepared"],
@@ -48,7 +71,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
             Some(dir.path().join("missing-source")),
         ),
     ] {
-        let mut command = Command::new(binary);
+        let mut command = Command::new(&binary);
         command.args(args);
         if let Some(source) = source {
             command.env(PLAN_FILE_ENV, source);
@@ -60,7 +83,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
     }
     let source = dir.path().join("source");
     std::fs::write(&source, b"plan").unwrap();
-    assert!(!Command::new(binary)
+    assert!(!Command::new(&binary)
         .args(["--sequence-editor-helper", "prepared", "missing/todo"])
         .env(PLAN_FILE_ENV, source)
         .current_dir(dir.path())
@@ -72,7 +95,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
     let destination = dir.path().join("todo ' preserve");
     let bytes = b"# transformed\npick abc fixup! subject\0\n";
     std::fs::write(&destination, bytes).unwrap();
-    assert!(Command::new(binary)
+    assert!(Command::new(&binary)
         .args(["--sequence-editor-helper", "preserve"])
         .arg(&destination)
         .env_remove(PLAN_FILE_ENV)
@@ -80,7 +103,7 @@ fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
         .unwrap()
         .success());
     assert_eq!(std::fs::read(&destination).unwrap(), bytes);
-    assert!(!Command::new(binary)
+    assert!(!Command::new(&binary)
         .args(["--sequence-editor-helper", "unknown"])
         .arg(&destination)
         .env_remove(PLAN_FILE_ENV)
@@ -159,7 +182,7 @@ fn prepared_message_actions_refuse_before_launch_without_mutation() {
             .to_string()
             .contains("prepared rebase message editing is not supported yet"));
         let error = plan
-            .launch_outcome(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
+            .launch_outcome(&repo, server_binary().as_path())
             .unwrap_err();
         assert!(error
             .to_string()
@@ -221,8 +244,7 @@ fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
         .collect::<Vec<_>>();
     plan.set_action(&oids[1], TodoAction::Drop).unwrap();
     plan.move_before(&oids[2], Some(&oids[0])).unwrap();
-    plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
-        .unwrap();
+    plan.launch(&repo, server_binary().as_path()).unwrap();
     assert_eq!(
         git(
             dir.path(),
@@ -258,9 +280,7 @@ fn prepared_plan_refuses_same_oid_branch_switch_and_detach() {
         }
         let before = state(dir.path());
         let entries = plan.entries().to_vec();
-        let error = plan
-            .launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
-            .unwrap_err();
+        let error = plan.launch(&repo, server_binary().as_path()).unwrap_err();
         assert!(error.to_string().contains("HEAD attachment changed"));
         assert_eq!(plan.entries(), entries);
         assert_eq!(state(dir.path()), before);
@@ -294,9 +314,7 @@ fn conflicting_plan() -> (TempDir, GitRepo, String, PreparedRebase) {
 #[test]
 fn edited_plan_conflict_survives_resolution_and_continue() {
     let (dir, repo, _base, plan) = conflicting_plan();
-    let error = plan
-        .launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
-        .unwrap_err();
+    let error = plan.launch(&repo, server_binary().as_path()).unwrap_err();
     assert!(!error.to_string().trim().is_empty());
     assert_eq!(
         git(dir.path(), &["show", "-s", "--format=%s", "HEAD"]).trim(),
@@ -330,9 +348,7 @@ fn edited_plan_conflict_survives_resolution_and_continue() {
 fn edited_plan_conflict_abort_restores_original_repository() {
     let (dir, repo, _, plan) = conflicting_plan();
     let before = state(dir.path());
-    assert!(plan
-        .launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
-        .is_err());
+    assert!(plan.launch(&repo, server_binary().as_path()).is_err());
     assert!(repo.rebase_state().unwrap().is_some());
     repo.rebase_abort().unwrap();
     assert_eq!(state(dir.path()), before);
@@ -351,8 +367,7 @@ fn intentional_edit_pause_abort_restores_original_repository() {
     let first = plan.entries()[0].oid.clone();
     plan.set_action(&first, TodoAction::Edit).unwrap();
     let before = state(dir.path());
-    plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
-        .unwrap();
+    plan.launch(&repo, server_binary().as_path()).unwrap();
     assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
     assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, false);
     repo.rebase_abort().unwrap();
@@ -546,7 +561,7 @@ fn initial_rebase_selector_cancel_and_stale_preparation_keep_caller_usable() {
 
 #[test]
 fn initial_rebase_invalid_selection_keeps_caller_usable() {
-    let (dir, _, base) = repo();
+    let (dir, _, _) = repo();
     let before = state(dir.path());
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
     test.open_status_view(STATUS_VIEWPORT);
@@ -629,7 +644,7 @@ fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     assert_eq!(head_plan.entries(), head_instructions);
     let stale_state = state(dir.path());
     assert!(head_plan
-        .launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp")))
+        .launch(&repo, server_binary().as_path())
         .unwrap_err()
         .to_string()
         .contains("HEAD changed"));

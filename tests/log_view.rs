@@ -1,14 +1,16 @@
 mod common;
 
-use magit_lsp::git::{GitLogOptions, GitRepo};
+use magit_lsp::git::GitLogOptions;
 use magit_lsp::log_view::{CommitSelection, LogView};
 use magit_lsp::view::View;
 use magit_lsp::{semantic_tokens, tree::Tree};
-use std::path::PathBuf;
 
 #[test]
 fn log_backend_returns_structured_commit_rows() {
-    let repo = GitRepo::open(env!("CARGO_MANIFEST_DIR")).expect("repository");
+    let (_fixture, repo) = common::RepoFixture::new()
+        .commit("first commit", [("first.txt", "first\n")])
+        .commit("second commit", [("second.txt", "second\n")])
+        .build();
     let page = repo
         .log(&GitLogOptions {
             page_size: 2,
@@ -27,7 +29,12 @@ fn log_backend_returns_structured_commit_rows() {
 
 #[test]
 fn log_scope_selection_marks_and_nodes_are_consistent() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (fixture, _) = common::RepoFixture::new()
+        .commit("first commit", [("first.txt", "first\n")])
+        .commit("second commit", [("second.txt", "second\n")])
+        .commit("third commit", [("third.txt", "third\n")])
+        .build();
+    let path = fixture.path().to_path_buf();
     let mut ordinary = LogView::new(
         path.clone(),
         GitLogOptions {
@@ -40,6 +47,7 @@ fn log_scope_selection_marks_and_nodes_are_consistent() {
     .unwrap();
     assert_eq!(ordinary.scope().as_str(), "log");
     let ids: Vec<_> = ordinary.commits().map(str::to_owned).collect();
+    assert_eq!(ids.len(), 3, "fixture supplies the commits the test marks");
     assert!(!ordinary.toggle_mark(&ids[0]));
 
     let mut selected = LogView::new(
@@ -72,6 +80,32 @@ fn log_scope_selection_marks_and_nodes_are_consistent() {
         selected.selected_commits(None),
         vec![ids[0].clone(), ids[1].clone()]
     );
+}
+
+#[test]
+fn log_view_history_comes_from_the_fixture_not_the_checkout() {
+    let (fixture, _) = common::RepoFixture::new()
+        .commit("fixture base", [("base.txt", "base\n")])
+        .commit("fixture tip", [("tip.txt", "tip\n")])
+        .build();
+    let expected: Vec<String> = fixture
+        .git(&["rev-list", "HEAD"])
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(expected.len(), 2, "fixture has exactly its own history");
+
+    let view = LogView::new(
+        fixture.path().to_path_buf(),
+        GitLogOptions {
+            page_size: 10,
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
+    let actual: Vec<String> = view.commits().map(str::to_owned).collect();
+    assert_eq!(actual, expected);
 }
 
 #[test]

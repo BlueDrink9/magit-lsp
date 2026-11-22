@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * The static keymap scope of a view descriptor.
@@ -10,10 +10,10 @@
  * @returns {string}
  */
 function staticScope(scope) {
-  if (typeof scope !== 'string') {
-    return '';
+  if (typeof scope !== "string") {
+    return "";
   }
-  return scope.startsWith('menu.') ? 'menu' : scope;
+  return scope.startsWith("menu.") ? "menu" : scope;
 }
 
 /**
@@ -27,13 +27,13 @@ function staticScope(scope) {
  * @returns {{'magit.active': boolean, 'magit.scope': string, 'magit.textMode': boolean, 'magit.capture': boolean}}
  */
 function deriveContext(descriptor, mode) {
-  const textMode = mode === 'text';
+  const textMode = mode === "text";
   return {
-    'magit.active': Boolean(descriptor && descriptor.id),
-    'magit.scope': staticScope(descriptor && descriptor.scope),
-    'magit.textMode': textMode,
+    "magit.active": Boolean(descriptor && descriptor.id),
+    "magit.scope": staticScope(descriptor && descriptor.scope),
+    "magit.textMode": textMode,
     // Text mode narrows the server keymap to the toggle, so capture is off.
-    'magit.capture': Boolean(descriptor && descriptor.capture) && !textMode,
+    "magit.capture": Boolean(descriptor && descriptor.capture) && !textMode,
   };
 }
 
@@ -44,10 +44,10 @@ function deriveContext(descriptor, mode) {
  */
 function inactiveContext() {
   return {
-    'magit.active': false,
-    'magit.scope': '',
-    'magit.textMode': false,
-    'magit.capture': false,
+    "magit.active": false,
+    "magit.scope": "",
+    "magit.textMode": false,
+    "magit.capture": false,
   };
 }
 

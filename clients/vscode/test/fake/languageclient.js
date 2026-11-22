@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * A minimal `LanguageClient` replacement that speaks LSP over stdio.
@@ -10,7 +10,7 @@
  * records every outgoing message so tests can assert what the client sent.
  */
 
-const { spawn } = require('node:child_process');
+const { spawn } = require("node:child_process");
 
 /** Every client this process constructed, for tests to inspect. */
 const instances = [];
@@ -44,7 +44,7 @@ class LanguageClient {
     this.notes = [];
     this.initializeResult = undefined;
     this.features = [];
-    this.stderr = '';
+    this.stderr = "";
     this.exited = undefined;
     instances.push(this);
   }
@@ -61,7 +61,9 @@ class LanguageClient {
 
   // anchor: vscode-languageclient 9.0.1 StaticFeature (features.d.ts), used by production session.js; native VSCodium initialize evidence: docs/evidence/typed-capability-declarations.md.
   /** Register a feature using vscode-languageclient's public static-feature API. */
-  registerFeature(feature) { this.features.push(feature); }
+  registerFeature(feature) {
+    this.features.push(feature);
+  }
 
   /**
    * Start the server, run the LSP initialize handshake and resolve.
@@ -70,10 +72,10 @@ class LanguageClient {
    */
   async start() {
     this.process = spawn(this.serverOptions.command, this.serverOptions.args || [], {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     this.exited = new Promise((resolve) => {
-      this.process.on('exit', (code, signal) => {
+      this.process.on("exit", (code, signal) => {
         for (const { reject } of this.pending.values()) {
           reject(new Error(`magit-lsp exited (${code ?? signal})`));
         }
@@ -81,21 +83,24 @@ class LanguageClient {
         resolve({ code, signal });
       });
     });
-    this.process.stdout.on('data', (chunk) => this.receive(chunk));
-    this.process.stderr.on('data', (chunk) => { this.stderr += chunk.toString(); });
+    this.process.stdout.on("data", (chunk) => this.receive(chunk));
+    this.process.stderr.on("data", (chunk) => {
+      this.stderr += chunk.toString();
+    });
 
     const capabilities = {};
     for (const feature of this.features) feature.fillClientCapabilities?.(capabilities);
     const params = {
       processId: process.pid,
-      clientInfo: { name: 'magit-lsp-node-test', version: '0.0.0' },
+      clientInfo: { name: "magit-lsp-node-test", version: "0.0.0" },
       rootUri: this.clientOptions.rootUri || null,
       capabilities,
       initializationOptions: this.clientOptions.initializationOptions,
     };
-    this.initializeResult = await this.request('initialize', params);
-    for (const feature of this.features) feature.initialize?.(this.initializeResult.capabilities, this.clientOptions.documentSelector);
-    this.sendNotification('initialized', {});
+    this.initializeResult = await this.request("initialize", params);
+    for (const feature of this.features)
+      feature.initialize?.(this.initializeResult.capabilities, this.clientOptions.documentSelector);
+    this.sendNotification("initialized", {});
   }
 
   /**
@@ -121,7 +126,7 @@ class LanguageClient {
     this.requests.push(new Recording(method, params));
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.write({ jsonrpc: '2.0', id, method, params });
+      this.write({ jsonrpc: "2.0", id, method, params });
     });
   }
 
@@ -133,7 +138,7 @@ class LanguageClient {
    */
   sendNotification(method, params) {
     this.notes.push(new Recording(method, params));
-    this.write({ jsonrpc: '2.0', method, params });
+    this.write({ jsonrpc: "2.0", method, params });
   }
 
   /**
@@ -146,8 +151,8 @@ class LanguageClient {
       return;
     }
     try {
-      await this.request('shutdown', null);
-      this.sendNotification('exit', null);
+      await this.request("shutdown", null);
+      this.sendNotification("exit", null);
     } catch {
       // The server may already be gone; the kill below is the fallback.
     }
@@ -156,7 +161,7 @@ class LanguageClient {
       new Promise((resolve) => setTimeout(() => resolve(true), 5000)),
     ]);
     if (timedOut) {
-      this.process.kill('SIGKILL');
+      this.process.kill("SIGKILL");
       await this.exited;
     }
   }
@@ -167,7 +172,7 @@ class LanguageClient {
    * @param {object} message
    */
   write(message) {
-    const body = Buffer.from(JSON.stringify(message), 'utf8');
+    const body = Buffer.from(JSON.stringify(message), "utf8");
     this.process.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
     this.process.stdin.write(body);
   }
@@ -180,11 +185,11 @@ class LanguageClient {
   receive(chunk) {
     this.buffer = Buffer.concat([this.buffer, chunk]);
     for (;;) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n');
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
       if (headerEnd < 0) {
         return;
       }
-      const header = this.buffer.subarray(0, headerEnd).toString('ascii');
+      const header = this.buffer.subarray(0, headerEnd).toString("ascii");
       const match = /Content-Length:\s*(\d+)/i.exec(header);
       if (!match) {
         throw new Error(`malformed LSP header: ${header}`);
@@ -194,7 +199,7 @@ class LanguageClient {
       if (this.buffer.length < start + length) {
         return;
       }
-      const body = this.buffer.subarray(start, start + length).toString('utf8');
+      const body = this.buffer.subarray(start, start + length).toString("utf8");
       this.buffer = this.buffer.subarray(start + length);
       this.dispatch(JSON.parse(body));
     }
@@ -221,7 +226,7 @@ class LanguageClient {
     }
     if (message.method !== undefined && message.id !== undefined) {
       // Server-originated requests are not part of this protocol; answer null.
-      this.write({ jsonrpc: '2.0', id: message.id, result: null });
+      this.write({ jsonrpc: "2.0", id: message.id, result: null });
       return;
     }
     if (message.method !== undefined) {
