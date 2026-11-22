@@ -1553,7 +1553,8 @@ async function run() {
       });
     }
     const types = new Set(tokenEntries.map((entry) => entry.type));
-    for (const type of ["magit-section", "added", "removed"]) {
+    const paintedRoles = ["heading", "added", "removed"];
+    for (const type of paintedRoles) {
       assert(types.has(type), type);
     }
     // R-VS-4: the host must request the server's semantic tokens and the
@@ -1566,9 +1567,7 @@ async function run() {
       "semantic-token requests did not use the server view URI",
     );
     const documentLines = () => editor.document.getText().split("\n");
-    const themeTokens = tokenEntries.filter((entry) =>
-      ["magit-section", "added", "removed"].includes(entry.type),
-    );
+    const themeTokens = tokenEntries.filter((entry) => paintedRoles.includes(entry.type));
     const styleEvidence = (entries) => {
       const lines = documentLines();
       const wanted = entries.map((entry) => ({
@@ -1747,7 +1746,7 @@ async function run() {
         );
       }
     }
-    for (const type of ["magit-section", "magit-diff-added", "magit-diff-removed"]) {
+    for (const type of paintedRoles) {
       assert.notEqual(
         colorOf(darkStyles, type),
         colorOf(lightStyles, type),
@@ -1764,10 +1763,10 @@ async function run() {
       { ...restoredStyles, text: restoredText, checkpoint: restoredThemeCheckpoint },
     );
 
-    const fileLine = tokenEntries.find((entry) => entry.type.startsWith("magit-file-"))?.line;
+    const fileLine = tokenEntries.find((entry) => entry.type === "path")?.line;
     assert.notEqual(fileLine, undefined, "no file token to focus");
     const sectionLine = tokenEntries.find(
-      (entry) => entry.type === "magit-section" && entry.line > 2,
+      (entry) => entry.type === "heading" && entry.line > 2,
     )?.line;
     assert.notEqual(sectionLine, undefined, "no section token to fold");
     const selectLine = (line) => {
@@ -2186,7 +2185,7 @@ async function run() {
       return entries;
     };
     const dispatchLine = (await entriesAt()).find(
-      (entry) => entry.type === "magit-section" && entry.line > 2,
+      (entry) => entry.type === "heading" && entry.line > 2,
     )?.line;
     assert.notEqual(dispatchLine, undefined, "no section token for generic dispatch");
     await focusStatus();
