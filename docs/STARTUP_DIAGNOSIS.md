@@ -187,6 +187,89 @@ visible `Head:` status in a valid window, not terminal redraw or first-window
 creation. Raw traces keep local paths and arguments and remain in ignored
 `build/`; only aggregates are recorded here.
 
+### CPU sampling (2026-11-22)
+
+`make nvim-startup-perf` exits 0 (`ok: build`; `ok: nvim-startup-perf`). It
+reuses the unchanged public-command Python/Lua harness through the generated
+`$MAGIT_LSP_BIN` wrapper. Perf 7.3.4 records `cycles:u` at 999 Hz with
+`--inherit`, so child Git processes are recorded, and each fresh server launch
+gets a unique `server-*.data`. The run's `summary.json`, symbolized
+`server-*.report.txt` hotspots and flat `server-*.samples.txt` per-sample/task
+records are in ignored `build/startup-perf/20261122T002937-3229/`. Validation
+rejects empty data/reports, zero samples, no symbolized server function, or
+missing inherited child Git task events.
+
+Call graphs are still denied: `PERF_SAMPLE_CALLCHAIN` configurations fail at
+`perf_event_open` with EACCES under `kernel.perf_event_paranoid=2`, `Seccomp=2`
+and no effective capabilities. The recorder therefore selected flat
+`cycles:u` samples. `server-*.samples.txt` is a flat per-sample and task-event
+record, **not** a captured call stack; no stack or exclusive phase attribution
+is claimed. Permission was not changed, and no alternate profiler was used.
+
+Per-launch attributed samples (sum of symbolized report rows; perf's header
+abbreviates the worktree totals as `1K`):
+
+| Group | Attributed samples, median (range) | Server | Git | Other/unresolved | Inherited Git exec/fork events |
+|---|---:|---:|---:|---:|---:|
+| Fixture ×3 | 601 (599–605) | 463 | 136 | 9 | 54 each |
+| Worktree ×3 | 1,976 (1,946–1,997) | 1,153 | 727 | 65 | 294 each |
+
+Across all six launches the 7,724 attributed samples split into 4,843 server
+(62.7%), 2,670 Git (34.6%) and 211 other/unresolved (2.7%). These are sampled
+on-CPU shares, not wall time: the same launches' strace evidence above still
+shows large filesystem/syscall volume and `wait4` blocking, which CPU samples
+do not replace. The server is the debug build, the worktree is dirty, the
+fixture is one file and three launches per group make these descriptive only.
+
+Top flat server symbols by samples (all launches; share of all attributed
+samples):
+
+| Symbol (report text) | Samples | Share |
+|---|---:|---:|
+| `Filter<...>::count::to_usize::<u8, magit_lsp::config::span_line::{closure#0}>::{closure#0}` | 592 | 7.66% |
+| `Bytes::fold::<..., magit_lsp::config::span_line::{closure#0}>` | 233 | 3.02% |
+| `core::str::iter::Bytes::next` | 219 | 2.84% |
+| `core::slice::iter::Iter<u8>::next` | 181 | 2.34% |
+| `map_fold::<..., magit_lsp::config::span_line::{closure#0}>` | 175 | 2.27% |
+| `__memmove_avx_unaligned_erms` | 153 | 1.98% |
+| `sha2::sha256::soft::sha256_digest_round_x2` | 123 | 1.59% (3 launches) |
+
+Top flat Git-context symbols:
+
+| Symbol (report text) | Samples | Share |
+|---|---:|---:|
+| `__strcmp_avx2` | 1,020 | 13.21% |
+| `_dl_relocate_object_no_relro` | 141 | 1.83% |
+| `read_conf_file.isra.0` | 126 | 1.63% |
+| `__tsearch` | 107 | 1.39% |
+| `maybe_split_for_insert.isra.0` | 98 | 1.27% |
+| `do_lookup_x` | 89 | 1.15% |
+| `add_module` | 82 | 1.06% |
+
+The `config::span_line` iterator symbols together account for 1,524 samples
+(19.7%), but they are separate flat IP symbols: without call stacks, grouping
+them into one path is an inference, not measured exclusive attribution.
+Similarly, `__strcmp_avx2`, `_dl_relocate_object_no_relro`, `do_lookup_x`,
+`add_module` and `insert_module` are libc/loader symbols sampled while Git ran;
+flat data cannot say which Git command, config lookup or dynamic-loading step
+called them. A `[k] 0xffffffffb9001280` row (131 samples, 1.70%) had no DSO and
+is counted as unresolved, not asserted as Git code. `sha2` appears in only
+three launches, so its share is not stable across all samples.
+
+Limits: the harness validates a visible `Head:` status; it does not time
+terminal redraw or first-window creation. Each fixture/worktree repetition runs
+one fresh Neovim and server, then reopens and focuses the same server, so the
+perf window covers the whole server lifetime and does not separate cold
+first-open, initialized-server reopen or already-open focus. Sampling at 999 Hz
+bounds resolution, short Git processes can be missed, perf adds sampling
+overhead, and debug/unoptimized code biases symbol shares.
+
+**Next experiment:** if call-graph permission is granted, rerun the same target
+and inspect `server-*.samples.txt` stacks to test whether the `span_line`
+symbols and Git loader/config symbols belong to the same paths; correlate
+phase timing from the existing trace harness rather than inferring a bottleneck
+from flat shares. No speedup follows from these sample shares alone.
+
 ## Early loading display evidence (2026-11-21)
 
 `make ui-file FILE=tests/ui/scenarios/status-loading.scn` exits 0
