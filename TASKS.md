@@ -14,6 +14,11 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - Verified: `make test-rust FILTER="--test capability_lattice"` @ 450811b → ok: rust (4/4; false positive was the `.magit` status-document applyEdit listing the draft path)
 - [ ] **AH-FULL: Rerun full suite after requested log fixes**
   - check: Run `make test` serially and record all suite outcomes; resolve failures before marking done.
+- [x] **AH-DOWNLOAD: Fix VSCode verified-download test failures**
+  - test: Preserve exact archive version/target identity, artifact VSIX selection and unsupported-host guidance coverage against the current supported-platform contract.
+  - check: Diagnose the four failures in `build/test-logs/vscode.cTMokC` and pass `make vscode-test` without weakening coverage.
+  - Done: `1661e16`.
+  - Verified: `make vscode-test` @ `bab7a22` → exit 0 (`ok: vscode`; verified-download checks pass: archive identity, artifact VSIX selection, uncached wrong-target rejection, unsupported-host guidance).
 - [x] **AH-PROGRESS: Fix pending-commit progress synchronization failures**
   - test: Both pending-commit cancellation and stale-draft rejection scenarios observe the actual progress lifecycle without assuming unrelated response ordering.
   - check: Run `make test-rust FILTER="--test plain_harness"`; diagnose the progress-begin failure before changing assertions or production ordering.
