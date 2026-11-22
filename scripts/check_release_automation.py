@@ -26,11 +26,13 @@ no readiness claim and is not wired into publication yet.
 """
 
 import argparse
+import base64
 import hashlib
 import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -116,6 +118,9 @@ PYTHON_CONSUMER = re.compile(r'\bpython3(?:\s|$)')
 SOURCE_CHECK_JOB = 'source-checks'
 FALLBACK_JOB = 'linux-x86_64-gnu'
 NATIVE_JOB = 'native-candidates'
+NATIVE_CONSUMER_JOB = 'native-consumers'
+NATIVE_FUNCTIONAL_JOB = 'native-functional-consumers'
+NATIVE_VSCODE_JOB = 'native-vscode-consumers'
 FALLBACK_TARGET = ASSET
 SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
 NATIVE_MATRIX = (
@@ -123,6 +128,20 @@ NATIVE_MATRIX = (
     ('macos-26', 'aarch64-apple-darwin'),
     ('macos-26-intel', 'x86_64-apple-darwin'),
 )
+# Each required build job runs exactly two server suites on one source, toolchain
+# and workspace cache: debug before the release build, release against the exact
+# packaged executable. Every other acceptance suite runs once per platform.
+SERVER_DEBUG_STEP = 'Debug server tests'
+SERVER_RELEASE_STEP = 'Release server tests against the exact release executable'
+SERVER_SUITE = 'server_async'
+NATIVE_SHELL = 'nix develop --no-update-lock-file .#release-native -c'
+COVERAGE_TOKENS = ('cargo llvm-cov', 'coverage-rust', '--instrument-coverage',
+                   'LLVM_PROFILE_FILE')
+# Client/ABI/package acceptance runs once in the consumer jobs, never alongside
+# the duplicated server suites.
+ACCEPTANCE_COMMANDS = ('check_native_artifact.py', 'native-vscode-artifact-check',
+                       'native-neovim-artifact-check')
+RELEASE_MANIFEST = 'build/release/release-manifest.json'
 # Every producer packages the exact source/ref/event/run identity it was
 # triggered from; an inferred head_branch or workflow_run SHA is never accepted.
 IDENTITY_ENV = (
@@ -134,13 +153,29 @@ IDENTITY_ENV = (
 )
 UPLOAD_IDENTITY_FILE = 'build/release/upload-identity.json'
 NODE_TOOLING = ('pnpm', 'npm ', 'vsce', 'ovsx')
-# Publication binding: the tracked producer's mandatory jobs. The native matrix
-# rows are explicit experiments and no VSIX or release-ready consumer exists
-# yet, so those names stay outside the gate until NREL-19 promotes them; this
-# checker makes no publication-readiness claim about them.
-MANDATORY_RUN_JOBS = (SOURCE_CHECK_JOB, FALLBACK_JOB)
-PENDING_READINESS_JOBS = ('native-candidates', 'vsix', 'release-ready')
-REQUIRED_RUN_ARTIFACTS = (ARTIFACT_NAME, f'{ARTIFACT_NAME}-identity')
+# The single platform-independent VSIX producer and the installed-extension
+# acceptance of its exact uploaded bytes. No step may rebuild or repackage it.
+VSIX_JOB = 'vsix'
+VSIX_ARTIFACT = 'vscode-vsix-candidate'
+VSIX_IDENTITY_ARTIFACT = f'{VSIX_ARTIFACT}-identity'
+VSIX_PATH = 'build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix'
+VSIX_MANIFEST = 'build/vscode/vsix-manifest.json'
+# Publication binding: the tracked producer's mandatory jobs. The stable
+# aggregates are consumed by job id, so this never infers an API matrix row name
+# (GitHub appends the matrix values to job names). `source-checks` and the strict
+# Linux GNU build are named for their own integrity, and the two aggregates
+# already cover the macOS rows, the VSIX producer and its installed consumers.
+REQUIRED_VSIX_GATE_JOB = 'required-vsix-gate'
+RELEASE_READINESS_JOB = 'release-readiness'
+MANDATORY_RUN_JOBS = (SOURCE_CHECK_JOB, FALLBACK_JOB, VSIX_JOB,
+                      REQUIRED_VSIX_GATE_JOB, RELEASE_READINESS_JOB)
+# Readiness never includes or depends on a Windows job; those stay informational.
+REQUIRED_VSIX_GATE_NEEDS = (VSIX_JOB, NATIVE_VSCODE_JOB)
+READINESS_NEEDS = (SOURCE_CHECK_JOB, VSIX_JOB, FALLBACK_JOB, NATIVE_JOB,
+                   NATIVE_CONSUMER_JOB, NATIVE_FUNCTIONAL_JOB, NATIVE_VSCODE_JOB,
+                   REQUIRED_VSIX_GATE_JOB)
+REQUIRED_RUN_ARTIFACTS = (ARTIFACT_NAME, f'{ARTIFACT_NAME}-identity',
+                          VSIX_ARTIFACT, VSIX_IDENTITY_ARTIFACT)
 RUN_EVENT = 'push'
 # The run-bound manifest fields emitted by scripts/check_release_pipeline.py.
 # Publication validation compares the exact set, so a replaced or extended
@@ -151,7 +186,14 @@ MANIFEST_FIELDS = frozenset({
     'executable_sha256',
 })
 ARTIFACT_DIGEST_PATTERN = re.compile(r'sha256:[0-9a-f]{64}')
-
+# The lockfiles the producer hashes into a release manifest. Publication reads
+# them at the bound source commit, never from the publisher checkout.
+SOURCE_LOCK_FILES = (
+    'Cargo.lock',
+    'flake.lock',
+    'clients/vscode/pnpm-lock.yaml',
+)
+# Publication binding: the tracked producer's mandatory jobs. The stable
 
 class CheckError(Exception):
     """One failed check, reported without a traceback."""
@@ -205,14 +247,12 @@ def cargo_versions():
 
 
 def check_workflow(path=WORKFLOW):
+    """Require the fail-closed workflow_run publication boundary."""
     lines = read_lines(path)
     text = '\n'.join(lines)
     code = code_lines(lines)
-
     if not lines or lines[0].strip() != 'name: Publish release artifacts':
         fail('workflow: expected the publish workflow name on the first line')
-
-    # Triggers: workflow_dispatch only; nothing may run on push, tag or PR.
     try:
         on_index = lines.index('on:')
     except ValueError:
@@ -220,201 +260,91 @@ def check_workflow(path=WORKFLOW):
     trigger_block = block_after(lines, on_index, 0)
     triggers = [line.strip()[:-1] for line in trigger_block
                 if indent_of(line) == 2 and line.strip().endswith(':')]
-    if triggers != ['workflow_dispatch']:
-        fail(f'workflow: triggers must be exactly workflow_dispatch, found {triggers}')
-    for line in lines:
-        if line.lstrip().startswith('#'):
-            continue
-        if re.match(r'^\s*(push|pull_request|pull_request_target|release|schedule|workflow_run):',
-                    line):
-            fail(f'workflow: forbidden automatic trigger {line.strip()!r}')
-
-    dispatch_index = next(i for i, line in enumerate(lines) if line == '  workflow_dispatch:')
-    dispatch_block = block_after(lines, dispatch_index, 2)
-    if '    inputs:' not in dispatch_block:
-        fail('workflow: workflow_dispatch has no `inputs:`')
-    for name, required_lines in (
-        ('build_run_id', ('        required: true', '        type: string')),
-        ('mode', ('        default: dry-run', '        type: choice',
-                  '          - dry-run', '          - publish')),
-    ):
-        try:
-            offset = dispatch_block.index(f'      {name}:')
-        except ValueError:
-            fail(f'workflow: missing workflow_dispatch input {name!r}')
-        input_block = block_after(dispatch_block, offset, 6)
-        for expected in required_lines:
-            if expected not in input_block:
-                fail(f'workflow: input {name!r} is missing {expected.strip()!r}')
-
+    if triggers != ['workflow_run'] or 'workflow_dispatch' in text:
+        fail(f'workflow: trigger must be workflow_run only, found {triggers}')
+    for required in ('      - Release artifact build (no publication)',
+                     '    types: [completed]',
+                     'python3 scripts/check_release_automation.py --prepare-publication-runtime "$GITHUB_EVENT_PATH"'):
+        if required not in text:
+            fail(f'workflow: missing trusted collector contract {required!r}')
+    # The publisher may not rebuild, repackage, install a PAT or run a registry/
+    # GitHub-release command inline: it downloads its own validated handoff and
+    # hands those exact bytes to the declared make interface.
+    for forbidden in ('build_run_id', 'inputs.mode', 'github.sha', 'make vscode-package',
+                      'vsce package', 'pnpm run', 'cargo build', 'CARGO_REGISTRY_TOKEN',
+                      'secrets.', 'gh release create', 'vsce publish',
+                      'ovsx publish', 'cargo publish', 'VSCE_PAT', 'OVSX_PAT'):
+        if forbidden in text:
+            fail(f'workflow: forbidden legacy/bypass path {forbidden!r}')
     top_permissions = block_after(lines, find_line(lines, 'permissions:', 'workflow') - 1, 0)
     if '  contents: read' not in top_permissions:
         fail('workflow: top-level permissions must be `contents: read`')
-
-    # Pinned actions: every `uses:` needs a full sha and a version comment.
     check_pinned_actions(lines, 'workflow')
-
-    # No inline step may carry more than ten lines of script.
     check_inline_scripts(lines, 'workflow')
-
-    # Untracked operator files must never be referenced.
     for forbidden in UNTRACKED_PATHS:
         if forbidden in text:
             fail(f'workflow: references operator-owned path {forbidden!r}')
-
     validate = require_job(lines, 'validate')
     publish = require_job(lines, 'publish')
-
-    validate_permissions = block_after(
-        validate, validate.index('    permissions:'), 4)
-    if '      contents: read' not in validate_permissions:
-        fail('workflow: validate job must have `contents: read`')
-    publish_permissions = block_after(
-        publish, publish.index('    permissions:'), 4)
-    if '      contents: write' not in publish_permissions:
-        fail('workflow: publish job must have `contents: write`')
-    if text.count('contents: write') != 1:
-        fail('workflow: `contents: write` must appear exactly once (publish job)')
-
-    # `actions: read` is only for the cross-run artifact download in validate;
-    # keep it least-privilege by refusing it anywhere else.
-    if '      actions: read' not in validate_permissions:
-        fail('workflow: validate job must grant `actions: read` for the cross-run download')
-    if '      actions: read' in publish_permissions:
-        fail('workflow: publish job must not grant `actions: read`')
-    if sum(line.count('actions: read') for line in code) != 1:
-        fail('workflow: `actions: read` must appear exactly once (validate job)')
-
-    if '    needs: validate' not in publish:
-        fail('workflow: publish job must declare `needs: validate`')
-    if not any(re.match(r"^\s*if:\s*\$\{\{\s*inputs\.mode\s*==\s*'publish'\s*\}\}", line)
-               for line in publish):
-        fail("workflow: publish job must be gated on `inputs.mode == 'publish'`")
-
-    # Validate lane consumes the build artifact and verifies it without rebuilding.
+    validate_permissions = block_after(validate, validate.index('    permissions:'), 4)
+    if '      contents: read' not in validate_permissions or '      actions: read' not in validate_permissions:
+        fail('workflow: validate must be read-only with actions: read')
+    publish_permissions = block_after(publish, publish.index('    permissions:'), 4)
+    if '      contents: write' not in publish_permissions or '      id-token: write' not in publish_permissions:
+        fail('workflow: publish must scope contents/id-token write to its job')
+    if text.count('contents: write') != 1 or text.count('id-token: write') != 1:
+        fail('workflow: write permissions must occur only in publish')
     validate_text = '\n'.join(validate)
-    if f'name: {ARTIFACT_NAME}' not in validate_text:
-        fail(f'workflow: validate job must download {ARTIFACT_NAME!r}')
-    if 'run-id: ${{ inputs.build_run_id }}' not in validate_text:
-        fail('workflow: validate job must download from `inputs.build_run_id`')
-    if 'actions/download-artifact@' not in validate_text:
-        fail('workflow: validate job must use actions/download-artifact')
-
-    # Provenance: the selected run is verified before any of its bytes are used,
-    # so a same-version run from another workflow, repository or commit cannot
-    # supply the assets. The checkout is pinned to the dispatch source commit.
-    if 'ref: ${{ github.sha }}' not in validate_text:
-        fail('workflow: validate job must check out the dispatch source commit')
-    if RUN_PROVENANCE not in validate_text:
-        fail('workflow: validate job must verify the selected build run provenance')
-    if 'BUILD_RUN_ID: ${{ inputs.build_run_id }}' not in validate_text:
-        fail('workflow: provenance check must receive `inputs.build_run_id`')
-    provenance_at = next(i for i, line in enumerate(validate) if RUN_PROVENANCE in line)
-    for later in ('actions/download-artifact@', '--validate-artifacts',
-                  'make vscode-package', 'name: validated-release-assets'):
-        later_at = next(i for i, line in enumerate(validate) if later in line)
-        if provenance_at > later_at:
-            fail(f'workflow: provenance verification must precede {later!r} '
-                 'in the validate job')
-
-    if 'python3 scripts/check_release_automation.py --validate-artifacts' not in validate_text:
-        fail('workflow: validate job must verify the archive and version triple')
-    if 'make vscode-package' not in validate_text:
-        fail('workflow: validate job must build the offline VSIX')
-    if 'name: validated-release-assets' not in validate_text:
-        fail('workflow: validate job must hand off validated assets to publish')
-    # Exactly the validated names are handed off; a glob or an unlisted path
-    # would let an unexpected file ride into the published release.
-    if '--print-version >> "$GITHUB_ENV"' not in validate_text:
-        fail('workflow: validate job must resolve RELEASE_VERSION for the handoff')
-    for glob in ('dist/*', 'build/vscode/*'):
-        if glob in validate_text:
-            fail(f'workflow: validated handoff must not upload {glob!r}')
-    for asset in (f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz',
-                  f'dist/magit-lsp-v${{{{ env.RELEASE_VERSION }}}}-{ASSET}.tar.gz.sha256',
-                  'build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix'):
-        if asset not in validate_text:
-            fail(f'workflow: validated handoff must list {asset!r}')
-    version_at = next(i for i, line in enumerate(validate)
-                      if '--print-version >> "$GITHUB_ENV"' in line)
-    handoff_at = next(i for i, line in enumerate(validate)
-                      if 'name: validated-release-assets' in line)
-    if version_at > handoff_at:
-        fail('workflow: RELEASE_VERSION must be resolved before the asset handoff')
-
-    # Publish lanes: mode gate plus credential presence, one readable skip per lane.
+    if 'ref: ${{ github.event.repository.default_branch }}' not in validate_text:
+        fail('workflow: validate must check out the protected default branch')
+    if '--prepare-publication-runtime' not in validate_text:
+        fail('workflow: validate must invoke the fail-closed runtime collector')
+    if '    needs: validate' not in publish:
+        fail('workflow: publish must run only after the validate job')
+    guard = next((line.strip() for line in publish
+                  if line.strip().startswith('if:')), None)
+    if guard is None or '${{ false }}' in guard:
+        fail('workflow: publish must gate on a successful push-tag build of this '
+             'repository, not a disabled or unconditional job')
+    for requirement in (
+            "github.event.workflow_run.event == 'push'",
+            "github.event.workflow_run.conclusion == 'success'",
+            'github.event.workflow_run.head_repository.full_name == github.repository'):
+        if requirement not in guard:
+            fail(f'workflow: publish guard must require {requirement!r}')
+    if '    environment: release-publish' not in publish:
+        fail('workflow: publish job must require release-publish environment')
+    # The read-only validate job uploads only the runtime's own handoff directory
+    # and exposes its immutable upload id; the protected publisher downloads that
+    # exact id, installs the frozen locked tooling and calls the declared make
+    # interface. A candidate by name, an inline registry command, a rebuild or a
+    # PAT never satisfies this contract.
+    for required in (
+            '        name: publication-handoff',
+            "      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}",
+            '        uses: actions/download-artifact@',
+            '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}',
+            "          node-version: '24'",
+            '        run: make vscode-deps',
+            '        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
+    ):
+        if required not in text:
+            fail(f'workflow: missing immutable handoff/publication contract {required!r}')
+    if 'actions/download-artifact@' in validate_text:
+        fail('workflow: only the protected publish job may download the handoff')
     publish_text = '\n'.join(publish)
-    if 'ref: ${{ github.sha }}' not in publish_text:
-        fail('workflow: publish job must check out the dispatch source commit')
-    if '--validate-artifacts release-assets/dist' not in publish_text:
-        fail('workflow: publish job must re-verify the handed-off artifact set')
-    if 'release-assets/dist/*' in publish_text:
-        fail('workflow: release creation must upload exactly the validated assets')
-    if TAG_TARGET_CHECK not in publish_text:
-        fail('workflow: publish job must resolve the version tag target')
-    if '--target "$RELEASE_TARGET"' not in publish_text:
-        fail('workflow: release creation must target the verified source commit')
-    if f'stem="release-assets/dist/magit-lsp-v${{RELEASE_VERSION}}-{ASSET}.tar.gz"' \
-            not in publish_text:
-        fail('workflow: release creation must name the validated archive path')
-    if '"$stem" "$stem.sha256"' not in publish_text:
-        fail('workflow: release creation must upload the archive and its sidecar')
-    revalidate_at = next(i for i, line in enumerate(publish)
-                         if '--validate-artifacts release-assets/dist' in line)
-    tag_target_at = next(i for i, line in enumerate(publish) if TAG_TARGET_CHECK in line)
-    release_at = next(i for i, line in enumerate(publish)
-                      if 'gh release create' in line and not line.lstrip().startswith('#'))
-    if revalidate_at > release_at:
-        fail('workflow: artifact re-verification must precede release creation')
-    if tag_target_at > release_at:
-        fail('workflow: tag target resolution must precede release creation')
-    for secret in STORED_SECRETS:
-        if f'{secret}: ${{{{ secrets.{secret} }}}}' not in publish_text:
-            fail(f'workflow: publish job must read secrets.{secret} into env')
-        if f"env.{secret} != ''" not in publish_text:
-            fail(f'workflow: {secret} lane must be gated on env.{secret} != empty')
-        if f"env.{secret} == ''" not in publish_text:
-            fail(f'workflow: {secret} lane must report a readable skip when unset')
-    for secret in FORBIDDEN_SECRETS:
-        if f'secrets.{secret}' in publish_text:
-            fail(f'workflow: publish job must not read secrets.{secret}; '
-                 'marketplace publication uses OIDC trusted publishing')
-    for command, oidc_arg in OIDC_PUBLISH_ARGS.items():
-        command_at = next((i for i, line in enumerate(publish)
-                           if command in line and not line.lstrip().startswith('#')),
-                          None)
-        if command_at is None:
-            continue  # reported by the publish-command loop below
-        command_indent = indent_of(publish[command_at])
-        step_lines = [publish[command_at]]
-        for line in publish[command_at + 1:]:
-            if line.strip() and line.lstrip().startswith('- ') \
-                    and indent_of(line) <= command_indent:
-                break
-            step_lines.append(line)
-        if oidc_arg not in '\n'.join(step_lines):
-            fail(f'workflow: {command!r} must authenticate with OIDC '
-                 f'({oidc_arg}) instead of a stored token')
-    for command in PUBLISH_COMMANDS:
-        if command not in publish_text:
-            fail(f'workflow: missing publish command {command!r}')
-    if 'gh release create' not in publish_text:
-        fail('workflow: publish job must create the GitHub Release')
-    if DEPENDENCY_INSTALL not in publish_text:
-        fail('workflow: publish job must install the frozen VSCode CLI dependencies '
-             f'with {DEPENDENCY_INSTALL!r} before publishing')
-    install_at = next(i for i, line in enumerate(publish)
-                      if DEPENDENCY_INSTALL in line and not line.lstrip().startswith('#'))
-    for step in PUBLISHING_STEPS:
-        step_at = next(i for i, line in enumerate(publish)
-                       if step in line and not line.lstrip().startswith('#'))
-        if install_at > step_at:
-            fail(f'workflow: {DEPENDENCY_INSTALL!r} must run before {step!r} '
-                 'in the publish job')
-    if 'release-assets/dist/' not in publish_text:
-        fail('workflow: release creation must upload the validated dist assets')
-    if 'python3 scripts/check_release_automation.py --print-version' not in publish_text:
-        fail('workflow: publish job must resolve the release version from the manifests')
+    if '          name: publication-handoff' in publish_text:
+        fail('workflow: the handoff download must use the immutable artifact id, '
+             'not a mutable name')
+    if '          path: build/release/publication-handoff' not in publish_text:
+        fail('workflow: the handoff download must target the declared handoff path')
+    deps_line = next((index for index, line in enumerate(publish)
+                      if line.strip() == 'run: make vscode-deps'), None)
+    publish_line = next((index for index, line in enumerate(publish)
+                         if line.strip().startswith('run: make release-publish')),
+                        None)
+    if deps_line is None or publish_line is None or deps_line > publish_line:
+        fail('workflow: frozen publication tooling must be installed before publishing')
 
 
 def require_job(lines, name):
@@ -708,14 +638,53 @@ def check_producer_handoff(block, target, context, experimental):
     return check_uploads(block, target, context, experimental)
 
 
+def check_native_promotion_evidence(selected_artifact, evidence):
+    """Fail closed if production selects a native artifact without complete hosted proof."""
+    if 'experimental' not in selected_artifact:
+        return
+    if not isinstance(evidence, dict):
+        fail('build workflow: native promotion requires complete identity-bound hosted evidence')
+    identity = evidence.get('identity')
+    if not isinstance(identity, dict) or not all(identity.get(key) for key in
+            ('source_sha', 'run_url', 'run_attempt')):
+        fail('build workflow: native promotion evidence is missing source/run/attempt identity')
+    artifacts = evidence.get('artifacts')
+    if not isinstance(artifacts, dict):
+        fail('build workflow: native promotion evidence is missing immutable artifacts')
+    for _, target in NATIVE_MATRIX:
+        artifact = artifacts.get(target)
+        if not isinstance(artifact, dict) or not artifact.get('immutable_id') or \
+                not re.fullmatch(r'[0-9a-f]{64}', str(artifact.get('sha256', ''))):
+            fail(f'build workflow: native promotion evidence lacks immutable ID/hash for {target}')
+        if any(artifact.get(key) != identity.get(key)
+               for key in ('source_sha', 'run_url', 'run_attempt')):
+            fail(f'build workflow: native promotion artifact identity mismatch for {target}')
+    outcomes = evidence.get('outcomes')
+    required_gates = ('abi', 'functional', 'vsix')
+    if not isinstance(outcomes, dict):
+        fail('build workflow: native promotion evidence is missing mandatory outcomes')
+    for gate in required_gates:
+        results = outcomes.get(gate)
+        if not isinstance(results, dict):
+            fail(f'build workflow: native promotion evidence is missing {gate} outcomes')
+        for _, target in NATIVE_MATRIX:
+            if results.get(target) != 'success':
+                fail(f'build workflow: native promotion {gate} outcome for {target} must be success')
+
+
 def check_native_candidates(block):
-    """Keep the native matrix an isolated, non-gating, locked experiment."""
+    """Require the strict, mandatory Linux GNU/macOS matrix experiment.
+
+    Every required row is a real job: ``continue-on-error`` would mask a failed
+    or cancelled row, so it is refused outright. The rows keep their
+    ``experimental`` artifact labels; production promotion is not claimed here.
+    """
     code = '\n'.join(code_lines(block))
     if not any(line.strip() == 'needs: source-checks' for line in block):
         fail('build workflow: the native producers must need source-checks')
-    if not any(line.strip() == 'continue-on-error: true' for line in block):
-        fail('build workflow: experimental native candidates must stay non-gating '
-             'until NREL-17 promotes them')
+    if 'continue-on-error:' in code:
+        fail('build workflow: the required native matrix must stay mandatory; '
+             'continue-on-error would mask a failed Linux/macOS row')
     matrix = {}
     artifacts = {}
     for index, line in enumerate(block):
@@ -752,6 +721,375 @@ def check_native_candidates(block):
     if PIPELINE_ARTIFACTS not in code:
         fail('build workflow: native candidates must package through the shared pipeline')
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
+
+
+def check_native_consumers(block):
+    """Require clean native hosts to consume only their bound immutable candidates."""
+    code = '\n'.join(code_lines(block))
+    if not any(line.strip() == 'needs: native-candidates' for line in block):
+        fail('build workflow: native consumers must need native-candidates')
+    if 'continue-on-error:' in code:
+        fail('build workflow: native consumers must be mandatory')
+    matrix = {}
+    artifacts = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if not match:
+            continue
+        target = artifact = None
+        for entry in block[index + 1:]:
+            if entry.strip() and indent_of(entry) <= indent_of(line):
+                break
+            found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+            if found:
+                target = found.group(1)
+            found = re.match(r'^\s*artifact:\s*(\S+)\s*$', entry)
+            if found:
+                artifact = found.group(1)
+        matrix[match.group(1)] = target
+        artifacts[match.group(1)] = artifact
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native consumer matrix must exactly match all three native hosts')
+    expected_artifacts = dict(zip((host for host, _ in NATIVE_MATRIX), (
+        'native-linux-x86_64-gnu-experimental',
+        'native-macos-arm64-experimental',
+        'native-macos-intel-experimental')))
+    if artifacts != expected_artifacts:
+        fail('build workflow: native consumers must select each exact experimental candidate')
+    if 'cachix/install-nix-action' in code or 'nix develop' in code:
+        fail('build workflow: native consumers must run on clean hosts without Nix')
+    for forbidden in ('cargo ', 'rustup ', 'release-native-build', 'make '):
+        if forbidden in code:
+            fail(f'build workflow: native consumers must not build or install tools ({forbidden.strip()})')
+    required = (
+        'permissions:', 'actions: read', 'contents: read',
+        'GITHUB_TOKEN: ${{ github.token }}', 'actions/setup-python@',
+        "python-version: '3.12'", 'python3 -m scripts.download_native_candidate',
+        '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
+        '--source-sha "${{ github.sha }}"', '--target "${{ matrix.target }}"',
+        '--artifact-name "${{ matrix.artifact }}"',
+        'scripts/check_native_artifact.py --functional "$archive"', 'if: always()',
+        'native-candidate.json', 'native-evidence.json', 'if-no-files-found: error',
+    )
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: native consumers must use immutable credential-free source checkout')
+    if 'test "${{ steps.candidate.outcome }}" = success' not in code:
+        fail('build workflow: native consumer candidate/check failures must fail the job')
+
+
+def check_native_functional_consumers(block):
+    """Require separate, mandatory artifact-backed native functional suites."""
+    code = '\n'.join(code_lines(block))
+    if not any(line.strip() == 'needs: native-candidates' for line in block):
+        fail('build workflow: native functional consumers must need native-candidates')
+    if 'continue-on-error:' in code:
+        fail('build workflow: native functional consumers must be mandatory')
+    matrix = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if not match:
+            continue
+        target = None
+        for entry in block[index + 1:]:
+            if entry.strip() and indent_of(entry) <= indent_of(line):
+                break
+            found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+            if found:
+                target = found.group(1)
+        matrix[match.group(1)] = target
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native functional matrix must exactly match all three native hosts')
+    for forbidden in ('release-native-build', 'cargo build', 'cargo test --release', 'continue-on-error:'):
+        if forbidden in code:
+            fail(f'build workflow: functional consumers must not substitute a server build ({forbidden})')
+    required = (
+        'needs: native-candidates', 'permissions:', 'actions: read', 'contents: read',
+        'cachix/install-nix-action@', '.#release-acceptance',
+        'python3 -m scripts.download_native_candidate', '--run-id "${{ github.run_id }}"',
+        '--attempt "${{ github.run_attempt }}"', '--source-sha "${{ github.sha }}"',
+        '--target "${{ matrix.target }}"', '--artifact-name "${{ matrix.artifact }}"',
+        'cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive',
+        'test-rust-artifact',
+        'FILTER="--test server_async --test editor_bridge --test rebase_interactive"',
+        'native-neovim-artifact-check', 'MAGIT_LSP_TEST_BINARY=',
+        'executable_sha256', 'before_sha256', 'after_sha256',
+        'native-functional-evidence.json', 'if: always()', 'if-no-files-found: warn',
+        'steps.harness.outcome', 'steps.rust-functional.outcome',
+    )
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native functional consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: functional consumers must use immutable credential-free checkout')
+    if 'test "$after" = "$expected"' not in code:
+        fail('build workflow: functional candidate hash must remain unchanged after runs')
+    if "grep -E '([0-9]+ ignored|skipped)'" not in code:
+        fail('build workflow: functional suites must fail on ignored or skipped cases')
+    if 'test "${{ steps.candidate.outcome }}" = success' not in code:
+        fail('build workflow: functional candidate/harness/runtime failures must fail the job')
+
+
+def check_native_vscode_consumers(block):
+    """Require installed-VSIX acceptance on each immutable native candidate host."""
+    code = '\n'.join(code_lines(block))
+    if 'continue-on-error:' in code or any(line.startswith('    if:') for line in block):
+        fail('build workflow: native VSCode consumers must be mandatory')
+    if 'needs: [native-candidates, vsix]' not in code:
+        fail('build workflow: native VSCode consumers must need native and VSIX producers')
+    matrix = {}
+    for index, line in enumerate(block):
+        match = re.match(r'^\s*- os:\s*(\S+)\s*$', line)
+        if match:
+            target = None
+            for entry in block[index + 1:]:
+                if entry.strip() and indent_of(entry) <= indent_of(line):
+                    break
+                found = re.match(r'^\s*target:\s*(\S+)\s*$', entry)
+                if found:
+                    target = found.group(1)
+            matrix[match.group(1)] = target
+    if matrix != dict(NATIVE_MATRIX):
+        fail('build workflow: native VSCode matrix must exactly match all three native hosts')
+    required = ('python3 -m scripts.download_native_candidate',
+                'python3 -m scripts.download_vsix_candidate',
+                '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
+                '--source-sha "${{ github.sha }}"', '--ref "${{ github.ref }}"',
+                '--event "${{ github.event_name }}"',
+                'from scripts.check_native_artifact import safe_extract',
+                'make native-vscode-artifact-check', 'MAGIT_LSP_SERVER_PATH=',
+                'RELEASE_ARTIFACT=', 'RELEASE_MANIFEST=', 'RELEASE_VSIX=',
+                'native-candidate.json', 'vsix-candidate.json',
+                'native_before', 'native_after', 'vsix_before', 'vsix_after',
+                'test "$native_before" = "$native_after"',
+                'test "$vsix_before" = "$vsix_after"',
+                'xvfb-run -a make native-vscode-artifact-check',
+                'if: always()', 'native-vscode-evidence.json', 'if-no-files-found: warn')
+    for token in required:
+        if token not in code:
+            fail(f'build workflow: native VSCode consumers must include {token!r}')
+    if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
+        fail('build workflow: native VSCode consumers must use immutable source checkout')
+    for forbidden in ('vscode-package', 'vscode-deps', 'cargo build', 'release-native-build'):
+        if forbidden in code:
+            fail(f'build workflow: native VSCode consumers must not build or package ({forbidden})')
+    if "if: runner.os == 'Linux'" not in code or "if: runner.os == 'macOS'" not in code:
+        fail('build workflow: editor setup must cover Linux and macOS hosted runners')
+
+
+def check_consumer_entrypoints(path=BUILD_WORKFLOW):
+    """Prove the consumer Python entrypoints on a clean runner, without network.
+
+    ``python3 -m`` resolves a repository-root module from the working directory
+    even when ``PYTHONPATH`` is unset; a script path does not add the repository
+    root to ``sys.path``, so these subprocesses fail exactly where the workflow
+    would. The installed-VSIX step must import the one real extractor from its
+    owning module instead of an aliased or duplicated downloader symbol.
+    """
+    code = '\n'.join(code_lines(read_lines(path)))
+    for script in ('scripts/download_native_candidate.py',
+                   'scripts/download_vsix_candidate.py'):
+        if script in code:
+            fail(f'build workflow: consumer steps must invoke the root module, not '
+                 f'the script path {script!r}')
+    for module in ('scripts.download_native_candidate',
+                   'scripts.download_vsix_candidate'):
+        if f'python3 -m {module}' not in code:
+            fail(f'build workflow: consumer steps must invoke `python3 -m {module}`')
+    if 'from scripts.check_native_artifact import safe_extract' not in code:
+        fail('build workflow: installed-VSIX extraction must import the owning '
+             "`from scripts.check_native_artifact import safe_extract`")
+    if 'from scripts.download_native_candidate import safe_extract' in code:
+        fail('build workflow: installed-VSIX extraction must not alias safe_extract '
+             'from the downloader module')
+    root = Path(__file__).resolve().parents[1]
+    owners = [script for script in sorted((root / 'scripts').glob('*.py'))
+              if re.search(r'^def safe_extract\b',
+                           script.read_text(encoding='utf-8'), re.MULTILINE)]
+    if owners != [root / 'scripts/check_native_artifact.py']:
+        found = ', '.join(str(script.relative_to(root)) for script in owners) or 'none'
+        fail('build workflow: safe_extract must be defined once in '
+             f'scripts/check_native_artifact.py, found {found}')
+    environment = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
+    commands = [[sys.executable, '-m', module, '--help']
+                for module in ('scripts.download_native_candidate',
+                               'scripts.download_vsix_candidate')]
+    commands.append([sys.executable, '-c',
+                     'from scripts.check_native_artifact import safe_extract'])
+    for command in commands:
+        result = subprocess.run(command, cwd=root, env=environment,
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            tail = detail[-6:] if detail else ['no output']
+            fail(f'consumer entrypoint {" ".join(command)} exited '
+                 f'{result.returncode}: ' + ' | '.join(tail))
+
+
+def job_needs(block, context):
+    """Return the declared ``needs:`` job ids of one workflow job block."""
+    for index, line in enumerate(block):
+        if line.strip().startswith('needs:'):
+            value = line.split(':', 1)[1].strip()
+            if value.startswith('[') and value.endswith(']'):
+                return [item.strip() for item in value[1:-1].split(',') if item.strip()]
+            if value:
+                return [value]
+            needs = []
+            for entry in block[index + 1:]:
+                if entry.strip() and indent_of(entry) <= indent_of(line):
+                    break
+                if entry.strip().startswith('- '):
+                    needs.append(entry.strip()[2:].strip())
+            return needs
+    return []
+
+
+def check_aggregate_gate(block, name, expected_needs):
+    """Require one fail-closed aggregate over exactly the expected job ids.
+
+    ``always()`` plus an explicit ``needs.<job>.result`` check for every
+    dependency means an absent, failed, skipped or cancelled required job blocks
+    the aggregate instead of being silently omitted. The gate runs no build,
+    package or install step, so it never rebuilds the bytes it gates.
+    """
+    if not block:
+        fail(f'build workflow: missing required aggregate job {name!r}')
+    code = '\n'.join(code_lines(block))
+    needs = job_needs(block, name)
+    if tuple(needs) != tuple(expected_needs):
+        fail(f'build workflow: {name} must need exactly {list(expected_needs)!r}, '
+             f'found {needs!r}')
+    if 'continue-on-error:' in code:
+        fail(f'build workflow: {name} must be mandatory')
+    if not any(line.strip() == 'if: always()' for line in block):
+        fail(f'build workflow: {name} must run with `if: always()` so a missing, '
+             'failed, skipped or cancelled dependency still evaluates the gate')
+    if 'uses:' in code:
+        fail(f'build workflow: {name} must not run an action or build step')
+    for forbidden in ('checkout@', 'make ', 'vsce ', 'npm ', 'pnpm ', 'cargo ',
+                      'setup-node'):
+        if forbidden in code:
+            fail(f'build workflow: {name} must not build, install or package '
+                 f'({forbidden.strip()})')
+    windows = [line.strip() for line in code_lines(block)
+               if re.match(r'^\s*(?:-\s*)?(?:os|runs-on):\s*windows', line,
+                           re.IGNORECASE)]
+    if windows:
+        fail(f'build workflow: {name} must never gate on Windows ({windows[0]!r})')
+    for need in expected_needs:
+        variable = need.upper().replace('-', '_') + '_RESULT'
+        if f'{variable}: ${{{{ needs.{need}.result }}}}' not in code:
+            fail(f'build workflow: {name} must read needs.{need}.result')
+        if f'check {need} "${variable}"' not in code:
+            fail(f'build workflow: {name} must fail unless {need} succeeded')
+    # The presence of a check call is not enough: the helper itself must compare
+    # against success and exit non-zero, or a skipped/cancelled result could ride
+    # along as a successful aggregate.
+    if 'check() { if [ "$2" != success ]; then' not in code or \
+            'exit 1; fi; }' not in code:
+        fail(f'build workflow: {name} must exit non-zero for any required result '
+             'other than success')
+
+
+def job_steps(block):
+    """Split a job block into its steps, each as ``(name, lines)``.
+
+    Steps are the entries at the job's six-space sequence indent; the name is
+    the step's ``- name:`` value or ``''`` for an unnamed ``uses`` step.
+    """
+    steps = []
+    for line in block:
+        if re.match(r'^      - ', line):
+            name = re.search(r'^      - name:\s*(.+?)\s*$', line)
+            steps.append([name.group(1) if name else '', [line]])
+        elif steps:
+            steps[-1][1].append(line)
+    return [(name, lines) for name, lines in steps]
+
+
+def single_step(steps, predicate, label, context):
+    """Return the index of the one step whose content matches ``predicate``."""
+    matches = [index for index, (_, lines) in enumerate(steps)
+               if predicate('\n'.join(lines))]
+    if len(matches) != 1:
+        fail(f'build workflow: {context} must run exactly one {label} step in the '
+             f'same job, found {len(matches)}')
+    return matches[0]
+
+
+def check_server_test_graph(context, block, target, native):
+    """Require one same-job debug-before-build and release-after-package pair.
+
+    The server suite is the only suite repeated, it runs against the exact
+    packaged executable recorded by the run-bound manifest, and no instrumented
+    coverage or consumer acceptance may mix into either run.
+    """
+    steps = job_steps(block)
+    for token in ACCEPTANCE_COMMANDS:
+        if token in '\n'.join(code_lines(block)):
+            fail(f'build workflow: {context} must not repeat client/ABI/package '
+                 'acceptance in the build job')
+    debug = single_step(steps, lambda text: 'make test-rust FILTER' in text,
+                        'debug server test', context)
+    build = single_step(
+        steps, lambda text: PIPELINE_BUILD in text or 'make release-native-build' in text,
+        'release build', context)
+    package = single_step(steps, lambda text: PIPELINE_ARTIFACTS in text,
+                          'packaging', context)
+    release = single_step(steps, lambda text: 'make test-rust-artifact' in text,
+                          'release server test', context)
+    if not debug < build < package < release:
+        fail(f'build workflow: {context} must run debug server tests before the '
+             'release build and release server tests after packaging')
+    if steps[debug][0] != SERVER_DEBUG_STEP:
+        fail(f'build workflow: {context} debug server tests must run in the '
+             f'{SERVER_DEBUG_STEP!r} step')
+    if steps[release][0] != SERVER_RELEASE_STEP:
+        fail(f'build workflow: {context} release server tests must run in the '
+             f'{SERVER_RELEASE_STEP!r} step')
+    debug_text = '\n'.join(steps[debug][1])
+    release_text = '\n'.join(steps[release][1])
+    if 'MAGIT_LSP_TEST_BINARY' in debug_text:
+        fail(f'build workflow: {context} debug server tests must not target the '
+             'release executable')
+    acceptance = ACCEPTANCE_COMMANDS + ('--test editor_bridge',
+                                        '--test rebase_interactive')
+    for token in acceptance + COVERAGE_TOKENS:
+        if token in debug_text or token in release_text:
+            fail(f'build workflow: {context} server tests must not repeat client/ABI/'
+                 f'package acceptance or mix coverage ({token!r})')
+    if 'cargo build' in release_text or 'release-native-build' in release_text:
+        fail(f'build workflow: {context} release server tests must run the packaged '
+             'executable, not rebuild the server')
+    for label, text in (('debug', debug_text), ('release', release_text)):
+        suites = re.findall(r'--test\s+([\w-]+)', text)
+        if suites != [SERVER_SUITE]:
+            fail(f'build workflow: {context} {label} server tests may run only '
+                 f'{SERVER_SUITE!r}, found {suites}')
+        if native and NATIVE_SHELL not in text:
+            fail(f'build workflow: {context} {label} server tests must use the same '
+                 'locked .#release-native shell as the build')
+        if not native and 'nix develop' in text:
+            fail(f'build workflow: {context} {label} server tests must use the '
+                 'same pinned rustup toolchain as the build')
+    if '--locked' not in debug_text:
+        fail(f'build workflow: {context} debug server tests must run the locked '
+             'server suite before the build')
+    expected_binary = f'target/{target}/release/magit-lsp'
+    if 'realpath' not in release_text or expected_binary not in release_text:
+        fail(f'build workflow: {context} release server tests must run the exact '
+             f'packaged executable {expected_binary!r}')
+    if RELEASE_MANIFEST not in release_text or 'executable_sha256' not in release_text:
+        fail(f'build workflow: {context} release server tests must bind '
+             f'{RELEASE_MANIFEST} executable_sha256')
+    digest = 'shasum -a 256' if native else 'sha256sum'
+    if digest not in release_text or '= "$expected"' not in release_text \
+            or 'MAGIT_LSP_TEST_BINARY="$binary"' not in release_text:
+        fail(f'build workflow: {context} release server tests must compare the '
+             f'packaged binary hash before running it')
 
 
 def check_build_workflow(path=BUILD_WORKFLOW):
@@ -795,10 +1133,13 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     check_inline_scripts(lines, 'build workflow')
 
     jobs = workflow_jobs(lines)
-    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB):
+    for required in (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB,
+                     NATIVE_FUNCTIONAL_JOB, NATIVE_VSCODE_JOB):
         if required not in jobs:
             fail(f'build workflow: missing mandatory job {required!r}')
     require_pinned_builders(jobs)
+
+    check_vsix_producer(jobs.get(VSIX_JOB, []))
 
     # Source checks reuse the CI Make targets in the locked dev shell; they never
     # invoke the release producer or become a second build path.
@@ -842,7 +1183,7 @@ def check_build_workflow(path=BUILD_WORKFLOW):
              'native-linker mode')
     if PIPELINE_ARTIFACTS not in fallback_text:
         fail(f'build workflow: must run the shared artifact check {PIPELINE_ARTIFACTS!r}')
-    for alternate in ('cargo build', 'package-release.sh', 'MAGIT_LSP_TEST_BINARY'):
+    for alternate in ('cargo build', 'package-release.sh'):
         if alternate in fallback_text:
             fail(f'build workflow: {alternate!r} belongs to the shared pipeline script, '
                  'not a separate workflow path')
@@ -853,12 +1194,54 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     if not ref_at < build_at < artifacts_at:
         fail('build workflow: version validation must precede the pinned build, '
              'and the build must precede artifact packaging')
+    selected_name, _ = step_uploads(upload_steps(fallback)[0], 'fallback')
+    # This is the production artifact selection point. No hosted proof is checked
+    # in locally; selecting an experimental artifact therefore fails closed.
+    check_native_promotion_evidence(selected_name, None)
     fallback_name = check_producer_handoff(fallback, FALLBACK_TARGET, 'fallback', False)
+    if 'experimental' in fallback_name:
+        fail('build workflow: experimental native artifacts cannot be selected as production')
     if fallback_name != ARTIFACT_NAME:
         fail(f'build workflow: uploads {fallback_name!r}, expected {ARTIFACT_NAME!r} '
              'so the publisher consumes the strict fallback')
+    check_server_test_graph(FALLBACK_JOB, fallback, FALLBACK_TARGET, False)
+    if any(line.strip() == 'continue-on-error: true' for line in fallback):
+        fail('build workflow: the strict Linux GNU fallback must remain mandatory')
+
+    # Windows may stay informational in this repository, but it can never gate a
+    # required release build or acceptance job.
+    required_jobs = (SOURCE_CHECK_JOB, FALLBACK_JOB, NATIVE_JOB, NATIVE_CONSUMER_JOB,
+                     NATIVE_FUNCTIONAL_JOB, NATIVE_VSCODE_JOB, VSIX_JOB,
+                     REQUIRED_VSIX_GATE_JOB, RELEASE_READINESS_JOB)
+    for job_name, block in jobs.items():
+        windows = [line.strip() for line in code_lines(block)
+                   if re.match(r'^\s*(?:-\s*)?(?:os|runs-on):\s*windows', line,
+                               re.IGNORECASE)]
+        if not windows:
+            continue
+        if job_name in required_jobs or 'continue-on-error: true' not in \
+                '\n'.join(code_lines(block)):
+            fail('build workflow: Windows cannot gate the required release graph '
+                 f'({windows[0]!r} in {job_name!r})')
+    for token in COVERAGE_TOKENS:
+        if token in text:
+            fail('build workflow: instrumented coverage belongs in the separate '
+                 f'read-only CI coverage job ({token!r})')
 
     check_native_candidates(jobs[NATIVE_JOB])
+    check_server_test_graph(NATIVE_JOB, jobs[NATIVE_JOB], '${{ matrix.target }}',
+                            True)
+    check_native_consumers(jobs[NATIVE_CONSUMER_JOB])
+    check_native_functional_consumers(jobs[NATIVE_FUNCTIONAL_JOB])
+    check_native_vscode_consumers(jobs[NATIVE_VSCODE_JOB])
+    # The two stable aggregates are the release-readiness contract: the VSIX
+    # gate covers the producer and its installed consumers, and readiness covers
+    # every required Linux/macOS source, build and acceptance job. Windows is
+    # absent from both graphs.
+    check_aggregate_gate(jobs.get(REQUIRED_VSIX_GATE_JOB), REQUIRED_VSIX_GATE_JOB,
+                         REQUIRED_VSIX_GATE_NEEDS)
+    check_aggregate_gate(jobs.get(RELEASE_READINESS_JOB), RELEASE_READINESS_JOB,
+                         READINESS_NEEDS)
     check_python_interpreter(lines)
     check_node_tooling(lines)
 
@@ -877,6 +1260,97 @@ def check_build_workflow(path=BUILD_WORKFLOW):
     for forbidden in RELEASE_FORBIDDEN_PATHS:
         if forbidden in text:
             fail(f'build workflow: references operator-owned path {forbidden!r}')
+
+
+def check_vsix_producer(block):
+    """Require one platform-independent, run-bound VSIX producer and upload."""
+    if not block:
+        fail('build workflow: missing VSIX producer job')
+    code = '\n'.join(code_lines(block))
+    runner = next((line.split(':', 1)[1].strip() for line in block
+                   if line.strip().startswith('runs-on:')), '')
+    if runner != 'ubuntu-24.04' or 'matrix:' in code:
+        fail('build workflow: VSIX producer must be platform-independent')
+    if 'needs: source-checks' not in code:
+        fail('build workflow: VSIX producer must need source-checks')
+    if "node-version: '24'" not in code or 'pnpm@10.13.1' not in code:
+        fail('build workflow: VSIX producer must use Node 24 and pinned pnpm')
+    makefile = '\n'.join(read_lines(MAKEFILE))
+    if 'make vscode-package' not in code or 'vscode-package:' not in makefile \
+            or '--frozen-lockfile' not in makefile:
+        fail('build workflow: VSIX producer must use the frozen existing package target')
+    if sum(1 for step in upload_steps(block)
+           if VSIX_PATH in '\n'.join(step_uploads(step, 'VSIX producer')[1])) != 1:
+        fail('build workflow: VSIX producer must upload exactly one VSIX')
+    if 'make vscode-package' not in code:
+        fail('build workflow: VSIX producer must package the VSIX')
+    if 'cargo build' in code or 'release-native-build' in code:
+        fail('build workflow: VSIX producer must not rebuild the native server')
+    if VSIX_MANIFEST not in code or 'artifact-digest' not in code \
+            or 'artifact-id' not in code:
+        fail('build workflow: VSIX producer must hand off manifest and immutable artifact identity')
+    provenance = job_step(block, '--write-vsix-binding', 'VSIX producer')
+    environment = step_environment(provenance, 'VSIX producer')
+    expected_identity = {
+        'RELEASE_SOURCE_SHA': '${{ github.sha }}',
+        'RELEASE_REF': '${{ github.ref }}',
+        'RELEASE_EVENT': '${{ github.event_name }}',
+        'RELEASE_RUN_ID': '${{ github.run_id }}',
+        'RELEASE_RUN_ATTEMPT': '${{ github.run_attempt }}',
+    }
+    if any(environment.get(key) != value for key, value in expected_identity.items()):
+        fail('build workflow: VSIX producer must bind source/ref/event/run/attempt')
+    if 'contents: write' in code or 'secrets.' in code:
+        fail('build workflow: VSIX producer must have no publication rights')
+
+
+def write_vsix_binding():
+    """Write hash and run identity for the exact VSIX produced by vscode-package."""
+    version = os.environ.get('RELEASE_VERSION', '')
+    if VERSION_PATTERN.fullmatch(version) is None:
+        fail('VSIX provenance: invalid RELEASE_VERSION')
+    package = json.loads(EXTENSION_MANIFEST.read_text(encoding='utf-8'))
+    if package.get('version') != version:
+        fail('VSIX provenance: package version drift')
+    artifact = Path(f'build/vscode/magit-lsp-{version}.vsix')
+    if not artifact.is_file():
+        fail('VSIX provenance: expected exactly one versioned VSIX')
+    if list(Path('build/vscode').glob('*.vsix')) != [artifact]:
+        fail('VSIX provenance: missing or extra VSIX package')
+    locks = ('Cargo.lock', 'flake.lock', 'clients/vscode/pnpm-lock.yaml')
+    payload = {
+        'source_sha': os.environ.get('RELEASE_SOURCE_SHA'),
+        'original_ref': os.environ.get('RELEASE_REF'),
+        'event': os.environ.get('RELEASE_EVENT'),
+        'run_id': os.environ.get('RELEASE_RUN_ID'),
+        'run_attempt': os.environ.get('RELEASE_RUN_ATTEMPT'),
+        'version': version,
+        'vsix_sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        'lock_hashes': {name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                        for name in locks},
+        'pnpm_version': '10.13.1',
+    }
+    if not all(payload[key] for key in ('source_sha', 'original_ref', 'event',
+                                        'run_id', 'run_attempt')):
+        fail('VSIX provenance: missing run identity')
+    if payload['source_sha'] != os.environ.get('GITHUB_SHA'):
+        fail('VSIX provenance: source SHA does not match the workflow run')
+    if payload['run_id'] != os.environ.get('GITHUB_RUN_ID') or \
+            payload['run_attempt'] != os.environ.get('GITHUB_RUN_ATTEMPT'):
+        fail('VSIX provenance: run ID or attempt does not match the workflow run')
+    Path('build/vscode/vsix-manifest.json').write_text(
+        json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
+
+
+def write_vsix_upload_identity():
+    """Record the immutable upload ID and digest for the VSIX handoff."""
+    fields = ('ARTIFACT_ID', 'ARTIFACT_DIGEST', 'RUN_ID', 'RUN_ATTEMPT')
+    payload = {key.lower(): os.environ.get(key, '') for key in fields}
+    if not all(payload.values()) or not ARTIFACT_DIGEST_PATTERN.fullmatch(
+            payload['artifact_digest']):
+        fail('VSIX upload identity: missing or invalid immutable upload identity')
+    Path('build/vscode/vsix-upload-identity.json').write_text(
+        json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
 
 
 def load_pipeline(path=PIPELINE):
@@ -1023,6 +1497,8 @@ def check_local_pipeline(path=MAKEFILE):
         ('release-native-build', PIPELINE_BUILD_NATIVE),
         ('release-pipeline-check', PIPELINE_CHECK),
         ('release-automation-unit', PIPELINE_AUTOMATION_UNIT),
+        ('release-publish',
+         'python3 scripts/publish_release.py --handoff "$(HANDOFF)"'),
     ):
         number = next((index for index, line in enumerate(lines, 1)
                        if line.startswith(target + ':')), None)
@@ -1075,18 +1551,24 @@ def check_contract_unit(path=MAKEFILE):
 
 
 def check_artifact_consistency():
-    """The build workflow must upload exactly the artifact the publish workflow downloads."""
+    """The producer uploads candidates; the publisher transfers only its handoff."""
+    build_jobs = workflow_jobs(read_lines(BUILD_WORKFLOW))
     uploaded = step_artifact_name(
-        read_lines(BUILD_WORKFLOW), 'actions/upload-artifact@', 'build workflow')
-    downloaded = step_artifact_name(
-        read_lines(WORKFLOW), 'actions/download-artifact@', 'publish workflow')
+        build_jobs[FALLBACK_JOB], 'actions/upload-artifact@', 'build workflow')
     if uploaded != ARTIFACT_NAME:
         fail(f'build workflow: uploads {uploaded!r}, expected {ARTIFACT_NAME!r}')
-    if downloaded != ARTIFACT_NAME:
-        fail(f'publish workflow: downloads {downloaded!r}, expected {ARTIFACT_NAME!r}')
-    if uploaded != downloaded:
-        fail(f'artifact name mismatch: release.yml uploads {uploaded!r} but '
-             f'publish.yml downloads {downloaded!r}')
+    publish = require_job(read_lines(WORKFLOW), 'publish')
+    publish_text = '\n'.join(publish)
+    if 'actions/download-artifact@' not in publish_text:
+        fail('publish workflow: the publisher must download its validated handoff')
+    if '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}' \
+            not in publish_text:
+        fail('publish workflow: the handoff must be addressed by the validate '
+             'artifact id')
+    if '          name: publication-handoff' in publish_text:
+        fail('publish workflow: the handoff must never be downloaded by name')
+    if 'build/release/publication-handoff' not in publish_text:
+        fail('publish workflow: the handoff must use the declared handoff path')
 
 
 def check_metadata():
@@ -1244,6 +1726,41 @@ def fetch_api(repository, path, token):
         return error.code, error.read()
     except OSError as error:
         fail(f'GitHub API request for {path} failed: {error}')
+
+
+def fetch_source_locks(repository, source_sha, token):
+    """Return each tracked lockfile's sha256 at the immutable ``source_sha``.
+
+    The locks are read as inert bytes through the ordinary read-only contents
+    API at the bound commit, so the expectation follows the release source and
+    not the publisher checkout. Unavailable or malformed data fails closed;
+    nothing is checked out, executed or read from the local tree.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', str(source_sha)):
+        fail('release source lock lookup requires a full commit SHA')
+    digests = {}
+    for name in SOURCE_LOCK_FILES:
+        status, body = fetch_api(
+            repository, f'/contents/{name}?ref={source_sha}', token)
+        if status != 200:
+            fail(f'release source {name} at {source_sha} returned HTTP {status}')
+        document = parse_json(body, f'release source {name}')
+        if not isinstance(document, dict) or document.get('type') != 'file' \
+                or document.get('path') != name:
+            fail(f'release source {name} is not the tracked file')
+        if document.get('encoding') != 'base64':
+            fail(f'release source {name} is not base64-encoded content')
+        content = document.get('content')
+        if not isinstance(content, str) or not content:
+            fail(f'release source {name} has no content')
+        try:
+            data = base64.b64decode(''.join(content.split()), validate=True)
+        except ValueError:
+            fail(f'release source {name} content is not valid base64')
+        if isinstance(document.get('size'), bool) or document.get('size') != len(data):
+            fail(f'release source {name} size differs from its content')
+        digests[name] = hashlib.sha256(data).hexdigest()
+    return digests
 
 
 def validate_run_metadata(document, repository, sha):
@@ -1471,7 +1988,7 @@ def validate_manifest_binding(manifest, expected):
                 r'[0-9a-f]{64}', manifest[field]):
             fail(f'release manifest {field} is not a SHA-256')
     if manifest['lock_hashes'] != expected['lock_hashes']:
-        fail('release manifest lock_hashes differ from the checked-out source')
+        fail('release manifest lock_hashes differ from the bound release source')
     if manifest['toolchain'] != expected['toolchain']:
         fail('release manifest toolchain differs from the trusted toolchain')
 
@@ -1590,7 +2107,8 @@ def validate_upload_identity(document, run_id, run_attempt, artifact):
         fail(f'upload identity artifact id {document["artifact_id"]!r} does not '
              f'match API artifact {artifact.get("id")!r}')
     if document['artifact_digest'] != artifact.get('digest'):
-        fail('upload identity artifact digest does not match the API artifact')
+        fail('upload identity artifact digest does not match the API artifact '
+             f'(identity {document["artifact_digest"]!r}, API {artifact.get("digest")!r})')
 
 
 def validate_archive_binding(manifest, archive):
@@ -1663,6 +2181,329 @@ def validate_publication_binding_bundle(path):
     return result
 
 
+def publication_api_pages(repository, path, token, key, api_get=None):
+    """Collect every API page for a publication listing, rejecting truncation."""
+    entries = []
+    if api_get is None:
+        api_get = fetch_api
+    total = None
+    page = 1
+    seen_pages = set()
+    while True:
+        status, body = api_get(
+            repository, f'{path}?per_page=100&page={page}', token)
+        if status != 200:
+            fail(f'publication API {path} page {page} returned HTTP {status}')
+        document = parse_json(body, f'publication API {path} page {page}')
+        if not isinstance(document, dict):
+            fail(f'publication API {path} page {page}: expected object')
+        count = document.get('total_count')
+        values = document.get(key)
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0 or \
+                not isinstance(values, list):
+            fail(f'publication API {path} page {page}: invalid listing')
+        if total is None:
+            total = count
+        elif total != count:
+            fail(f'publication API {path} pages disagree on total_count')
+        page_signature = json.dumps(values, sort_keys=True, separators=(',', ':'))
+        if page_signature in seen_pages:
+            fail(f'publication API {path} page {page} repeats an earlier page')
+        seen_pages.add(page_signature)
+        previous_count = len(entries)
+        entries.extend(values)
+        if len(entries) >= total:
+            break
+        if len(entries) == previous_count:
+            fail(f'publication API {path} page {page} made no pagination progress')
+        page += 1
+    if len(entries) != total:
+        fail(f'publication API {path}: incomplete pagination')
+    return [{'total_count': total, key: entries}]
+
+
+def validate_publication_orchestration(event, repository, checkout_ref,
+                                       checkout_sha, default_ref='refs/heads/main'):
+    """Require trusted workflow_run orchestration and the protected checkout.
+
+    Readiness is a property of the required producer jobs themselves (see
+    :data:`MANDATORY_RUN_JOBS`), not of a separate readiness/promotion bundle, so
+    no extra evidence schema is demanded here.
+    """
+    if checkout_ref != default_ref:
+        fail(f'publication orchestration ref is {checkout_ref!r}, expected protected default')
+    if not isinstance(checkout_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', checkout_sha):
+        fail('publication orchestration checkout SHA is invalid')
+    if not isinstance(event, dict) or event.get('action') != 'completed':
+        fail('publication event must be workflow_run completed')
+    run = event.get('workflow_run')
+    if not isinstance(run, dict) or full_name(run.get('repository')) != repository:
+        fail('publication event run belongs to another repository')
+    return run
+
+
+def prepare_publication_runtime(event_path):
+    """Validate the event and upstream API binding, then write the exact-byte handoff.
+
+    The required aggregate and integrity jobs must all be completed successfully;
+    the native and VSIX candidates are downloaded and validated as immutable
+    artifacts without executing or rebuilding them. Registry publication is not
+    enabled here.
+    """
+    event = parse_json(Path(event_path).read_bytes(), 'workflow_run event')
+    repository = os.environ.get('GITHUB_REPOSITORY', '')
+    ref = os.environ.get('GITHUB_REF', '')
+    checkout_sha = os.environ.get('GITHUB_SHA', '')
+    if os.environ.get('GITHUB_EVENT_NAME') != 'workflow_run':
+        fail('publication orchestration requires workflow_run event')
+    token = os.environ.get('GH_TOKEN', '')
+    status, body = fetch_api(repository, '', token)
+    if status != 200:
+        fail(f'publication repository metadata returned HTTP {status}')
+    repo_document = parse_json(body, 'publication repository metadata')
+    default_branch = repo_document.get('default_branch') if isinstance(repo_document, dict) else None
+    if not isinstance(default_branch, str) or not default_branch:
+        fail('publication repository has no default branch')
+    expected_ref = f'refs/heads/{default_branch}'
+    if ref != expected_ref:
+        fail(f'publication orchestration ref is {ref!r}, expected default {expected_ref!r}')
+    # The validation job's token has only contents/actions read. "Get a branch"
+    # requires Contents: read, while branch protection requires
+    # Administration: read, which no workflow permission can grant. Only the
+    # branch's ordinary ``protected`` metadata is checked here; detailed
+    # protection/ruleset settings stay an explicit maintainer prerequisite.
+    status, body = fetch_api(repository, f'/branches/{default_branch}', token)
+    if status != 200:
+        fail(f'publication default branch metadata returned HTTP {status}')
+    branch_document = parse_json(body, 'publication default branch metadata')
+    if not isinstance(branch_document, dict):
+        fail('publication default branch metadata: expected object')
+    if branch_document.get('protected') is not True:
+        fail('publication default branch metadata does not report a protected branch')
+    status, body = fetch_api(repository, f'/git/ref/heads/{default_branch}', token)
+    if status != 200:
+        fail(f'publication default branch ref returned HTTP {status}')
+    default_ref = parse_json(body, 'publication default branch ref')
+    default_object = default_ref.get('object') if isinstance(default_ref, dict) else None
+    if not isinstance(default_object, dict) or default_object.get('sha') != checkout_sha:
+        fail('publication orchestration checkout SHA is not the current default branch SHA')
+    run = validate_publication_orchestration(
+        event, repository, expected_ref, checkout_sha, default_ref=expected_ref)
+    run_id = run.get('id')
+    attempt = run.get('run_attempt')
+    if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+        fail('publication event has invalid upstream run id')
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        fail('publication event has invalid upstream run attempt')
+    status, body = fetch_api(repository, f'/actions/runs/{run_id}', token)
+    if status != 200:
+        fail(f'publication upstream run returned HTTP {status}')
+    upstream = parse_json(body, 'publication upstream run')
+    if not isinstance(upstream, dict):
+        fail('publication upstream run: expected object')
+    workflow_id = upstream.get('workflow_id')
+    if run.get('workflow_id') != workflow_id or run.get('event') != RUN_EVENT:
+        fail('publication event/upstream workflow identity or event differs')
+    original_ref = run.get('head_branch')
+    if not isinstance(original_ref, str) or not original_ref.startswith('v'):
+        fail('publication upstream run does not identify an original version tag')
+    tag_ref = f'refs/tags/{original_ref}'
+    validate_run_binding(upstream, repository, run_id, attempt, workflow_id,
+                         tag_ref)
+    # Required producer jobs are checked by stable job id: the two fail-closed
+    # aggregates plus source-checks and the strict Linux GNU build. Inference of
+    # API matrix row names is neither needed nor accepted, and a missing, failed,
+    # skipped or cancelled required job blocks publication here.
+    validate_run_jobs(
+        publication_api_pages(repository, f'/actions/runs/{run_id}/jobs', token,
+                              'jobs'),
+        run_id, attempt)
+    tag_status, tag_body = fetch_api(repository, f'/git/ref/tags/{original_ref}', token)
+    tag_document = parse_json(tag_body, 'publication original tag ref') if tag_status == 200 else None
+    if tag_status != 200:
+        fail(f'publication original tag lookup returned HTTP {tag_status}')
+    target = tag_document.get('object') if isinstance(tag_document, dict) else None
+    tag_object = None
+    if isinstance(target, dict) and target.get('type') == 'tag':
+        object_sha = target.get('sha')
+        tag_status, tag_body = fetch_api(repository, f'/git/tags/{object_sha}', token)
+        if tag_status != 200:
+            fail(f'publication annotated tag lookup returned HTTP {tag_status}')
+        tag_object = parse_json(tag_body, 'publication annotated tag')
+    if tag_object is None and isinstance(target, dict) and target.get('type') != 'commit':
+        fail('publication original tag has an unsupported object type')
+    # Artifact bytes are untrusted data. Authenticate only against the fixed
+    # GitHub API origin, bind the identity ZIP to its immutable artifact ID,
+    # then validate the candidate ZIP and its manifest before considering gates.
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import download_native_candidate as transport
+    artifacts = validate_run_artifacts(
+        publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token,
+                              'artifacts'), run_id)
+    candidate = artifacts[ARTIFACT_NAME]
+    identity_artifact = artifacts[f'{ARTIFACT_NAME}-identity']
+    owner, _, repo = repository.partition('/')
+    if not owner or not repo:
+        fail('publication repository slug is invalid')
+
+    def artifact_bytes(artifact):
+        url = (f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/'
+               f'{artifact["id"]}/zip')
+        try:
+            with transport.request(url, token) as response:
+                return response.read()
+        except transport.DownloadError as error:
+            fail(f'publication artifact download failed: {error}')
+
+    identity_zip = artifact_bytes(identity_artifact)
+    if transport.digest(identity_zip) != identity_artifact['digest'].removeprefix('sha256:'):
+        fail('publication identity transport digest mismatch')
+    try:
+        identity_files = transport.exact_zip(identity_zip, ['upload-identity.json'])
+        identity = parse_json(identity_files['upload-identity.json'], 'publication upload identity')
+    except (transport.DownloadError, KeyError) as error:
+        fail(f'publication identity artifact is invalid: {error}')
+    validate_upload_identity(identity, run_id, attempt, candidate)
+    candidate_zip = artifact_bytes(candidate)
+    if transport.digest(candidate_zip) != candidate['digest'].removeprefix('sha256:'):
+        fail('publication candidate transport digest mismatch')
+    try:
+        files = transport.exact_zip(candidate_zip)
+        manifest = parse_json(files['release-manifest.json'], 'publication release manifest')
+    except (transport.DownloadError, KeyError) as error:
+        fail(f'publication candidate artifact is invalid: {error}')
+    # Peel the manifest's original tag before trusting any lock expectation:
+    # the locks belong to the immutable source commit, so they are fetched as
+    # data at that SHA and never read from the publisher checkout or default
+    # branch. A legitimate older tag therefore releases its own lockfiles.
+    if not isinstance(manifest, dict) or not isinstance(
+            manifest.get('original_ref'), str) or not isinstance(
+            manifest.get('source_sha'), str):
+        fail('release manifest is missing its original_ref/source_sha binding')
+    tag_status, tag_body = fetch_api(repository, f'/git/ref/tags/{original_ref}', token)
+    tag_object_body = None
+    tag_target = tag_document.get('object') if isinstance(tag_document, dict) else None
+    if isinstance(tag_target, dict) and tag_target.get('type') == 'tag':
+        peel_status, peel_body = fetch_api(repository, f'/git/tags/{tag_target.get("sha")}', token)
+        if peel_status != 200:
+            fail(f'publication annotated tag lookup returned HTTP {peel_status}')
+        tag_object_body = peel_body
+    source_sha = validate_tag_binding(tag_status, tag_body, tag_object_body, manifest)
+    source_locks = fetch_source_locks(repository, source_sha, token)
+    trusted = {
+        'run_id': str(run_id), 'run_attempt': str(attempt), 'event': RUN_EVENT,
+        'version': original_ref[1:], 'target': ASSET, 'original_ref': tag_ref,
+        'lock_hashes': {name: source_locks[name]
+                        for name in ('Cargo.lock', 'flake.lock')},
+        'toolchain': {'rust': RELEASE_TOOLCHAIN},
+    }
+    validate_manifest_binding(manifest, trusted)
+    archive_name = f'magit-lsp-v{manifest["version"]}-{manifest["target"]}.tar.gz'
+    required = {archive_name, archive_name + '.sha256', 'release-manifest.json',
+                'release-manifest.json.sha256'}
+    if {Path(name).name for name in files} != required:
+        fail('publication candidate asset list differs from the validated manifest')
+    archive = next(data for name, data in files.items() if Path(name).name == archive_name)
+    checksum = next(data for name, data in files.items()
+                    if Path(name).name == archive_name + '.sha256')
+    manifest_bytes = files['release-manifest.json']
+    try:
+        sidecar = files['release-manifest.json.sha256'].decode('ascii').split()
+        checksum_tokens = checksum.decode('ascii').split()
+    except UnicodeDecodeError:
+        fail('publication candidate checksums are not ASCII')
+    if len(sidecar) != 2 or sidecar[1] != 'release-manifest.json' or \
+            transport.digest(manifest_bytes) != sidecar[0] or \
+            transport.digest(archive) != manifest['archive_sha256'] or \
+            len(checksum_tokens) != 2 or checksum_tokens[1] != archive_name or \
+            checksum_tokens[0] != transport.digest(archive):
+        fail('publication candidate asset hash validation failed')
+    # Persist the exact validated native bytes next to the VSIX. The artifact
+    # upload carries this whole directory, so every later consumer addresses
+    # the files by handoff-relative names, never by a path from this job's
+    # temporary workspace. The extraction below only rechecks the executable.
+    handoff_dir = Path(os.environ.get('PUBLICATION_HANDOFF_DIR') or
+                       'build/release/publication-handoff')
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    persisted = {
+        archive_name: archive,
+        archive_name + '.sha256': checksum,
+        'release-manifest.json': manifest_bytes,
+        'release-manifest.json.sha256': files['release-manifest.json.sha256'],
+    }
+    for name, data in persisted.items():
+        destination = handoff_dir / name
+        if destination.is_symlink():
+            fail(f'publication handoff {name} must not be a symbolic link')
+        destination.write_bytes(data)
+        if destination.is_symlink() or \
+                transport.digest(destination.read_bytes()) != transport.digest(data):
+            fail(f'publication handoff {name} was not persisted as exact bytes')
+    with tempfile.TemporaryDirectory(prefix='publication-assets-') as temporary:
+        try:
+            binary = transport.native.safe_extract(
+                handoff_dir / archive_name, Path(temporary) / 'extracted',
+                archive_name.removesuffix('.tar.gz'))
+        except Exception as error:
+            fail(f'publication release archive is invalid: {error}')
+        if transport.native.digest(binary) != manifest['executable_sha256']:
+            fail('publication executable hash differs from manifest')
+    # One VSIX is built once by the Node 24/frozen-lockfile producer. The
+    # publisher downloads those exact uploaded bytes and validates them through
+    # the same transport verifier the installed-extension consumers use; nothing
+    # here rebuilds, repackages or reinstalls the extension.
+    from scripts import download_vsix_candidate as vsix_transport
+    try:
+        vsix = vsix_transport.fetch_candidate(
+            repository, run_id, attempt, source_sha, tag_ref, RUN_EVENT,
+            original_ref[1:], handoff_dir, token, opener=transport.request,
+            expected_locks=source_locks)
+    except (vsix_transport.DownloadError, KeyError, ValueError, OSError) as error:
+        fail(f'publication VSIX handoff is invalid: {error}')
+    # The handoff records only handoff-relative names for the exact accepted
+    # bytes and their immutable identities, never a rebuilt package or a
+    # promotion bundle. The protected publisher consumes these paths verbatim.
+    handoff = {
+        'source_sha': source_sha,
+        'version': manifest['version'],
+        'original_ref': tag_ref,
+        'event': RUN_EVENT,
+        'run_id': str(run_id),
+        'run_attempt': str(attempt),
+        'target': ASSET,
+        'native': {
+            'artifact_id': str(candidate.get('id')),
+            'artifact_digest': candidate.get('digest'),
+            'archive': archive_name,
+            'checksum': archive_name + '.sha256',
+            'manifest': 'release-manifest.json',
+            'manifest_checksum': 'release-manifest.json.sha256',
+            'archive_sha256': manifest['archive_sha256'],
+            'manifest_sha256': transport.digest(manifest_bytes),
+            'executable_sha256': manifest['executable_sha256'],
+        },
+        'vsix': {
+            'artifact_id': vsix['artifact_id'],
+            'artifact_digest': vsix['artifact_digest'],
+            'run_id': vsix['run_id'],
+            'run_attempt': vsix['run_attempt'],
+            'source_sha': vsix['source_sha'],
+            # Relocatable: resolved against the published handoff JSON's directory.
+            'vsix': Path(vsix['vsix']).name,
+            'manifest': Path(vsix['manifest']).name,
+            'vsix_sha256': vsix['vsix_sha256'],
+        },
+    }
+    handoff_path = handoff_dir / 'publication-handoff.json'
+    handoff_path.write_text(json.dumps(handoff, sort_keys=True) + '\n',
+                            encoding='utf-8')
+    print(f'ok: publication handoff validated for {source_sha}; '
+          f'VSIX {vsix["vsix_sha256"]}; publication is delegated to the '
+          'protected publisher')
+    return handoff
+
+
 def repository_and_sha():
     """Return ``(repository, sha)`` from the workflow environment, validated."""
     repository = os.environ.get('GITHUB_REPOSITORY', '')
@@ -1714,6 +2555,57 @@ def expect_check(label, function, *args, expected=None):
             fail(f'self-test: {label} failed for another reason: {error}')
         return
     fail(f'self-test: {label} was accepted')
+
+
+def test_vsix_binding_fixtures(directory):
+    """Exercise VSIX provenance generation and rejection paths offline."""
+    root = Path(directory)
+    (root / 'clients/vscode').mkdir(parents=True)
+    (root / 'build/vscode').mkdir(parents=True)
+    (root / 'clients/vscode/package.json').write_text(
+        '{"version":"1.2.3"}', encoding='utf-8')
+    for lock in ('Cargo.lock', 'flake.lock', 'clients/vscode/pnpm-lock.yaml'):
+        (root / lock).write_text('fixture lock', encoding='utf-8')
+    artifact = root / 'build/vscode/magit-lsp-1.2.3.vsix'
+    artifact.write_bytes(b'fixture VSIX bytes')
+    env = {
+        'RELEASE_VERSION': '1.2.3', 'RELEASE_SOURCE_SHA': SELF_TEST_SHA,
+        'GITHUB_SHA': SELF_TEST_SHA, 'RELEASE_REF': 'refs/tags/v1.2.3',
+        'RELEASE_EVENT': 'push', 'RELEASE_RUN_ID': '1234',
+        'GITHUB_RUN_ID': '1234', 'RELEASE_RUN_ATTEMPT': '2',
+        'GITHUB_RUN_ATTEMPT': '2',
+    }
+    saved = {key: os.environ.get(key) for key in env}
+    cwd = Path.cwd()
+    try:
+        os.environ.update(env)
+        os.chdir(root)
+        write_vsix_binding()
+        manifest = json.loads(Path('build/vscode/vsix-manifest.json').read_text())
+        if manifest['vsix_sha256'] != hashlib.sha256(artifact.read_bytes()).hexdigest():
+            fail('self-test: VSIX provenance did not hash the exact fixture bytes')
+        os.environ['RELEASE_SOURCE_SHA'] = SELF_TEST_OTHER_SHA
+        expect_check('VSIX provenance with wrong source', write_vsix_binding,
+                     expected='source SHA does not match')
+        os.environ['RELEASE_SOURCE_SHA'] = SELF_TEST_SHA
+        os.environ['RELEASE_RUN_ATTEMPT'] = '1'
+        expect_check('VSIX provenance with wrong run attempt', write_vsix_binding,
+                     expected='run ID or attempt does not match')
+        os.environ['RELEASE_RUN_ATTEMPT'] = '2'
+        os.environ['RELEASE_VERSION'] = '1.2.4'
+        expect_check('VSIX provenance with version drift', write_vsix_binding,
+                     expected='package version drift')
+        os.environ['RELEASE_VERSION'] = '1.2.3'
+        (Path('build/vscode') / 'unexpected.vsix').write_bytes(b'extra')
+        expect_check('VSIX provenance with extra package', write_vsix_binding,
+                     expected='missing or extra VSIX')
+    finally:
+        os.chdir(cwd)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def expect_pipeline_error(module, label, function, *args, expected=None):
@@ -1846,6 +2738,127 @@ def manifest_expectation(**overrides):
     }
     document.update(overrides)
     return document
+
+
+def publisher_event(**overrides):
+    """Return a trusted successful push workflow_run event for the fixtures."""
+    document = {'action': 'completed', 'workflow_run': {
+        'id': int(SELF_TEST_RUN_ID), 'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'event': 'push', 'conclusion': 'success',
+        'head_branch': f'v{SELF_TEST_VERSION}', 'head_sha': SELF_TEST_SHA,
+        'path': BUILD_WORKFLOW_PATH, 'name': BUILD_WORKFLOW_NAME,
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_repository': {'full_name': SELF_TEST_REPOSITORY}}}
+    document.update(overrides)
+    return document
+
+
+def publisher_environment(**overrides):
+    """Return the GitHub Actions OIDC context the publisher requires."""
+    environment = {
+        'GITHUB_ACTIONS': 'true', 'GITHUB_EVENT_NAME': 'workflow_run',
+        'GITHUB_REPOSITORY': SELF_TEST_REPOSITORY,
+        'ACTIONS_ID_TOKEN_REQUEST_URL': 'https://oidc.example.invalid/request',
+        'ACTIONS_ID_TOKEN_REQUEST_TOKEN': 'fixture-oidc-request-token',
+    }
+    environment.update(overrides)
+    return environment
+
+
+def publisher_backend(module, release=None, fail=None):
+    """Return an offline publisher backend that records external calls.
+
+    ``fail`` selects one external failure: ``lookup`` before any mutation,
+    ``upload`` after the created release is recorded (as ``gh release create``
+    does before uploading assets), ``readback`` on the lookup that follows
+    creation, or ``marketplace``/``openvsx`` in a registry lane.
+    """
+    class Recording:
+        def __init__(self):
+            self.release = None if release is None else dict(release)
+            self.calls = []
+
+        def release_assets(self, repository, tag):
+            self.calls.append(('release_assets', repository, tag))
+            if fail == 'lookup':
+                raise module.PublishError('gh release lookup failed')
+            if fail == 'readback' and any(
+                    call[0] == 'release_assets' for call in self.calls[:-1]):
+                raise module.PublishError('gh release readback failed')
+            return None if self.release is None else dict(self.release)
+
+        def create_release(self, repository, tag, title, assets):
+            self.calls.append(('create_release', tag,
+                               [Path(path).name for path in assets]))
+            self.release = {
+                Path(path).name: 'sha256:' + hashlib.sha256(
+                    Path(path).read_bytes()).hexdigest() for path in assets}
+            if fail == 'upload':
+                raise module.PublishError('gh release asset upload failed')
+
+        def publish_marketplace(self, vsix_path):
+            self.calls.append(('marketplace', str(vsix_path)))
+            if fail == 'marketplace':
+                raise module.PublishError('vsce publish failed')
+
+        def publish_openvsx(self, vsix_path):
+            self.calls.append(('openvsx', str(vsix_path)))
+            if fail == 'openvsx':
+                raise module.PublishError('ovsx publish failed')
+
+    return Recording()
+
+
+def publisher_release_body(tag, assets, draft=False):
+    """Return one GitHub release API body with tag identity, draft state and assets."""
+    return json.dumps({
+        'tag_name': tag, 'draft': draft,
+        'assets': [{'name': name, 'digest': digest}
+                   for name, digest in assets.items()]})
+
+
+def publisher_command(responses):
+    """Return an argv log and a ``subprocess.run`` stand-in for the real backend.
+
+    ``responses`` is consumed in order as ``(returncode, stdout, stderr)``
+    tuples. Driving :class:`publish_release.CommandBackend` this way exercises
+    its actual ``gh``/registry command parsing and response validation offline.
+    """
+    calls, pending = [], list(responses)
+
+    def run(argv, **kwargs):
+        calls.append([str(token) for token in argv])
+        if not pending:
+            fail(f'self-test: unexpected external command {argv!r}')
+        returncode, stdout, stderr = pending.pop(0)
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout,
+                                           stderr=stderr)
+
+    return calls, run
+
+
+def registry_commands_run(calls):
+    """Return the recorded registry invocations from a publisher argv log."""
+    return [call for call in calls if call[0].endswith(('vsce', 'ovsx'))]
+
+
+def expect_publish_error(module, label, function, *args, expected=None,
+                         required=(), forbidden=(), **kwargs):
+    """Fail the self-test unless the publisher rejects the fixture."""
+    try:
+        function(*args, **kwargs)
+    except module.PublishError as error:
+        text = str(error)
+        if expected is not None and expected not in text:
+            fail(f'self-test: {label} failed for another reason: {error}')
+        for fragment in required:
+            if fragment not in text:
+                fail(f'self-test: {label} omitted {fragment!r}: {error}')
+        for fragment in forbidden:
+            if fragment in text:
+                fail(f'self-test: {label} wrongly claimed {fragment!r}: {error}')
+        return
+    fail(f'self-test: {label} was accepted')
 
 
 def tag_ref_body(kind='commit', sha=SELF_TEST_SHA, ref=SELF_TEST_TAG_REF):
@@ -2381,6 +3394,56 @@ def run_pipeline_self_tests():
 
 def run_self_tests():
     """Exercise the provenance, tag, artifact and wiring guards with fixtures."""
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import publish_release
+    # The retired readiness draft must not reappear: neither its CLI
+    # entrypoints/arguments nor its collector/validator symbols may remain.
+    options = set(build_parser()._option_string_actions)
+    for retired in ('--collect-release-readiness', '--validate-release-readiness',
+                    '--repository', '--run-id', '--attempt', '--source-sha',
+                    '--ref', '--event', '--workflow-id'):
+        if retired in options:
+            fail(f'self-test: retired readiness entrypoint {retired} is exposed')
+    for retired in ('collect_release_readiness', 'validate_release_readiness',
+                    'READINESS_TARGETS', 'READINESS_OUTCOMES',
+                    'PENDING_READINESS_JOBS'):
+        if hasattr(sys.modules[__name__], retired):
+            fail(f'self-test: retired readiness symbol {retired} remains')
+    promotion_identity = {
+        'source_sha': SELF_TEST_SHA,
+        'run_url': 'https://github.com/example/magit-lsp/actions/runs/42',
+        'run_attempt': '1',
+    }
+    promotion_proof = {
+        'identity': promotion_identity,
+        'artifacts': {target: {**promotion_identity, 'immutable_id': f'id-{index}',
+                              'sha256': 'a' * 64}
+                      for index, (_, target) in enumerate(NATIVE_MATRIX)},
+        'outcomes': {gate: {target: 'success' for _, target in NATIVE_MATRIX}
+                     for gate in ('abi', 'functional', 'vsix')},
+    }
+    expect_check('promotion without hosted proof', check_native_promotion_evidence,
+                 'native-linux-experimental', None, expected='complete identity-bound hosted evidence')
+    mismatch = {**promotion_proof, 'artifacts': dict(promotion_proof['artifacts'])}
+    mismatch['artifacts'] = {**mismatch['artifacts'], 'x86_64-unknown-linux-gnu': {
+        **mismatch['artifacts']['x86_64-unknown-linux-gnu'], 'source_sha': SELF_TEST_OTHER_SHA}}
+    expect_check('promotion artifact identity mismatch', check_native_promotion_evidence,
+                 'native-linux-experimental', mismatch, expected='artifact identity mismatch')
+    for gate in ('abi', 'functional', 'vsix'):
+        for _, target in NATIVE_MATRIX:
+            missing = {**promotion_proof, 'outcomes': {
+                key: dict(value) for key, value in promotion_proof['outcomes'].items()}}
+            del missing['outcomes'][gate][target]
+            expect_check(f'promotion missing {gate} outcome for {target}',
+                         check_native_promotion_evidence, 'native-linux-experimental',
+                         missing, expected=f'{gate} outcome for {target} must be success')
+            unsuccessful = {**promotion_proof, 'outcomes': {
+                key: dict(value) for key, value in promotion_proof['outcomes'].items()}}
+            unsuccessful['outcomes'][gate][target] = 'failure'
+            expect_check(f'promotion failed {gate} outcome for {target}',
+                         check_native_promotion_evidence, 'native-linux-experimental',
+                         unsuccessful, expected=f'{gate} outcome for {target} must be success')
     validate_run_metadata(run_metadata_fixture(), SELF_TEST_REPOSITORY, SELF_TEST_SHA)
     for label, document, expected in (
         ('wrong repository', run_metadata_fixture(repository={'full_name': 'other/repo'}),
@@ -2409,11 +3472,7 @@ def run_self_tests():
 
     # Publication binding: a coherent push-tag run, every paginated job and
     # artifact entry, the exact trusted manifest and both tag shapes are
-    # accepted together. The native matrix stays a non-gating experiment and
-    # the release-ready/VSIX contract is explicitly pending, so this fixture
-    # makes no publication-readiness claim.
-    if set(MANDATORY_RUN_JOBS) & set(PENDING_READINESS_JOBS):
-        fail('self-test: pending readiness jobs must not be mandatory yet')
+    # accepted together. The native matrix stays a non-gating experiment.
     validate_run_binding(run_binding_fixture(), SELF_TEST_REPOSITORY,
                          SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
                          SELF_TEST_WORKFLOW_ID, SELF_TEST_TAG_REF)
@@ -2465,17 +3524,56 @@ def run_self_tests():
                  expected='expected a JSON object')
 
     coherent_jobs = [job_document(SOURCE_CHECK_JOB, 1),
-                     job_document(FALLBACK_JOB, 2)]
+                     job_document(FALLBACK_JOB, 2),
+                     job_document(VSIX_JOB, 3),
+                     job_document(REQUIRED_VSIX_GATE_JOB, 4),
+                     job_document(RELEASE_READINESS_JOB, 5)]
     jobs = validate_run_jobs(
         [page_document('jobs', coherent_jobs + [
-            job_document('native-candidates', 3, conclusion='skipped')])],
+            job_document('native-candidates', 6, conclusion='skipped'),
+            job_document('native-windows-experimental', 7,
+                         conclusion='failure')])],
         SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT)
-    if [job['name'] for job in jobs][:2] != list(MANDATORY_RUN_JOBS):
-        fail('self-test: coherent jobs must list the mandatory producer jobs')
+    if [job['name'] for job in jobs][:len(MANDATORY_RUN_JOBS)] != \
+            list(MANDATORY_RUN_JOBS):
+        fail('self-test: coherent jobs must list the mandatory producer and '
+             'aggregate jobs')
     for label, pages, expected in (
         ('missing mandatory job',
          [page_document('jobs', [job_document(SOURCE_CHECK_JOB, 1)])],
          'missing mandatory job'),
+        ('missing required VSIX aggregate',
+         [page_document('jobs', [job for job in coherent_jobs
+                                 if job['name'] != REQUIRED_VSIX_GATE_JOB])],
+         "missing mandatory job 'required-vsix-gate'"),
+        ('missing release-readiness aggregate',
+         [page_document('jobs', [job for job in coherent_jobs
+                                 if job['name'] != RELEASE_READINESS_JOB])],
+         "missing mandatory job 'release-readiness'"),
+        ('failed release-readiness aggregate',
+         [page_document('jobs', [
+             job if job['name'] != RELEASE_READINESS_JOB
+             else job_document(RELEASE_READINESS_JOB, 5, conclusion='failure')
+             for job in coherent_jobs])],
+         'not success'),
+        ('skipped required VSIX aggregate',
+         [page_document('jobs', [
+             job if job['name'] != REQUIRED_VSIX_GATE_JOB
+             else job_document(REQUIRED_VSIX_GATE_JOB, 4, conclusion='skipped')
+             for job in coherent_jobs])],
+         'not success'),
+        ('cancelled release-readiness aggregate',
+         [page_document('jobs', [
+             job if job['name'] != RELEASE_READINESS_JOB
+             else job_document(RELEASE_READINESS_JOB, 5, conclusion='cancelled')
+             for job in coherent_jobs])],
+         'not success'),
+        ('skipped mandatory VSIX producer',
+         [page_document('jobs', [
+             job if job['name'] != VSIX_JOB
+             else job_document(VSIX_JOB, 3, conclusion='skipped')
+             for job in coherent_jobs])],
+         'not success'),
         ('skipped mandatory job',
          [page_document('jobs', [
              job_document(SOURCE_CHECK_JOB, 1),
@@ -2509,7 +3607,7 @@ def run_self_tests():
              job_document(FALLBACK_JOB, 2, run_id=int(SELF_TEST_RUN_ID) + 1)])],
          'belongs to run'),
         ('incomplete job pagination',
-         [page_document('jobs', coherent_jobs, total=3)],
+         [page_document('jobs', coherent_jobs, total=len(coherent_jobs) + 1)],
          'incomplete pagination'),
         ('contradictory job pagination',
          [page_document('jobs', coherent_jobs, total=1)],
@@ -2530,12 +3628,14 @@ def run_self_tests():
     coherent_artifacts = [
         artifact_document(ARTIFACT_NAME, 100),
         artifact_document(f'{ARTIFACT_NAME}-identity', 101),
+        artifact_document(VSIX_ARTIFACT, 102),
+        artifact_document(VSIX_IDENTITY_ARTIFACT, 103),
     ]
     artifacts = validate_run_artifacts(
         [page_document('artifacts', coherent_artifacts)], SELF_TEST_RUN_ID)
     identity = {
         'artifact_id': '100',
-        'artifact_digest': SELF_TEST_ARTIFACT_DIGEST,
+        'artifact_digest': artifacts[ARTIFACT_NAME]['digest'],
         'run_id': SELF_TEST_RUN_ID,
         'run_attempt': SELF_TEST_RUN_ATTEMPT,
         'target': ASSET,
@@ -2546,9 +3646,17 @@ def run_self_tests():
         ('missing candidate artifact',
          [page_document('artifacts', coherent_artifacts[1:])],
          'missing required artifact'),
+        ('missing required VSIX producer artifact',
+         [page_document('artifacts', [artifact for artifact in coherent_artifacts
+                                      if artifact['name'] != VSIX_ARTIFACT])],
+         "missing required artifact 'vscode-vsix-candidate'"),
+        ('missing required VSIX identity artifact',
+         [page_document('artifacts', [artifact for artifact in coherent_artifacts
+                                      if artifact['name'] != VSIX_IDENTITY_ARTIFACT])],
+         "missing required artifact 'vscode-vsix-candidate-identity'"),
         ('unexpected production artifact',
          [page_document('artifacts', coherent_artifacts + [
-             artifact_document('release-assets', 102)])],
+             artifact_document('release-assets', 104)])],
          'unexpected artifact'),
         ('candidate artifact without a supported digest',
          [page_document('artifacts', [
@@ -2567,7 +3675,8 @@ def run_self_tests():
              coherent_artifacts[1]])],
          'belongs to another run'),
         ('incomplete artifact pagination',
-         [page_document('artifacts', coherent_artifacts, total=3)],
+         [page_document('artifacts', coherent_artifacts,
+                        total=len(coherent_artifacts) + 1)],
          'incomplete pagination'),
         ('contradictory artifact pagination',
          [page_document('artifacts', coherent_artifacts, total=1)],
@@ -2575,7 +3684,7 @@ def run_self_tests():
         ('no artifact pages', [], 'no API pages'),
         ('duplicate artifact names',
          [page_document('artifacts', coherent_artifacts + [
-             artifact_document(ARTIFACT_NAME, 103)])],
+             artifact_document(ARTIFACT_NAME, 105)])],
          'duplicate artifact'),
     ):
         expect_check(label, validate_run_artifacts, pages, SELF_TEST_RUN_ID,
@@ -2719,14 +3828,21 @@ def run_self_tests():
          {'repository': 'other/repo'}, 'run binding repository is'),
         ('binding with a skipped mandatory job',
          {'jobs': [page_document('jobs', [
-             job_document(SOURCE_CHECK_JOB, 1),
-             job_document(FALLBACK_JOB, 2, conclusion='skipped')])]},
+             job if job['name'] != FALLBACK_JOB
+             else job_document(FALLBACK_JOB, 2, conclusion='skipped')
+             for job in coherent_jobs])]},
+         'not success'),
+        ('binding with a skipped required aggregate',
+         {'jobs': [page_document('jobs', [
+             job if job['name'] != RELEASE_READINESS_JOB
+             else job_document(RELEASE_READINESS_JOB, 5, conclusion='skipped')
+             for job in coherent_jobs])]},
          'not success'),
         ('binding with a replaced artifact digest',
          {'artifacts_pages': [page_document('artifacts', [
              artifact_document(ARTIFACT_NAME, 100,
                                digest='sha256:' + '0' * 64),
-             coherent_artifacts[1]])]},
+             *coherent_artifacts[1:]])]},
          'artifact digest does not match'),
         ('binding with other lock hashes',
          {'manifest_document': manifest_fixture(
@@ -2737,11 +3853,894 @@ def run_self_tests():
          'not the manifest source'),
         ('binding with a missing tag', {'tag_status': 404}, 'is missing'),
         ('binding with an incomplete job page',
-         {'jobs': [page_document('jobs', coherent_jobs, total=3)]},
+         {'jobs': [page_document('jobs', coherent_jobs,
+                                 total=len(coherent_jobs) + 1)]},
          'incomplete pagination'),
     ):
         expect_check(label, lambda options=options: binding(**options),
                      expected=expected)
+
+    orchestration_event = {
+        'action': 'completed',
+        'workflow_run': {'id': int(SELF_TEST_RUN_ID),
+                         'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+                         'repository': {'full_name': SELF_TEST_REPOSITORY},
+                         'head_sha': SELF_TEST_OTHER_SHA},
+    }
+    if validate_publication_orchestration(
+            orchestration_event, SELF_TEST_REPOSITORY,
+            'refs/heads/main', SELF_TEST_SHA) != \
+            orchestration_event['workflow_run']:
+        fail('self-test: protected-default orchestration must remain distinct from source SHA')
+    for label, event, repo, ref, sha, expected in (
+        ('branch orchestration', orchestration_event, SELF_TEST_REPOSITORY,
+         'refs/heads/feature', SELF_TEST_SHA, 'protected default'),
+        ('foreign event repository', dict(orchestration_event, workflow_run=dict(
+            orchestration_event['workflow_run'], repository={'full_name': 'other/repo'})),
+         SELF_TEST_REPOSITORY, 'refs/heads/main', SELF_TEST_SHA, 'another repository'),
+        ('malformed orchestration checkout SHA', orchestration_event,
+         SELF_TEST_REPOSITORY, 'refs/heads/main', 'not-a-sha',
+         'orchestration checkout SHA'),
+    ):
+        expect_check(label, validate_publication_orchestration, event, repo,
+                     ref, sha, expected=expected)
+
+    # Exercise the runtime boundary with mocked GitHub API responses: this
+    # proves the collector binds the workflow_run payload to upstream API data.
+    from unittest.mock import patch
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+    from scripts import download_native_candidate as runtime_transport_module
+    import io
+    import tarfile
+    import zipfile
+
+    def zip_bytes(entries):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name, value in entries.items():
+                archive.writestr(name, value)
+        return stream.getvalue()
+
+    executable = b'fixture executable bytes'
+    tar_stream = io.BytesIO()
+    with tarfile.open(fileobj=tar_stream, mode='w:gz') as archive:
+        for name, value, mode in (
+                ('magit-lsp', executable, 0o755), ('LICENSE', b'license', 0o644),
+                ('LICENSE-APACHE', b'apache', 0o644), ('INSTALL.md', b'install', 0o644)):
+            info = tarfile.TarInfo(f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}/{name}')
+            info.size, info.mode = len(value), mode
+            archive.addfile(info, io.BytesIO(value))
+    # The bound release source owns its lockfiles. These fixture bytes
+    # deliberately differ from this publisher checkout, so a successful run
+    # proves the expectation comes from the source SHA, not the publisher tree.
+    source_lock_bytes = {
+        name: f'fixture bound-source {name}\n'.encode('utf-8')
+        for name in SOURCE_LOCK_FILES}
+    source_lock_hashes = {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in source_lock_bytes.items()}
+    for name in SOURCE_LOCK_FILES:
+        if source_lock_hashes[name] == hashlib.sha256(
+                Path(name).read_bytes()).hexdigest():
+            fail(f'self-test: the {name} source fixture must differ from the '
+                 'publisher checkout')
+    runtime_manifest = manifest_fixture(
+        lock_hashes={name: source_lock_hashes[name]
+                     for name in ('Cargo.lock', 'flake.lock')},
+        archive_sha256=hashlib.sha256(tar_stream.getvalue()).hexdigest(),
+        executable_sha256=hashlib.sha256(executable).hexdigest())
+    runtime_manifest_bytes = json.dumps(runtime_manifest).encode()
+    runtime_archive_name = f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}.tar.gz'
+    runtime_assets = {
+        runtime_archive_name: tar_stream.getvalue(),
+        runtime_archive_name + '.sha256':
+            f'{hashlib.sha256(tar_stream.getvalue()).hexdigest()}  {runtime_archive_name}\n'.encode(),
+        'release-manifest.json': runtime_manifest_bytes,
+        'release-manifest.json.sha256':
+            f'{hashlib.sha256(runtime_manifest_bytes).hexdigest()}  release-manifest.json\n'.encode(),
+    }
+    runtime_candidate_zip = zip_bytes(runtime_assets)
+    runtime_identity = {
+        'artifact_id': '100', 'artifact_digest': 'sha256:' + hashlib.sha256(runtime_candidate_zip).hexdigest(),
+        'run_id': SELF_TEST_RUN_ID, 'run_attempt': SELF_TEST_RUN_ATTEMPT, 'target': ASSET,
+    }
+    runtime_identity_zip = zip_bytes({'upload-identity.json': json.dumps(runtime_identity).encode()})
+    vsix_bytes = b'fixture exact VSIX bytes'
+    vsix_manifest = {
+        'source_sha': SELF_TEST_SHA, 'original_ref': SELF_TEST_TAG_REF, 'event': 'push',
+        'run_id': SELF_TEST_RUN_ID, 'run_attempt': SELF_TEST_RUN_ATTEMPT,
+        'version': SELF_TEST_VERSION, 'pnpm_version': '10.13.1',
+        'vsix_sha256': hashlib.sha256(vsix_bytes).hexdigest(),
+        'lock_hashes': dict(source_lock_hashes),
+    }
+    vsix_manifest_bytes = json.dumps(vsix_manifest).encode()
+    vsix_name = f'magit-lsp-{SELF_TEST_VERSION}.vsix'
+    runtime_vsix_zip = zip_bytes({vsix_name: vsix_bytes,
+                                  'vsix-manifest.json': vsix_manifest_bytes})
+    runtime_vsix_identity = {
+        'artifact_id': '102',
+        'artifact_digest': 'sha256:' + hashlib.sha256(runtime_vsix_zip).hexdigest(),
+        'run_id': SELF_TEST_RUN_ID, 'run_attempt': SELF_TEST_RUN_ATTEMPT,
+    }
+    runtime_vsix_identity_zip = zip_bytes(
+        {'vsix-upload-identity.json': json.dumps(runtime_vsix_identity).encode()})
+    runtime_coherent_artifacts = [
+        artifact_document(ARTIFACT_NAME, 100,
+                         digest='sha256:' + hashlib.sha256(runtime_candidate_zip).hexdigest()),
+        artifact_document(f'{ARTIFACT_NAME}-identity', 101,
+                         digest='sha256:' + hashlib.sha256(runtime_identity_zip).hexdigest()),
+        artifact_document(VSIX_ARTIFACT, 102,
+                         digest='sha256:' + hashlib.sha256(runtime_vsix_zip).hexdigest()),
+        artifact_document(VSIX_IDENTITY_ARTIFACT, 103,
+                         digest='sha256:' + hashlib.sha256(runtime_vsix_identity_zip).hexdigest()),
+    ]
+    # A Windows-only failure is never part of the required graph, so it must not
+    # affect the runtime readiness binding.
+    runtime_jobs = coherent_jobs + [
+        job_document('native-windows-experimental', 7, conclusion='failure')]
+    runtime_event = {'action': 'completed', 'workflow_run': {
+        'id': int(SELF_TEST_RUN_ID), 'run_attempt': int(SELF_TEST_RUN_ATTEMPT),
+        'workflow_id': SELF_TEST_WORKFLOW_ID, 'event': 'push',
+        'head_branch': f'v{SELF_TEST_VERSION}',
+        'repository': {'full_name': SELF_TEST_REPOSITORY},
+        'head_sha': SELF_TEST_OTHER_SHA}}
+    runtime_total_jobs = len(runtime_jobs)
+    runtime_total_artifacts = len(runtime_coherent_artifacts)
+    runtime_responses = {
+        '': {'default_branch': 'main'},
+        '/branches/main': {'name': 'main', 'protected': True},
+        '/git/ref/heads/main': {'object': {'sha': SELF_TEST_SHA}},
+        f'/actions/runs/{SELF_TEST_RUN_ID}': run_binding_fixture(),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=1':
+            page_document('jobs', runtime_jobs[:3], total=runtime_total_jobs),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2':
+            page_document('jobs', runtime_jobs[3:], total=runtime_total_jobs),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1':
+            page_document('artifacts', runtime_coherent_artifacts[:2],
+                          total=runtime_total_artifacts),
+        f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2':
+            page_document('artifacts', runtime_coherent_artifacts[2:],
+                          total=runtime_total_artifacts),
+        f'/git/ref/tags/v{SELF_TEST_VERSION}': json.loads(tag_ref_body()),
+        **{f'/contents/{name}?ref={SELF_TEST_SHA}': {
+            'type': 'file', 'path': name, 'encoding': 'base64',
+            'size': len(source_lock_bytes[name]),
+            'content': base64.b64encode(source_lock_bytes[name]).decode('ascii')}
+           for name in SOURCE_LOCK_FILES},
+    }
+    runtime_calls = []
+    runtime_overrides = {}
+    def runtime_fetch(repository, path, token):
+        runtime_calls.append((repository, path))
+        if path in runtime_overrides:
+            return runtime_overrides[path]
+        if path not in runtime_responses:
+            return 404, '{}'
+        return 200, json.dumps(runtime_responses[path])
+    saved_env = {key: os.environ.get(key) for key in (
+        'GITHUB_REPOSITORY', 'GITHUB_REF', 'GITHUB_SHA',
+        'GITHUB_EVENT_NAME', 'GH_TOKEN', 'PUBLICATION_HANDOFF_DIR')}
+    try:
+        os.environ.update({'GITHUB_REPOSITORY': SELF_TEST_REPOSITORY,
+                           'GITHUB_REF': 'refs/heads/main',
+                           'GITHUB_SHA': SELF_TEST_SHA,
+                           'GITHUB_EVENT_NAME': 'workflow_run', 'GH_TOKEN': 'mock'})
+        with tempfile.TemporaryDirectory(prefix='publication-runtime-') as temporary:
+            event_path = Path(temporary) / 'event.json'
+            event_path.write_text(json.dumps(runtime_event), encoding='utf-8')
+            handoff_dir = Path(temporary) / 'handoff'
+            os.environ['PUBLICATION_HANDOFF_DIR'] = str(handoff_dir)
+            runtime_zip_bytes = {'100': runtime_candidate_zip,
+                                 '101': runtime_identity_zip,
+                                 '102': runtime_vsix_zip,
+                                 '103': runtime_vsix_identity_zip}
+            runtime_metadata = {str(item['id']): item
+                                for item in runtime_coherent_artifacts}
+            transport_calls = []
+
+            def response_for(content):
+                class Response:
+                    def __enter__(self): return self
+                    def __exit__(self, *_): return None
+                    def read(self): return content
+                return Response()
+
+            def runtime_transport(url, token):
+                transport_calls.append(url)
+                if url.endswith('/artifacts?per_page=100'):
+                    return response_for(json.dumps({
+                        'total_count': len(runtime_coherent_artifacts),
+                        'artifacts': runtime_coherent_artifacts}).encode())
+                if '/actions/artifacts/' in url:
+                    remainder = url.split('/actions/artifacts/')[1].split('/')
+                    if len(remainder) > 1 and remainder[1] == 'zip':
+                        return response_for(runtime_zip_bytes[remainder[0]])
+                    return response_for(
+                        json.dumps(runtime_metadata[remainder[0]]).encode())
+                if '/actions/runs/' in url:
+                    return response_for(json.dumps(run_binding_fixture()).encode())
+                raise AssertionError(f'unexpected transport URL {url}')
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                runtime_calls.clear()
+                handoff = prepare_publication_runtime(str(event_path))
+                if (SELF_TEST_REPOSITORY, '/branches/main') not in runtime_calls:
+                    fail('self-test: runtime collector must read the protected branch metadata')
+                if any('/protection' in path for _, path in runtime_calls):
+                    fail('self-test: runtime collector requested the Administration-only '
+                         'branch protection endpoint')
+            expected_vsix_sha = hashlib.sha256(vsix_bytes).hexdigest()
+            if handoff['source_sha'] != SELF_TEST_SHA or \
+                    handoff['version'] != SELF_TEST_VERSION or \
+                    handoff['original_ref'] != SELF_TEST_TAG_REF or \
+                    handoff['vsix']['vsix_sha256'] != expected_vsix_sha or \
+                    handoff['native']['artifact_id'] != '100':
+                fail('self-test: the runtime handoff must bind source, version, tag '
+                     'and the exact VSIX bytes')
+            handoff_path = handoff_dir / 'publication-handoff.json'
+            if json.loads(handoff_path.read_text(encoding='utf-8')) != handoff:
+                fail('self-test: the runtime must write the validated handoff')
+            native_archive = f'magit-lsp-v{SELF_TEST_VERSION}-{ASSET}.tar.gz'
+            for name in (native_archive, native_archive + '.sha256',
+                         'release-manifest.json', 'release-manifest.json.sha256',
+                         f'magit-lsp-{SELF_TEST_VERSION}.vsix', 'vsix-manifest.json'):
+                persisted = handoff_dir / name
+                if not persisted.is_file() or persisted.is_symlink():
+                    fail(f'self-test: the runtime must persist {name!r} as a '
+                         'regular file')
+            if handoff['native']['archive'] != native_archive or \
+                    handoff['native']['checksum'] != native_archive + '.sha256' or \
+                    Path(handoff['native']['archive']).is_absolute() or \
+                    handoff['vsix']['vsix'] != f'magit-lsp-{SELF_TEST_VERSION}.vsix' or \
+                    Path(handoff['vsix']['vsix']).is_absolute() or \
+                    Path(handoff['vsix']['manifest']).is_absolute():
+                fail('self-test: the handoff must record relocatable native/VSIX names')
+            # Every lock expectation is fetched at the peeled source SHA; the
+            # default branch and the publisher checkout are never consulted.
+            expected_lock_paths = [f'/contents/{name}?ref={SELF_TEST_SHA}'
+                                   for name in SOURCE_LOCK_FILES]
+            missing_lock_paths = [path for path in expected_lock_paths
+                                  if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
+            if missing_lock_paths:
+                fail('self-test: the runtime must fetch every source lock at the '
+                     f'bound SHA; missing {missing_lock_paths!r}')
+            lock_calls = [path for _, path in runtime_calls if '/contents/' in path]
+            if any(f'ref={SELF_TEST_SHA}' not in path for path in lock_calls):
+                fail('self-test: every lock fetch must address the bound source '
+                     f'SHA, saw {lock_calls!r}')
+            for key in ('vsix', 'manifest'):
+                if not (handoff_dir / handoff['vsix'][key]).is_file():
+                    fail(f'self-test: the handoff {key} path must stay readable')
+            # The uploaded directory is relocated by the artifact download; the
+            # publisher must resolve every accepted byte from that new location.
+            relocated = Path(temporary) / 'relocated-handoff'
+            shutil.copytree(handoff_dir, relocated)
+            relocated_handoff = relocated / 'publication-handoff.json'
+            backend = publisher_backend(publish_release)
+            completed = publish_release.publish(
+                relocated / 'publication-handoff.json', backend=backend,
+                environment=publisher_environment(), event=publisher_event())
+            if completed != ['github-release', 'marketplace', 'openvsx']:
+                fail(f'self-test: unexpected publication order {completed!r}')
+            if [call[0] for call in backend.calls] != [
+                    'release_assets', 'create_release', 'release_assets',
+                    'marketplace', 'openvsx']:
+                fail(f'self-test: publication must proceed GitHub -> Marketplace '
+                     f'-> Open VSX, saw {backend.calls!r}')
+            lane_paths = {call[1] for call in backend.calls
+                          if call[0] in ('marketplace', 'openvsx')}
+            if len(lane_paths) != 1 or \
+                    Path(lane_paths.pop()).read_bytes() != vsix_bytes:
+                fail('self-test: both registry lanes must publish the identical '
+                     'accepted VSIX bytes')
+            # Exact locked local invocations, never a packaging/build fallback.
+            marketplace_argv, openvsx_argv = publish_release.registry_commands(
+                'accepted.vsix')
+            if marketplace_argv != ('clients/vscode/node_modules/.bin/vsce',
+                                    'publish', '--oidc', '--packagePath',
+                                    'accepted.vsix') or \
+                    openvsx_argv != ('clients/vscode/node_modules/.bin/ovsx',
+                                     'publish', '--trusted-publishing',
+                                     'accepted.vsix'):
+                fail(f'self-test: unexpected registry argv '
+                     f'{marketplace_argv!r}/{openvsx_argv!r}')
+            for argv in (marketplace_argv, openvsx_argv):
+                if argv[1] != 'publish' or any(
+                        token in argv for token in ('package', 'build', 'cargo',
+                                                    'pnpm', 'npm', 'npx')):
+                    fail('self-test: registry commands must publish, not '
+                         'build/repackage')
+            if publish_release.BUILD_WORKFLOW_NAME != BUILD_WORKFLOW_NAME or \
+                    publish_release.BUILD_WORKFLOW_PATH != BUILD_WORKFLOW_PATH or \
+                    publish_release.TARGET != ASSET or \
+                    publish_release.MANIFEST_FIELDS != MANIFEST_FIELDS:
+                fail('self-test: publisher contract constants drifted')
+            # Changed bytes, escaped paths and symlinks never reach a destination.
+            def relocated_case(label):
+                case = Path(temporary) / f'case-{label}'
+                shutil.copytree(handoff_dir, case)
+                return case / 'publication-handoff.json'
+
+            case = relocated_case('changed-bytes')
+            (case.parent / native_archive).write_bytes(b'changed archive bytes')
+            backend = publisher_backend(publish_release)
+            expect_publish_error(
+                publish_release, 'publisher with changed archive bytes',
+                publish_release.publish, case, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='archive bytes differ from the handoff')
+            if backend.calls:
+                fail('self-test: a tampered input reached a destination')
+            for escaped, expected in (('../escape.tar.gz',
+                                       'escapes the handoff directory'),
+                                      ('/etc/passwd', 'escapes the handoff directory'),
+                                      ('nested/archive.tar.gz',
+                                       'escapes the handoff directory'),
+                                      ('..\\escape.tar.gz', 'invalid')):
+                expect_publish_error(
+                    publish_release, f'publisher with escaped path {escaped!r}',
+                    publish_release.asset_path, handoff_dir, escaped, 'archive',
+                    expected=expected)
+            case = relocated_case('symlink')
+            outside_vsix = Path(temporary) / 'outside.vsix'
+            shutil.copy(case.parent / handoff['vsix']['vsix'], outside_vsix)
+            (case.parent / handoff['vsix']['vsix']).unlink()
+            (case.parent / handoff['vsix']['vsix']).symlink_to(outside_vsix)
+            expect_publish_error(
+                publish_release, 'publisher with a symlinked VSIX',
+                publish_release.publish, case,
+                backend=publisher_backend(publish_release),
+                environment=publisher_environment(), event=publisher_event(),
+                expected='symbolic link')
+            # Mismatched source, tag, version and run are refused before mutation.
+            for label, mutation, expected in (
+                    ('source', ('head_sha', SELF_TEST_OTHER_SHA),
+                     'source differs from the trusted tag commit'),
+                    ('tag', ('head_branch', 'v9.9.9'), 'event tag'),
+                    ('run', ('id', int(SELF_TEST_RUN_ID) + 1),
+                     'run identity differs')):
+                event = publisher_event()
+                event['workflow_run'][mutation[0]] = mutation[1]
+                expect_publish_error(
+                    publish_release, f'publisher with a mismatched {label}',
+                    publish_release.publish,
+                    relocated_case(f'mismatch-{label}'),
+                    backend=publisher_backend(publish_release),
+                    environment=publisher_environment(), event=event,
+                    expected=expected)
+            case = relocated_case('version')
+            document = json.loads(case.read_text(encoding='utf-8'))
+            document['version'] = '9.9.9'
+            case.write_text(json.dumps(document), encoding='utf-8')
+            expect_publish_error(
+                publish_release, 'publisher with a mismatched version',
+                publish_release.publish, case,
+                backend=publisher_backend(publish_release),
+                environment=publisher_environment(), event=publisher_event(),
+                expected='is not the version tag')
+            # Missing OIDC and every PAT fallback fail closed.
+            missing_oidc = publisher_environment()
+            missing_oidc.pop('ACTIONS_ID_TOKEN_REQUEST_URL')
+            missing_oidc.pop('ACTIONS_ID_TOKEN_REQUEST_TOKEN')
+            expect_publish_error(
+                publish_release, 'publisher without OIDC',
+                publish_release.publish, relocated_handoff,
+                backend=publisher_backend(publish_release),
+                environment=missing_oidc, event=publisher_event(),
+                expected='OIDC environment')
+            for name in ('VSCE_PAT', 'OVSX_PAT'):
+                pat_only = dict(missing_oidc, **{name: 'fixture-pat'})
+                expect_publish_error(
+                    publish_release, f'publisher with only {name}',
+                    publish_release.publish, relocated_handoff,
+                    backend=publisher_backend(publish_release),
+                    environment=pat_only, event=publisher_event(),
+                    expected='PAT fallback')
+            # A GitHub release that fails during asset upload or its
+            # post-creation readback may already exist. That must be reported as
+            # partial/unverified GitHub progress requiring inspection, never as
+            # a clean failure, and it still blocks both registry lanes.
+            for label, failure in (('asset upload', 'upload'),
+                                   ('post-creation readback', 'readback')):
+                backend = publisher_backend(publish_release, fail=failure)
+                expect_publish_error(
+                    publish_release,
+                    f'publisher whose GitHub {label} fails after creation',
+                    publish_release.publish, relocated_handoff, backend=backend,
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='partial or unverified',
+                    required=('require manual inspection',
+                              'neither registry was attempted',
+                              'completed none',
+                              'pending github-release, marketplace, openvsx'),
+                    forbidden=('no GitHub mutation was attempted',))
+                if not any(call[0] == 'create_release' for call in backend.calls):
+                    fail(f'self-test: a GitHub {label} failure must follow a '
+                         'recorded release creation')
+                if any(call[0] in ('marketplace', 'openvsx') for call in backend.calls):
+                    fail(f'self-test: a GitHub {label} failure must block both '
+                         'registries')
+            # A lookup failure happens before creation, so it stays an honest
+            # no-mutation diagnostic rather than claiming unknown side effects.
+            backend = publisher_backend(publish_release, fail='lookup')
+            expect_publish_error(
+                publish_release, 'publisher whose GitHub lookup fails',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='no GitHub mutation was attempted',
+                required=('completed none', 'pending github-release, marketplace, '
+                          'openvsx'),
+                forbidden=('partial or unverified',))
+            if [call[0] for call in backend.calls] != ['release_assets']:
+                fail('self-test: a GitHub lookup failure must happen before any '
+                     'mutation or registry call')
+            # The command exit status makes the uncertainty visible to the
+            # release workflow: a real upload failure after creation exits 1 and
+            # prints the inspection warning.
+            publisher_event_path = Path(temporary) / 'publisher-event.json'
+            publisher_event_path.write_text(json.dumps(publisher_event()),
+                                            encoding='utf-8')
+            mutation_lookup = ['gh', 'api',
+                               f'repos/{SELF_TEST_REPOSITORY}/releases/tags/'
+                               f'v{SELF_TEST_VERSION}']
+            calls, run = publisher_command(
+                [(1, '', 'gh: Not Found (HTTP 404)'),
+                 (1, '', 'gh: release asset upload failed')])
+            diagnostic = io.StringIO()
+            with patch.object(subprocess, 'run', run), \
+                    patch.dict(os.environ, publisher_environment(
+                        GITHUB_EVENT_PATH=str(publisher_event_path)), clear=True), \
+                    patch.object(sys, 'stderr', diagnostic):
+                status = publish_release.main(
+                    ['--handoff', str(relocated_handoff)])
+            if status != 1 or 'partial or unverified' not in diagnostic.getvalue():
+                fail('self-test: an uncertain GitHub release mutation must exit '
+                     f'nonzero with an inspection diagnostic; saw {status!r} and '
+                     f'{diagnostic.getvalue()!r}')
+            if calls[0] != mutation_lookup or \
+                    calls[1][:3] != ['gh', 'release', 'create'] \
+                    or registry_commands_run(calls):
+                fail(f'self-test: a real upload failure must attempt creation '
+                     f'only; saw {calls!r}')
+            # An existing release with different bytes is a conflict, never an
+            # overwrite and never a registry publication.
+            conflict = {name: 'sha256:' + '0' * 64
+                        for name in (native_archive, native_archive + '.sha256',
+                                     'release-manifest.json',
+                                     'release-manifest.json.sha256',
+                                     f'magit-lsp-{SELF_TEST_VERSION}.vsix')}
+            backend = publisher_backend(publish_release, release=conflict)
+            expect_publish_error(
+                publish_release, 'publisher with a conflicting GitHub release',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='conflicting assets; refusing to overwrite')
+            if [call[0] for call in backend.calls] != ['release_assets']:
+                fail('self-test: a conflicting release must not be mutated or '
+                     'published')
+            # The real backend parser reads the GitHub response itself. A draft,
+            # a wrong tag or conflicting bytes fails closed before either
+            # registry, for both an existing release and a creation readback.
+            tag = f'v{SELF_TEST_VERSION}'
+            release_names = (native_archive, native_archive + '.sha256',
+                             'release-manifest.json',
+                             'release-manifest.json.sha256',
+                             f'magit-lsp-{SELF_TEST_VERSION}.vsix')
+            exact_assets = {name: 'sha256:' + hashlib.sha256(
+                (relocated / name).read_bytes()).hexdigest()
+                for name in release_names}
+            lookup = ['gh', 'api',
+                      f'repos/{SELF_TEST_REPOSITORY}/releases/tags/{tag}']
+            for label, body, expected in (
+                    ('draft', publisher_release_body(tag, exact_assets, draft=True),
+                     'is not published'),
+                    ('wrong-tag', publisher_release_body('v9.9.9', exact_assets),
+                     'returned tag')):
+                calls, run = publisher_command([(0, body, '')])
+                with patch.object(subprocess, 'run', run):
+                    expect_publish_error(
+                        publish_release,
+                        f'publisher with an existing {label} release',
+                        publish_release.publish, relocated_handoff,
+                        backend=publish_release.CommandBackend(root=str(relocated)),
+                        environment=publisher_environment(),
+                        event=publisher_event(), expected=expected)
+                if calls != [lookup]:
+                    fail(f'self-test: an existing {label} release must fail '
+                         f'before any registry; saw {calls!r}')
+            conflict_body = publisher_release_body(
+                tag, {name: 'sha256:' + '0' * 64 for name in release_names})
+            calls, run = publisher_command([(0, conflict_body, '')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release,
+                    'publisher with a real conflicting GitHub release',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(),
+                    event=publisher_event(),
+                    expected='conflicting assets; refusing to overwrite')
+            if calls != [lookup]:
+                fail(f'self-test: a real conflicting release must fail before '
+                     f'any registry; saw {calls!r}')
+            # Creation succeeds, but the readback must still prove published
+            # identity before the registry lanes run.
+            for label, body, expected in (
+                    ('draft', publisher_release_body(tag, exact_assets, draft=True),
+                     'is not published'),
+                    ('wrong-tag', publisher_release_body('v9.9.9', exact_assets),
+                     'returned tag')):
+                calls, run = publisher_command(
+                    [(1, '', 'gh: Not Found (HTTP 404)'), (0, '', ''),
+                     (0, body, '')])
+                with patch.object(subprocess, 'run', run):
+                    expect_publish_error(
+                        publish_release,
+                        f'publisher whose created release reads back {label}',
+                        publish_release.publish, relocated_handoff,
+                        backend=publish_release.CommandBackend(root=str(relocated)),
+                        environment=publisher_environment(),
+                        event=publisher_event(), expected=expected,
+                        required=('partial or unverified',
+                                  'neither registry was attempted'))
+                if calls[0] != lookup or calls[1][:3] != ['gh', 'release', 'create'] \
+                        or registry_commands_run(calls):
+                    fail(f'self-test: a created {label} readback must fail before '
+                         f'any registry; saw {calls!r}')
+            # A readback that cannot be read at all is equally uncertain.
+            calls, run = publisher_command(
+                [(1, '', 'gh: Not Found (HTTP 404)'), (0, '', ''),
+                 (1, '', 'gh: HTTP 500: server error')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release,
+                    'publisher whose created release readback errors',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='GitHub release lookup for',
+                    required=('partial or unverified',
+                              'neither registry was attempted'))
+            if calls[0] != lookup or calls[1][:3] != ['gh', 'release', 'create'] \
+                    or registry_commands_run(calls):
+                fail(f'self-test: an errored readback must attempt creation only; '
+                     f'saw {calls!r}')
+            # A lookup that fails before creation is not a partial mutation.
+            calls, run = publisher_command(
+                [(1, '', 'gh: HTTP 500: server error')])
+            with patch.object(subprocess, 'run', run):
+                expect_publish_error(
+                    publish_release, 'publisher whose release lookup errors',
+                    publish_release.publish, relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event(),
+                    expected='no GitHub mutation was attempted',
+                    forbidden=('partial or unverified',))
+            if calls != [lookup]:
+                fail(f'self-test: a failed release lookup must not create or '
+                     f'publish; saw {calls!r}')
+            # An exact published release is still accepted and both registry
+            # lanes run against the same VSIX.
+            calls, run = publisher_command(
+                [(0, publisher_release_body(tag, exact_assets), ''),
+                 (0, '', ''), (0, '', '')])
+            with patch.object(subprocess, 'run', run):
+                completed = publish_release.publish(
+                    relocated_handoff,
+                    backend=publish_release.CommandBackend(root=str(relocated)),
+                    environment=publisher_environment(), event=publisher_event())
+            if completed != ['github-release', 'marketplace', 'openvsx']:
+                fail(f'self-test: an exact published release must publish in '
+                     f'order, saw {completed!r}')
+            registries = registry_commands_run(calls)
+            if calls[0] != lookup or len(registries) != 2 or \
+                    not registries[0][0].endswith('vsce') or \
+                    not registries[1][0].endswith('ovsx') or \
+                    registries[0][1:] != ['publish', '--oidc', '--packagePath',
+                                          str((relocated / handoff['vsix']['vsix']).resolve())]:
+                fail(f'self-test: an exact published release must reach both '
+                     f'registry lanes once; saw {calls!r}')
+            # Partial registry completion is reported, never atomic success.
+            backend = publisher_backend(publish_release, fail='marketplace')
+            expect_publish_error(
+                publish_release, 'publisher with a marketplace failure',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='completed github-release; pending marketplace, openvsx')
+            if any(call[0] == 'openvsx' for call in backend.calls):
+                fail('self-test: a marketplace failure must leave Open VSX pending')
+            backend = publisher_backend(publish_release, fail='openvsx')
+            expect_publish_error(
+                publish_release, 'publisher with an Open VSX failure',
+                publish_release.publish, relocated_handoff, backend=backend,
+                environment=publisher_environment(), event=publisher_event(),
+                expected='completed github-release, marketplace; pending openvsx')
+            required_paths = [f'/actions/runs/{SELF_TEST_RUN_ID}',
+                          f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2',
+                          f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=2',
+                          f'/git/ref/tags/v{SELF_TEST_VERSION}']
+            missing_runtime_paths = [path for path in required_paths
+                                 if (SELF_TEST_REPOSITORY, path) not in runtime_calls]
+            if missing_runtime_paths:
+                fail(f'self-test: runtime collector missed API paths {missing_runtime_paths!r}; calls={runtime_calls!r}')
+            # Branch protection is read through ordinary branch metadata. Only a
+            # positive boolean counts; forbidden, missing, unprotected and
+            # malformed responses all fail closed.
+            for label, override, expected in (
+                    ('forbidden',
+                     (403, '{"message":"Resource not accessible by integration"}'),
+                     'branch metadata returned HTTP 403'),
+                    ('missing', (404, '{}'),
+                     'branch metadata returned HTTP 404'),
+                    ('unprotected',
+                     (200, json.dumps({'name': 'main', 'protected': False})),
+                     'does not report a protected branch'),
+                    ('missing status', (200, json.dumps({'name': 'main'})),
+                     'does not report a protected branch'),
+                    ('non-boolean status',
+                     (200, json.dumps({'name': 'main', 'protected': 'true'})),
+                     'does not report a protected branch'),
+                    ('malformed', (200, '[]'), 'metadata: expected object')):
+                runtime_overrides['/branches/main'] = override
+                with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                        patch.object(runtime_transport_module, 'request', runtime_transport):
+                    expect_check(f'runtime collector rejects {label} branch metadata',
+                                 prepare_publication_runtime, str(event_path),
+                                 expected=expected)
+            runtime_overrides.clear()
+            # The VSIX is fetched through the same verifier the installed
+            # consumers use: exact run/attempt/listing and byte digest checks.
+            for fragment in (f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100',
+                             '/actions/artifacts/102/zip', '/actions/artifacts/102'):
+                if not any(fragment in url for url in transport_calls):
+                    fail(f'self-test: runtime VSIX verification missed {fragment}')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture(name='untrusted')
+            runtime_calls.clear()
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects mismatched workflow',
+                             prepare_publication_runtime, str(event_path),
+                             expected='workflow name')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture()
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', [
+                    artifact_document(ARTIFACT_NAME, 100,
+                                      digest='sha256:' + '0' * 64),
+                    runtime_coherent_artifacts[1]], total=runtime_total_artifacts)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a changed API artifact digest',
+                             prepare_publication_runtime, str(event_path),
+                             expected='artifact digest does not match')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', runtime_coherent_artifacts[:2],
+                              total=runtime_total_artifacts)
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', [], total=runtime_total_jobs)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a missing listing page',
+                             prepare_publication_runtime, str(event_path),
+                             expected='made no pagination progress')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', runtime_jobs[3:], total=runtime_total_jobs)
+            # A skipped required aggregate blocks the handoff even when every
+            # other required job succeeded.
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', [
+                    job if job['name'] != RELEASE_READINESS_JOB
+                    else job_document(RELEASE_READINESS_JOB, 5,
+                                      conclusion='skipped')
+                    for job in runtime_jobs[3:]], total=runtime_total_jobs)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a skipped required aggregate',
+                             prepare_publication_runtime, str(event_path),
+                             expected='not success')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=2'] = \
+                page_document('jobs', runtime_jobs[3:], total=runtime_total_jobs)
+            runtime_responses['/git/ref/heads/main'] = {'object': {'sha': SELF_TEST_OTHER_SHA}}
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects the wrong default checkout',
+                             prepare_publication_runtime, str(event_path),
+                             expected='checkout SHA is not the current default branch SHA')
+            runtime_responses['/git/ref/heads/main'] = {'object': {'sha': SELF_TEST_SHA}}
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = \
+                run_binding_fixture(run_attempt=int(SELF_TEST_RUN_ATTEMPT) + 1)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a changed run attempt',
+                             prepare_publication_runtime, str(event_path),
+                             expected='binding attempt')
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = run_binding_fixture()
+            runtime_responses[f'/git/ref/tags/v{SELF_TEST_VERSION}'] = \
+                json.loads(tag_ref_body(sha=SELF_TEST_OTHER_SHA))
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a moved original tag',
+                             prepare_publication_runtime, str(event_path),
+                             expected='not the manifest source')
+            runtime_responses[f'/git/ref/tags/v{SELF_TEST_VERSION}'] = json.loads(tag_ref_body())
+            runtime_calls.clear()
+            original_runtime_transport = runtime_transport
+            def changed_runtime_transport(url, token):
+                content = original_runtime_transport(url, token).read()
+                if url.endswith('/zip'):
+                    content += b'changed'
+                return response_for(content)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', changed_runtime_transport):
+                expect_check('runtime collector rejects changed handoff bytes',
+                             prepare_publication_runtime, str(event_path),
+                             expected='transport digest mismatch')
+            # The VSIX manifest still names the producer's hash while the
+            # uploaded bytes changed, so the exact-byte verifier refuses it even
+            # though the artifact transport digest is internally consistent.
+            tampered_vsix_zip = zip_bytes({vsix_name: b'changed VSIX bytes',
+                                           'vsix-manifest.json': vsix_manifest_bytes})
+            tampered_identity = dict(
+                runtime_vsix_identity,
+                artifact_digest='sha256:' + hashlib.sha256(tampered_vsix_zip).hexdigest())
+            tampered_identity_zip = zip_bytes(
+                {'vsix-upload-identity.json': json.dumps(tampered_identity).encode()})
+            runtime_zip_bytes['102'] = tampered_vsix_zip
+            runtime_zip_bytes['103'] = tampered_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = tampered_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(tampered_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects changed VSIX bytes',
+                             prepare_publication_runtime, str(event_path),
+                             expected='VSIX digest differs from manifest')
+            # A VSIX identity naming another artifact is refused even when the
+            # downloaded bytes hash to the recorded artifact digest.
+            mismatched_identity = dict(runtime_vsix_identity, artifact_id='999')
+            mismatched_identity_zip = zip_bytes(
+                {'vsix-upload-identity.json': json.dumps(mismatched_identity).encode()})
+            runtime_zip_bytes['102'] = runtime_vsix_zip
+            runtime_zip_bytes['103'] = mismatched_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = runtime_vsix_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(mismatched_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects a mismatched VSIX identity',
+                             prepare_publication_runtime, str(event_path),
+                             expected='upload identity does not bind candidate/run/attempt')
+            # Missing or malformed source lock data fails closed before any
+            # handoff or publication; it never falls back to the checkout or
+            # the default branch.
+            handoff_path = handoff_dir / 'publication-handoff.json'
+            handoff_path.unlink()
+            cargo_lock_path = f'/contents/Cargo.lock?ref={SELF_TEST_SHA}'
+            runtime_overrides[cargo_lock_path] = (404, '{}')
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects an unavailable source lock',
+                             prepare_publication_runtime, str(event_path),
+                             expected=f'release source Cargo.lock at {SELF_TEST_SHA} '
+                                      'returned HTTP 404')
+            if handoff_path.exists():
+                fail('self-test: unavailable source lock data must fail before '
+                     'the handoff')
+            malformed_source_locks = (
+                ('a lock from another path',
+                 {'type': 'file', 'path': 'flake.lock', 'encoding': 'base64',
+                  'size': 1, 'content': 'eA=='},
+                 'is not the tracked file'),
+                ('a directory in place of the lock',
+                 {'type': 'dir', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 1, 'content': 'eA=='},
+                 'is not the tracked file'),
+                ('a lock with another encoding',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'utf-8',
+                  'size': 1, 'content': 'eA=='},
+                 'is not base64-encoded content'),
+                ('an empty lock',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 0, 'content': ''},
+                 'has no content'),
+                ('a lock whose size does not match',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 2, 'content': 'eA=='},
+                 'size differs from its content'),
+                ('invalid base64 lock content',
+                 {'type': 'file', 'path': 'Cargo.lock', 'encoding': 'base64',
+                  'size': 1, 'content': '!!!!'},
+                 'content is not valid base64'),
+            )
+            for description, document, reason in malformed_source_locks:
+                runtime_overrides[cargo_lock_path] = (200, json.dumps(document))
+                with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                        patch.object(runtime_transport_module, 'request',
+                                     runtime_transport):
+                    expect_check(f'runtime collector rejects {description}',
+                                 prepare_publication_runtime, str(event_path),
+                                 expected=f'release source Cargo.lock {reason}')
+                if handoff_path.exists():
+                    fail(f'self-test: {description} must fail before the handoff')
+            runtime_overrides.clear()
+            # A native manifest whose locks name another revision is rejected
+            # against the bound source even though its bytes are self-coherent.
+            mismatched_native_manifest = dict(
+                runtime_manifest,
+                lock_hashes={**runtime_manifest['lock_hashes'],
+                             'Cargo.lock': '0' * 64})
+            mismatched_native_bytes = json.dumps(mismatched_native_manifest).encode()
+            mismatched_native_assets = dict(
+                runtime_assets, **{
+                    'release-manifest.json': mismatched_native_bytes,
+                    'release-manifest.json.sha256':
+                        f'{hashlib.sha256(mismatched_native_bytes).hexdigest()}  '
+                        'release-manifest.json\n'.encode()})
+            mismatched_native_zip = zip_bytes(mismatched_native_assets)
+            mismatched_native_identity = dict(
+                runtime_identity,
+                artifact_digest='sha256:' +
+                hashlib.sha256(mismatched_native_zip).hexdigest())
+            mismatched_native_identity_zip = zip_bytes(
+                {'upload-identity.json': json.dumps(
+                    mismatched_native_identity).encode()})
+            runtime_zip_bytes['100'] = mismatched_native_zip
+            runtime_zip_bytes['101'] = mismatched_native_identity_zip
+            runtime_coherent_artifacts[0]['digest'] = \
+                mismatched_native_identity['artifact_digest']
+            runtime_coherent_artifacts[1]['digest'] = (
+                'sha256:' + hashlib.sha256(
+                    mismatched_native_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects manifest locks from another '
+                             'source', prepare_publication_runtime, str(event_path),
+                             expected='lock_hashes differ from the bound release source')
+            runtime_zip_bytes['100'] = runtime_candidate_zip
+            runtime_zip_bytes['101'] = runtime_identity_zip
+            runtime_coherent_artifacts[0]['digest'] = runtime_identity['artifact_digest']
+            runtime_coherent_artifacts[1]['digest'] = (
+                'sha256:' + hashlib.sha256(runtime_identity_zip).hexdigest())
+            # The same holds for the VSIX manifest's source lock map.
+            mismatched_vsix_manifest = dict(
+                vsix_manifest,
+                lock_hashes={**vsix_manifest['lock_hashes'],
+                             'clients/vscode/pnpm-lock.yaml': '0' * 64})
+            mismatched_vsix_zip = zip_bytes({
+                vsix_name: vsix_bytes,
+                'vsix-manifest.json': json.dumps(
+                    mismatched_vsix_manifest).encode()})
+            mismatched_vsix_identity = dict(
+                runtime_vsix_identity,
+                artifact_digest='sha256:' +
+                hashlib.sha256(mismatched_vsix_zip).hexdigest())
+            mismatched_vsix_identity_zip = zip_bytes(
+                {'vsix-upload-identity.json': json.dumps(
+                    mismatched_vsix_identity).encode()})
+            runtime_zip_bytes['102'] = mismatched_vsix_zip
+            runtime_zip_bytes['103'] = mismatched_vsix_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = \
+                mismatched_vsix_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(
+                    mismatched_vsix_identity_zip).hexdigest())
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects VSIX locks from another '
+                             'source', prepare_publication_runtime, str(event_path),
+                             expected='VSIX manifest provenance does not match')
+            runtime_zip_bytes['102'] = runtime_vsix_zip
+            runtime_zip_bytes['103'] = runtime_vsix_identity_zip
+            runtime_coherent_artifacts[2]['digest'] = \
+                runtime_vsix_identity['artifact_digest']
+            runtime_coherent_artifacts[3]['digest'] = (
+                'sha256:' + hashlib.sha256(runtime_vsix_identity_zip).hexdigest())
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     with tempfile.TemporaryDirectory(prefix='magit-lsp-binding-bundle-') as temporary:
         bundle = {
@@ -2786,6 +4785,8 @@ def run_self_tests():
 
     with tempfile.TemporaryDirectory(prefix='magit-lsp-release-self-test-') as temporary:
         directory = Path(temporary)
+        with tempfile.TemporaryDirectory(prefix='magit-lsp-vsix-self-test-') as fixture:
+            test_vsix_binding_fixtures(fixture)
         artifacts = directory / 'dist'
         write_artifacts(artifacts)
         validate_artifacts(artifacts, '1.2.3')
@@ -2816,54 +4817,64 @@ def run_self_tests():
 
         check_workflow()
         for label, mutations, expected in (
-            ('publish workflow without a pinned validate checkout',
-             (('          ref: ${{ github.sha }}\n', '', 1),),
-             'validate job must check out the dispatch source commit'),
-            ('publish workflow without a pinned publish checkout',
-             (('          ref: ${{ github.sha }}\n\n'
-               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
-               ' # v7.0.0\n        with:\n'
-               '          name: validated-release-assets\n',
-               '      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131'
-               ' # v7.0.0\n        with:\n'
-               '          name: validated-release-assets\n', None),),
-             'publish job must check out the dispatch source commit'),
-            ('publish workflow without run provenance',
-             ((RUN_PROVENANCE, 'python3 scripts/other.py', None),),
-             'verify the selected build run provenance'),
-            ('publish workflow using the VSIX before provenance',
-             (('      # Fail closed before any of the selected run',
-               '      - run: make vscode-package\n'
-               '      # Fail closed before any of the selected run', None),),
-             'provenance verification must precede'),
-            ('publish workflow handing off a dist glob',
-             (('            dist/magit-lsp-v${{ env.RELEASE_VERSION }}-x86_64-unknown-linux-gnu'
-               '.tar.gz\n', '            dist/*\n', None),),
-             'must not upload'),
-            ('publish workflow uploading arbitrary release assets',
-             (('"$stem" "$stem.sha256"', 'release-assets/dist/*', None),),
-             'upload exactly the validated assets'),
-            ('publish workflow releasing without a target',
-             ((' --target "$RELEASE_TARGET"', '', None),),
-             'must target the verified source commit'),
-            ('publish workflow without a tag target check',
-             ((TAG_TARGET_CHECK, 'python3 scripts/other.py', None),),
-             'resolve the version tag target'),
-            ('publish workflow without artifact re-verification',
-             (('--validate-artifacts release-assets/dist', '--print-version', None),),
-             're-verify the handed-off artifact set'),
-            ('publish workflow reading a stored marketplace PAT',
-             (('      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n',
-               '      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}\n'
-               '      VSCE_PAT: ${{ secrets.VSCE_PAT }}\n', 1),),
-             'must not read secrets.VSCE_PAT'),
-            ('publish workflow publishing the marketplace VSIX with a stored token',
-             (('            --oidc\n', '', None),),
-             'must authenticate with OIDC'),
-            ('publish workflow without frozen CLI dependencies',
-             (('      - name: Install frozen VS Code CLI dependencies\n'
-               '        run: make vscode-deps V=1\n', '', None),),
-             'frozen VSCode CLI dependencies'),
+            ('manual trigger bypass', (('  workflow_run:', '  workflow_dispatch:', 1),),
+             'trigger must be workflow_run only'),
+            ('default SHA as release source', (('github.event.repository.default_branch', 'github.sha', 1),),
+             'forbidden legacy/bypass path'),
+            ('write validation permission', (('      contents: read', '      contents: write', 1),),
+             'validate must be read-only'),
+            ('missing protected environment', (('    environment: release-publish\n', '', 1),),
+             'must require release-publish environment'),
+            ('PAT fallback', (('    steps:', '    env: { VSCE_PAT: ${{ secrets.VSCE_PAT }} }\n    steps:', 1),),
+             'forbidden legacy/bypass path'),
+            ('publish disabled by a literal false', (('    if: ${{ github.event.workflow_run.event', '    if: ${{ false }} && github.event.workflow_run.event', 1),),
+             'publish must gate on a successful push-tag build'),
+            ('publish without a validate dependency', (('    needs: validate\n', '', 1),),
+             'publish must run only after the validate job'),
+            ('publish without the push-origin guard',
+             (("github.event.workflow_run.event == 'push'",
+               "github.event.workflow_run.event == 'schedule'", 1),),
+             "publish guard must require \"github.event.workflow_run.event == 'push'\""),
+            ('publish without the success guard',
+             (('github.event.workflow_run.conclusion == \'success\'',
+               'github.event.workflow_run.conclusion != \'failure\'', 1),),
+             'publish guard must require "github.event.workflow_run.conclusion == \'success\'"'),
+            ('publish without the same-repository guard',
+             ((' && github.event.workflow_run.head_repository.full_name == github.repository', '', 1),),
+             'publish guard must require \'github.event.workflow_run.head_repository.full_name == github.repository\''),
+            ('publish with an unconditional guard',
+             (('    if: ${{ github.event.workflow_run.event', '    if: ${{ true }}\n    # github.event.workflow_run.event', 1),),
+             'publish guard must require'),
+            ('untrusted producer identity', (('Release artifact build (no publication)', 'Untrusted producer', 1),),
+             'missing trusted collector contract'),
+            ('untrusted producer checkout', (('ref: ${{ github.event.repository.default_branch }}',
+                                                'ref: ${{ github.event.workflow_run.head_sha }}', 1),),
+             'validate must check out the protected default branch'),
+            ('publisher without the immutable handoff download',
+             (('        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0',
+               '        uses: actions/upload-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher downloading the handoff by mutable name',
+             (('          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}',
+               '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}\n'
+               '          name: publication-handoff', 1),),
+             'must use the immutable artifact id'),
+            ('publisher without the uploaded artifact id',
+             (('      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}',
+               '      handoff_artifact_id: fixture-id', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher rebuilding the VSIX',
+             (('      - name: Install the frozen publication tooling\n',
+               '      - name: Install the frozen publication tooling\n'
+               '      - run: make vscode-package\n', 1),),
+             'forbidden legacy/bypass path'),
+            ('publisher without the frozen tooling',
+             (('        run: make vscode-deps\n', '', 1),),
+             'missing immutable handoff/publication contract'),
+            ('publisher without the declared make interface',
+             (('        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
+               '        run: true', 1),),
+             'missing immutable handoff/publication contract'),
         ):
             expect_check(label, check_workflow,
                          mutated_workflow(directory, label, mutations),
@@ -2872,7 +4883,36 @@ def run_self_tests():
         # The build workflow keeps one pinned pipeline handoff: fixed
         # toolchain, version producer, shared build and shared artifact check.
         for label, mutations, expected in (
-            ('build workflow with an unpinned build',
+             ('build workflow without the VSIX producer',
+              (('  vsix:\n', '  vsix-disabled:\n', 1),),
+              'missing VSIX producer job'),
+             ('VSIX producer using multiple platform builds',
+              (('  vsix:\n    needs: source-checks\n    runs-on: ubuntu-24.04\n',
+                '  vsix:\n    needs: source-checks\n    runs-on: ubuntu-24.04\n'
+                '    strategy:\n      matrix:\n        os: [ubuntu-24.04, macos-26]\n', 1),),
+              'platform-independent'),
+             ('VSIX producer without Node 24',
+              (("          node-version: '24'", "          node-version: '20'", 1),),
+              'Node 24'),
+             ('VSIX producer rebuilding native binary',
+              (('      - name: Validate version and package the VSIX\n',
+                '      - run: cargo build\n      - name: Validate version and package the VSIX\n', 1),),
+              'must not rebuild the native server'),
+             ('VSIX producer without run-attempt binding',
+              (('          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}\n'
+                '          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}',
+                '          RELEASE_RUN_ATTEMPT: fixture-attempt\n'
+                '          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}', 1),),
+              'VSIX producer must bind source/ref/event/run/attempt'),
+             ('VSIX producer without provenance generation',
+              (('--write-vsix-binding', '--write-other-binding', 1),),
+              "missing '--write-vsix-binding'"),
+             ('VSIX producer granted publication rights',
+              (('  vsix:\n    needs: source-checks\n',
+                '  vsix:\n    needs: source-checks\n    permissions:\n'
+                '      contents: write\n', 1),),
+              'not read-only'),
+             ('build workflow with an unpinned build',
              ((PIPELINE_BUILD, 'cargo build --release', None),),
              'shared pinned build'),
             ('build workflow without the artifact pipeline',
@@ -2921,11 +4961,12 @@ def run_self_tests():
              (('make format-check hygiene test-rust test-lua V=1',
                'make format-check hygiene test-rust test-lua V=1 release-locked', 1),),
              'must not invoke the release producer'),
-            ('build workflow inferring the handoff source from another run',
-             (('          RELEASE_SOURCE_SHA: ${{ github.sha }}',
-               '          RELEASE_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}',
-               1),),
-             'RELEASE_SOURCE_SHA'),
+             ('VSIX provenance inferring source from another run',
+              (('          RELEASE_SOURCE_SHA: ${{ github.sha }}\n'
+                '          RELEASE_EVENT: ${{ github.event_name }}',
+                '          RELEASE_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}\n'
+                '          RELEASE_EVENT: ${{ github.event_name }}', 1),),
+              'VSIX producer must bind source/ref/event/run/attempt'),
             ('build workflow packaging the fallback for another target',
              (('          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu',
                '          RELEASE_BUILD_TARGET: aarch64-apple-darwin', 1),),
@@ -2947,18 +4988,24 @@ def run_self_tests():
              (('          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}',
                '          ARTIFACT_DIGEST: fixture-digest', 1),),
              'artifact-digest'),
-            ('build workflow omitting the run attempt evidence',
-             (('          RUN_ATTEMPT: ${{ github.run_attempt }}',
-               '          RUN_ATTEMPT: fixture-attempt', 1),),
-             'github.run_attempt'),
+             ('build workflow omitting fallback run attempt evidence',
+              (('          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}\n'
+                '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu',
+                '          RELEASE_RUN_ATTEMPT: fixture-attempt\n'
+                '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu', 1),),
+              'github.run_attempt'),
             ('build workflow omitting the upload identity file',
              (('          path: build/release/upload-identity.json',
                '          path: build/release/provenance.json', 1),),
              'upload-identity.json'),
-            ('build workflow renaming the fallback candidate the publisher consumes',
-             (('          name: linux-x86_64-gnu-release-candidate',
-               '          name: release-candidate', 1),),
-             'expected \'linux-x86_64-gnu-release-candidate\''),
+             ('build workflow renaming the fallback candidate the publisher consumes',
+              (('          name: linux-x86_64-gnu-release-candidate',
+                '          name: release-candidate', 1),),
+              'expected \'linux-x86_64-gnu-release-candidate\''),
+             ('build workflow selecting an experimental artifact for production',
+              (('          name: linux-x86_64-gnu-release-candidate',
+                '          name: native-linux-x86_64-gnu-experimental', 1),),
+              'complete identity-bound hosted evidence'),
             ('build workflow consuming a candidate by mutable name',
              (('    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n',
                '    needs: source-checks\n    runs-on: ubuntu-22.04\n    steps:\n'
@@ -2998,9 +5045,10 @@ def run_self_tests():
              (('          RELEASE_BUILD_TARGET: ${{ matrix.target }}',
                '          RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu', 1),),
              'native candidates packaging target is'),
-            ('build workflow promoting an experimental native candidate',
-             (('    continue-on-error: true', '    continue-on-error: false', 1),),
-             'non-gating'),
+            ('build workflow masking a failed native row',
+             (('  native-candidates:\n',
+               '  native-candidates:\n    continue-on-error: true\n', 1),),
+             'continue-on-error would mask a failed Linux/macOS row'),
             ('build workflow naming a native candidate as production',
              (('            artifact: native-macos-arm64-experimental',
                '            artifact: macos-arm64-release-candidate', 1),),
@@ -3008,11 +5056,160 @@ def run_self_tests():
             ('build workflow building a native candidate outside its locked shell',
              (('.#release-native', '.#release-naive', None),),
              '.#release-native'),
-            ('build workflow native candidate skipping the shared pipeline',
-             (('nix develop --no-update-lock-file .#release-native -c python3 '
-               'scripts/check_release_pipeline.py artifacts',
-               'nix develop --no-update-lock-file .#release-native -c true', 1),),
-             'shared pipeline'),
+             ('build workflow native candidate skipping the shared pipeline',
+              (('nix develop --no-update-lock-file .#release-native -c python3 '
+                'scripts/check_release_pipeline.py artifacts',
+                'nix develop --no-update-lock-file .#release-native -c true', 1),),
+              'shared pipeline'),
+             ('build workflow missing a native consumer host',
+              (('  native-consumers:', '  native-consumers-disabled:', 1),),
+              "missing mandatory job 'native-consumers'"),
+             ('build workflow native consumers with Nix',
+              (('    needs: native-candidates\n',
+                '    needs: native-candidates\n    steps:\n      - run: nix develop\n', 1),),
+              'without Nix'),
+             ('build workflow native consumer with a build command',
+              (('      - name: Run native ABI and functional checks\n',
+                '      - run: cargo build\n      - name: Run native ABI and functional checks\n', 1),),
+              'must not build or install tools'),
+             ('build workflow optional native consumer',
+              (('  native-consumers:\n', '  native-consumers:\n    continue-on-error: true\n', 1),),
+              'must be mandatory'),
+             ('build workflow native consumer without immutable run binding',
+              (('--attempt "${{ github.run_attempt }}"', '--attempt "1"', 1),),
+              'github.run_attempt'),
+             ('build workflow native consumer invoking the downloader by script path',
+              (('python3 -m scripts.download_native_candidate\n',
+                'python3 scripts/download_native_candidate.py\n', 1),),
+              'must include'),
+             ('build workflow native consumer without functional probe',
+              (('scripts/check_native_artifact.py --functional', 'true', 1),),
+              'scripts/check_native_artifact.py --functional'),
+             ('build workflow native consumer without failure evidence',
+              (('native-evidence.json', 'native-result.json', None),),
+              'native-evidence.json'),
+             ('build workflow missing native functional consumer host',
+              (('  native-functional-consumers:', '  native-functional-consumers-disabled:', 1),),
+              "missing mandatory job 'native-functional-consumers'"),
+             ('build workflow native functional consumer missing a required suite',
+              (('--test editor_bridge --test rebase_interactive', '--test rebase_interactive', 1),),
+              'must include'),
+             ('build workflow native functional consumer substituting a server build',
+              (('nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact',
+                'cargo build --release', 1),),
+              'must not substitute a server build'),
+             ('build workflow native functional consumer optional',
+              (('  native-functional-consumers:\n',
+                '  native-functional-consumers:\n    continue-on-error: true\n', 1),),
+              'must be mandatory'),
+             ('build workflow native functional consumer without post-run identity',
+              (('test "$after" = "$expected"', 'true', 1),),
+              'hash must remain unchanged'),
+             ('build workflow native functional consumer without Neovim target',
+               (('native-neovim-artifact-check', 'missing-neovim-target', 1),),
+               'native-neovim-artifact-check'),
+             ('build workflow missing native VSCode host',
+              (('  native-vscode-consumers:', '  native-vscode-consumers-disabled:', 1),),
+              "missing mandatory job 'native-vscode-consumers'"),
+             ('build workflow native VSCode job optional',
+              (('  native-vscode-consumers:\n',
+                '  native-vscode-consumers:\n    continue-on-error: true\n', 1),),
+              'native VSCode consumers must be mandatory'),
+             ('build workflow native VSCode skips VSIX producer',
+              (('needs: [native-candidates, vsix]', 'needs: native-candidates', 1),),
+              'must need native and VSIX producers'),
+             ('build workflow native VSCode misses immutable identity',
+              (('vsix-candidate.json', 'missing-identity.json', 1),),
+              "must include 'vsix-candidate.json'"),
+             ('build workflow native VSCode imports the extractor from the downloader',
+              (('from scripts.check_native_artifact import safe_extract',
+                'from scripts.download_native_candidate import safe_extract', 1),),
+              'must include'),
+             ('build workflow native VSCode misses post-run hash',
+              (('test "$vsix_before" = "$vsix_after"', 'true', 1),),
+              "must include 'test \"$vsix_before\" = \"$vsix_after\"'"),
+             ('build workflow with a lost readiness dependency',
+              (('      - native-consumers\n', '', 1),),
+              'must need exactly'),
+             ('build workflow without the readiness success guard',
+              (('          check native-consumers "$NATIVE_CONSUMERS_RESULT"',
+                '          check native-consumers success', 1),),
+              'must fail unless native-consumers succeeded'),
+             ('build workflow masking a release-readiness failure',
+              (('  release-readiness:\n',
+                '  release-readiness:\n    continue-on-error: true\n', 1),),
+              'must be mandatory'),
+             ('build workflow without the VSIX gate always condition',
+              (('    needs: [vsix, native-vscode-consumers]\n    if: always()',
+                '    needs: [vsix, native-vscode-consumers]', 1),),
+              'must run with `if: always()`'),
+             ('build workflow VSIX gate losing its consumer dependency',
+              (('    needs: [vsix, native-vscode-consumers]',
+                '    needs: [vsix]', 1),),
+              'must need exactly'),
+             ('build workflow gating readiness on Windows',
+              (('  release-readiness:\n    # Single fail-closed readiness aggregate',
+                '  release-readiness:\n    runs-on: windows-2022\n'
+                '    # Single fail-closed readiness aggregate', 1),),
+              'Windows cannot gate'),
+             ('build workflow with an aggregate that cannot fail',
+              ((f'          check() {{ if [ "$2" != success ]; then echo '
+                f'"required job $1 is \'$2\'" >&2; exit 1; fi; }}',
+                '          check() { true; }', None),),
+              'non-zero for any required result'),
+           ):
+            expect_check(label, check_build_workflow,
+                         mutated_file(BUILD_WORKFLOW, directory, label, mutations),
+                         expected=expected)
+
+        # The same-job server graph: real command ordering, the exact packaged
+        # release selector/hash, server-only duplication, coverage separation,
+        # one-time consumer acceptance and mandatory GNU/macOS-only gating.
+        debug_run = '        run: make test-rust FILTER="--locked --test server_async"\n'
+        build_run = f'        run: {PIPELINE_BUILD}\n'
+        release_make = ('          make test-rust-artifact '
+                        'MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"\n')
+        package_run = f'        run: {PIPELINE_ARTIFACTS}\n'
+        for label, mutations, expected in (
+            ('build workflow after swapping the debug and build commands',
+             ((debug_run, '        run: __TMP_DEBUG_RUN__\n', 1),
+              (build_run, debug_run, 1),
+              ('        run: __TMP_DEBUG_RUN__\n', build_run, 1)),
+             'must run debug server tests before the release build'),
+            ('build workflow testing the release inside the packaging step',
+             ((release_make, '', 1),
+              (package_run, package_run + release_make, 1)),
+             'release server tests after packaging'),
+            ('build workflow testing an unselected release target',
+             (('target/x86_64-unknown-linux-gnu/release/magit-lsp',
+               'target/aarch64-apple-darwin/release/magit-lsp', 1),),
+             'exact packaged executable'),
+            ('build workflow without the exact executable hash',
+             (('["executable_sha256"])', '["archive_sha256"])', 1),),
+             'executable_sha256'),
+            ('build workflow repeating a nonserver suite in the debug step',
+             (('FILTER="--locked --test server_async"',
+               'FILTER="--locked --test server_async --test editor_bridge"', 1),),
+             'must not repeat client/ABI/package acceptance'),
+            ('build workflow mixing coverage into the server step',
+             ((debug_run, debug_run.rstrip('\n') + ' LLVM_PROFILE_FILE=coverage.profraw\n', 1),),
+             'mix coverage'),
+            ('build workflow repeating ABI acceptance in the build job',
+             (('      - id: upload\n',
+               '      - run: python3 scripts/check_native_artifact.py --functional candidate.tar.gz\n'
+               '      - id: upload\n', 1),),
+             'must not repeat client/ABI/package acceptance'),
+            ('build workflow gating on a Windows matrix row',
+             (('          - os: macos-26\n'
+               '            target: aarch64-apple-darwin\n'
+               '            artifact: native-macos-arm64-experimental',
+               '          - os: windows-latest\n'
+               '            target: x86_64-pc-windows-msvc\n'
+               '            artifact: native-windows-experimental\n'
+               '          - os: macos-26\n'
+               '            target: aarch64-apple-darwin\n'
+               '            artifact: native-macos-arm64-experimental', 1),),
+             'Windows cannot gate'),
         ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
@@ -3114,6 +5311,7 @@ def run_automation_unit():
     run_self_tests()
     check_workflow()
     check_build_workflow()
+    check_consumer_entrypoints()
     check_release_pipeline()
     check_local_pipeline()
     check_automation_unit()
@@ -3121,7 +5319,8 @@ def run_automation_unit():
     print('ok: release automation unit guards (no Cargo metadata or package)')
 
 
-def main():
+def build_parser():
+    """Return the CLI parser without the retired readiness entrypoints."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--validate-artifacts', metavar='DIR',
                         help='verify the downloaded release archive and sidecar')
@@ -3135,6 +5334,10 @@ def main():
                         help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
                         help='print RELEASE_VERSION=<X.Y.Z> for $GITHUB_ENV')
+    parser.add_argument('--write-vsix-binding', action='store_true',
+                        help='write exact VSIX hash and run provenance')
+    parser.add_argument('--write-vsix-upload-identity', action='store_true',
+                        help='write immutable VSIX artifact upload identity')
     parser.add_argument('--pipeline-self-tests', action='store_true',
                         help='run only the release pipeline adapter self-tests '
                              '(fake processes; no Cargo, build or metadata)')
@@ -3144,7 +5347,13 @@ def main():
     parser.add_argument('--validate-publication-binding', metavar='BUNDLE',
                         help='validate an offline JSON run/tag/asset binding '
                              'bundle and print its source commit')
-    args = parser.parse_args()
+    parser.add_argument('--prepare-publication-runtime', metavar='EVENT',
+                        help='read-only validate workflow_run event and upstream API')
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     try:
         if args.pipeline_self_tests:
             run_pipeline_self_tests()
@@ -3152,8 +5361,17 @@ def main():
         if args.automation_unit:
             run_automation_unit()
             return 0
+        if args.write_vsix_binding:
+            write_vsix_binding()
+            return 0
+        if args.write_vsix_upload_identity:
+            write_vsix_upload_identity()
+            return 0
         if args.validate_publication_binding:
             validate_publication_binding_bundle(args.validate_publication_binding)
+            return 0
+        if args.prepare_publication_runtime:
+            prepare_publication_runtime(args.prepare_publication_runtime)
             return 0
         if args.validate_artifacts:
             validate_artifacts(args.validate_artifacts)

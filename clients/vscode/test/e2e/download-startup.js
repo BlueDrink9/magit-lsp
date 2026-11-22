@@ -94,14 +94,63 @@ function releasePayload(binary) {
  * @param {{directory: string, binary: string}} options isolated profile root and built server
  * @returns {Promise<{version: string, asset: string, cacheRoot: string, executable: string}>}
  */
-async function prepareDownloadCache({ directory, binary }) {
-  const payload = releasePayload(binary);
+async function prepareDownloadCache({
+  directory,
+  binary,
+  artifact,
+  manifest: manifestPath,
+  sidecar: sidecarPath,
+}) {
+  let payload;
+  let runtime;
+  if (artifact || manifestPath || sidecarPath) {
+    assert.ok(
+      artifact && manifestPath,
+      "artifact mode requires RELEASE_ARTIFACT and RELEASE_MANIFEST",
+    );
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const archive = fs.readFileSync(artifact);
+    const archiveName = path.basename(artifact);
+    const host = { platform: process.platform, arch: process.arch };
+    const assetByHost = {
+      "linux-x64": "x86_64-unknown-linux-gnu",
+      "darwin-arm64": "aarch64-apple-darwin",
+      "darwin-x64": "x86_64-apple-darwin",
+    };
+    const asset = assetByHost[`${host.platform}-${host.arch}`];
+    const match = /^magit-lsp-v(.+)-(.+)\.tar\.gz$/.exec(archiveName);
+    assert.ok(match && asset, "artifact filename and extension-host runtime must be supported");
+    assert.equal(manifest.target, asset, "manifest target must match the extension-host runtime");
+    assert.equal(manifest.version, match[1], "manifest version must match the archive filename");
+    assert.equal(match[2], asset, "archive target must match the extension-host runtime");
+    assert.equal(
+      digest(archive),
+      manifest.archive_sha256,
+      "archive bytes must match the manifest hash",
+    );
+    const sidecar = fs.readFileSync(sidecarPath || `${artifact}.sha256`, "utf8");
+    payload = {
+      version: manifest.version,
+      stem: `magit-lsp-v${manifest.version}-${asset}`,
+      archiveName,
+      archive,
+      sidecar,
+      asset,
+      executableHash: manifest.executable_sha256,
+    };
+    runtime = { ...host };
+    if (host.platform === "linux")
+      runtime.glibc = process.report?.getReport?.().header?.glibcVersionRuntime ?? null;
+  } else {
+    payload = releasePayload(binary);
+    runtime = { platform: "linux", arch: "x64", glibc: "2.36" };
+  }
   const cacheRoot = path.join(directory, "user", "User", "globalStorage", EXTENSION_ID);
   const { resolveServer } = require("../../lib/server-download.js");
   const resolved = await resolveServer({
     version: payload.version,
     cacheRoot,
-    runtime: { platform: "linux", arch: "x64", glibc: "2.36" },
+    runtime,
     transport: async (url) => {
       if (url === `${payload.base}/${payload.archiveName}.sha256`) {
         return Buffer.from(payload.sidecar);
@@ -116,7 +165,17 @@ async function prepareDownloadCache({ directory, binary }) {
     true,
     "the production helper installs the server below the extension cache root",
   );
-  return { version: payload.version, asset: ASSET, cacheRoot, executable: resolved.executable };
+  const executableHash = digest(fs.readFileSync(resolved.executable));
+  if (payload.executableHash)
+    assert.equal(executableHash, payload.executableHash, "cached executable matches manifest");
+  return {
+    version: payload.version,
+    asset: payload.asset || ASSET,
+    cacheRoot,
+    executable: resolved.executable,
+    archiveHash: digest(payload.archive),
+    executableHash,
+  };
 }
 
 exports.prepareDownloadCache = prepareDownloadCache;

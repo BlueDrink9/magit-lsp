@@ -11,8 +11,12 @@ const { message } = require("./util");
 /** GitHub repository publishing magit-lsp release archives. */
 const REPOSITORY = "BlueDrink9/magit-lsp";
 
-/** The only published release asset: Linux x86_64 GNU with glibc 2.35+. */
-const ASSET = "x86_64-unknown-linux-gnu";
+/** Approved release assets mapped from extension-host platform and architecture. */
+const ASSETS = Object.freeze({
+  "linux-x64": "x86_64-unknown-linux-gnu",
+  "darwin-arm64": "aarch64-apple-darwin",
+  "darwin-x64": "x86_64-apple-darwin",
+});
 
 /** GNU libc version the released Linux binary requires. */
 const MINIMUM_GLIBC = [2, 35];
@@ -117,7 +121,7 @@ function supportedGlibc(value) {
 /**
  * Pick the release asset for the reported host.
  *
- * Only the published Linux x86_64 GNU asset is ever selected. Any other host is
+ * Only explicitly published assets are selected. Any other host is
  * told how to point the client at a server it installed itself rather than
  * being handed a binary it cannot run.
  *
@@ -130,16 +134,19 @@ function releaseAsset(runtime) {
   const glibc = runtime.glibc === undefined ? hostGlibc() : runtime.glibc;
   const shape = `${platform}-${arch}`;
   const guidance = 'set "magit-lsp.server.path" to a magit-lsp executable instead';
-  if (platform !== "linux" || arch !== "x64") {
-    fail(`no release asset for ${shape}: only ${ASSET} is published; ${guidance}`);
+  const asset = Object.hasOwn(ASSETS, shape) ? ASSETS[shape] : undefined;
+  if (!asset) {
+    fail(
+      `no release asset for ${shape}: supported targets are ${Object.values(ASSETS).join(", ")}; ${guidance}`,
+    );
   }
-  if (!supportedGlibc(glibc)) {
+  if (platform === "linux" && !supportedGlibc(glibc)) {
     fail(
       `no release asset for ${shape}: GNU glibc ${MINIMUM_GLIBC.join(".")} or newer is ` +
         `required (found ${glibc || "none"}); ${guidance}`,
     );
   }
-  return ASSET;
+  return asset;
 }
 
 /**
@@ -174,13 +181,13 @@ function cacheEntry(cacheRoot, version, asset) {
  * @param {string} version normalized release version
  * @returns {string|undefined} verified executable path
  */
-function cachedExecutable(entry, version) {
+function cachedExecutable(entry, version, asset) {
   const executable = path.join(entry, "magit-lsp");
   try {
     const stat = fs.lstatSync(executable);
     if (!stat.isFile()) return undefined;
     const manifest = JSON.parse(fs.readFileSync(path.join(entry, "manifest.json"), "utf8"));
-    if (!manifest || manifest.version !== version || manifest.asset !== ASSET) return undefined;
+    if (!manifest || manifest.version !== version || manifest.asset !== asset) return undefined;
     if (!/^[0-9a-f]{64}$/.test(manifest.digest) || manifest.size !== stat.size) return undefined;
     if (sha256(fs.readFileSync(executable)) !== manifest.digest) return undefined;
     return executable;
@@ -313,8 +320,8 @@ function withEntryLock(entry, action) {
  * @param {string} version normalized release version
  * @returns {void}
  */
-function removeInvalidEntry(entry, version) {
-  if (cachedExecutable(entry, version)) return;
+function removeInvalidEntry(entry, version, asset) {
+  if (cachedExecutable(entry, version, asset)) return;
   for (const name of ["magit-lsp", "manifest.json"]) {
     try {
       fs.rmSync(path.join(entry, name), { force: true });
@@ -679,17 +686,17 @@ async function install(entry, version, asset, transport, force = false) {
     fs.writeFileSync(path.join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
     return withEntryLock(entry, () => {
       if (!force) {
-        const winner = cachedExecutable(entry, version);
+        const winner = cachedExecutable(entry, version, asset);
         if (winner) return winner;
       }
       /** @type {string|undefined} retired directory holding the displaced entry */
       let retired;
-      if (force && cachedExecutable(entry, version)) {
+      if (force && cachedExecutable(entry, version, asset)) {
         retired = fs.mkdtempSync(path.join(parent, ".retired-"));
         fs.renameSync(entry, path.join(retired, "entry"));
       }
       try {
-        removeInvalidEntry(entry, version);
+        removeInvalidEntry(entry, version, asset);
         fs.renameSync(staging, entry);
       } catch (error) {
         if (retired) {
@@ -736,7 +743,7 @@ const inFlight = new Map();
  * Resolve a verified magit-lsp executable for one extension version.
  *
  * The release tag is exactly the requested version, never `latest`. Only the
- * published Linux x86_64 GNU asset is installed; any other host fails with
+ * published host asset is installed; any other host fails with
  * guidance to set `magit-lsp.server.path`. A cached binary is re-verified before
  * it is returned, concurrent calls in this process share one download, and
  * extension hosts sharing the cache publish complete entries by directory
@@ -757,7 +764,7 @@ async function resolveServer(options) {
   const asset = releaseAsset(options?.runtime ?? {});
   const entry = cacheEntry(cacheRoot, version, asset);
   const force = options?.force === true;
-  const cached = force ? undefined : cachedExecutable(entry, version);
+  const cached = force ? undefined : cachedExecutable(entry, version, asset);
   if (cached) return { executable: cached, version };
   const transport = options?.transport ?? fetchBytes;
   let pending = force ? undefined : inFlight.get(entry);
@@ -768,13 +775,13 @@ async function resolveServer(options) {
       // host's freshly published winner from being deleted; publication
       // repeats the check authoritatively, so a failure here is not fatal.
       try {
-        withEntryLock(entry, () => removeInvalidEntry(entry, version));
+        withEntryLock(entry, () => removeInvalidEntry(entry, version, asset));
       } catch {}
     }
     // Re-check after clearing so an install that finished while we waited for
     // the lock is reused instead of downloaded again. A forced install always
     // downloads, so it never reuses that settled entry.
-    const settled = force ? undefined : cachedExecutable(entry, version);
+    const settled = force ? undefined : cachedExecutable(entry, version, asset);
     if (settled) return { executable: settled, version };
     pending = install(entry, version, asset, transport, force);
     if (!force) {

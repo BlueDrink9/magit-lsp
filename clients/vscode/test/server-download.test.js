@@ -41,13 +41,13 @@ function digest(bytes) {
 }
 
 /** Versioned archive directory name published for one release. */
-function stemOf(version = VERSION) {
-  return `magit-lsp-v${version}-${ASSET}`;
+function stemOf(version = VERSION, asset = ASSET) {
+  return `magit-lsp-v${version}-${asset}`;
 }
 
 /** Archive file name published for one release. */
-function archiveNameOf(version = VERSION) {
-  return `${stemOf(version)}.tar.gz`;
+function archiveNameOf(version = VERSION, asset = ASSET) {
+  return `${stemOf(version, asset)}.tar.gz`;
 }
 
 /**
@@ -178,8 +178,9 @@ function paxMember(records, name = "././@PaxHeader") {
  */
 function releaseFixture(options = {}) {
   const version = options.version ?? VERSION;
-  const stem = stemOf(version);
-  const archiveName = archiveNameOf(version);
+  const asset = options.asset ?? ASSET;
+  const stem = stemOf(version, asset);
+  const archiveName = archiveNameOf(version, asset);
   const base = `https://github.com/BlueDrink9/magit-lsp/releases/download/v${version}`;
   const archive =
     options.archive ??
@@ -199,8 +200,8 @@ function releaseFixture(options = {}) {
 }
 
 /** Cache directory the helper owns for one version. */
-function entryOf(root, version = VERSION) {
-  return path.join(root, "server", `v${version}`, ASSET);
+function entryOf(root, version = VERSION, asset = ASSET) {
+  return path.join(root, "server", `v${version}`, asset);
 }
 
 /**
@@ -296,7 +297,7 @@ function stagingSiblings(entry) {
  * @param {Buffer} binary expected executable bytes
  * @param {string} version expected release version
  */
-function assertCompleteInstall(entry, binary, version) {
+function assertCompleteInstall(entry, binary, version, asset = ASSET) {
   assert.deepEqual(
     fs.readdirSync(entry).sort(),
     ["magit-lsp", "manifest.json"],
@@ -304,7 +305,7 @@ function assertCompleteInstall(entry, binary, version) {
   );
   const manifest = JSON.parse(fs.readFileSync(path.join(entry, "manifest.json"), "utf8"));
   assert.equal(manifest.version, version);
-  assert.equal(manifest.asset, ASSET);
+  assert.equal(manifest.asset, asset);
   assert.equal(manifest.size, binary.length);
   assert.equal(manifest.digest, digest(binary));
   assert.deepEqual(fs.readFileSync(path.join(entry, "magit-lsp")), binary);
@@ -581,6 +582,120 @@ async function run() {
       failures.push({ name, error });
     }
   }
+
+  await check("artifact acquisition seeds the unchanged archive through the helper", async () => {
+    const directory = temporaryRoot();
+    const inputs = path.join(directory, "inputs");
+    fs.mkdirSync(inputs);
+    try {
+      const archiveName = archiveNameOf();
+      const archive = packagedArchive(BINARY);
+      const artifact = path.join(inputs, archiveName);
+      fs.writeFileSync(artifact, archive);
+      fs.writeFileSync(`${artifact}.sha256`, `${digest(archive)}  ${archiveName}\n`);
+      fs.writeFileSync(
+        path.join(inputs, "manifest.json"),
+        JSON.stringify({
+          target: ASSET,
+          version: VERSION,
+          archive_sha256: digest(archive),
+          executable_sha256: digest(BINARY),
+        }),
+      );
+      const helper = require("./e2e/download-startup.js");
+      const result = await helper.prepareDownloadCache({
+        directory,
+        artifact,
+        manifest: path.join(inputs, "manifest.json"),
+      });
+      assert.equal(result.archiveHash, digest(archive));
+      assert.equal(result.executableHash, digest(BINARY));
+      assert.deepEqual(fs.readFileSync(result.executable), BINARY);
+      assert.equal(
+        fs.readFileSync(artifact).equals(archive),
+        true,
+        "resolver input archive remains unchanged",
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  await check(
+    "artifact VSIX mode selects the supplied archive without a development path",
+    async () => {
+      const source = fs.readFileSync(path.join(__dirname, "e2e/run.mjs"), "utf8");
+      assert.match(source, /MAGIT_VSCODE_ARTIFACT_ONLY === "1"/);
+      assert.match(source, /executable: process\.env\.MAGIT_LSP_SERVER_PATH/);
+      assert.match(source, /archive: process\.env\.RELEASE_ARTIFACT/);
+      assert.match(source, /manifest: process\.env\.RELEASE_MANIFEST/);
+      assert.match(source, /vsix: process\.env\.RELEASE_VSIX/);
+      assert.match(source, /focusedArtifact \? artifactPaths\.vsix/);
+      assert.match(
+        source,
+        /focusedVsix \? \[\] : \[`--extensionDevelopmentPath=\$\{root\}\/clients\/vscode`\]/,
+      );
+      assert.match(
+        source,
+        /prepareDownloadCache\(\{[\s\S]*?artifact: process\.env\.RELEASE_ARTIFACT,[\s\S]*?manifest: process\.env\.RELEASE_MANIFEST/,
+      );
+      assert.doesNotMatch(source, /focusedArtifact[\s\S]{0,300}build\/vscode/);
+      assert.match(source, /artifactHashesBefore/);
+      assert.match(source, /hashesAfter/);
+      assert.match(source, /native-vscode-artifact-evidence\.json/);
+      assert.match(source, /installedOrigin: vsixEvidence\?\.install/);
+      assert.match(source, /status: passed \? "pass" : "fail"/);
+      assert.match(source, /remainingOwnedPids/);
+      assert.match(source, /gitStatus/);
+      assert.match(source, /cleanup/);
+    },
+  );
+
+  await check("artifact helper rejects absent and manifest-mismatched inputs", async () => {
+    const directory = temporaryRoot();
+    try {
+      const helper = require("./e2e/download-startup.js");
+      await assert.rejects(
+        helper.prepareDownloadCache({
+          directory,
+          artifact: path.join(directory, "missing.tar.gz"),
+          manifest: path.join(directory, "manifest.json"),
+        }),
+      );
+      await assert.rejects(
+        helper.prepareDownloadCache({ directory, binary: BINARY, manifest: "missing" }),
+      );
+      const archive = packagedArchive(BINARY);
+      const artifact = path.join(directory, archiveNameOf());
+      fs.writeFileSync(artifact, archive);
+      fs.writeFileSync(`${artifact}.sha256`, `${digest(archive)}  ${archiveNameOf()}\n`);
+      const manifestPath = path.join(directory, "manifest.json");
+      const manifest = {
+        target: ASSET,
+        version: VERSION,
+        archive_sha256: digest(archive),
+        executable_sha256: digest(BINARY),
+      };
+      for (const changed of [
+        { ...manifest, target: "aarch64-apple-darwin" },
+        { ...manifest, version: "0.0.0" },
+        { ...manifest, archive_sha256: "0".repeat(64) },
+        { ...manifest, executable_sha256: "0".repeat(64) },
+      ]) {
+        fs.writeFileSync(manifestPath, JSON.stringify(changed));
+        await assert.rejects(
+          helper.prepareDownloadCache({ directory, artifact, manifest: manifestPath }),
+        );
+      }
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+      fs.writeFileSync(artifact, Buffer.concat([archive, Buffer.from("changed")]));
+      await assert.rejects(
+        helper.prepareDownloadCache({ directory, artifact, manifest: manifestPath }),
+      );
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   await check("downloads, verifies and caches the exact released binary", async () => {
     const root = temporaryRoot();
@@ -953,6 +1068,81 @@ async function run() {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  await check(
+    "approved extension-host targets use exact archive and cache identities",
+    async () => {
+      const targets = [
+        [{ platform: "linux", arch: "x64", glibc: "2.36" }, "x86_64-unknown-linux-gnu"],
+        [{ platform: "darwin", arch: "arm64", glibc: null }, "aarch64-apple-darwin"],
+        [{ platform: "darwin", arch: "x64", glibc: null }, "x86_64-apple-darwin"],
+      ];
+      const root = temporaryRoot();
+      try {
+        for (const [runtime, asset] of targets) {
+          const fixture = releaseFixture({ asset });
+          const installed = await resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: fixture.transport,
+            runtime,
+          });
+          const archiveName = archiveNameOf(VERSION, asset);
+          const expectedEntry = entryOf(root, VERSION, asset);
+          assert.equal(installed.executable, path.join(expectedEntry, "magit-lsp"));
+          assert.deepEqual(fixture.calls, [
+            `${RELEASE_BASE}/${archiveName}.sha256`,
+            `${RELEASE_BASE}/${archiveName}`,
+          ]);
+          assertCompleteInstall(expectedEntry, BINARY, VERSION, asset);
+          const manifest = JSON.parse(
+            fs.readFileSync(path.join(expectedEntry, "manifest.json"), "utf8"),
+          );
+          assert.equal(manifest.asset, asset);
+          fs.writeFileSync(installed.executable, "tampered\n");
+          const repaired = releaseFixture({ asset });
+          await resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: repaired.transport,
+            runtime,
+          });
+          assert.deepEqual(
+            fs.readFileSync(installed.executable),
+            BINARY,
+            `${asset} tamper repaired`,
+          );
+          assert.deepEqual(repaired.calls, [
+            `${RELEASE_BASE}/${archiveName}.sha256`,
+            `${RELEASE_BASE}/${archiveName}`,
+          ]);
+        }
+        const wrongHost = releaseFixture({ asset: "x86_64-apple-darwin" });
+        await rejects(
+          resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: wrongHost.transport,
+            runtime: { platform: "darwin", arch: "arm64", glibc: null },
+          }),
+          /unexpected download/,
+        );
+        const unsupported = releaseFixture();
+        await rejects(
+          resolveServer({
+            version: VERSION,
+            cacheRoot: root,
+            transport: unsupported.transport,
+            runtime: { platform: "win32", arch: "x64", glibc: null },
+          }),
+          /no release asset/,
+        );
+        assert.deepEqual(unsupported.calls, []);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   await check("malformed versions fail before any URL is built", async () => {
     const root = temporaryRoot();

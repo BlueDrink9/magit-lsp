@@ -1,4 +1,9 @@
 
+# Read-only, unprivileged producer of release candidates. Each required
+# platform (Ubuntu 22.04 GNU x86_64, macOS arm64, macOS Intel) runs its debug
+# server tests, then its release build and release-server tests, in one job.
+# Windows is informational only and appears in no required matrix, readiness
+# condition or downstream gate.
 name: Release artifact build (no publication)
 
 on:
@@ -25,6 +30,65 @@ jobs:
       - name: Check the release source
         run: nix develop --no-update-lock-file -c make format-check hygiene test-rust test-lua V=1
 
+  vsix:
+    needs: source-checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Set up pinned pnpm
+        run: corepack prepare pnpm@10.13.1 --activate
+
+      - name: Validate version and package the VSIX
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: python3 scripts/check_release_automation.py --validate-release-ref && make vscode-package
+
+      - name: Write VSIX provenance
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: python3 scripts/check_release_automation.py --write-vsix-binding
+
+      - id: vsix-upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vscode-vsix-candidate
+          path: |
+            build/vscode/magit-lsp-${{ env.RELEASE_VERSION }}.vsix
+            build/vscode/vsix-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record immutable VSIX upload identity
+        env:
+          ARTIFACT_ID: ${{ steps.vsix-upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.vsix-upload.outputs.artifact-digest }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: python3 scripts/check_release_automation.py --write-vsix-upload-identity
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vscode-vsix-candidate-identity
+          path: build/vscode/vsix-upload-identity.json
+          if-no-files-found: error
+          retention-days: 14
+
   linux-x86_64-gnu:
     # Strict, established fallback: the older glibc baseline and the pinned
     # rustup toolchain stay the only path the publisher may consume.
@@ -49,6 +113,13 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
         run: python3 scripts/check_release_automation.py --validate-release-ref
 
+      # Debug server tests run in this build job before the release build, with
+      # the same source, pinned toolchain and workspace cache. Only the server
+      # suite is repeated against the release executable below; instrumented
+      # coverage stays in the separate read-only CI coverage job.
+      - name: Debug server tests
+        run: make test-rust FILTER="--locked --test server_async"
+
       # The shared pipeline script is also what `make release-locked` and
       # `make release-artifact-check` run locally, so this workflow has no
       # separate build/packaging path to drift. `--validate-release-ref` above
@@ -65,6 +136,16 @@ jobs:
           RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_BUILD_TARGET: x86_64-unknown-linux-gnu
         run: python3 scripts/check_release_pipeline.py artifacts
+
+      # The server suite runs a second time only here, against the exact release
+      # executable whose digest the run-bound manifest records. ABI, runtime and
+      # editor/package acceptance run once per platform in the consumers below.
+      - name: Release server tests against the exact release executable
+        run: |
+          binary="$(realpath target/x86_64-unknown-linux-gnu/release/magit-lsp)"
+          expected=$(python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
+          test "$(sha256sum "$binary" | awk '{print $1}')" = "$expected"
+          make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -99,10 +180,14 @@ jobs:
           retention-days: 14
 
   native-candidates:
-    # Isolated, non-publishing native-linker experiments. They are not a
-    # production promotion and never gate the fallback: NREL-17 owns the hosted
-    # proof that would justify promotion. Each matrix row uses the same shared
-    # pipeline to build and package its own explicitly named candidate.
+    # Required, strict native builds for exactly the Linux GNU and macOS
+    # platforms. Labels stay "experimental" in this slice, but a failed or
+    # cancelled row now fails the workflow; no continue-on-error masks it.
+    # This is still not a production promotion: no hosted proof is recorded
+    # yet, and promotion needs NREL-12's three-host ABI/LSP/Git and functional
+    # gates plus NREL-14's installed-VSIX gate bound to one source, run,
+    # attempt and immutable artifact/hash set. Each matrix row uses the same
+    # shared pipeline to build and package its own explicitly named candidate.
     needs: source-checks
     strategy:
       fail-fast: false
@@ -118,7 +203,6 @@ jobs:
             target: x86_64-apple-darwin
             artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,6 +214,12 @@ jobs:
         env:
           RELEASE_REF: ${{ github.ref }}
         run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_automation.py --validate-release-ref
+
+      # Each required platform runs its debug server suite in this same build
+      # job, before its native release build, sharing source, locked toolchain
+      # and workspace cache. Only the server suite is repeated after packaging.
+      - name: Debug server tests
+        run: nix develop --no-update-lock-file .#release-native -c make test-rust FILTER="--locked --test server_async"
 
       - name: Experimental native-linker build
         run: nix develop --no-update-lock-file .#release-native -c make release-native-build RELEASE_TARGET=${{ matrix.target }}
@@ -143,6 +233,15 @@ jobs:
           RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_BUILD_TARGET: ${{ matrix.target }}
         run: nix develop --no-update-lock-file .#release-native -c python3 scripts/check_release_pipeline.py artifacts
+
+      # Second and last server run for this platform: the exact release
+      # executable recorded by the run-bound manifest, not a debug rebuild.
+      - name: Release server tests against the exact release executable
+        run: |
+          binary="$(realpath "target/${{ matrix.target }}/release/magit-lsp")"
+          expected=$(nix develop --no-update-lock-file .#release-native -c python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
+          test "$(shasum -a 256 "$binary" | awk '{print $1}')" = "$expected"
+          nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -175,3 +274,294 @@ jobs:
           path: build/release/upload-identity.json
           if-no-files-found: error
           retention-days: 14
+
+  native-consumers:
+    # Acceptance of the producer's immutable candidates, once per required
+    # platform and against the uploaded release output only: these consumers
+    # never rebuild the server and never repeat the debug server suite.
+    # Experimental candidates stay non-promoting until hosted proof exists.
+    needs: native-candidates
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Download and validate immutable candidate
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -m scripts.download_native_candidate
+          --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
+          --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
+          --output "$RUNNER_TEMP/native-candidate" > "$RUNNER_TEMP/native-candidate-download.json"
+
+      - name: Run native ABI and functional checks
+        id: native-check
+        run: |
+          echo '{"ok":false,"error":"native check did not run"}' > "$RUNNER_TEMP/native-evidence.json"
+          archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$RUNNER_TEMP/native-candidate/native-candidate.json")
+          python3 scripts/check_native_artifact.py --functional "$archive" > "$RUNNER_TEMP/native-evidence.json"
+
+      - name: Upload identity-bound evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-consumer-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-candidate/native-candidate.json
+            ${{ runner.temp }}/native-candidate-download.json
+            ${{ runner.temp }}/native-evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require successful candidate checks
+        if: always()
+        run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.native-check.outcome }}" = success
+
+  native-functional-consumers:
+    # Functional suites consume the same immutable candidates in the
+    # release-acceptance tools shell; this is not portability evidence.
+    needs: native-candidates
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.28.3/install
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Download immutable candidate
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -m scripts.download_native_candidate
+          --repository "${{ github.repository }}" --run-id "${{ github.run_id }}"
+          --attempt "${{ github.run_attempt }}" --source-sha "${{ github.sha }}"
+          --target "${{ matrix.target }}" --artifact-name "${{ matrix.artifact }}"
+          --output "$RUNNER_TEMP/native-functional-candidate" > "$RUNNER_TEMP/native-functional-download.json"
+
+      - name: Compile native Rust harness separately
+        id: harness
+        run: nix develop --no-update-lock-file .#release-native -c cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive
+
+      - name: Run artifact functional suites
+        id: rust-functional
+        run: |
+          handoff="$RUNNER_TEMP/native-functional-candidate/native-candidate.json"
+          archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff"); manifest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")
+          name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target"])' "$handoff"); mkdir -p "$RUNNER_TEMP/native-functional-bin"; tar -xzf "$archive" -C "$RUNNER_TEMP/native-functional-bin"
+          binary=$(find "$RUNNER_TEMP/native-functional-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit); expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["executable_sha256"])' "$manifest")
+          before=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$before" = "$expected"; echo '{"ok":false,"phase":"rust-functional"}' > "$RUNNER_TEMP/native-functional-evidence.json"
+          make_bin=$(command -v make)
+          nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
+          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_TEST_BINARY="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
+          after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; if grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"; then exit 1; fi
+          printf '{"ok":true,"target":"%s","executable_sha256":"%s","before_sha256":"%s","after_sha256":"%s","rust_suites":["server_async","editor_bridge","rebase_interactive"],"neovim_scenarios":["status-basics.scn","commit-message-editor.scn"],"cleanup":"make targets completed"}\n' "$name" "$expected" "$before" "$after" > "$RUNNER_TEMP/native-functional-evidence.json"
+
+      - name: Upload functional evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-functional-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-functional-candidate/native-candidate.json
+            ${{ runner.temp }}/native-functional-download.json
+            ${{ runner.temp }}/native-functional-rust.log
+            ${{ runner.temp }}/native-functional-neovim.log
+            ${{ runner.temp }}/native-functional-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require successful functional run
+        if: always()
+        run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.harness.outcome }}" = success && test "${{ steps.rust-functional.outcome }}" = success
+
+  native-vscode-consumers:
+    # Required installed-extension acceptance consumes the exact native and VSIX uploads.
+    needs: [native-candidates, vsix]
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: native-linux-x86_64-gnu-experimental
+          - os: macos-26
+            target: aarch64-apple-darwin
+            artifact: native-macos-arm64-experimental
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+            artifact: native-macos-intel-experimental
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install VSCode on Linux
+        if: runner.os == 'Linux'
+        run: sudo snap install code --classic && sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install VSCode on macOS
+        if: runner.os == 'macOS'
+        run: brew install --cask visual-studio-code
+      - name: Download immutable native candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -m scripts.download_native_candidate --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+          --source-sha "${{ github.sha }}" --target "${{ matrix.target }}"
+          --artifact-name "${{ matrix.artifact }}" --output "$RUNNER_TEMP/vscode-native"
+          > "$RUNNER_TEMP/vscode-native-download.json"
+      - name: Download immutable VSIX candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -m scripts.download_vsix_candidate --repository "${{ github.repository }}"
+          --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
+          --source-sha "${{ github.sha }}" --ref "${{ github.ref }}"
+          --event "${{ github.event_name }}" --version "$(python3 scripts/check_release_automation.py --print-version)"
+          --output "$RUNNER_TEMP/vscode-vsix" > "$RUNNER_TEMP/vscode-vsix-download.json"
+      - name: Run installed VSIX acceptance
+        run: |
+          mkdir -p "$RUNNER_TEMP/vscode-native-bin"
+          python3 -c 'from pathlib import Path; from scripts.check_native_artifact import safe_extract; import json,sys; h=json.load(open(sys.argv[1])); safe_extract(Path(h["archive"]),Path(sys.argv[2]),Path(h["archive"]).name.removesuffix(".tar.gz"))' "$RUNNER_TEMP/vscode-native/native-candidate.json" "$RUNNER_TEMP/vscode-native-bin"
+          binary=$(find "$RUNNER_TEMP/vscode-native-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit)
+          handoff="$RUNNER_TEMP/vscode-native/native-candidate.json"; version=$(python3 scripts/check_release_automation.py --print-version); vsix="$RUNNER_TEMP/vscode-vsix/magit-lsp-$version.vsix"
+          evidence="$RUNNER_TEMP/native-vscode-evidence.json"; echo '{"ok":false,"phase":"not-run"}' > "$evidence"
+          native_before=$(shasum -a 256 "$binary" | awk '{print $1}'); vsix_before=$(shasum -a 256 "$vsix" | awk '{print $1}')
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a make native-vscode-artifact-check MAGIT_LSP_SERVER_PATH="$(realpath "$binary")" RELEASE_ARTIFACT="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff")")" RELEASE_MANIFEST="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")")" RELEASE_VSIX="$(realpath "$vsix")"; else make native-vscode-artifact-check MAGIT_LSP_SERVER_PATH="$(realpath "$binary")" RELEASE_ARTIFACT="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$handoff")")" RELEASE_MANIFEST="$(realpath "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest"])' "$handoff")")" RELEASE_VSIX="$(realpath "$vsix")"; fi
+          native_after=$(shasum -a 256 "$binary" | awk '{print $1}'); vsix_after=$(shasum -a 256 "$vsix" | awk '{print $1}')
+          test "$native_before" = "$native_after" && test "$vsix_before" = "$vsix_after"
+          printf '{"ok":true,"native_before":"%s","native_after":"%s","vsix_before":"%s","vsix_after":"%s","cleanup":"target completed"}\n' "$native_before" "$native_after" "$vsix_before" "$vsix_after" > "$evidence"
+      - name: Upload native VSCode evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-vscode-${{ matrix.target }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vscode-native/native-candidate.json
+            ${{ runner.temp }}/vscode-native-download.json
+            ${{ runner.temp }}/vscode-vsix/vsix-candidate.json
+            ${{ runner.temp }}/vscode-vsix-download.json
+            ${{ runner.temp }}/native-vscode-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  required-vsix-gate:
+    # One stable fail-closed gate for the single Node 24/frozen-lockfile VSIX
+    # producer and the installed-extension consumers that install those exact
+    # uploaded bytes. No build, package or install step runs here, so the gate
+    # never reruns or rebuilds the VSIX; missing, failed, skipped or cancelled
+    # producer or consumer results fail it.
+    needs: [vsix, native-vscode-consumers]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require the VSIX producer and installed consumers to succeed
+        env:
+          VSIX_RESULT: ${{ needs.vsix.result }}
+          NATIVE_VSCODE_CONSUMERS_RESULT: ${{ needs.native-vscode-consumers.result }}
+        run: |
+          check() { if [ "$2" != success ]; then echo "required job $1 is '$2'" >&2; exit 1; fi; }
+          check vsix "$VSIX_RESULT"
+          check native-vscode-consumers "$NATIVE_VSCODE_CONSUMERS_RESULT"
+
+  release-readiness:
+    # Single fail-closed readiness aggregate over every required Linux/macOS
+    # source, build and consumer job. Windows is absent from this graph and
+    # from every dependency above. `always()` plus explicit result checks means
+    # a failed, missing, skipped or cancelled required job blocks readiness.
+    needs:
+      - source-checks
+      - vsix
+      - linux-x86_64-gnu
+      - native-candidates
+      - native-consumers
+      - native-functional-consumers
+      - native-vscode-consumers
+      - required-vsix-gate
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require every required job to succeed
+        env:
+          SOURCE_CHECKS_RESULT: ${{ needs.source-checks.result }}
+          VSIX_RESULT: ${{ needs.vsix.result }}
+          LINUX_X86_64_GNU_RESULT: ${{ needs.linux-x86_64-gnu.result }}
+          NATIVE_CANDIDATES_RESULT: ${{ needs.native-candidates.result }}
+          NATIVE_CONSUMERS_RESULT: ${{ needs.native-consumers.result }}
+          NATIVE_FUNCTIONAL_CONSUMERS_RESULT: ${{ needs.native-functional-consumers.result }}
+          NATIVE_VSCODE_CONSUMERS_RESULT: ${{ needs.native-vscode-consumers.result }}
+          REQUIRED_VSIX_GATE_RESULT: ${{ needs.required-vsix-gate.result }}
+        run: |
+          check() { if [ "$2" != success ]; then echo "required job $1 is '$2'" >&2; exit 1; fi; }
+          check source-checks "$SOURCE_CHECKS_RESULT"
+          check vsix "$VSIX_RESULT"
+          check linux-x86_64-gnu "$LINUX_X86_64_GNU_RESULT"
+          check native-candidates "$NATIVE_CANDIDATES_RESULT"
+          check native-consumers "$NATIVE_CONSUMERS_RESULT"
+          check native-functional-consumers "$NATIVE_FUNCTIONAL_CONSUMERS_RESULT"
+          check native-vscode-consumers "$NATIVE_VSCODE_CONSUMERS_RESULT"
+          check required-vsix-gate "$REQUIRED_VSIX_GATE_RESULT"

@@ -1,4 +1,4 @@
-.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-contract-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -125,8 +125,11 @@ test-rust:
 # native harness may be compiled here, but the server under test must be the
 # supplied artifact, never the binary Cargo builds: `MAGIT_LSP_TEST_BINARY` is
 # required, absolute and executable, and its SHA-256 is recorded before Cargo
-# starts. There is no `build` (server) prerequisite.
+# starts. The Rust harness is compiled separately from the selected server
+# identity; there is no `build` (server) prerequisite. FILTER may select a
+# focused hosted suite set without changing ordinary test-rust defaults.
 MAGIT_LSP_TEST_BINARY ?=
+RUST_ARTIFACT_FILTER ?= --test server_async
 test-rust-artifact:
 	@case "$(MAGIT_LSP_TEST_BINARY)" in \
 	'') echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
@@ -136,7 +139,7 @@ test-rust-artifact:
 	*) echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
 	esac
 	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("test-rust-artifact: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
-	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q --test server_async)
+	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q $(if $(strip $(FILTER)),$(FILTER),$(RUST_ARTIFACT_FILTER)))
 
 # Exercises the real `run` macro above through temporary included Makefiles.
 .PHONY: wrapper-check
@@ -199,6 +202,18 @@ ui-test: build
 ui-file: build
 	$(call run,ui-file,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) $(FILE))
 
+# Consume the exact externally supplied server; intentionally has no build prerequisite.
+native-neovim-artifact-check:
+	@case "$(MAGIT_LSP_TEST_BINARY)" in \
+	'') echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
+	/*) if [ ! -f "$(MAGIT_LSP_TEST_BINARY)" ] || [ ! -x "$(MAGIT_LSP_TEST_BINARY)" ]; then \
+	      echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY is not an executable file: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2; \
+	    fi;; \
+	*) echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
+	esac
+	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("native-neovim-artifact-check: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
+	$(call run,native-neovim-artifact-check,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" MAGIT_LSP_BIN="$(MAGIT_LSP_TEST_BINARY)" PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/scenarios/status-basics.scn tests/ui/scenarios/commit-message-editor.scn)
+
 update-snapshots:
 	$(call run,update-snapshots,UPDATE_EXPECT=1 cargo test -q --test manifest --test parity --test menu --test menus)
 
@@ -237,6 +252,10 @@ vscode-unit: vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode-unit,node clients/vscode/test/test.js)
 
+.PHONY: vscode-download-unit
+vscode-download-unit:
+	$(call run,vscode-download-unit,node clients/vscode/test/server-download.test.js)
+
 # Offline distributable VSIX (no bundler, no publish): package the unbundled
 # client with its runtime deps into build/ and fail if the archive lacks the
 # entry files or either runtime dependency. vsce discovers dependencies through
@@ -264,11 +283,36 @@ release-pipeline-check:
 release-automation-unit:
 	$(call run,release-automation-unit,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_automation.py --automation-unit)
 
+# Publication consumes only the validated handoff downloaded by the protected
+# publisher job. It never builds, repackages, installs a PAT or picks a
+# cheaper credential path; the script verifies the handoff and OIDC/GitHub
+# context before the first mutation and reports partial outcomes honestly.
+release-publish:
+	@test -n "$(HANDOFF)" || { echo 'release-publish: HANDOFF is required' >&2; exit 2; }
+	$(call run,release-publish,PYTHONDONTWRITEBYTECODE=1 python3 scripts/publish_release.py --handoff "$(HANDOFF)")
+
 # Explicit offline release contract cases plus shellcheck. Selecting the
 # methods avoids optional real-binary cases and needs no Cargo build; the
 # real-binary install/launch smoke is only for an actual artifact.
 release-contract-unit:
 	$(call run,release-contract-unit,command -v shellcheck >/dev/null 2>&1 || { echo 'release-contract-unit: shellcheck is required (install it or add it to the flake dev shell)' >&2; exit 1; }; shellcheck scripts/install.sh scripts/package-release.sh && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_release.ReleaseTests.test_latest_and_pinned tests.release.test_release.ReleaseTests.test_default_directory tests.release.test_release.ReleaseTests.test_download_failures tests.release.test_release.ReleaseTests.test_missing_asset tests.release.test_release.ReleaseTests.test_bad_metadata_and_versions tests.release.test_release.ReleaseTests.test_destination_failure_preserves_binary tests.release.test_release.ReleaseTests.test_checksum_failures tests.release.test_release.ReleaseTests.test_platform_failures tests.release.test_release.ReleaseTests.test_archive_structure tests.release.test_release.ReleaseTests.test_package_install_contract tests.release.test_release.ReleaseTests.test_package_rejects_version_mismatch)
+
+# Synthetic archive/tool fixtures only; never executes or builds a candidate.
+native-artifact-unit:
+	$(call run,native-artifact-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_native_artifact)
+
+# Mocked API and synthetic archive fixtures only; never executes a candidate.
+native-candidate-unit:
+	$(call run,native-candidate-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_native_candidate_download)
+
+vsix-candidate-unit:
+	$(call run,vsix-candidate-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.release.test_vsix_candidate_download)
+
+native-artifact-inspect:
+	$(call run,native-artifact-inspect,test -n "$(RELEASE_ARTIFACT)" && python3 scripts/check_native_artifact.py "$(RELEASE_ARTIFACT)")
+
+native-artifact-check:
+	$(call run,native-artifact-check,test -n "$(RELEASE_ARTIFACT)" && python3 scripts/check_native_artifact.py --functional "$(RELEASE_ARTIFACT)")
 
 # Shellcheck plus the offline release contract suite for the download/packaging
 # scripts the release workflow and installer path depend on. The flake dev shell
@@ -282,8 +326,10 @@ release-contract-check:
 # layer (malformed `${{ }}`, unknown job/output references, shell defects).
 # It is in the flake dev shell, so a missing tool fails readably, never skips;
 # when shellcheck is also on PATH actionlint lints the shell snippets too.
+# WORKFLOW_FILES selects specific workflows for a scoped check; unset lints all.
+WORKFLOW_FILES ?=
 workflows-check:
-	$(call run,workflows-check,command -v actionlint >/dev/null 2>&1 || { echo 'workflows-check: actionlint is required (install it or add it to the flake dev shell)' >&2; exit 1; }; actionlint .github/workflows/*.yml)
+	$(call run,workflows-check,command -v actionlint >/dev/null 2>&1 || { echo 'workflows-check: actionlint is required (install it or add it to the flake dev shell)' >&2; exit 1; }; actionlint $(if $(strip $(WORKFLOW_FILES)),$(WORKFLOW_FILES),.github/workflows/*.yml))
 
 # Static guard for the prepared (not submitted) Mason registry package. PyYAML
 # is absent, so clients/mason/package.yaml is checked line by line against
@@ -309,6 +355,12 @@ vscode-download-startup: vscode-prereqs build vscode-deps
 .PHONY: vscode-vsix-install
 vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps
 	$(call run,vscode-vsix-install,MAGIT_VSCODE_VSIX_INSTALL_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
+# Hosted artifact consumer: validate explicit candidate inputs before launching
+# the installed-VSIX smoke; deliberately has no build, package or deps target.
+.PHONY: native-vscode-artifact-check
+native-vscode-artifact-check:
+	$(call run,native-vscode-artifact-check,test -n "$(MAGIT_LSP_SERVER_PATH)" || { echo 'MAGIT_LSP_SERVER_PATH is required' >&2; exit 1; }; test -n "$(RELEASE_ARTIFACT)" || { echo 'RELEASE_ARTIFACT is required' >&2; exit 1; }; test -n "$(RELEASE_MANIFEST)" || { echo 'RELEASE_MANIFEST is required' >&2; exit 1; }; test -n "$(RELEASE_VSIX)" || { echo 'RELEASE_VSIX is required' >&2; exit 1; }; for value in "$(MAGIT_LSP_SERVER_PATH)" "$(RELEASE_ARTIFACT)" "$(RELEASE_MANIFEST)" "$(RELEASE_VSIX)"; do test "$${value#/}" != "$$value" && test -f "$$value" || { echo 'release inputs must be absolute files' >&2; exit 1; }; done; test -x "$(MAGIT_LSP_SERVER_PATH)" || { echo 'MAGIT_LSP_SERVER_PATH is not executable' >&2; exit 1; }; if test ! -e /proc/sys/kernel/ostype || test -n "$$DISPLAY"; then :; else echo 'DISPLAY is required on Linux' >&2; exit 1; fi; editor="$(MAGIT_VSCODE_BIN)"; if [ -n "$$editor" ]; then test -x "$$editor" || { echo 'MAGIT_VSCODE_BIN is not executable' >&2; exit 1; }; else editor=$$(command -v codium || command -v code || true); test -n "$$editor" || { echo 'VSCode-compatible editor is required' >&2; exit 1; }; fi; MAGIT_VSCODE_ARTIFACT_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 # Focused native server management: against the pre-seeded managed release, the
 # server-info command must report it and install/reinstall must force a fresh

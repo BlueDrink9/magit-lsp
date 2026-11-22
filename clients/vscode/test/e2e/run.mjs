@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +14,7 @@ import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { resolveCommand } from "../../lib/version.js";
 
 /**
@@ -54,6 +56,30 @@ if (process.argv[2] === "--cdp") {
   socket.close();
   process.exit(0);
 }
+const focusedArtifact = process.env.MAGIT_VSCODE_ARTIFACT_ONLY === "1";
+const artifactPaths = focusedArtifact
+  ? {
+      executable: process.env.MAGIT_LSP_SERVER_PATH,
+      archive: process.env.RELEASE_ARTIFACT,
+      manifest: process.env.RELEASE_MANIFEST,
+      vsix: process.env.RELEASE_VSIX,
+    }
+  : null;
+if (focusedArtifact) {
+  for (const [name, file] of Object.entries(artifactPaths)) {
+    if (!file || !isAbsolute(file) || !existsSync(file) || !statSync(file).isFile()) {
+      console.error(`FAIL e2e: ${name} must be an existing absolute file`);
+      process.exit(1);
+    }
+  }
+  try {
+    accessSync(artifactPaths.executable, constants.X_OK);
+  } catch {
+    console.error("FAIL e2e: supplied server executable is not executable");
+    process.exit(1);
+  }
+}
+const hashFile = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 const candidates = [
   process.env.MAGIT_VSCODE_BIN,
   resolveCommand("codium"),
@@ -64,7 +90,7 @@ if (process.argv[2] === "--select-editor") {
   console.log(editor || "");
   process.exit(editor ? 0 : 1);
 }
-const suiteMode = selectSuiteMode(process.env);
+const suiteMode = focusedArtifact ? "vsix-install" : selectSuiteMode(process.env);
 const focusedEdit = suiteMode === "edit";
 const focusedHead = suiteMode === "head";
 const focusedVersion = suiteMode === "version";
@@ -72,6 +98,28 @@ const focusedF5 = suiteMode === "f5";
 const focusedDownload = suiteMode === "download";
 const focusedVsix = suiteMode === "vsix-install";
 const focusedCommands = suiteMode === "server-commands";
+const debugBinary = join(
+  root,
+  "target",
+  "debug",
+  `magit-lsp${process.platform === "win32" ? ".exe" : ""}`,
+);
+const selectedServer = process.env.MAGIT_LSP_SERVER_PATH || debugBinary;
+function executableServer(command) {
+  if (!isAbsolute(command)) return false;
+  try {
+    accessSync(command, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (process.env.MAGIT_LSP_SERVER_PATH && !executableServer(process.env.MAGIT_LSP_SERVER_PATH)) {
+  console.error(
+    `FAIL e2e: MAGIT_LSP_SERVER_PATH must be an absolute executable file: ${process.env.MAGIT_LSP_SERVER_PATH}`,
+  );
+  process.exit(1);
+}
 const strictFocused =
   focusedEdit ||
   focusedHead ||
@@ -87,13 +135,13 @@ if (!editor) {
   );
   process.exit(strictFocused ? 1 : 0);
 }
-if (!process.env.DISPLAY) {
+if (process.platform === "linux" && !process.env.DISPLAY) {
   console.log(
     `${strictFocused ? "FAIL" : "skip"} e2e: DISPLAY is required for the real-editor keyboard checks`,
   );
   process.exit(strictFocused ? 1 : 0);
 }
-if (!existsSync(`${root}/target/debug/magit-lsp`)) {
+if (!process.env.MAGIT_LSP_SERVER_PATH && !existsSync(debugBinary)) {
   console.log(
     `${strictFocused ? "FAIL" : "skip"} e2e: missing target/debug/magit-lsp; run cargo build first`,
   );
@@ -140,7 +188,7 @@ writeFileSync(
     // pick a host binary; it resolves the seeded pinned release from the cache.
     ...(focusedDownload || focusedVsix || focusedCommands
       ? { "magit-lsp.server.source": "managed" }
-      : { "magit-lsp.server.path": `${root}/target/debug/magit-lsp` }),
+      : { "magit-lsp.server.path": selectedServer }),
   }),
 );
 writeFileSync(`${directory}/user/User/keybindings.json`, JSON.stringify(mirror, null, 2));
@@ -188,13 +236,18 @@ const env = Object.fromEntries(
     .map((key) => [key, process.env[key]]),
 );
 if (process.env.MAGIT_LSP_WIRELOG) env.MAGIT_LSP_WIRELOG = process.env.MAGIT_LSP_WIRELOG;
+if (process.env.MAGIT_LSP_SERVER_PATH) env.MAGIT_LSP_SERVER_PATH = selectedServer;
 if (process.env.MAGIT_VSCODE_A06_ONLY === "1") env.MAGIT_VSCODE_A06_ONLY = "1";
 if (process.env.MAGIT_VSCODE_A29_ONLY === "1") env.MAGIT_VSCODE_A29_ONLY = "1";
 if (process.env.MAGIT_VSCODE_A33_ONLY === "1") env.MAGIT_VSCODE_A33_ONLY = "1";
 if (process.env.MAGIT_VSCODE_A34_ONLY === "1") env.MAGIT_VSCODE_A34_ONLY = "1";
 if (focusedEdit) env.MAGIT_VSCODE_EDIT_ONLY = "1";
 Object.assign(env, withSuiteMode(process.env));
+if (focusedArtifact) env.MAGIT_VSCODE_SUITE_MODE = "vsix-install";
 env.MAGIT_VSCODE_EVIDENCE = directory;
+const artifactHashesBefore = focusedArtifact
+  ? Object.fromEntries(Object.entries(artifactPaths).map(([name, file]) => [name, hashFile(file)]))
+  : null;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
 env.MAGIT_VSCODE_CDP_PORT = String(listener.address().port);
@@ -206,10 +259,16 @@ let downloadFixture;
 if (focusedDownload || focusedVsix || focusedCommands) {
   downloadFixture = await require("./download-startup.js").prepareDownloadCache({
     directory,
-    binary: `${root}/target/debug/magit-lsp`,
+    binary: selectedServer,
+    artifact: process.env.RELEASE_ARTIFACT,
+    manifest: process.env.RELEASE_MANIFEST,
+    sidecar: process.env.RELEASE_SIDECAR,
   });
   env.MAGIT_VSCODE_DOWNLOAD_EXPECTED = downloadFixture.executable;
   env.MAGIT_VSCODE_DOWNLOAD_CACHE = downloadFixture.cacheRoot;
+  if (downloadFixture.archiveHash) env.MAGIT_VSCODE_ARCHIVE_SHA256 = downloadFixture.archiveHash;
+  if (downloadFixture.executableHash)
+    env.MAGIT_VSCODE_CACHE_EXECUTABLE_SHA256 = downloadFixture.executableHash;
 }
 
 /**
@@ -301,10 +360,14 @@ if (
 // must load this installed copy, so it is installed before any editor launch.
 let vsixPath;
 if (focusedVsix) {
-  const version = JSON.parse(readFileSync(`${root}/clients/vscode/package.json`, "utf8")).version;
-  vsixPath = `${root}/build/vscode/magit-lsp-${version}.vsix`;
+  if (focusedArtifact) {
+    vsixPath = artifactPaths.vsix;
+  } else {
+    const version = JSON.parse(readFileSync(`${root}/clients/vscode/package.json`, "utf8")).version;
+    vsixPath = `${root}/build/vscode/magit-lsp-${version}.vsix`;
+  }
   if (!existsSync(vsixPath)) {
-    console.log(`FAIL e2e: missing packaged VSIX ${vsixPath}; run make vscode-package first`);
+    console.log(`FAIL e2e: missing packaged VSIX ${vsixPath}`);
     process.exit(1);
   }
   try {
@@ -399,6 +462,7 @@ if (
   result = spawnSync(editor, args, { env, stdio: "inherit", timeout: 180000 });
 }
 stopOwned(directory);
+const remainingOwnedPids = focusedArtifact ? ownedPids(directory) : [];
 versionFixture?.cleanup();
 console.log(`VSCode text evidence: ${directory}`);
 if (result.error) console.error(result.error);
@@ -429,6 +493,45 @@ const vsixEvidence =
   focusedVsix && existsSync(`${directory}/vsix-install-evidence.json`)
     ? JSON.parse(readFileSync(`${directory}/vsix-install-evidence.json`, "utf8"))
     : null;
+let artifactEvidence;
+if (focusedArtifact) {
+  const hashesAfter = Object.fromEntries(
+    Object.entries(artifactPaths).map(([name, file]) => [name, hashFile(file)]),
+  );
+  const seededExecutable = downloadFixture?.executable;
+  const seededExecutableHash = seededExecutable ? hashFile(seededExecutable) : null;
+  const unchanged =
+    JSON.stringify(artifactHashesBefore) === JSON.stringify(hashesAfter) &&
+    seededExecutableHash === downloadFixture?.executableHash;
+  const gitStatus = execFileSync("git", ["-C", repo, "status", "--short"], {
+    encoding: "utf8",
+  }).trim();
+  artifactEvidence = {
+    status:
+      vsixEvidence?.status === "pass" &&
+      unchanged &&
+      remainingOwnedPids.length === 0 &&
+      gitStatus.includes("tracked.txt")
+        ? "pass"
+        : "fail",
+    hashes: {
+      before: artifactHashesBefore,
+      after: hashesAfter,
+      seededExecutable: seededExecutableHash,
+      unchanged,
+    },
+    installedOrigin: vsixEvidence?.install ?? null,
+    extensionActive: vsixEvidence?.extensionActive ?? false,
+    statusText: vsixEvidence?.statusText ?? null,
+    gitStatus,
+    launchedProcessCommand: vsixEvidence?.launchedProcessCommand ?? null,
+    cleanup: { remainingOwnedPids, verified: remainingOwnedPids.length === 0 },
+  };
+  writeFileSync(
+    `${directory}/native-vscode-artifact-evidence.json`,
+    JSON.stringify(artifactEvidence, null, 2),
+  );
+}
 // The command evidence records failures too, so readiness requires a pass.
 const commandEvidence =
   focusedCommands && existsSync(`${directory}/server-commands-evidence.json`)
@@ -441,7 +544,8 @@ const evidenceReady = focusedVersion
     : focusedDownload
       ? downloadEvidence?.status === "pass"
       : focusedVsix
-        ? vsixEvidence?.status === "pass"
+        ? vsixEvidence?.status === "pass" &&
+          (!focusedArtifact || artifactEvidence?.status === "pass")
         : focusedHead
           ? headEvidence?.status === "pass" && headEvidence.cases?.length === 8
           : focusedEdit
