@@ -151,7 +151,7 @@ ui-unit:
 # launchers. `scripts/neovim` isolates editor state and removes it on exit.
 REPO ?= $(CURDIR)
 neovim: build
-	$(CURDIR)/scripts/neovim --repo "$(REPO)"
+	"$(CURDIR)/scripts/neovim" --repo "$(REPO)"
 
 PLAIN_ARGS ?=
 plain-neovim: build
