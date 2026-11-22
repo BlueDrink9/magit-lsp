@@ -21,13 +21,13 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `blame.removal` | menu-action | Planned (R-8.1) | — | — | Planned (R-8.1) | Planned (R-8.1) | Planned (R-8.1) | — |
 | `blame.reverse` | menu-action | Planned (R-8.1) | — | — | Planned (R-8.1) | Planned (R-8.1) | Planned (R-8.1) | — |
 | `blame.start` | menu-action | Planned (R-8.1) | — | — | Planned (R-8.1) | Planned (R-8.1) | Planned (R-8.1) | — |
-| `branch.checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.checkout-local` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
-| `branch.checkout-remote` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.checkout` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `branch.checkout-local` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `branch.checkout-remote` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.configure` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.configure-description` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.create` | menu-action | Implemented | — | — | Available | Available | Available | — |
-| `branch.create-and-checkout` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
+| `branch.create-and-checkout` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.delete` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `branch.orphan` | menu-action | Planned (R-6.1) | — | — | Planned (R-6.1) | Planned (R-6.1) | Planned (R-6.1) | — |
 | `branch.rename` | menu-action | Implemented | — | — | Available | Available | Available | — |

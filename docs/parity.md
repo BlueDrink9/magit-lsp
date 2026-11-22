@@ -31,11 +31,11 @@
 | `-` | `-r` | `-` | Implemented | branch |
 | `magit-branch.<branch>.description` | `b d` | `branch.configure-description` | Implemented | branch |
 | `magit-update-default-branch` | `b B` | `branch.update-default` | Planned R-6.1 | branch |
-| `magit-checkout` | `b b` | `branch.checkout` | Planned R-6.1 | branch |
-| `magit-branch-checkout` | `b l` | `branch.checkout-local` | Planned R-6.1 | branch |
+| `magit-checkout` | `b b` | `branch.checkout` | Implemented | branch |
+| `magit-branch-checkout` | `b l` | `branch.checkout-local` | Implemented | branch |
 | `magit-branch-orphan` | `b o` | `branch.orphan` | Planned R-6.1 | branch |
-| `magit-checkout-remote-ref` | `b r` | `branch.checkout-remote` | Planned R-6.1 | branch |
-| `magit-branch-and-checkout` | `b c` | `branch.create-and-checkout` | Planned R-6.1 | branch |
+| `magit-checkout-remote-ref` | `b r` | `branch.checkout-remote` | Implemented | branch |
+| `magit-branch-and-checkout` | `b c` | `branch.create-and-checkout` | Implemented | branch |
 | `magit-branch-spinoff` | `b s` | `branch.spinoff` | Implemented | branch |
 | `magit-worktree-checkout` | `b w` | `branch.worktree-checkout` | Planned R-6.1 | branch |
 | `magit-branch-create` | `b n` | `branch.create` | Implemented | branch |
