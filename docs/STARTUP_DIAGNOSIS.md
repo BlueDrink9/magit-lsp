@@ -155,8 +155,10 @@ attribution.
 
 ### Granular instrumented run (2026-11-21)
 
-`make nvim-startup-check` now retains correlated per-open phase durations and
-ranked Git calls in each sample's `profiles_by_trace_id`. Full output is in
+`make nvim-startup-check` retains correlated per-open phase durations and
+ranked Git calls in each sample's `profiles_by_trace_id`, with the handler span
+and summed Git duration reported independently because their intervals differ.
+This 2026-11-21 run's output is in
 `build/startup-diagnosis/20261121T104046Z/summary.json` and its per-sample
 `*.json`/`*.trace.jsonl` files. It ran three fixture and three worktree
 processes; each has a cold open and an initialized-server reopen. Wall-time
@@ -174,7 +176,8 @@ was 481 ms cold and 486 ms reopen. Its per-sample leader was repeated
 diff/index queries also appeared. Worktree results reflect this dirty
 diagnostic tree and must not be generalized to a clean user repository.
 
-Median handler-minus-summed-Git remainder was 147.5 ms fixture cold, 61.4 ms
+The synchronous run's median handler-minus-summed-Git remainder (a metric
+retired once opening became asynchronous) was 147.5 ms fixture cold, 61.4 ms
 fixture reopen, 204.4 ms worktree cold and 122.7 ms worktree reopen. This is a
 measured non-Git remainder, **not** exclusive CPU time or proof that one phase
 owns the gap. Inclusive fixture-cold phase medians were 41.0 ms discovery,
@@ -191,8 +194,10 @@ The server emits repository-lock wait only on the queued mutation path; measured
 session `Mutex`. Server initialization has a phase event but is not correlated
 to the `view/open` trace; client LSP setup/initialize callback, process
 spawn-to-request, and visible redraw remain unavailable boundaries, not
-zero-cost phases. Inclusive spans overlap; handler-minus-Git is only the
-arithmetic remainder. Three samples per repository show variance (notably
+zero-cost phases. Inclusive spans overlap; the current harness reports the
+handler span and correlated Git duration separately because deferred Git calls
+can carry the same trace ID past `handler_end`, so their intervals differ.
+Three samples per repository show variance (notably
 worktree cold 929.7–1087.2 ms), so medians are descriptive, not controlled
 performance claims. Profiling overhead is present and not independently
 calibrated.
@@ -202,6 +207,24 @@ command with cold/reopen cases, paired with clean and dirty worktree runs. Test
 whether status-listing subprocess/filesystem activity explains the larger
 worktree span; obtain syscall/CPU attribution before proposing batching or
 another code change. No optimization follows from wall-time spans alone.
+
+### Retired remainder metric (2026-11-22)
+
+Opening became asynchronous, so deferred Git acquisition keeps the originating
+trace ID after the open handler returns. The 2026-11-21 section's
+handler-minus-Git figure subtracted that later work from the earlier handler
+span and clamped negative results to zero; it is historical and not a valid
+non-Git remainder. The current harness reports `handler_ms` and `git_total_ms`
+independently and records the differing intervals in `span_accounting`;
+`summary.json` likewise exposes `median_handler_ms` beside `median_git_ms` and a
+`profile_cost_intervals` caveat, with no subtracted remainder.
+
+The rationale is recorded in the current run
+`build/startup-diagnosis/20261122T071530Z/fixture-1795331730257848226.trace.jsonl`:
+for trace id 1, `handler_end` is at 60.281 ms while a deferred
+`git rev-parse --show-toplevel` `git_call` (15 ms) is recorded at 76.420 ms,
+16.139 ms after the handler ended. Cold/reopen timing distributions and the
+phase/status validation are unchanged by this retirement.
 
 ### Syscall and subprocess tracing (2026-11-21)
 

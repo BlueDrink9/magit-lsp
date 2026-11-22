@@ -62,9 +62,9 @@ def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, l
                                                     if event.get("event") == "handler_end"
                                                     for started_event in trace_events if started_event.get("event") == "handler_start"), None)}
         profile = by_id[str(trace_id)]
-        profile["handler_minus_git_ms"] = (max(0.0, profile["handler_ms"] - profile["git_total_ms"])
-                                             if profile["handler_ms"] is not None else None)
-        profile["span_accounting"] = "inclusive spans overlap; handler-minus-Git is remainder, not exclusive attribution"
+        profile["span_accounting"] = ("handler_ms spans handler_start to handler_end; git_total_ms sums all git_call "
+                                      "events correlated to this trace id, including deferred calls after handler_end; "
+                                      "the intervals differ and are reported separately, not subtracted")
     (artifact / f"{stem}.trace.jsonl").write_text("".join(json.dumps(e) + "\n" for e in raw))
     client_trace.unlink(missing_ok=True)
     server_trace.unlink(missing_ok=True)
@@ -111,8 +111,12 @@ def main() -> int:
                 "distributions": distributions, "profile_costs": {
                     case: {"samples": [r["profile"] for r in rows if r["case"] == case and r["profile"]],
                            "median_git_ms": statistics.median(r["profile"]["git_total_ms"] for r in rows if r["case"] == case and r["profile"]),
-                           "median_handler_minus_git_ms": statistics.median(r["profile"]["handler_minus_git_ms"] for r in rows if r["case"] == case and r["profile"])}
+                           "median_handler_ms": statistics.median(r["profile"]["handler_ms"] for r in rows if r["case"] == case and r["profile"])}
                     for case in ("process_cold_first_open", "initialized_server_reopen")},
+                "profile_cost_intervals": ("median_handler_ms spans handler_start to handler_end; median_git_ms sums all "
+                                           "git_call events correlated to the trace id, including deferred calls after "
+                                           "handler_end; the intervals differ, so they are reported separately with no "
+                                           "subtracted remainder"),
                 "raw_json": "*.json", "merged_trace": "*.trace.jsonl"}
     (artifact / "summary.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(json.dumps(metadata, indent=2))
