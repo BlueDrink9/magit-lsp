@@ -19,7 +19,9 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - Done: 05c63e9
   - Verified: make test-rust FILTER="--test semantic_tokens" @ 72c727c → ok
 
-- [ ] **STARTUP-HYGIENE-READY — Exercise Git failures after status acquisition in stdout hygiene tests.** test: retain readable error, stderr/log and framed-only stdout assertions with deterministic fresh status readiness. Verification: `make test-rust FILTER="--test stdout_hygiene"`.
+- [x] **STARTUP-HYGIENE-READY — Exercise Git failures after status acquisition in stdout hygiene tests.** test: retain readable error, stderr/log and framed-only stdout assertions with deterministic fresh status readiness. Verification: `make test-rust FILTER="--test stdout_hygiene"`.
+  - Verified: `make test-rust FILTER="--test stdout_hygiene"` @ `7467624` → exit 0, 2 passed / 0 failed (`build/test-logs/rust.E7Fn3z`, rerun `build/test-logs/rust.ZQKfNl`); both tests reach a real Git failure (`index.lock`) after a polled fresh status, retaining error, stderr/log and framing assertions.
+  - Done: `e9d9638`
 
 - [x] **STARTUP-EXAMPLE-REFS — Refresh generated references for the asynchronous lifecycle.** Part 1 check: regenerate through `make update-schema` and commit generated reference changes separately from queue bookkeeping. Part 2 check: `make schema-check docs-check` validates the generated references and documentation; record evidence and completion.
   - Part 1: `make update-schema` → exit 0 (`ok: update-schema (warnings detected; check log: build/test-logs/update-schema.mcBfTo)`), rerun idempotent; regenerated `docs/schema/worked-exchanges-02.md` and `docs/schema/worked-exchanges-03.md`. The rich exchange now records loading v1, fresh full status v2 without an acknowledged base, acks v1/v2, key v2, one progress token, and the mutation edit v3 from base 2, matching the committed `rich-lifecycle.jsonl`.
