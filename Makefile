@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -298,8 +298,12 @@ docs-artifacts-check: schema-check registry-docs-check
 ui-tour: build
 	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
 
-color-spike: build
-	$(call run,color-spike,nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua)
+.PHONY: color-spike-retirement-check
+# One-off retirement guard: the obsolete colour-spike experiment must stay gone.
+# Every assertion below is a fail-capable absence check (a `test`/`grep` that
+# succeeds only when the retired artifact is missing); no artifact is produced.
+color-spike-retirement-check:
+	$(call run,color-spike-retirement-check,test ! -e scripts/color_spike.lua && ! grep -qE '^color-spike:' Makefile && ! grep -qE '(^|[[:space:]])color-spike([[:space:]]|:)' Makefile && ! grep -q 'scripts/color_spike.lua' hygiene-allowlist.md && ! git ls-files '*status-*.html' | grep -q .)
 
 readme-shots:
 	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'

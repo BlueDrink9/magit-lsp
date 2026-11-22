@@ -91,7 +91,7 @@ code issues, not allowlisted source suppressions; fix or disposition individuall
   `:167:3` and `:373:3`: reads that undefined global. Likely spelling mismatch
   with declared `open_status`/configured global; confirm intended name.
 - Empty branches: `lua/magit-lsp/keys.lua:256:106`,
-  `scripts/color_spike.lua:57:19`, `tests/test_magit_lsp.lua:45:21`.
+  `tests/test_magit_lsp.lua:45:21`.
 - `tests/spikes/real_file_nvim.lua:27:10`, `:40:10`, `:47:10`: writes
   undeclared globals `SpikeState`, `SpikeShow`, `SpikeRefresh`; declare local or
   test globals explicitly after confirming test contract.
