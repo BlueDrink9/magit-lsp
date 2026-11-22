@@ -66,8 +66,7 @@ The list is a starting point, not exhaustive.
 - **Make only.** Run tests, builds, snapshot updates and UI scenarios only via
   the targets in "Verification". Never compose `cargo test`/`build`/`nextest`,
   `nvim`, `npm test` or `python3 scripts/ui run` command lines. If no target
-  fits, stop and propose one. Never run formatters (the pre-commit hook formats)
-  and never use `--no-verify`.
+  fits, stop and propose one.
 - Keep changes scoped to the requested task; take on no unrelated backlog.
 - **Tests.** Feature work gets Rust state tests and conformance scenarios.
   Native-client evidence is required only for new visible behavior (Neovim) or
