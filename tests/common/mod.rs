@@ -420,6 +420,11 @@ pub fn fork_in(
 }
 
 /// Recursively copy `source` into `target`, preserving file contents and modes.
+///
+/// Directory permissions are replayed as the last step of each directory, after
+/// its children have been copied: a template directory may deny writes (and a
+/// parent may deny writes in its subtree), so applying them up front would make
+/// the copy fail. Symlinks are copied as links, not followed.
 fn copy_tree(source: &Path, target: &Path) {
     std::fs::create_dir_all(target).expect("create copied directory");
     for entry in std::fs::read_dir(source).expect("read template directory") {
@@ -442,6 +447,10 @@ fn copy_tree(source: &Path, target: &Path) {
             std::fs::copy(&from, &to).expect("copy template file");
         }
     }
+    let permissions = std::fs::metadata(source)
+        .expect("inspect template directory mode")
+        .permissions();
+    std::fs::set_permissions(target, permissions).expect("copy template directory mode");
 }
 
 /// A merge dated January 2 over January 1 parents, plus unmerged local,

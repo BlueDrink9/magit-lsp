@@ -2956,6 +2956,7 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
 
     let (fresh, _) = fixtures::RepoFixture::new()
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
+        .commit("nested", [("nested/deep.txt", "deep\n")])
         .modify_standard()
         .build();
     let builds = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2965,15 +2966,44 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
             let builds = builds.clone();
             fixtures::fork("plain-harness-fork-equivalence", move |parent| {
                 builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                fixtures::RepoFixture::new_in(parent)
+                let built = fixtures::RepoFixture::new_in(parent)
                     .commit("init", [("f.txt", fixtures::TEN_LINES)])
+                    .commit("nested", [("nested/deep.txt", "deep\n")])
                     .modify_standard()
-                    .build()
+                    .build();
+                // A populated worktree directory with a non-default,
+                // write-denying mode: the copy must replay it, and must do so
+                // only after copying the children (a 0o500 directory rejects
+                // the writes).
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(
+                        built.0.path().join("nested"),
+                        fs::Permissions::from_mode(0o500),
+                    )
+                    .expect("deny writes in the template subdirectory");
+                }
+                built
             })
         }
     };
     let (first, _) = fork();
     let (second, _) = fork();
+    let template =
+        fixtures::template_path("plain-harness-fork-equivalence").expect("template was cached");
+
+    // Raw index equality: the copies must carry the template's `.git/index`
+    // byte for byte. Read before any Git command below, which may refresh and
+    // rewrite a repository's index stat cache.
+    let template_index = fs::read(template.join(".git/index")).expect("read template index");
+    for copy in [&first, &second] {
+        assert_eq!(
+            fs::read(copy.path().join(".git/index")).expect("read forked index"),
+            template_index,
+            "a forked repository must carry the template's index bytes unchanged"
+        );
+    }
 
     for copy in [&first, &second] {
         assert_eq!(
@@ -2989,8 +3019,6 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
 
     assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_ne!(first.path(), second.path());
-    let template =
-        fixtures::template_path("plain-harness-fork-equivalence").expect("template was cached");
     assert_eq!(
         template,
         fixtures::template_path("plain-harness-fork-equivalence").expect("template was cached")
@@ -2998,4 +3026,59 @@ fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
     assert!(template.join("f.txt").exists());
     assert_ne!(first.path(), template);
     assert_ne!(second.path(), template);
+
+    // File and directory modes travel with the copy, including the template's
+    // non-default worktree directory mode.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| {
+            fs::metadata(path)
+                .expect("inspect fixture mode")
+                .permissions()
+                .mode()
+                & 0o7777
+        };
+        assert_eq!(mode(&template.join("nested")), 0o500);
+        assert_eq!(mode(&first.path().join("nested")), 0o500);
+        assert_eq!(mode(&second.path().join("nested")), 0o500);
+        assert_eq!(
+            mode(&first.path().join("f.txt")),
+            mode(&template.join("f.txt"))
+        );
+        assert_eq!(
+            mode(&first.path().join("nested/deep.txt")),
+            mode(&template.join("nested/deep.txt"))
+        );
+    }
+
+    // Mutation isolation: writing into a fork leaves the template and the other
+    // fork byte- and metadata-identical.
+    let template_files = worktree_files(&template);
+    let first_files = worktree_files(first.path());
+    let second_files = worktree_files(second.path());
+    fs::write(first.path().join("f.txt"), "mutated\n").expect("mutate forked file");
+    fs::write(first.path().join("added.txt"), "added\n").expect("add forked file");
+    assert_ne!(worktree_files(first.path()), first_files);
+    assert_eq!(worktree_files(second.path()), second_files);
+    assert_eq!(worktree_files(&template), template_files);
+    assert_eq!(
+        fs::read(template.join(".git/index")).expect("read template index"),
+        template_index
+    );
+
+    // Restore writable modes so the template sweep and each fixture's teardown
+    // can remove the trees; the copy assertions above ran against 0o500.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [
+            template.join("nested"),
+            first.path().join("nested"),
+            second.path().join("nested"),
+        ] {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o755))
+                .expect("restore writable subdirectory mode");
+        }
+    }
 }
