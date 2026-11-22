@@ -2926,3 +2926,76 @@ fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
     client.until(|c| !c.editor.text(&uri).contains(&expected_path));
     client.finish();
 }
+
+#[test]
+fn forked_repo_template_matches_fresh_build_and_is_copied_per_use() {
+    fn worktree_files(root: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+            for entry in fs::read_dir(dir).expect("read worktree directory") {
+                let path = entry.expect("worktree entry").path();
+                if path.file_name().is_some_and(|name| name == ".git") {
+                    continue;
+                }
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    out.push((
+                        path.strip_prefix(root)
+                            .expect("worktree path")
+                            .to_path_buf(),
+                        fs::read(&path).expect("read worktree file"),
+                    ));
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(root, root, &mut files);
+        files.sort();
+        files
+    }
+
+    let (fresh, _) = fixtures::RepoFixture::new()
+        .commit("init", [("f.txt", fixtures::TEN_LINES)])
+        .modify_standard()
+        .build();
+    let builds = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let fork = {
+        let builds = builds.clone();
+        move || {
+            let builds = builds.clone();
+            fixtures::fork("plain-harness-fork-equivalence", move |parent| {
+                builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                fixtures::RepoFixture::new_in(parent)
+                    .commit("init", [("f.txt", fixtures::TEN_LINES)])
+                    .modify_standard()
+                    .build()
+            })
+        }
+    };
+    let (first, _) = fork();
+    let (second, _) = fork();
+
+    for copy in [&first, &second] {
+        assert_eq!(
+            copy.git(&["rev-parse", "HEAD"]),
+            fresh.git(&["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            copy.git(&["status", "--porcelain"]),
+            fresh.git(&["status", "--porcelain"])
+        );
+        assert_eq!(worktree_files(copy.path()), worktree_files(fresh.path()));
+    }
+
+    assert_eq!(builds.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_ne!(first.path(), second.path());
+    let template =
+        fixtures::template_path("plain-harness-fork-equivalence").expect("template was cached");
+    assert_eq!(
+        template,
+        fixtures::template_path("plain-harness-fork-equivalence").expect("template was cached")
+    );
+    assert!(template.join("f.txt").exists());
+    assert_ne!(first.path(), template);
+    assert_ne!(second.path(), template);
+}

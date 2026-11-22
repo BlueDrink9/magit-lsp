@@ -54,10 +54,12 @@ fn stage_profile(
     let special_parent = tempfile::tempdir().expect("tempdir");
     let repo_parent = special_parent.path().join("repo é#%");
     std::fs::create_dir(&repo_parent).expect("repository parent");
-    let (repo, _) = fixtures::RepoFixture::new_in(&repo_parent)
-        .commit("init", [("f.txt", fixtures::TEN_LINES)])
-        .modify_standard()
-        .build();
+    let (repo, _) = fixtures::fork_in("capability-status-standard", Some(&repo_parent), |parent| {
+        fixtures::RepoFixture::new_in(parent)
+            .commit("init", [("f.txt", fixtures::TEN_LINES)])
+            .modify_standard()
+            .build()
+    });
     let before = repo.git(&["write-tree"]);
     let head = repo.git(&["rev-parse", "HEAD"]);
     let before_status = repo.git(&["status", "--porcelain"]);
@@ -358,10 +360,12 @@ fn draft_chain(
     progress: bool,
     document_changes: bool,
 ) -> (String, String, String, String) {
-    let (repo, _) = fixtures::RepoFixture::new()
-        .commit("init", [("f.txt", fixtures::TEN_LINES)])
-        .modify_standard()
-        .build();
+    let (repo, _) = fixtures::fork("capability-status-standard", |parent| {
+        fixtures::RepoFixture::new_in(parent)
+            .commit("init", [("f.txt", fixtures::TEN_LINES)])
+            .modify_standard()
+            .build()
+    });
     fixtures::git(repo.path(), &["add", "f.txt"]);
     let before = (
         repo.git(&["rev-parse", "HEAD"]),

@@ -8,9 +8,10 @@
 pub mod recording_prompt_ui;
 
 use magit_lsp::git::GitRepo;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Once;
+use std::sync::{Mutex, Once, OnceLock};
 use tempfile::TempDir;
 
 /// Ten numbered lines, the content most fixtures start from.
@@ -300,6 +301,111 @@ impl RepoFixture {
     /// Run `git` inside the repository.
     pub fn git(&self, args: &[&str]) -> String {
         git(self.path(), args)
+    }
+}
+
+/// Process-global root that owns every cached repository template.
+///
+/// Lives outside every test's temporary directory so templates outlive the
+/// fixture that built them, and for the lifetime of the process.
+static TEMPLATE_ROOT: OnceLock<TempDir> = OnceLock::new();
+
+/// Templates already built in this process, keyed by [`fork`]'s `name`.
+static TEMPLATES: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+
+/// The process-global template registry.
+fn templates() -> &'static Mutex<HashMap<String, PathBuf>> {
+    TEMPLATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Canonical directory of the cached template called `name`, once built.
+///
+/// `None` until a [`fork`] or [`fork_in`] call with that name has run its
+/// builder.
+pub fn template_path(name: &str) -> Option<PathBuf> {
+    templates()
+        .lock()
+        .expect("template cache lock")
+        .get(name)
+        .cloned()
+}
+
+/// Build the repository template `name` once per process, then return a fresh
+/// copy of it through the template root.
+///
+/// [`RepoFixture::build`] cannot be cached directly because every fixture owns
+/// and removes its directory. The first call runs `build` inside the
+/// process-global template root, passing it the directory to build in; later
+/// calls skip `build` and copy the template into a new temporary directory, so
+/// each caller receives an independent repository interchangeable with
+/// [`RepoFixture::build`]'s output.
+pub fn fork(
+    name: &str,
+    build: impl FnOnce(&Path) -> (RepoFixture, GitRepo),
+) -> (RepoFixture, GitRepo) {
+    fork_in(name, None, build)
+}
+
+/// Like [`fork`], but create the copy inside `parent`, mirroring
+/// [`RepoFixture::new_in`].
+pub fn fork_in(
+    name: &str,
+    parent: Option<&Path>,
+    build: impl FnOnce(&Path) -> (RepoFixture, GitRepo),
+) -> (RepoFixture, GitRepo) {
+    let template = {
+        let mut cache = templates().lock().expect("template cache lock");
+        match cache.get(name) {
+            Some(path) => path.clone(),
+            None => {
+                let root = TEMPLATE_ROOT.get_or_init(|| TempDir::new().expect("template root"));
+                let dir = root.path().join(name);
+                std::fs::create_dir_all(&dir).expect("create template directory");
+                let (fixture, _) = build(&dir);
+                let path = fixture.path().to_path_buf();
+                // The registry owns the template now, so keep its directory
+                // instead of letting the fixture remove it on drop.
+                let _ = fixture.dir.keep();
+                cache.insert(name.to_owned(), path.clone());
+                path
+            }
+        }
+    };
+    let copy = match parent {
+        Some(parent) => tempfile::Builder::new()
+            .prefix("magit-lsp-fixture")
+            .tempdir_in(parent),
+        None => TempDir::new(),
+    }
+    .expect("copy fixture template");
+    copy_tree(&template, copy.path());
+    let fixture = RepoFixture::with_tempdir(copy);
+    let repo = GitRepo::open(fixture.path()).expect("open forked repository");
+    (fixture, repo)
+}
+
+/// Recursively copy `source` into `target`, preserving file contents and modes.
+fn copy_tree(source: &Path, target: &Path) {
+    std::fs::create_dir_all(target).expect("create copied directory");
+    for entry in std::fs::read_dir(source).expect("read template directory") {
+        let entry = entry.expect("read template entry");
+        let from = entry.path();
+        let to = target.join(entry.file_name());
+        let file_type = entry.file_type().expect("inspect template entry");
+        if file_type.is_dir() {
+            copy_tree(&from, &to);
+        } else if file_type.is_symlink() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(
+                std::fs::read_link(&from).expect("read template symlink"),
+                &to,
+            )
+            .expect("copy template symlink");
+            #[cfg(not(unix))]
+            panic!("cannot copy template symlink {from:?}");
+        } else {
+            std::fs::copy(&from, &to).expect("copy template file");
+        }
     }
 }
 
