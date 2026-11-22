@@ -338,8 +338,8 @@ fn status_open_refreshes_while_loading_are_coalesced() {
     // Both the superseded acquisition and its single follow-up must complete
     // before the newer render is treated as final.
     wait_for_completion_barrier(&trace, &view, 2);
-    let ready =
-        server.wait_for_view_render_after(&view, loading["params"]["version"].as_u64().unwrap());
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    let ready = server.wait_for_view_render_after(&view, loading_version);
     let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
     assert!(
         lines.iter().any(|line| line.contains("overlap-fresh.txt")),
@@ -356,17 +356,39 @@ fn status_open_refreshes_while_loading_are_coalesced() {
         2,
         "overlapping refreshes schedule one follow-up acquisition"
     );
-    // An older completion must never publish after the follow-up's render.
-    let later = server.drain_notifications();
-    assert!(
-        !later.iter().any(|message| {
+    // Exactly one render follows loading: the follow-up's fresh content at the
+    // next version. A superseded completion publishing late would add a second
+    // render (older content at a newer version), and a duplicate would repeat
+    // the version; the wire order exposes both.
+    let received_before_late = server.notifications.len();
+    server.drain_notifications();
+    let published: Vec<(u64, String)> = server.notifications[..received_before_late]
+        .iter()
+        .chain(std::iter::once(&ready))
+        .chain(server.notifications[received_before_late..].iter())
+        .filter(|message| {
             message["method"] == "view/render"
                 && message["params"]["viewId"] == view
-                && message["params"]["text"]
-                    .to_string()
-                    .contains("Loading repository status")
-        }),
-        "a stale loading completion was delivered after the newer render: {later:?}"
+                && message["params"]["version"]
+                    .as_u64()
+                    .is_some_and(|version| version > loading_version)
+        })
+        .map(|message| {
+            (
+                message["params"]["version"].as_u64().unwrap(),
+                message["params"]["text"].to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        published.len(),
+        1,
+        "completion published a stale or duplicate render after loading: {published:?}"
+    );
+    assert_eq!(
+        published[0].0,
+        loading_version + 1,
+        "the fresh render must directly follow the loading version: {published:?}"
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
