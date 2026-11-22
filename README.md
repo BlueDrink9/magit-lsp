@@ -122,12 +122,18 @@ make neovim                      # open the current working directory
 make neovim REPO=/path/to/repo   # open a chosen repository
 ```
 
-It does not load user configuration, plugin managers or the test initializer,
-and it keeps HOME, XDG state/cache/config/data, shada, swap, backup and undo
-files in a temporary directory that is removed when Neovim exits. PATH and
-terminal variables are inherited. The automated targets below (`make test-lua`
-via `scripts/minimal_init.lua`, and tmux-driven `make ui-test`/`make ui-file`)
-are test harnesses, not interactive launchers.
+It does not load user configuration, plugin managers or the test initializer.
+Neovim's config/data/state/cache directories, plus shada, swap, backup, undo
+and view files, live in a temporary directory removed when Neovim exits. HOME
+is preserved, so Git and external helpers keep the caller's normal global
+configuration (identity, signing and includes) and repository-local settings
+still take precedence; a temporary include-only global Git config keeps the
+original XDG `git/config` and `~/.gitconfig` visible while editor paths are
+isolated. PATH and terminal variables are inherited; credential-helper or SSH
+integration is not asserted beyond that inherited environment. The automated
+targets below (`make test-lua` via `scripts/minimal_init.lua`, and
+tmux-driven `make ui-test`/`make ui-file`) are test harnesses, not interactive
+launchers.
 
 ### VS Code (1.85+)
 

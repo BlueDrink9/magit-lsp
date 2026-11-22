@@ -48,10 +48,17 @@ interactive Neovim that loads only the in-tree client:
     make neovim REPO=/path/to/repo   " open a chosen repository
 
 It loads `scripts/neovim_init.lua` instead of your user configuration, sources
-the plugin entry point explicitly and uses the checkout's debug server.  HOME,
-XDG directories, shada, swap, backup and undo files are temporary and removed
-when Neovim exits.  The automated targets (`make test-lua`, `make ui-test`) are
-test harnesses, not interactive launchers.
+the plugin entry point explicitly and uses the checkout's debug server.
+Neovim's config/data/state/cache directories and its shada, swap, backup,
+undo and view files are temporary and removed when Neovim exits.  HOME is
+preserved so Git and external helpers keep the caller's normal global
+configuration (identity, signing and includes) and repository-local
+precedence; a temporary include-only global Git config keeps the original XDG
+`git/config` and `~/.gitconfig` visible while editor paths are isolated.
+PATH and terminal variables are inherited.  Credential-helper or SSH
+integration is not asserted beyond that environment.  The automated targets
+(`make test-lua`, `make ui-test`) are test harnesses, not interactive
+launchers.
 
 ==============================================================================
 COMMANDS                                                     *magit-commands*

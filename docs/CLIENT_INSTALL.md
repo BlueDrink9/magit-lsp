@@ -112,13 +112,20 @@ make neovim REPO=/path/to/repo   # open a chosen repository
 ```
 
 The launcher runs `scripts/neovim` with the dedicated `scripts/neovim_init.lua`,
-which prepends the client runtime, sources `plugin/magit-lsp.lua` explicitly
-and opens the selected repository with `:Magit`; user configuration, plugin
-managers and the MiniTest initializer are not loaded. `$MAGIT_LSP_BIN` points
-at the checkout's `target/debug/magit-lsp`. HOME, XDG state/cache/config/data,
-shada, swap, backup and undo files live in a temporary directory that is
-removed when Neovim exits; PATH and terminal variables are inherited. This is
-a development convenience, not an installation method.
+which restricts the runtime path to the client and Neovim's own runtime,
+sources `plugin/magit-lsp.lua` explicitly and opens the selected repository
+with `:Magit`; user configuration, plugin managers and the MiniTest initializer
+are not loaded. `$MAGIT_LSP_BIN` points at the checkout's
+`target/debug/magit-lsp`. Neovim's config/data/state/cache
+directories and the shada, swap, backup, undo and view files live in a
+temporary directory removed when Neovim exits; PATH and terminal variables are
+inherited. HOME is preserved for Git and external helpers, so the caller's
+normal global configuration (identity, signing and includes) and
+repository-local precedence still apply, and a temporary include-only global
+Git config keeps the original XDG `git/config` and `~/.gitconfig` visible while
+editor paths are isolated. Credential-helper or SSH integration is not asserted
+beyond that inherited environment. This is a development convenience, not an
+installation method.
 
 The automated targets are not interactive launchers: `make test-lua` and
 `make test-file` run headless `mini.test` through `scripts/minimal_init.lua`,

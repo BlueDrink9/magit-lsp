@@ -50,10 +50,18 @@ class Recorded:
         self.environment = dict(options["env"])  # type: ignore[arg-type]
         self.base = Path(self.environment["MAGIT_LSP_LAUNCH_DIR"])
         self.base_existed = self.base.is_dir()
-        # Snapshot the ShaDa path while the isolated directories still exist.
+        # Snapshot the ShaDa path and Git include file while the isolated
+        # directories still exist.
         self.shada = Path(command[command.index("-i") + 1])
         self.shada_parent_existed = self.shada.parent.is_dir()
         self.shada_is_directory = self.shada.is_dir()
+        self.gitconfig = self.base / launcher.GIT_GLOBAL_CONFIG  # type: ignore[attr-defined]
+        self.gitconfig_existed = self.gitconfig.is_file()
+        self.gitconfig_content = (
+            self.gitconfig.read_text(encoding="utf-8")
+            if self.gitconfig_existed
+            else None
+        )
 
     @property
     def cwd(self) -> str:
@@ -65,7 +73,6 @@ class Recorded:
         return [
             self.environment[name]
             for name in (
-                "HOME",
                 "XDG_CONFIG_HOME",
                 "XDG_DATA_HOME",
                 "XDG_STATE_HOME",
@@ -141,7 +148,7 @@ class LauncherTest(unittest.TestCase):
         self.assertNotIn("--cmd", call.command)
         self.assertNotIn("minimal_init", " ".join(call.command))
 
-    def test_environment_isolates_state_and_keeps_terminal_variables(self) -> None:
+    def test_environment_keeps_caller_home_and_isolates_editor_state(self) -> None:
         self.run_launcher(inherited={
             "PATH": "/usr/bin:/bin",
             "TERM": "screen-256color",
@@ -149,18 +156,100 @@ class LauncherTest(unittest.TestCase):
             "XDG_CONFIG_HOME": "/home/someone/.config",
         })
         (call,) = self.recorded
-        self.assertEqual(call.environment["HOME"], str(call.base / "home"))
+        self.assertEqual(call.environment["HOME"], "/home/someone")
         for value in call.isolated_paths():
             self.assertTrue(
                 value.startswith(str(call.base) + os.sep), value
             )
-        self.assertNotEqual(call.environment["HOME"], "/home/someone")
+        self.assertNotEqual(
+            call.environment["XDG_CONFIG_HOME"], "/home/someone/.config"
+        )
         self.assertEqual(call.environment["PATH"], "/usr/bin:/bin")
         self.assertEqual(call.environment["TERM"], "screen-256color")
         self.assertEqual(call.environment["MAGIT_LSP_BIN"], str(self.server))
         self.assertEqual(
             call.environment["MAGIT_LSP_LAUNCH_REPO"], str(self.repo)
         )
+        self.assertEqual(
+            call.environment["MAGIT_LSP_LAUNCH_DIR"], str(call.base)
+        )
+        self.assertEqual(
+            call.environment["GIT_CONFIG_GLOBAL"], str(call.gitconfig)
+        )
+        self.assertTrue(call.gitconfig_existed)
+        self.assertIn("--noplugin", call.command)
+
+    def test_global_git_config_includes_original_xdg_then_home(self) -> None:
+        home = self.root / "caller home"
+        xdg = self.root / "caller xdg"
+        (xdg / "git").mkdir(parents=True)
+        (xdg / "git" / "config").write_text(
+            "[user]\n\tname = XDG Sentinel\n", encoding="utf-8"
+        )
+        home.mkdir()
+        (home / ".gitconfig").write_text(
+            "[user]\n\temail = home-sentinel@example.com\n", encoding="utf-8"
+        )
+        self.run_launcher(inherited={
+            "PATH": "/usr/bin:/bin",
+            "TERM": "xterm-256color",
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(xdg),
+        })
+        (call,) = self.recorded
+        self.assertEqual(
+            call.environment["GIT_CONFIG_GLOBAL"], str(call.gitconfig)
+        )
+        text = call.gitconfig_content or ""
+        self.assertTrue(text)
+        xdg_include = str(xdg / "git" / "config")
+        home_include = str(home / ".gitconfig")
+        self.assertIn(f'path = "{xdg_include}"', text)
+        self.assertIn(f'path = "{home_include}"', text)
+        self.assertLess(text.index(xdg_include), text.index(home_include))
+        # Include-only: caller values are never copied into the temporary file.
+        self.assertNotIn("XDG Sentinel", text)
+        self.assertNotIn("home-sentinel@example.com", text)
+        self.assertEqual(text.count("[include]"), 2)
+
+    def test_home_config_uses_default_xdg_location_when_unset(self) -> None:
+        home = self.root / "home-only"
+        home.mkdir()
+        self.run_launcher(inherited={
+            "PATH": "/usr/bin:/bin",
+            "TERM": "xterm-256color",
+            "HOME": str(home),
+        })
+        (call,) = self.recorded
+        text = call.gitconfig_content or ""
+        self.assertTrue(text)
+        default_xdg = str(home / ".config" / "git" / "config")
+        home_include = str(home / ".gitconfig")
+        self.assertIn(f'path = "{default_xdg}"', text)
+        self.assertLess(text.index(default_xdg), text.index(home_include))
+
+    def test_explicit_git_config_global_is_not_replaced(self) -> None:
+        custom = self.root / "custom global"
+        self.run_launcher(inherited={
+            "PATH": "/usr/bin:/bin",
+            "TERM": "xterm-256color",
+            "HOME": "/home/someone",
+            "GIT_CONFIG_GLOBAL": str(custom),
+        })
+        (call,) = self.recorded
+        self.assertEqual(call.environment["GIT_CONFIG_GLOBAL"], str(custom))
+        self.assertFalse(call.gitconfig_existed)
+
+    def test_empty_git_config_global_override_is_preserved(self) -> None:
+        self.run_launcher(inherited={
+            "PATH": "/usr/bin:/bin",
+            "TERM": "xterm-256color",
+            "HOME": "/home/someone",
+            "GIT_CONFIG_GLOBAL": "",
+        })
+        (call,) = self.recorded
+        self.assertEqual(call.environment["GIT_CONFIG_GLOBAL"], "")
+        self.assertFalse(call.gitconfig_existed)
 
     def test_chosen_repository_with_spaces_is_passed_verbatim(self) -> None:
         self.run_launcher()
@@ -188,10 +277,16 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(call.environment["MAGIT_LSP_BIN"], str(self.server))
 
     def test_temporary_directory_is_removed_after_exit(self) -> None:
-        self.run_launcher()
+        self.run_launcher(inherited={
+            "PATH": "/usr/bin:/bin",
+            "TERM": "xterm-256color",
+            "HOME": "/home/someone",
+        })
         (call,) = self.recorded
         self.assertTrue(call.base_existed)
+        self.assertTrue(call.gitconfig_existed)
         self.assertFalse(call.base.exists())
+        self.assertFalse(call.gitconfig.exists())
         self.assertTrue(call.base.is_relative_to(self.temporary_root))
 
     def test_exit_status_is_propagated(self) -> None:
@@ -235,7 +330,9 @@ class InitializerContractTest(unittest.TestCase):
         self.assertNotIn("mini.nvim", text)
         self.assertNotIn("mini.test", text)
         self.assertIn('project_root .. "/clients/neovim"', text)
-        self.assertIn('vim.opt.runtimepath:prepend(client_runtime)', text)
+        self.assertIn("vim.opt.runtimepath = runtimepath", text)
+        self.assertIn("vim.opt.packpath = {}", text)
+        self.assertIn("vim.env.VIMRUNTIME", text)
         self.assertIn('client_runtime .. "/plugin/magit-lsp.lua"', text)
         self.assertIn("MAGIT_LSP_LAUNCH_REPO", text)
         self.assertIn('require("magit-lsp").open(', text)
