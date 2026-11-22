@@ -220,12 +220,14 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
   - **Done when:** `rg -n 'MagitMenu' lua tests` returns no matches; `make test-file FILE=tests/test_magit_lsp.lua` passes, including "every token type and modifier in the legend links to a theme group" and "canonical semantic roles have Neovim default link coverage".
   - **Constraints:** Do not change `M.MODIFIER_LINKS` targets, role names, `src/semantic_roles.json` or the server legend; do not touch version-labeled historical captures.
 
-- [ ] **[P3] Collapse the identical `live` branches in the menu option spans** (`src/menu.rs:548-567`, `Builder::argument_item`)
+- [x] **[P3] Collapse the identical `live` branches in the menu option spans** (`src/menu.rs:548-567`, `Builder::argument_item`)
   - **Problem:** The `Item::Option` arm pushes both the flag span and the value span as `if live { "muted" } else { "muted" }`. The branches are identical, a leftover from collapsing `magit.menu.flag`/`magit.menu.value`/`magit.menu.disabled` into `muted` in `9479bbd`.
   - **Why it matters:** Readability and dead code: the conditional implies live and disabled options render differently, which they do not; the disabled state is carried by the `disabled` modifier from `Attributes::of`.
   - **Change:** Pass `"muted"` directly for both spans and keep the `attributes` tuple element and the flag/value text construction unchanged. Do not alter the `Item::Switch` arm, `key_token`, `label_token` or `Attributes`.
   - **Done when:** `rg -n 'if live \{ "muted" \} else \{ "muted" \}' src/menu.rs` returns no matches; `make test-rust FILTER="--test semantic_tokens --test menu"` passes with the planned/disabled span assertions unchanged.
   - **Constraints:** No role, modifier, text or layout change; do not reformat surrounding code.
+   - Verified: `make test-rust FILTER="--test semantic_tokens --test menu"` @ `db29c68` → `ok: rust` (22 passed + 7 passed; 0 failed; log `build/test-logs/rust.Rv6IWG`).
+   - Done: `f6e5c48`
 
 ### Robustness — Deep dive on stale operations, freezes and hangs
 
