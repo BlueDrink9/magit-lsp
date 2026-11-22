@@ -1580,6 +1580,28 @@ fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
     client.until_response(id)
 }
 
+/// Whether a message is the `$/progress` begin for the commit operation.
+///
+/// Request-level progress reuses `$/progress`, so match the operation label
+/// the commit worker announces rather than any begin.
+fn is_commit_begin(message: &Value) -> bool {
+    message["method"] == "$/progress"
+        && message["params"]["value"]["kind"] == "begin"
+        && message["params"]["value"]["message"] == "commit"
+}
+
+/// Whether a message is the manual edit instructions for a Plain commit draft.
+///
+/// Plain clients without `showDocument` get this message only after the draft
+/// helper joined and its template was recorded, so it proves the draft is
+/// attachable.
+fn is_manual_commit_instructions(message: &Value, uri: &str) -> bool {
+    message["method"] == "window/showMessage"
+        && message["params"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(uri) && message.contains("Confirm commit"))
+}
+
 fn plain_gate_open(repo: &fixtures::RepoFixture) -> (ClientPump, String) {
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
@@ -2367,7 +2389,10 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             .expect("native path has a file URI")
             .as_str()
             .to_owned();
-        client.until(|c| c.editor.text(&uri).contains(&expected_uri));
+        client.until(|c| {
+            c.editor.text(&uri).contains(&expected_uri)
+                && c.server.notifications.iter().any(|m| is_commit_begin(m))
+        });
         assert!(
             client
                 .editor
@@ -2381,10 +2406,19 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             .server
             .notifications
             .iter()
-            .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+            .find(|m| is_commit_begin(m))
             .expect("commit progress began")["params"]["token"]
             .clone();
         if !declared {
+            // The draft helper joins only when Git opens the edit; until then a
+            // client open cannot attach. The manual-instructions message is
+            // emitted at that join, after the template is recorded.
+            client.until(|c| {
+                c.server
+                    .notifications
+                    .iter()
+                    .any(|m| is_manual_commit_instructions(m, &expected_uri))
+            });
             let initial = std::fs::read_to_string(&expected_path).unwrap();
             let did_open = client.editor.open(&expected_uri, &initial);
             client.send(did_open);
@@ -2468,7 +2502,21 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
                 .expect("start abortable commit")["command"]["arguments"][0]
                 .clone();
             assert!(execute_plain_action(&mut client, create)["error"].is_null());
-            client.until(|c| c.editor.text(&uri).contains(&expected_path));
+            let instructions_before = client
+                .server
+                .notifications
+                .iter()
+                .filter(|m| is_manual_commit_instructions(m, &expected_uri))
+                .count();
+            client.until(|c| {
+                c.editor.text(&uri).contains(&expected_path)
+                    && c.server
+                        .notifications
+                        .iter()
+                        .filter(|m| is_manual_commit_instructions(m, &expected_uri))
+                        .count()
+                        > instructions_before
+            });
             let initial = std::fs::read_to_string(&expected_path).unwrap();
             let did_open = client.editor.open(&expected_uri, &initial);
             client.send(did_open);
@@ -2526,6 +2574,16 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
             assert_eq!(repo.git(&["write-tree"]), abort_tree);
             assert_eq!(repo.git(&["status", "--porcelain"]), abort_status);
         } else {
+            // The helper joins when Git opens the edit, and the server proves
+            // that join with the showDocument handshake. Wait for the request
+            // (and its reply, recorded when dispatched) before cancelling so
+            // this case exercises the declared path instead of racing it.
+            client.until(|c| {
+                c.editor
+                    .outbound
+                    .iter()
+                    .any(|m| m["method"] == "window/showDocument")
+            });
             client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
             client.until(|c| {
                 let begins = c
@@ -2546,6 +2604,18 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
                     .count();
                 begins > 0 && ends >= begins && !c.editor.text(&uri).contains(&expected_path)
             });
+            if succeeds == Some(false) {
+                // A rejected showDocument falls back to the manual
+                // instructions, which arrive after the correlated reply.
+                client.until(|c| {
+                    c.server.notifications.iter().any(|m| {
+                        m["method"] == "window/showMessage"
+                            && m["params"]["message"]
+                                .as_str()
+                                .is_some_and(|message| message.contains("COMMIT_EDITMSG"))
+                    })
+                });
+            }
         }
 
         let requests: Vec<_> = client
@@ -2721,7 +2791,14 @@ fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
         .expect("native path has a file URI")
         .as_str()
         .to_owned();
-    client.until(|c| c.editor.text(&uri).contains(&expected_uri));
+    client.until(|c| {
+        c.editor.text(&uri).contains(&expected_uri)
+            && c.server.notifications.iter().any(|m| is_commit_begin(m))
+            && c.server
+                .notifications
+                .iter()
+                .any(|m| is_manual_commit_instructions(m, &expected_uri))
+    });
     let token = client
         .server
         .notifications
