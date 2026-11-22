@@ -7,6 +7,14 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **AH-CAP: Fix template-refresh capability failure from full suite**
+  - check: Diagnose and correct `template_refresh_mixed_fallback_chain_and_progress_cancel` without weakening capability fallback coverage; run `make test-rust FILTER="--test capability_lattice"`.
+  - test: Template refresh detection distinguishes the actual draft URI from controller edits that merely mention it, if confirmed as the cause.
+  - Done: 450811b
+  - Verified: `make test-rust FILTER="--test capability_lattice"` @ 450811b → ok: rust (4/4; false positive was the `.magit` status-document applyEdit listing the draft path)
+- [ ] **AH-FULL: Rerun full suite after requested log fixes**
+  - check: Run `make test` serially and record all suite outcomes; resolve failures before marking done.
+
 - [ ] **NVIM-HELP-DISCOVERY — Ship discoverable Neovim help.** User reports `:h magit` does not work. VERIFIED inspection at `9b9e97e`: `doc/magit.txt` defines the tag but `doc/tags` is absent; the existing help test generates temporary tags and masks missing packaging. Part 1: add a Make help-tags generation target; Part 2: generate and commit the standalone tag index separately from source/authored docs/bookkeeping; Part 3: replace test-only helptags setup with actual shipped-help discovery and correct the install note. check: `make help-tags` generates a valid index. test: `make test-file FILE=tests/test_magit_lsp.lua` resolves shipped `:h magit` without generating tags. Do not change protocol or unrelated concurrent work.
   - Verified: `make help-tags` → exit 0 (`ok: help-tags`); the generated `doc/tags` maps `magit` to `magit.txt`. With `doc/` absent the same target fails with `help-tags: helptags failed or doc/tags was not generated` and make exit 1. Part 1 check only; the generated index is left untracked for Part 2.
 
