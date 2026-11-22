@@ -116,6 +116,13 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 
 ## Review
 
+- [ ] **[P1] Emit hook-stable generated Lua bytes**
+  - VERIFIED `6d15e6a`: `make schema-check` log `schema-check.pa9V93` rejects only shared.lua/types.lua; generator single quotes (`scripts/generate_schema.rs:296-310`) and extra EOF blank (`scripts/schema_luals.rs:31-45`) disagree with committed hook-formatted bytes.
+  - Part 1 test: preserve generation semantics/order and emit double-quoted escaped Lua strings and exactly one terminal newline; use existing generator fixture tests, not committed-artifact equality tests. Verify `make test-rust FILTER="--test schema"`.
+  - Verified (Part 1): `make test-rust FILTER="--test schema"` @ `1ea21e8` → `ok: rust` (50 passed; 0 failed; log `build/test-logs/rust.AchAYN`). `scripts/generate_schema.rs` `lua_string` now emits double-quoted literals escaping `"` and `\`, the shared-list test checks those list bytes plus the single-terminal-newline module shape and helper escaping, and the deterministic annotation test keeps blank-line root separators with exactly one final newline.
+  - Done (Part 1): `1ea21e8`.
+  - Part 2 check: `make schema-check` on committed content passes without normalization or weakened comparisons; record evidence and close this item and generated worked-exchange freshness item.
+
 - [ ] **[P1] Refresh generated worked exchanges for canonical semantic roles**
   - VERIFIED at `ef0590f`: generated `docs/schema/worked-exchanges-01.md`, `-02.md`, `-03.md` still embed retired legends; examples already canonical (`e5eba40`). Generator/check inventory: `scripts/schema_markdown.rs:16-23,176-298,314-368`; Makefile:288-304.
   - Part 1 check: regenerate through `make update-schema`, inspect semantic deltas and commit generated artifacts alone with source/command rationale.
