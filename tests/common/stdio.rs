@@ -219,6 +219,44 @@ impl TestServer {
         }
     }
 
+    /// Wait for a later render of a view, preserving unrelated incoming messages.
+    /// The wire exposes render versions but no separate status-readiness flag.
+    pub fn wait_for_view_render_after(&mut self, view_id: &str, version: u64) -> Value {
+        loop {
+            let message = self.recv();
+            if message["method"] == "view/render"
+                && message["params"]["viewId"] == view_id
+                && message["params"]["version"]
+                    .as_u64()
+                    .is_some_and(|next| next > version)
+            {
+                return message;
+            }
+            self.notifications.push(message);
+        }
+    }
+
+    /// Poll the server-owned render until a later version is available (Plain clients).
+    pub fn wait_for_view_resync_after(&mut self, view_id: &str, request_id: i64, version: u64) {
+        let deadline = Instant::now() + self.recv_timeout;
+        let mut next_id = request_id;
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "view {view_id} did not publish a newer render"
+            );
+            self.send(json!({"jsonrpc":"2.0","id":next_id,"method":"view/resync","params":{"viewId":view_id}}));
+            let render = self.response_with_id(next_id);
+            if render["result"]["version"]
+                .as_u64()
+                .is_some_and(|next| next > version)
+            {
+                return;
+            }
+            next_id += 1;
+        }
+    }
+
     /// Initialize with the requested client capabilities.
     pub fn initialize(&mut self, capabilities: Value) -> Value {
         let mut message = initialize_message();

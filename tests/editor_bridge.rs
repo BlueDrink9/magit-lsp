@@ -193,13 +193,45 @@ fn open_status(server: &mut TestServer, id: i64, repo: &Value) -> String {
         .expect("view id")
         .to_string();
     eprintln!("editor-bridge phase=open-status/wait-render id={id}");
-    let render = server.recv();
-    eprintln!("editor-bridge phase=open-status/render id={id} frame={render}");
-    assert_eq!(render["method"], json!("view/render"), "{render}");
+    let loading = server.recv();
+    eprintln!("editor-bridge phase=open-status/render id={id} frame={loading}");
+    assert_eq!(loading["method"], json!("view/render"), "{loading}");
+    let loading_version = loading["params"]["version"]
+        .as_u64()
+        .expect("the loading render carries a version");
+    // Actions are refused until the fresh status installs, so wait for a render
+    // newer than the loading one. The keymap and that render may arrive in
+    // either order: consume both, buffering unrelated notifications.
     eprintln!("editor-bridge phase=open-status/wait-keymap id={id}");
-    let keymap = server.recv();
+    let mut keymap = None;
+    let mut ready = None;
+    while keymap.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("view/keymap")
+            && message["params"]["viewId"] == json!(view_id)
+        {
+            keymap = Some(message);
+        } else if message["method"] == json!("view/render")
+            && message["params"]["viewId"] == json!(view_id)
+            && message["params"]["version"]
+                .as_u64()
+                .is_some_and(|version| version > loading_version)
+        {
+            ready = Some(message);
+        } else {
+            server.notifications.push(message);
+        }
+    }
+    let keymap = keymap.expect("status view keymap");
     eprintln!("editor-bridge phase=open-status/keymap id={id} frame={keymap}");
-    assert_eq!(keymap["method"], json!("view/keymap"), "{keymap}");
+    let ready = match ready {
+        Some(ready) => ready,
+        None => {
+            eprintln!("editor-bridge phase=open-status/wait-ready id={id}");
+            server.wait_for_view_render_after(&view_id, loading_version)
+        }
+    };
+    eprintln!("editor-bridge phase=open-status/ready id={id} frame={ready}");
     view_id
 }
 

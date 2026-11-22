@@ -922,6 +922,65 @@ class StartPathTest(unittest.TestCase):
             self.assertIn("server-exec.sh", launcher)
             self.assertIn("target/debug/magit-lsp", (run.dir / "server-exec.sh").read_text())
 
+    def test_held_startup_returns_before_first_view_and_installs_the_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+
+            def build(_fixture, repo, home):
+                repo.mkdir()
+                (repo / ".git/info").mkdir(parents=True)
+                home.mkdir()
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build", side_effect=build),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket") as wait_socket,
+                patch.object(driver, "_wait_for_view") as wait_view,
+                patch.object(driver, "_update_last_run"),
+            ):
+                run = driver.start("clean", size="80x24", startup_mode="held")
+            self.assertEqual(run.startup_mode, "held")
+            self.assertIsNotNone(run.gate)
+            wait_view.assert_not_called()
+            self.assertIs(wait_socket.call_args.kwargs["readiness_probe"], driver._rpc_probe)
+            launcher = (run.dir / "launch-nvim.sh").read_text()
+            self.assertIn(f"PATH={run.gate.wrapper_dir}:", launcher)
+            state = json.loads((run.dir / "state.json").read_text())
+            self.assertEqual(state["startup_mode"], "held")
+
+    def test_ready_startup_is_the_default_and_still_waits_for_the_first_view(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+
+            def build(_fixture, repo, home):
+                repo.mkdir()
+                (repo / ".git/info").mkdir(parents=True)
+                home.mkdir()
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build", side_effect=build),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket") as wait_socket,
+                patch.object(driver, "_wait_for_view") as wait_view,
+                patch.object(driver, "_update_last_run"),
+            ):
+                run = driver.start("clean", size="80x24")
+            self.assertEqual(run.startup_mode, "ready")
+            self.assertIsNone(run.gate)
+            wait_view.assert_called_once_with(run)
+            self.assertIs(wait_socket.call_args.kwargs["readiness_probe"], driver._idle_probe)
+            self.assertNotIn("git-bin", (run.dir / "launch-nvim.sh").read_text())
+
+    def test_unknown_startup_mode_is_rejected(self) -> None:
+        for value in ("early", "", "HELD"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(driver.DriverError, "unknown startup mode"):
+                    driver.parse_startup_mode(value)
+
     def test_plain_probes_do_not_load_the_rich_adapter(self) -> None:
         run = make_run("/tmp/test-run")
         run.client = "plain"
@@ -1238,6 +1297,25 @@ class NativeSessionTest(unittest.TestCase):
                     with driver.native_session(repo, home, init, initial, {}):
                         raise ValueError("body failed")
             driver.shutil.rmtree(observed["run"].dir)
+
+    def test_stop_releases_a_held_first_status_gate_before_killing_the_server(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            run.startup_mode = "held"
+            gate = run.gate
+            assert gate is not None
+            gate.install(os.environ.get("PATH", "/usr/bin:/bin"))
+            gate.entered_path.touch()
+            with (
+                patch.object(driver.fixtures.time, "monotonic", side_effect=[0, 3]),
+                patch.object(driver, "_stop_roles", return_value={
+                    "ownership": {}, "remaining_owned_pids": []}),
+                patch.object(driver, "_tmux", return_value=subprocess.CompletedProcess([], 1)),
+                patch.object(driver, "_forget_last_run"),
+                patch.object(driver.shutil, "rmtree"),
+            ):
+                driver.stop(run)
+            self.assertTrue(gate.release_path.exists())
 
     def test_recorded_native_roles_use_shared_shutdown_before_editor_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

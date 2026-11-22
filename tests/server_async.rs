@@ -22,6 +22,719 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+/// The server's trace file for a client trace path (see `runner::TRACE_ENV`).
+#[cfg(unix)]
+fn completion_trace_file(trace: &std::path::Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{}.server", trace.display()))
+}
+
+/// Wait until the server processed `expected` status completions for `view`.
+///
+/// The completion task traces only after its render is enqueued, so observing
+/// the event proves the completion's ordering turn has delivered (or dropped)
+/// its output. This is the barrier the close regressions assert against; no
+/// unrelated request or quiet window stands in for it.
+#[cfg(unix)]
+fn wait_for_completion_barrier(trace: &std::path::Path, view: &str, expected: usize) {
+    let path = completion_trace_file(trace);
+    let needle = format!("\"view\":\"{view}\"");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let events = std::fs::read_to_string(&path).unwrap_or_default();
+        let seen = events
+            .lines()
+            .filter(|line| {
+                line.contains("\"event\":\"status_completion_processed\"") && line.contains(&needle)
+            })
+            .count();
+        if seen >= expected {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "status completion barrier {expected} not observed for {view}: {events}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_held_git_unacknowledged_completion_sends_full_text() {
+    status_open_held_git(false);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_held_git_acknowledged_completion_uses_exact_base() {
+    status_open_held_git(true);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_text_mode_defers_held_completion_until_exit() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(
+        &tmp.path().join("status-open-text.txt"),
+        "fresh while editing\n",
+    );
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-text-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(7);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let toggled = server.response_with_id(3);
+    assert!(toggled["error"].is_null(), "{toggled}");
+    let mode_render = server.recv();
+    assert_eq!(mode_render["method"], "view/render", "{mode_render}");
+    assert_eq!(mode_render["params"]["mode"], "text", "{mode_render}");
+    assert_eq!(mode_render["params"]["version"], json!(version));
+    assert!(!gate.is_released(), "text mode entered while Git is held");
+
+    gate.release();
+    // The completion must actually be processed before absence of output is
+    // asserted; the trace event follows its enqueued render.
+    wait_for_completion_barrier(&trace, view, 1);
+    // The resync round-trip also drains any completion notification, so the
+    // assertion below sees every message the completion could have sent.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let held = server.response_with_id(4);
+    assert_eq!(held["result"]["version"], json!(version));
+    assert_eq!(
+        held["result"]["text"],
+        json!(["Loading repository status…"])
+    );
+    // The acquired success must stay unpublished and unversioned in text mode.
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "completion rendered into text mode: {:?}",
+        server.notifications
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let exited = server.response_with_id(5);
+    assert!(exited["error"].is_null(), "{exited}");
+    let ready = server.recv();
+    assert_eq!(ready["method"], "view/render", "{ready}");
+    assert_eq!(ready["params"]["mode"], "interactive", "{ready}");
+    assert_eq!(
+        ready["params"]["version"],
+        json!(version + 1),
+        "the stored completion advances the version exactly once, on exit"
+    );
+    assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
+    assert!(ready["params"].get("edits").is_none(), "{ready}");
+    let text: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        text.iter()
+            .any(|line| line.contains("status-open-text.txt")),
+        "{text:?}"
+    );
+    assert!(!text
+        .iter()
+        .any(|line| line.contains("Loading repository status")));
+    assert_eq!(
+        gate.invocation_count(),
+        1,
+        "exiting text mode must expose the acquired result without another Git read"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(6);
+    assert_eq!(resync["result"]["version"], ready["params"]["version"]);
+    assert_eq!(resync["result"]["text"], ready["params"]["text"]);
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(
+        &tmp.path().join("status-open-text.txt"),
+        "fresh while editing\n",
+    );
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-later-refresh");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(7);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    let version = loading["params"]["version"].as_u64().unwrap();
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let toggled = server.response_with_id(3);
+    assert!(toggled["error"].is_null(), "{toggled}");
+    let mode_render = server.recv();
+    assert_eq!(mode_render["method"], "view/render", "{mode_render}");
+    assert_eq!(mode_render["params"]["mode"], "text", "{mode_render}");
+
+    gate.release();
+    wait_for_completion_barrier(&trace, view, 1);
+    // The resync round-trip drains any completion notification, so the
+    // assertions below see every message the completion could have sent.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let held = server.response_with_id(4);
+    assert_eq!(held["result"]["version"], json!(version));
+    assert_eq!(
+        held["result"]["text"],
+        json!(["Loading repository status…"])
+    );
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "completion rendered into text mode: {:?}",
+        server.notifications
+    );
+
+    // A repository change after the acquired completion must survive into the
+    // queued refresh instead of being published as the older acquired state.
+    write(&tmp.path().join("later-refresh.txt"), "later refresh\n");
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.refresh"}}));
+    let queued = server.response_with_id(5);
+    assert!(queued["error"].is_null(), "{queued}");
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "a text-mode refresh must not render: {:?}",
+        server.notifications
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let exited = server.response_with_id(6);
+    assert!(exited["error"].is_null(), "{exited}");
+    let ready = server.recv();
+    assert_eq!(ready["method"], "view/render", "{ready}");
+    assert_eq!(ready["params"]["mode"], "interactive", "{ready}");
+    assert_eq!(
+        ready["params"]["version"],
+        json!(version + 1),
+        "the exit replacement advances the version exactly once"
+    );
+    assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
+    assert!(ready["params"].get("edits").is_none(), "{ready}");
+    let text: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        text.iter().any(|line| line.contains("later-refresh.txt")),
+        "the exit refresh must include the file created after the completion: {text:?}"
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("status-open-text.txt")),
+        "{text:?}"
+    );
+    assert!(!text
+        .iter()
+        .any(|line| line.contains("Loading repository status")));
+    assert_eq!(
+        gate.invocation_count(),
+        2,
+        "the queued refresh re-reads status exactly once on exit"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(7);
+    assert_eq!(resync["result"]["version"], ready["params"]["version"]);
+    assert_eq!(resync["result"]["text"], ready["params"]["text"]);
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "the exit must emit exactly one full replacement: {:?}",
+        server.notifications
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_close_drops_held_success_without_resurrection() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(7);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/close",
+        "params":{"viewId":view}}));
+    let closed = server.response_with_id(3);
+    assert!(closed["error"].is_null(), "{closed}");
+    gate.release();
+    // The completion must actually execute before absence of output is
+    // asserted; the trace event follows its enqueued render.
+    wait_for_completion_barrier(&trace, view, 1);
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(4);
+    assert!(
+        !resync["error"].is_null(),
+        "the closed view must stay unroutable: {resync}"
+    );
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "closed status view was resurrected: {:?}",
+        server.notifications
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_close_drops_held_error_without_resurrection() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-error-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(8);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    assert_eq!(server.recv()["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/close",
+        "params":{"viewId":view}}));
+    assert!(server.response_with_id(3)["error"].is_null());
+    let git_dir = tmp.path().join(".git");
+    let saved_git = tmp.path().join(".git-held");
+    std::fs::rename(&git_dir, &saved_git).unwrap();
+    gate.release();
+    // The held error must be processed before asserting it was not rendered.
+    wait_for_completion_barrier(&trace, view, 1);
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(4);
+    assert!(
+        !resync["error"].is_null(),
+        "the closed view must stay unroutable: {resync}"
+    );
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "closed status view was resurrected by late Git error: {:?}",
+        server.notifications
+    );
+    std::fs::rename(saved_git, git_dir).unwrap();
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_refreshes_while_loading_are_coalesced() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-coalesced-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(9);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+    assert_eq!(gate.invocation_count(), 1);
+
+    write(
+        &tmp.path().join("overlap-fresh.txt"),
+        "fresh after refresh\n",
+    );
+    for id in 3..=6 {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+            "params":{"viewId":view,"command":"common.refresh"}}));
+        let refreshed = server.response_with_id(id);
+        assert!(refreshed["error"].is_null(), "{refreshed}");
+        assert_eq!(
+            gate.invocation_count(),
+            1,
+            "refresh during held acquisition must not start Git"
+        );
+    }
+    assert!(
+        !gate.is_released(),
+        "all refresh requests answered while Git stayed held"
+    );
+
+    gate.release();
+    // Both the superseded acquisition and its single follow-up must complete
+    // before the newer render is treated as final.
+    wait_for_completion_barrier(&trace, &view, 2);
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        lines.iter().any(|line| line.contains("overlap-fresh.txt")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("Loading repository status")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        gate.invocation_count(),
+        2,
+        "overlapping refreshes schedule one follow-up acquisition"
+    );
+    // Exactly one render follows loading: the follow-up's fresh content at the
+    // next version. A superseded completion publishing late would add a second
+    // render (older content at a newer version), and a duplicate would repeat
+    // the version; the wire order exposes both.
+    let received_before_late = server.notifications.len();
+    server.drain_notifications();
+    let published: Vec<(u64, String)> = server.notifications[..received_before_late]
+        .iter()
+        .chain(std::iter::once(&ready))
+        .chain(server.notifications[received_before_late..].iter())
+        .filter(|message| {
+            message["method"] == "view/render"
+                && message["params"]["viewId"] == view
+                && message["params"]["version"]
+                    .as_u64()
+                    .is_some_and(|version| version > loading_version)
+        })
+        .map(|message| {
+            (
+                message["params"]["version"].as_u64().unwrap(),
+                message["params"]["text"].to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        published.len(),
+        1,
+        "completion published a stale or duplicate render after loading: {published:?}"
+    );
+    assert_eq!(
+        published[0].0,
+        loading_version + 1,
+        "the fresh render must directly follow the loading version: {published:?}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-text-error-completion");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(8);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    assert_eq!(server.recv()["method"], "view/keymap");
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"status.stage"}}));
+    let refused = server.response_with_id(3);
+    assert!(
+        refused["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"),
+        "{refused}"
+    );
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let menu = server.response_with_id(4);
+    assert!(menu["error"].is_null(), "{menu}");
+    assert_eq!(menu["result"]["effects"], json!([]), "{menu}");
+    let mode_render = server.recv();
+    assert_eq!(mode_render["method"], "view/render", "{mode_render}");
+    assert_eq!(mode_render["params"]["mode"], "text", "{mode_render}");
+    assert!(
+        !gate.is_released(),
+        "safe menu affordance responds while status Git is held"
+    );
+
+    let git_dir = tmp.path().join(".git");
+    let saved_git = tmp.path().join(".git-held");
+    std::fs::rename(&git_dir, &saved_git).unwrap();
+    gate.release();
+    // The failure is generation-validated and stored, but text mode owns the
+    // buffer: it must not render or advance the displayed version yet. Wait for
+    // the actual completion before asserting the absence of output.
+    wait_for_completion_barrier(&trace, view, 1);
+    // The resync round-trip also drains any completion notification, so the
+    // assertion below sees every message the completion could have sent.
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let held = server.response_with_id(5);
+    assert_eq!(held["result"]["version"], loading["params"]["version"]);
+    assert_eq!(held["result"]["text"], loading["params"]["text"]);
+    assert!(
+        !server.notifications.iter().any(
+            |message| message["method"] == "view/render" && message["params"]["viewId"] == view
+        ),
+        "held error rendered into text mode: {:?}",
+        server.notifications
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-text-mode"}}));
+    let exited = server.response_with_id(6);
+    assert!(exited["error"].is_null(), "{exited}");
+    let failed = server.recv();
+    assert_eq!(failed["method"], "view/render", "{failed}");
+    assert_eq!(failed["params"]["mode"], "interactive", "{failed}");
+    assert_eq!(
+        failed["params"]["version"],
+        loading["params"]["version"].as_u64().unwrap() + 1
+    );
+    assert!(failed["params"].get("baseVersion").is_none(), "{failed}");
+    assert!(failed["params"].get("edits").is_none(), "{failed}");
+    std::fs::rename(&saved_git, &git_dir).unwrap();
+    let lines: Vec<String> = serde_json::from_value(failed["params"]["text"].clone()).unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Unable to load repository status")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("Loading repository status")),
+        "{lines:?}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+fn status_open_held_git(acknowledge: bool) {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("status-open-fresh.txt"), "fresh status\n");
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    gate.wait_entered();
+
+    // Use the raw transport: ready-state helpers would hide early-open failures.
+    let opened = server.recv();
+    assert_eq!(opened["id"], 2, "descriptor precedes notifications");
+    assert!(opened["error"].is_null(), "{opened}");
+    let view = opened["result"]["id"].as_str().expect("real view id");
+    assert!(!view.is_empty());
+    assert!(opened["result"]["uri"]
+        .as_str()
+        .is_some_and(|uri| !uri.is_empty()));
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(loading["params"]["viewId"], view);
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Loading repository status…"])
+    );
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    assert!(
+        !gate.is_released(),
+        "descriptor and honest loading arrive while Git is held"
+    );
+
+    if acknowledge {
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+            "params":{"viewId":view,"version":version}}));
+    }
+    // This request must answer while acquisition is still blocked; it also
+    // orders the optional ack before the completion can be published.
+    server.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/foldingRange",
+        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    );
+    let responsive = server.response_with_id(3);
+    assert_eq!(responsive["result"], json!([]), "loading has no file folds");
+    assert!(
+        !gate.is_released(),
+        "another request answered before release"
+    );
+
+    gate.release();
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(view, version);
+    assert_eq!(ready["params"]["viewId"], view);
+    let text: Vec<String> = if acknowledge {
+        assert_eq!(ready["params"]["baseVersion"], version);
+        assert!(ready["params"].get("text").is_none(), "{ready}");
+        let edits: Vec<magit_lsp::protocol::LineEdit> =
+            serde_json::from_value(ready["params"]["edits"].clone()).unwrap();
+        magit_lsp::diff_text::apply_edits(&["Loading repository status…".into()], &edits)
+    } else {
+        assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
+        assert!(ready["params"].get("edits").is_none(), "{ready}");
+        serde_json::from_value(ready["params"]["text"].clone()).unwrap()
+    };
+    assert!(
+        text.iter()
+            .any(|line| line.contains("status-open-fresh.txt")),
+        "{text:?}"
+    );
+    assert!(
+        text.iter().any(|line| line.contains("+line3 CHANGED")),
+        "{text:?}"
+    );
+    assert!(!text
+        .iter()
+        .any(|line| line.contains("Loading repository status")));
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(4);
+    assert_eq!(resync["result"]["version"], ready["params"]["version"]);
+    assert_eq!(resync["result"]["text"], json!(text));
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[test]
 fn opening_multirow_rebase_todo_batches_object_resolution_once() {
     for rows in [2, 5] {
@@ -342,7 +1055,8 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     assert!(server.initialize_rich(json!({}))["error"].is_null());
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let version = if view == status { 2 } else { 1 };
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":version,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
         server.response_with_id(id)
     };
     let pushed = |response: &Value| {
@@ -1682,6 +2396,13 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     assert_eq!(render["method"], json!("view/render"), "{render}");
     let keymap = server.recv();
     assert_eq!(keymap["method"], json!("view/keymap"), "{keymap}");
+    let ready = server.wait_for_view_render_after(
+        &view_id,
+        render["params"]["version"]
+            .as_u64()
+            .expect("initial render version"),
+    );
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":ready["params"]["version"]}}));
     view_id
 }
 
@@ -1689,10 +2410,12 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
 fn open_plain_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     server.send(open_view_message(id, repo));
     let opened = server.response_with_id(id);
-    opened["result"]["id"]
+    let view_id = opened["result"]["id"]
         .as_str()
         .expect("view id")
-        .to_string()
+        .to_string();
+    server.wait_for_view_resync_after(&view_id, id * 100_000 + 1, 1);
+    view_id
 }
 
 /// A `view/open` request for a status view of `repo`.
@@ -1769,11 +2492,7 @@ fn a_declared_native_pick_answers_the_staged_menu_prompt() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize(rich_pick_capabilities());
-    server.send(open_view_message(2, &repo_param(tmp.path())));
-    let status = server.response_with_id(2)["result"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
         "params":{"viewId":status,"command":"open.branch"}}));
     let opened = server.response_with_id(3);
@@ -2181,11 +2900,7 @@ fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize(limited_rich(json!([]), json!([])));
-    server.send(open_view_message(2, &repo_param(tmp.path())));
-    let status = server.response_with_id(2)["result"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
         "params":{"viewId":status,"command":"open.branch"}}));
     let opened = server.response_with_id(3);

@@ -257,6 +257,8 @@ pub struct OpenView {
     mode: ViewMode,
     /// A refresh arrived while in text mode; it is applied on exit.
     dirty: bool,
+    /// A generation-validated completion is stored for publication on text-mode exit.
+    pending_completion: bool,
     /// Global detail level, including levels with no visible children.
     visibility_level: u8,
     /// Where the session publishes this view; consulted for resync markers.
@@ -360,6 +362,11 @@ impl OpenView {
     fn leave_text_mode(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
         self.mode = ViewMode::Interactive;
         self.descriptor.mode = ViewMode::Interactive;
+        // A completion acquired during text mode already holds the backing
+        // state, so publish it without reading Git again. A refresh that
+        // arrived after it was installed is still queued in `dirty` and must
+        // be honored before the full replacement.
+        self.pending_completion = false;
         if std::mem::take(&mut self.dirty) {
             self.view.on_refresh()?;
         }
@@ -441,6 +448,7 @@ impl OpenView {
 
     /// Render authoritative structure without advancing the delivery version.
     fn render_tree(&mut self) -> Tree {
+        let started = std::time::Instant::now();
         let pending = self.menu_pending.clone();
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
@@ -451,6 +459,10 @@ impl OpenView {
             let drafts = crate::editor::registry().pending_for(owner, &self.repo_path);
             tree.append_pending_drafts(&drafts);
         }
+        crate::runner::trace_current(
+            "phase_tree_render",
+            serde_json::json!({ "duration_ms": started.elapsed().as_secs_f64() * 1000.0 }),
+        );
         tree
     }
 
@@ -516,10 +528,15 @@ fn initialize_open_view(
     draft_owner: Option<String>,
 ) -> (ViewDescriptor, ViewRender, OpenView) {
     let repo_path_owned = repo_path.to_string();
+    let render_started = std::time::Instant::now();
     let mut tree = view.render(&Ctx {
         viewport,
         pending: &[],
     });
+    crate::runner::trace_current(
+        "phase_tree_render",
+        serde_json::json!({ "duration_ms": render_started.elapsed().as_secs_f64() * 1000.0 }),
+    );
     #[cfg(unix)]
     if let Some(owner) = &draft_owner {
         let drafts = crate::editor::registry().pending_for(owner, &repo_path_owned);
@@ -562,6 +579,7 @@ fn initialize_open_view(
         key_cursor: None,
         mode: descriptor.mode,
         dirty: false,
+        pending_completion: false,
         visibility_level: 4,
         published: PublishedViews::default(),
         repo_path: repo_path_owned,
@@ -756,7 +774,106 @@ fn prompt_busy() -> InvokeResult {
     }
 }
 
+fn loading_action_blocked(command: &str, ready: bool) -> bool {
+    !ready
+        && !matches!(
+            command,
+            "common.refresh" | "common.toggle-text-mode" | "common.close"
+        )
+}
+
+#[cfg(test)]
+mod loading_action_tests {
+    use super::loading_action_blocked;
+
+    #[test]
+    fn loading_blocks_state_dependent_actions_but_allows_safe_commands() {
+        assert!(loading_action_blocked("file.stage", false));
+        assert!(loading_action_blocked("rebase.continue", false));
+        assert!(!loading_action_blocked("common.refresh", false));
+        assert!(!loading_action_blocked("common.toggle-text-mode", false));
+        assert!(!loading_action_blocked("common.close", false));
+        assert!(!loading_action_blocked("file.stage", true));
+    }
+}
+
 impl Session {
+    /// Install a status acquisition only into its still-live view generation.
+    pub fn install_fresh_status(
+        &mut self,
+        view_id: &str,
+        fresh: crate::status_view::FreshStatus,
+    ) -> Result<Option<ViewRender>> {
+        let Some(view) = self.views.get_mut(view_id) else {
+            return Ok(None);
+        };
+        let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        else {
+            return Ok(None);
+        };
+        if !status.install_fresh_state(fresh) {
+            return Ok(None);
+        }
+        // Text mode owns the buffer: keep the installed result unpublished and
+        // unversioned until leaving text mode renders it as a full replace.
+        if view.mode() == ViewMode::Text {
+            view.pending_completion = true;
+            return Ok(None);
+        }
+        let tree = view.render_tree();
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        self.publish();
+        Ok(Some(render))
+    }
+
+    /// Render a terminal status-acquisition error only into the live loading generation.
+    pub fn fail_fresh_status(
+        &mut self,
+        view_id: &str,
+        generation: u64,
+        message: String,
+    ) -> Result<Option<ViewRender>> {
+        let Some(view) = self.views.get_mut(view_id) else {
+            return Ok(None);
+        };
+        let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        else {
+            return Ok(None);
+        };
+        if !status.fail_loading(message, generation) {
+            return Ok(None);
+        }
+        // Text mode owns the buffer: keep the installed error unpublished and
+        // unversioned until leaving text mode renders it as a full replace.
+        if view.mode() == ViewMode::Text {
+            view.pending_completion = true;
+            return Ok(None);
+        }
+        let tree = view.render_tree();
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        self.publish();
+        Ok(Some(render))
+    }
+
+    /// Take a coalesced loading refresh for the next status acquisition.
+    pub(crate) fn take_pending_status_refresh(
+        &mut self,
+        view_id: &str,
+        completed_generation: u64,
+    ) -> Option<u64> {
+        let view = self.views.get_mut(view_id)?;
+        let status = view.view.as_any_mut()?.downcast_mut::<StatusView>()?;
+        status.take_pending_refresh(completed_generation)
+    }
+
     /// Create a session for a repository root.
     pub fn new(repo_path: impl Into<String>) -> Self {
         Self {
@@ -924,6 +1041,30 @@ impl Session {
         self.open_internal(id.into(), kind, placement, viewport, args, None)
     }
 
+    /// Open a view using the repository already discovered by the server.
+    pub fn open_with_discovered_repo(
+        &mut self,
+        id: impl Into<String>,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+        repo: GitRepo,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_internal_with_repo(id.into(), kind, placement, viewport, args, None, Some(repo))
+    }
+
+    /// Open a status view in its loading state without acquiring Git status.
+    pub fn open_status_loading(
+        &mut self,
+        id: impl Into<String>,
+        placement: Placement,
+        viewport: Viewport,
+        repo: GitRepo,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_provider_view(id, placement, viewport, Box::new(StatusView::loading(repo)))
+    }
+
     fn open_internal(
         &mut self,
         id: String,
@@ -933,10 +1074,31 @@ impl Session {
         args: Option<&Value>,
         section_line_limit: Option<usize>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_internal_with_repo(
+            id,
+            kind,
+            placement,
+            viewport,
+            args,
+            section_line_limit,
+            None,
+        )
+    }
+
+    fn open_internal_with_repo(
+        &mut self,
+        id: String,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+        section_line_limit: Option<usize>,
+        repo: Option<GitRepo>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         if self.views.get(&id).is_some() {
             return Err(Error::new(format!("view already open: {id}")));
         }
-        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps, repo)?;
         if let Some(limit) = section_line_limit {
             view.set_section_line_limit(Some(limit));
         }
@@ -1156,6 +1318,24 @@ impl Session {
         request: crate::dispatch::DispatchRequest,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
+        let ready = self
+            .views
+            .get(&request.target.view_id)
+            .is_some_and(|view| view.view.is_ready());
+        if loading_action_blocked(&request.command, ready) {
+            return Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    "Repository status is still loading",
+                )],
+                ..InvokeResult::empty()
+            });
+        }
+        if request.command == "common.refresh"
+            && self.queue_loading_status_refresh(&request.target.view_id)
+        {
+            return Ok(InvokeResult::empty());
+        }
         if self.pending_prompt.is_some() && request.command != "common.refresh" {
             return Ok(prompt_busy());
         }
@@ -2249,7 +2429,7 @@ impl Session {
         placement: Placement,
         args: Option<&Value>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let view = create_view(&self.repo_path, &kind, args, &self.keymaps, None)?;
         self.push_view(parent_id, kind, placement, view)
     }
 
@@ -2367,6 +2547,14 @@ impl Session {
             .views
             .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        if view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+            .is_some_and(|status| status.queue_refresh_while_loading().is_some())
+        {
+            return Ok(None);
+        }
         if prompt_active {
             view.queue_refresh();
             return Ok(None);
@@ -2391,6 +2579,14 @@ impl Session {
             None,
             RenderDelivery::Acknowledged,
         )?))
+    }
+
+    fn queue_loading_status_refresh(&mut self, view_id: &str) -> bool {
+        self.views
+            .get_mut(view_id)
+            .and_then(|view| view.view.as_any_mut())
+            .and_then(|state| state.downcast_mut::<StatusView>())
+            .is_some_and(|status| status.queue_refresh_while_loading().is_some())
     }
 
     /// Re-render and publish the active view after a pending draft is admitted.
@@ -2502,9 +2698,13 @@ fn create_view(
     kind: &ViewKind,
     args: Option<&Value>,
     keymaps: &BTreeMap<String, Keymap>,
+    repo: Option<GitRepo>,
 ) -> Result<Box<dyn View>> {
     match kind {
-        ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
+        ViewKind::Status => Ok(Box::new(match repo {
+            Some(repo) => StatusView::open_repo(repo)?,
+            None => StatusView::open(repo_path)?,
+        })),
         ViewKind::Log => {
             let options = match args {
                 Some(args) => {

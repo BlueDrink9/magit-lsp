@@ -196,6 +196,11 @@ pub trait View: Send {
     /// The view kind this implementation renders.
     fn kind(&self) -> ViewKind;
 
+    /// Whether this view has acquired the state required for interactive actions.
+    fn is_ready(&self) -> bool {
+        true
+    }
+
     /// Human-readable title for the client's buffer or window.
     fn title(&self) -> String;
 

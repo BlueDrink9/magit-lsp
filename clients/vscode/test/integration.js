@@ -1419,6 +1419,17 @@ async function run() {
     __test.setWorkspaceFolder(secondRepo);
     await commands.get("magit.open")();
     await waitFor(() => store.views.size === 2, "second repository view");
+    const secondView = () =>
+      Array.from(store.views.values()).find((state) => state.repo === secondRepo);
+    await waitFor(
+      () =>
+        secondView() &&
+        secondView().id === store.activeViewId &&
+        __test.activeEditor &&
+        __test.activeEditor.document.uri.toString() === secondView().uri.toString() &&
+        /Unstaged changes/.test(__test.activeEditor.document.getText()),
+      "second repository status view ready",
+    );
     await commands.get("magit.invoke")({ command: "common.quit" });
     assert.equal(store.views.size, 1, "quit removes only the originating repository view");
     assert.equal(Array.from(store.views.values())[0].repo, repo);

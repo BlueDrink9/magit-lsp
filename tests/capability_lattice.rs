@@ -71,6 +71,22 @@ fn stage_profile(
         let id = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/open","params":{"kind":"status","args":{"repo_path":repo.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
         let opened = client.until_response(id);
         let view = opened["result"]["id"].as_str().expect("status opened");
+        // State-dependent commands are refused while the status acquisition is
+        // still running (src/session.rs:1321-1333), so wait for the server-owned
+        // render to publish acquired state before invoking stage-all.
+        client.until(|c| {
+            c.rich
+                .as_ref()
+                .and_then(|rich| rich.views.get(view))
+                .is_some_and(|state| {
+                    state.version > 0
+                        && !state.lines.is_empty()
+                        && !state
+                            .lines
+                            .iter()
+                            .any(|line| line.contains("Loading repository status"))
+                })
+        });
         let id = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         assert!(client.until_response(id)["error"].is_null());
     } else {
@@ -421,25 +437,46 @@ fn draft_chain(
                 })
             })
     });
-    let edits_draft = |message: &Value| {
-        message["method"] == "workspace/applyEdit"
-            && (message["params"]["edit"]["documentChanges"]
-                .as_array()
-                .is_some_and(|changes| {
-                    changes
-                        .iter()
-                        .any(|change| change["textDocument"]["uri"] == draft_uri)
-                })
-                || message["params"]["edit"]["changes"]
-                    .get(draft_uri.as_str())
-                    .is_some())
-    };
-    let template_index = client.editor.outbound.iter().position(edits_draft);
+    // The status render can quote the draft path in fallback instructions, so
+    // identify the template edit by the document it targets rather than by
+    // serialized text. Template refresh is gated on the effective
+    // applyEdit+documentChanges capabilities (src/server/plain.rs:1284-1295).
+    // These fixtures send no clientInfo (tests/common/stdio.rs:334-345), so the
+    // recorded declaration is effective; the assume-document-changes quirk
+    // (src/quirks.rs:81-95) only applies to a matching client identity.
+    let template_index = client.editor.outbound.iter().position(|m| {
+        if m["method"] != "workspace/applyEdit" {
+            return false;
+        }
+        let edit = &m["params"]["edit"];
+        edit["documentChanges"].as_array().is_some_and(|changes| {
+            changes
+                .iter()
+                .any(|change| change["textDocument"]["uri"] == draft_uri.as_str())
+        }) || edit["changes"]
+            .as_object()
+            .is_some_and(|changes| changes.contains_key(&draft_uri))
+    });
     assert_eq!(
         template_index.is_some(),
         refresh,
         "versioned template refresh requires documentChanges"
     );
+    if refresh {
+        let edit =
+            &client.editor.outbound[template_index.expect("template edit")]["params"]["edit"];
+        let change = &edit["documentChanges"][0];
+        assert_eq!(change["textDocument"]["uri"], json!(draft_uri));
+        assert!(
+            change["textDocument"]["version"].is_number(),
+            "template edit must be a versioned whole-document edit: {edit}"
+        );
+        assert_eq!(
+            change["edits"][0]["range"]["start"],
+            json!({"line":0,"character":0})
+        );
+        assert_eq!(change["edits"][0]["newText"], fixtures::read(&draft_path));
+    }
     if refresh {
         assert_eq!(
             client.editor.text(&draft_uri),

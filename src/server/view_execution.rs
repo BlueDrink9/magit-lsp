@@ -1,3 +1,4 @@
+use super::requests::DeferredStatus;
 use super::*;
 
 /// Worker-owned same-repository mutation reservation.
@@ -16,12 +17,19 @@ impl Drop for DeferredReservation {
 }
 
 pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let total = std::time::Instant::now();
     let p: ViewOpenParams = from_params(params)?;
     let repo = p
         .repo_path()
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
-    let repo = crate::git::GitRepo::open(&repo)?
+    let discovery = std::time::Instant::now();
+    let discovered_repo = crate::git::GitRepo::open(&repo)?;
+    crate::runner::trace_current(
+        "phase_repository_discovery",
+        serde_json::json!({ "duration_ms": discovery.elapsed().as_secs_f64() * 1000.0 }),
+    );
+    let repo = discovered_repo
         .root()
         .canonicalize()?
         .to_string_lossy()
@@ -55,6 +63,8 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
                 .clone()
         }
     };
+    let session_start = std::time::Instant::now();
+    let is_status = matches!(&p.kind, ViewKind::Status);
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         let rich = match shared
@@ -76,20 +86,44 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             .or_insert_with(|| session.published());
         session.set_keymaps(keymaps);
         let placement = p.placement.unwrap_or_default();
-        let (descriptor, render) =
-            session.open_with_args(id.clone(), p.kind, placement, p.viewport, p.args.as_ref())?;
+        let (descriptor, render) = if is_status {
+            session.open_status_loading(id.clone(), placement, p.viewport, discovered_repo)?
+        } else {
+            session.open_with_discovered_repo(
+                id.clone(),
+                p.kind,
+                placement,
+                p.viewport,
+                p.args.as_ref(),
+                discovered_repo,
+            )?
+        };
         let keymap = session.keymap_notice(&id);
         (descriptor, render, keymap)
     };
+    crate::runner::trace_current(
+        "phase_session_open_render",
+        serde_json::json!({ "duration_ms": session_start.elapsed().as_secs_f64() * 1000.0 }),
+    );
     let repo = repo.as_str();
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(id, repo.to_string());
+        .insert(id.clone(), repo.to_string());
+    let watcher = std::time::Instant::now();
     shared.ensure_watcher(repo);
+    crate::runner::trace_current(
+        "phase_watcher_setup",
+        serde_json::json!({ "duration_ms": watcher.elapsed().as_secs_f64() * 1000.0 }),
+    );
 
+    let delivery = std::time::Instant::now();
     let mut notifications: Vec<_> = deliver_render(shared, render).into_iter().collect();
+    crate::runner::trace_current(
+        "phase_render_delivery",
+        serde_json::json!({ "duration_ms": delivery.elapsed().as_secs_f64() * 1000.0 }),
+    );
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
@@ -101,10 +135,167 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             )));
         }
     }
-    Ok(Dispatched::with(
-        serde_json::to_value(descriptor)?,
-        notifications,
-    ))
+    crate::runner::trace_current(
+        "phase_view_open_total",
+        serde_json::json!({ "duration_ms": total.elapsed().as_secs_f64() * 1000.0 }),
+    );
+    let dispatched = Dispatched::with(serde_json::to_value(descriptor)?, notifications);
+    if is_status {
+        Ok(dispatched.with_deferred(DeferredStatus {
+            repo_path: repo.to_string(),
+            view_id: id,
+            generation: 0,
+            trace_id: crate::runner::current_trace_id(),
+        }))
+    } else {
+        Ok(dispatched)
+    }
+}
+
+/// What one acquisition produced once it reached its publication turn.
+enum InstallStatus {
+    /// The live generation's render, if the view still exists interactive.
+    Installed(Option<ViewRender>),
+    /// The completed generation was superseded by a coalesced refresh.
+    Coalesced(u64),
+}
+
+/// Acquire one status generation off-runtime, then publish it in repository order.
+pub(super) async fn acquire_status(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+) {
+    let acquisition_path = repo_path.clone();
+    let acquired = tokio::task::spawn_blocking(move || {
+        crate::runner::with_trace_id(trace_id, || {
+            let repo = crate::git::GitRepo::open(&acquisition_path)?;
+            crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+        })
+    })
+    .await;
+    finish_status_acquisition(shared, repo_path, view_id, generation, trace_id, acquired).await;
+}
+
+/// Start the single coalesced follow-up acquisition on its own task.
+fn spawn_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+) {
+    tokio::spawn(acquire_status(
+        shared, repo_path, view_id, generation, trace_id,
+    ));
+}
+
+/// Publish an already-acquired status generation through its repository's turn.
+///
+/// Acquisition happens before this call, so the turn only covers live-generation
+/// validation, installation and enqueueing the render. A request ordered after
+/// this ticket therefore cannot publish between installation and delivery, and
+/// a close ordered before it leaves nothing to install. The blocking install
+/// mirrors command dispatch: no Tokio worker waits on the session mutex.
+pub(super) async fn finish_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+    acquired: std::result::Result<
+        std::result::Result<crate::status_view::FreshStatus, crate::Error>,
+        tokio::task::JoinError,
+    >,
+) {
+    let turn = shared.reserve_mutation(repo_path.clone());
+    turn.wait().await;
+    let lock = repository_lock(&shared.repo_locks, &repo_path).await;
+    let _guard = lock.lock().await;
+    let install_shared = shared.clone();
+    let install_repo = repo_path.clone();
+    let install_view = view_id.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        install_status_acquisition(
+            install_shared,
+            install_repo,
+            install_view,
+            generation,
+            acquired,
+        )
+    })
+    .await;
+    match outcome {
+        Ok(InstallStatus::Coalesced(next_generation)) => {
+            spawn_status_acquisition(
+                shared,
+                repo_path,
+                view_id.clone(),
+                next_generation,
+                trace_id,
+            );
+        }
+        Ok(InstallStatus::Installed(render)) => {
+            if let Some(render) = render {
+                if let Some(message) = super::plain::deliver_render(&shared, render) {
+                    let _ = shared.sender.send(message);
+                }
+            }
+        }
+        Err(error) => tracing::warn!(%error, "status completion install failed"),
+    }
+    if trace_id > 0 {
+        crate::runner::trace(
+            trace_id,
+            "status_completion_processed",
+            serde_json::json!({ "view": view_id }),
+        );
+    }
+    drop(turn);
+}
+
+/// Install or coalesce one acquired generation; the caller owns the turn.
+fn install_status_acquisition(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    acquired: std::result::Result<
+        std::result::Result<crate::status_view::FreshStatus, crate::Error>,
+        tokio::task::JoinError,
+    >,
+) -> InstallStatus {
+    let Some(handle) = shared.session(&repo_path) else {
+        return InstallStatus::Installed(None);
+    };
+    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(next_generation) = session.take_pending_status_refresh(&view_id, generation) {
+        return InstallStatus::Coalesced(next_generation);
+    }
+    let render = match acquired {
+        Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
+        Ok(Err(error)) => session.fail_fresh_status(
+            &view_id,
+            generation,
+            format!("Unable to load repository status: {error}"),
+        ),
+        Err(error) => session.fail_fresh_status(
+            &view_id,
+            generation,
+            format!("Unable to load repository status: {error}"),
+        ),
+    };
+    match render {
+        Ok(render) => InstallStatus::Installed(render),
+        // Installation failures still complete this acquisition; a later
+        // request sees the installed loading/error state, not a stale retry.
+        Err(error) => {
+            tracing::warn!(%error, "status completion install failed");
+            InstallStatus::Installed(None)
+        }
+    }
 }
 
 pub(super) fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {

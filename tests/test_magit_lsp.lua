@@ -62,9 +62,13 @@ local function setup_child(opts)
   end
   child.lua(
     string.format(
-      "VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); "
-        .. "vim.wait(5000, function() local v = M.status_view(); "
-        .. "return v ~= nil and v.version ~= nil and v.keymap_ready end, 10); "
+      "function STATUS_SETTLED(record) "
+        .. "if not record or record.version == nil or not record.keymap_ready then return false end; "
+        .. "local lines = vim.api.nvim_buf_get_lines(record.buf, 0, -1, false); "
+        .. "return not vim.tbl_contains(lines, 'Loading repository status…') end; "
+        .. "VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); "
+        .. "local ok = vim.wait(5000, function() return STATUS_SETTLED(M.status_view()) end, 10); "
+        .. "if not ok then error('status view stayed at the loading placeholder') end; "
         .. "STATUS = M.status_view()",
       vim.inspect(init)
     )
@@ -490,6 +494,21 @@ local T = MiniTest.new_set({
     pre_case = function()
       repo = make_repo()
       child.restart({ "-u", "scripts/minimal_init.lua" })
+      child.lua([[
+        --- True when `record` is a status view whose buffer holds the completed
+        --- fixture status (never the loading placeholder) and whose keymap is
+        --- applied. The placeholder also satisfies version/keymap_ready, so the
+        --- rendered text is the only deterministic completion signal.
+        ---@param record table|nil
+        ---@return boolean
+        function STATUS_SETTLED(record)
+          if not record or record.version == nil or not record.keymap_ready then
+            return false
+          end
+          local lines = vim.api.nvim_buf_get_lines(record.buf, 0, -1, false)
+          return not vim.tbl_contains(lines, "Loading repository status…")
+        end
+      ]])
     end,
     post_case = function()
       pcall(
@@ -677,8 +696,7 @@ T["bare :Magit starts a session for the current directory without setup"] = func
     (function()
       M = require('magit-lsp')
       local opened = vim.wait(10000, function()
-        local record = M.status_view()
-        return record ~= nil and record.version ~= nil and record.keymap_ready
+        return STATUS_SETTLED(M.status_view())
       end, 20)
       local record = M.status_view()
       local session = M.sessions[vim.fn.getcwd()]
@@ -729,8 +747,7 @@ T["bare :Magit reopens a wiped status without a second server"] = function()
   local state = child.lua_get([[
     (function()
       local opened = vim.wait(10000, function()
-        local record = M.status_view()
-        return record ~= nil and record.version ~= nil and record.keymap_ready
+        return STATUS_SETTLED(M.status_view())
       end, 20)
       STATUS = M.status_view()
       local session = M.sessions[vim.fn.getcwd()]
@@ -768,8 +785,7 @@ T[":Magit starts an explicit repository directory"] = function()
     (function()
       M = require('magit-lsp')
       local opened = vim.wait(10000, function()
-        local record = M.status_view(%q)
-        return record ~= nil and record.version ~= nil and record.keymap_ready
+        return STATUS_SETTLED(M.status_view(%q))
       end, 20)
       local record = M.status_view(%q)
       return {
@@ -2098,8 +2114,7 @@ T["two repositories get independent status views"] = function()
   child.lua(
     string.format(
       "vim.cmd('tabnew'); M.setup({ root_dir = %q }); "
-        .. "vim.wait(5000, function() local v = M.status_view(%q); "
-        .. "return v ~= nil and v.version ~= nil and v.keymap_ready end, 10)",
+        .. "vim.wait(5000, function() return STATUS_SETTLED(M.status_view(%q)) end, 10)",
       other,
       other
     )

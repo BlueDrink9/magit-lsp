@@ -177,6 +177,36 @@ fn every_profile_resolves_without_conflicts() {
     }
 }
 
+#[test]
+fn repeated_profile_resolution_reuses_stable_independent_bindings() {
+    let standard_config = Config {
+        profile: Profile::Standard,
+        ..Default::default()
+    };
+    let vim_config = Config {
+        profile: Profile::Vim,
+        ..Default::default()
+    };
+    let standard = Keymap::resolve("status", Profile::Standard, &standard_config).unwrap();
+    let vim = Keymap::resolve("status", Profile::Vim, &vim_config).unwrap();
+    assert_ne!(
+        standard.command("open.dispatch").unwrap().keys,
+        vim.command("open.dispatch").unwrap().keys,
+        "switching profiles yields each profile's own bindings"
+    );
+
+    // A caller owns its result: mutating it cannot change the shared parse or
+    // later lookups.
+    let mut first = profile_keys(Profile::Standard).unwrap();
+    first.scopes.clear();
+    let second = profile_keys(Profile::Standard).unwrap();
+    assert!(
+        second.scopes.contains_key("status"),
+        "a mutated result must not poison later lookups"
+    );
+    assert_eq!(profile_keys(Profile::Standard).unwrap(), second);
+}
+
 fn profile_chords(profile: Profile) -> Vec<KeyChord> {
     let keys = profile_keys(profile).expect("profile parses");
     let mut chords = Vec::new();
