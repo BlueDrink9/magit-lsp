@@ -199,12 +199,15 @@ records are in ignored `build/startup-perf/20261122T002937-3229/`. Validation
 rejects empty data/reports, zero samples, no symbolized server function, or
 missing inherited child Git task events.
 
-Call graphs are still denied: `PERF_SAMPLE_CALLCHAIN` configurations fail at
+The first run's probe requested only `--call-graph dwarf`; it failed at
 `perf_event_open` with EACCES under `kernel.perf_event_paranoid=2`, `Seccomp=2`
-and no effective capabilities. The recorder therefore selected flat
-`cycles:u` samples. `server-*.samples.txt` is a flat per-sample and task-event
-record, **not** a captured call stack; no stack or exclusive phase attribution
-is claimed. Permission was not changed, and no alternate profiler was used.
+and no effective capabilities, so that run selected flat `cycles:u` samples.
+That probe omitted `--user-callchains`, and repeating it with the flag succeeds
+(see "User-space call chains" below), so the earlier statement that call graphs
+are denied was too broad. In the flat run, `server-*.samples.txt` is a flat
+per-sample and task-event record, **not** a captured call stack; no stack or
+exclusive phase attribution is claimed for it. Permission was not changed, and
+no alternate profiler was used.
 
 Per-launch attributed samples (sum of symbolized report rows; perf's header
 abbreviates the worktree totals as `1K`):
@@ -264,11 +267,69 @@ first-open, initialized-server reopen or already-open focus. Sampling at 999 Hz
 bounds resolution, short Git processes can be missed, perf adds sampling
 overhead, and debug/unoptimized code biases symbol shares.
 
-**Next experiment:** if call-graph permission is granted, rerun the same target
+**Next experiment (superseded by "User-space call chains" below):** if
+call-graph permission is granted, rerun the same target
 and inspect `server-*.samples.txt` stacks to test whether the `span_line`
 symbols and Git loader/config symbols belong to the same paths; correlate
 phase timing from the existing trace harness rather than inferring a bottleneck
 from flat shares. No speedup follows from these sample shares alone.
+
+### User-space call chains (2026-11-22)
+
+The runner now requests `--call-graph dwarf --user-callchains` in both the
+permission probe and every real inherited recording, and it selects a non-flat
+mode only when the probe yields at least one two-frame stack. A selected
+non-flat run is rejected if a launch has no server call chains, so exit status
+alone can never label flat samples as stacks; if no configuration produces
+stacks, the runner keeps the flat `cycles:u` path and prints that the call-graph
+probe failed with the attempts file path.
+
+`make nvim-startup-perf` needed two runs for this change: the first exited 1
+because call-graph data adds `Children`/`Self` columns to `perf report` and the
+flat row parser matched nothing; adding `--no-children` restored self-sample
+rows, and the second run exits 0 (`ok: build`; `ok: nvim-startup-perf`). The
+probe selected `cycles:u` with DWARF user-space stacks (`rc=0`, 304 samples,
+304 stacked, max depth 37), so **stack recording works in this sandbox**.
+Artifacts are in `build/startup-perf/20261122T005359-7311/`, including
+`preflight/attempts.txt`, `server-wrapper.sh` (which shows the actual flags),
+one `server-*.data`/`.report.txt`/`.samples.txt` per launch, and `summary.json`.
+Median per launch: 814 self samples (1,189 attributed), 803 server, 346 Git,
+144 inherited Git task events, 10.8 MiB of DWARF data.
+
+Across the six launches `summary.json` records 6,063 stacked samples: 3,888
+server, 2,308 Git, maximum depth 1,396. Representative captured chains
+(verbatim frames from `server-5mSJ9S.samples.txt`):
+
+- Server: `Keymap::resolve` → `config::profile_keys` → `config::apply_keys` →
+  `config::parse_binding` → `config::parse_chord_array` →
+  `config::span_line` → the `Filter`/`Bytes`/`map_fold` iterator frames
+  (13 frames). Another tokio-worker chain reaches the same
+  `Keymap::resolve`/`apply_keys` path through the `toml_parser` lexer.
+- Git: `main` → `init_git` → `setlocale` → `_nl_find_locale` →
+  `__gconv_read_conf` → `read_conf_file.isra.0` → `__strcmp_avx2` in the
+  sampled `git` 2.56.0 executable (13 frames).
+
+This changes the flat interpretation from inference to measured ancestry, while
+remaining inclusive and non-exclusive: 1,882 of the 3,888 server stacked
+samples (48.4%) contain the config key/binding parse chain at least once, and
+1,652 of the 2,308 Git stacked samples (71.6%) contain locale/gconv/config-init
+frames. The flat `span_line` family (1,524 samples, 19.7% of that run) is
+therefore the leaf end of one measured initialization path, and the flat Git
+loader/config symbols (`__strcmp_avx2`, `read_conf_file.isra.0`,
+`_dl_relocate_object_no_relro`, `do_lookup_x`) occur under each Git process's
+locale/config startup, not under status or diff computation. Each sampled
+chain is counted once, its frames overlap, and these percentages are presence
+in stacks, not exclusive CPU cost or a share that can be added across
+functions. They do not by themselves select an optimization target.
+
+Limitations specific to these stacks: 10 frame lines were `[unknown]`, and
+seven samples have more than 200 frames (up to 1,396 frames over 184 distinct
+addresses with repeated `notify::inotify::EventLoop` frames). These are DWARF
+unwind runaways, not evidence of recursion or deep product call depth, and are
+excluded from the chain counts above. There are no kernel frames because the
+call chains are user-space only. The debug build, one-file fixture, dirty
+worktree, whole-server-lifecycle window and 999 Hz resolution remain, so these
+chains are descriptive rather than a controlled production baseline.
 
 ## Early loading display evidence (2026-11-21)
 
