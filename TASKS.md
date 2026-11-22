@@ -15,7 +15,9 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
   - Verified: `make test-rust FILTER="--test server_async"` on the implementation based on `37056f2` → exit 0, 67 passed / 0 failed; `build/test-logs/rust.mi9W1F`. Both named cases assert the distinct `view/invoke` request and `commit` worker tokens each run create/begin/end, the signing case cancels the correlated worker token, and failure/draft/unsigned-recovery outcomes are retained.
   - Done: `f500bf1`.
 
-- [ ] **STARTUP-TOKENS-READY — Decode semantic tokens against a fresh acknowledged status tree.** test: preserve exact token decoding/equality oracle while correcting asynchronous-open setup where proven necessary. Verification: `make test-rust FILTER="--test semantic_tokens"`.
+- [x] **STARTUP-TOKENS-READY — Decode semantic tokens against a fresh acknowledged status tree.** test: preserve exact token decoding/equality oracle while correcting asynchronous-open setup where proven necessary. Verification: `make test-rust FILTER="--test semantic_tokens"`.
+  - Done: 05c63e9
+  - Verified: make test-rust FILTER="--test semantic_tokens" @ 72c727c → ok
 
 - [ ] **STARTUP-HYGIENE-READY — Exercise Git failures after status acquisition in stdout hygiene tests.** test: retain readable error, stderr/log and framed-only stdout assertions with deterministic fresh status readiness. Verification: `make test-rust FILTER="--test stdout_hygiene"`.
 
