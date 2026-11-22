@@ -116,6 +116,12 @@ Historical reference mapping (not additional tasks or completion claims): R-VS/A
 
 ## Review
 
+- [x] **[P1] Resolve Unicode filename tokens through the negotiated legend**
+  - VERIFIED at `05d4422`: `make test` fails `plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invalid_columns` (`tests/plain_vis.rs:222`, log `build/test-logs/rust.hh24SW`). Selector at line 208 hardcodes index 2, now `added`; filename emission is `path` (`src/status_view.rs:576-582`).
+  - test: resolve `path` from the negotiated legend and preserve UTF-8/16/32 lengths 8/6/5 and invalid-column rejection. Verify: `make test-rust FILTER="--test plain_vis"`.
+  - Verified: `make test-rust FILTER="--test plain_vis"` @ `05d4422` → `ok: rust`, `6 passed; 0 failed` (log `build/test-logs/rust.KtWy0f`). `setup_with_encoding` now captures the initialize response's `capabilities.semanticTokensProvider.legend.tokenTypes` and the test resolves the `path` index from it, replacing the hardcoded `Some(2)`. Pre-change red at `05d4422` was an assertion failure (`None` vs `Some(8)` at `tests/plain_vis.rs:222`, log `build/test-logs/rust.ePyvvD`), not a compile error. All UTF-8/16/32 lengths 8/6/5, offsets, interior-invalid-column and terminal-phantom-row assertions are unchanged; production untouched.
+  - Done: `28b99a3`.
+
 - [x] **[P1] Complete menu and status-render semantic fixture migration**
   - VERIFIED scout at `77da295`: `tests/menus.rs:676,700` still select retired planned/group types; current labels are `muted`+`planned` and group headings `heading` (`src/menu.rs:935-939,700-706`). Full gate `rust.DNSdCA` failed planned-action collection.
   - Part 1: test: preserve exact planned-label list and narrow/wide layout assertions using canonical type/modifier selectors; check: `make test-rust FILTER="--test menus"`.
