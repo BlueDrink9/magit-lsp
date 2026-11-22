@@ -7,6 +7,18 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **STARTUP-PLAIN-READY — Restore Plain harness readiness and routing assertions.** test: correct deterministic setup for the four failing Plain harness cases exposed by asynchronous status opening without weakening mutation/progress/prompt/rejection contracts. Verification: `make test-rust FILTER="--test plain_harness"`.
+  - Verified: `make test-rust FILTER="--test plain_harness"` on the implementation based on `6db6d6c` → exit 0, 34 passed; `build/test-logs/rust.pv9wOT`. Readiness, worker-token correlation and draft-delivery gates retain mutation, cancellation and rejection assertions.
+  - Done: `37056f2`.
+
+- [x] **STARTUP-PROGRESS-READY — Align commit progress assertions with real request and worker lifecycles.** test: failed-commit and signing recovery cases in `tests/server_async/repository.rs` assert complete correlated progress lifecycles, failure/cancellation and recovery without truncating the event stream. Verification: `make test-rust FILTER="--test server_async"`.
+  - Verified: `make test-rust FILTER="--test server_async"` on the implementation based on `37056f2` → exit 0, 67 passed / 0 failed; `build/test-logs/rust.mi9W1F`. Both named cases assert the distinct `view/invoke` request and `commit` worker tokens each run create/begin/end, the signing case cancels the correlated worker token, and failure/draft/unsigned-recovery outcomes are retained.
+  - Done: `f500bf1`.
+
+- [ ] **STARTUP-TOKENS-READY — Decode semantic tokens against a fresh acknowledged status tree.** test: preserve exact token decoding/equality oracle while correcting asynchronous-open setup where proven necessary. Verification: `make test-rust FILTER="--test semantic_tokens"`.
+
+- [ ] **STARTUP-HYGIENE-READY — Exercise Git failures after status acquisition in stdout hygiene tests.** test: retain readable error, stderr/log and framed-only stdout assertions with deterministic fresh status readiness. Verification: `make test-rust FILTER="--test stdout_hygiene"`.
+
 - [x] **STARTUP-EXAMPLE-REFS — Refresh generated references for the asynchronous lifecycle.** Part 1 check: regenerate through `make update-schema` and commit generated reference changes separately from queue bookkeeping. Part 2 check: `make schema-check docs-check` validates the generated references and documentation; record evidence and completion.
   - Part 1: `make update-schema` → exit 0 (`ok: update-schema (warnings detected; check log: build/test-logs/update-schema.mcBfTo)`), rerun idempotent; regenerated `docs/schema/worked-exchanges-02.md` and `docs/schema/worked-exchanges-03.md`. The rich exchange now records loading v1, fresh full status v2 without an acknowledged base, acks v1/v2, key v2, one progress token, and the mutation edit v3 from base 2, matching the committed `rich-lifecycle.jsonl`.
   - Verified: `make schema-check docs-check` @ `3b2e096` → exit 0: `ok: schema-check (warnings detected; check log: build/test-logs/schema-check.advZjX)` ends `ok: schemas current`; warnings are pre-existing unused-variable/dead-code notes in `src/server/view_execution.rs:1016`, `scripts/generate_schema.rs:82` and `scripts/schema_markdown.rs:30`, unrelated to the generated docs. `ok: docs-check` (3 tests OK, no warnings).
