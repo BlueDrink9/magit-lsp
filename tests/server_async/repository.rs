@@ -1825,12 +1825,22 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
         for (attempt, signed) in [(0, true), (1, false)] {
             let id = 10 + attempt * 10;
             let mut progress = Vec::new();
+            let mut begun: Vec<(String, String)> = Vec::new();
             server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
                 "params":{"viewId":view,"command":"commit.create",
                     "args": if signed { json!({"switches":[],"options":{"=S":""}}) } else { json!({"switches":[],"options":{}}) }}}));
             let edit = loop {
                 let message = server.recv();
                 if let Some(event) = progress_event(&message) {
+                    if event.1 == "begin" {
+                        begun.push((
+                            event.0.clone(),
+                            message["params"]["value"]["message"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        ));
+                    }
                     progress.push(event);
                 }
                 if message["id"] == id {
@@ -1860,7 +1870,8 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
             let mut cancelled = false;
             loop {
                 if signed && cancel && !cancelled {
-                    if let Some((token, _)) = progress.iter().find(|(_, phase)| phase == "begin") {
+                    if let Some((token, _)) = begun.iter().find(|(_, command)| command == "commit")
+                    {
                         let deadline = Instant::now() + Duration::from_secs(10);
                         while !observed.exists() {
                             assert!(Instant::now() < deadline, "configured signer did not start");
@@ -1875,6 +1886,15 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                 }
                 let message = server.recv();
                 if let Some(event) = progress_event(&message) {
+                    if event.1 == "begin" {
+                        begun.push((
+                            event.0.clone(),
+                            message["params"]["value"]["message"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        ));
+                    }
                     progress.push(event);
                 }
                 if message["method"] == "view/effects" {
@@ -1887,21 +1907,49 @@ fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery()
                         failure = Some(effect.clone());
                     }
                 }
-                if progress.iter().any(|(_, phase)| phase == "end")
-                    && (!signed || failure.is_some())
-                {
+                let all_ended = begun.iter().all(|(token, _)| {
+                    progress
+                        .iter()
+                        .any(|(ended, phase)| ended == token && phase == "end")
+                });
+                if begun.len() == 2 && all_ended && (!signed || failure.is_some()) {
                     break;
                 }
             }
             assert_eq!(
-                progress
-                    .iter()
-                    .map(|(_, phase)| phase.as_str())
-                    .filter(|phase| *phase != "report")
-                    .collect::<Vec<_>>(),
-                ["create", "begin", "end"]
+                begun.len(),
+                2,
+                "the commit request and worker must both begin: {progress:?}"
             );
-            assert!(progress.windows(2).all(|pair| pair[0].0 == pair[1].0));
+            let request = begun
+                .iter()
+                .find(|(_, command)| command == "view/invoke")
+                .expect("the commit request progress");
+            let worker = begun
+                .iter()
+                .find(|(_, command)| command == "commit")
+                .expect("the commit worker progress");
+            assert_ne!(
+                request.0, worker.0,
+                "request and worker must not share a token: {progress:?}"
+            );
+            for (token, command) in [request, worker] {
+                let phases: Vec<&str> = progress
+                    .iter()
+                    .filter(|(event_token, _)| event_token == token)
+                    .map(|(_, phase)| phase.as_str())
+                    .collect();
+                assert_eq!(phases.first(), Some(&"create"), "{command}: {progress:?}");
+                assert_eq!(phases.get(1), Some(&"begin"), "{command}: {progress:?}");
+                assert_eq!(phases.last(), Some(&"end"), "{command}: {progress:?}");
+                assert!(phases.len() >= 3, "{command}: {progress:?}");
+                assert!(
+                    phases[2..phases.len() - 1]
+                        .iter()
+                        .all(|phase| *phase == "report"),
+                    "{command}: {progress:?}"
+                );
+            }
             if signed {
                 assert_eq!(cancelled, cancel);
                 let failure = failure.expect("readable signing failure");
@@ -2012,16 +2060,25 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     }));
 
     let mut progress: Vec<(String, String)> = Vec::new();
+    let mut begun: Vec<(String, String)> = Vec::new();
     let mut response = None;
     let mut failure = None;
-    let saw_end = |progress: &[(String, String)]| progress.iter().any(|(_, phase)| phase == "end");
-    while response.is_none() || failure.is_none() || !saw_end(&progress) {
+    loop {
         let message = server.recv();
         if message["id"] == json!(3) {
             response = Some(message);
             continue;
         }
         if let Some(event) = progress_event(&message) {
+            if event.1 == "begin" {
+                begun.push((
+                    event.0.clone(),
+                    message["params"]["value"]["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ));
+            }
             progress.push(event);
         }
         if message["method"] == json!("window/showMessage")
@@ -2031,6 +2088,14 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
             })
         {
             failure = Some(message);
+        }
+        let all_ended = begun.iter().all(|(token, _)| {
+            progress
+                .iter()
+                .any(|(ended, phase)| ended == token && phase == "end")
+        });
+        if response.is_some() && failure.is_some() && begun.len() == 2 && all_ended {
+            break;
         }
     }
 
@@ -2044,16 +2109,40 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
         "the commit must announce itself before the worker starts: {response}"
     );
 
-    let phases: Vec<String> = progress.iter().map(|(_, phase)| phase.clone()).collect();
     assert_eq!(
-        phases,
-        vec!["create".to_string(), "begin".to_string(), "end".to_string()],
-        "a failed commit still ends its progress: {progress:?}"
+        begun.len(),
+        2,
+        "the commit request and worker must both begin: {progress:?}"
     );
-    assert!(
-        progress.windows(2).all(|pair| pair[0].0 == pair[1].0),
-        "create, begin and end must share one token: {progress:?}"
+    let request = begun
+        .iter()
+        .find(|(_, command)| command == "view/invoke")
+        .expect("the commit request progress");
+    let worker = begun
+        .iter()
+        .find(|(_, command)| command == "commit")
+        .expect("the commit worker progress");
+    assert_ne!(
+        request.0, worker.0,
+        "request and worker must not share a token: {progress:?}"
     );
+    for (token, command) in [request, worker] {
+        let phases: Vec<&str> = progress
+            .iter()
+            .filter(|(event_token, _)| event_token == token)
+            .map(|(_, phase)| phase.as_str())
+            .collect();
+        assert_eq!(phases.first(), Some(&"create"), "{command}: {progress:?}");
+        assert_eq!(phases.get(1), Some(&"begin"), "{command}: {progress:?}");
+        assert_eq!(phases.last(), Some(&"end"), "{command}: {progress:?}");
+        assert!(phases.len() >= 3, "{command}: {progress:?}");
+        assert!(
+            phases[2..phases.len() - 1]
+                .iter()
+                .all(|phase| *phase == "report"),
+            "{command}: {progress:?}"
+        );
+    }
 
     let failure = failure.expect("the failed commit effect");
     let error = failure["params"]["message"].as_str().unwrap();
