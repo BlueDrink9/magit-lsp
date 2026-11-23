@@ -2174,8 +2174,26 @@ fn plain_gate_rebase_conflict_is_readable_and_abort_restores_exact_state() {
     // Conflict rows need not render resolved file text. The structured section
     // action stages the tracked resolution without waiting for a text change.
     plain_gate_run(&mut client, &uri, "Unstaged changes", "status.stage", None);
+    // A silently skipped stage leaves the conflict unresolved and would only
+    // surface later as a failed continue: assert the index holds the resolution.
+    assert_eq!(repo.git(&["show", ":f.txt"]), "resolved\n");
+    assert!(
+        !repo.git(&["status", "--porcelain"]).contains("UU f.txt"),
+        "stage left the conflict unresolved: {}",
+        repo.git(&["status", "--porcelain"])
+    );
     plain_gate_run(&mut client, &uri, "", "open.rebase", None);
-    plain_gate_run(&mut client, &uri, "Rebase", "menu.run-action", Some("r"));
+    let continued = plain_gate_run(&mut client, &uri, "Rebase", "menu.run-action", Some("r"));
+    // A failed continue reports a warn message; a successful one has no message
+    // effects at all (tests/server_async.rs:1829-1832).
+    assert!(
+        !continued["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "message"),
+        "continue reported a message effect: {continued}"
+    );
     assert_eq!(
         repo.git(&["log", "--reverse", "--format=%s"]),
         "conflict base\nsecond change\n"
