@@ -1,7 +1,7 @@
 # Confirm the select-mode continuation: the copied commit id reaches the caller.
 fixture: log-history
 ---
-sh: nvim --headless --server ../nvim.sock --remote-expr "setreg('\"','sentinel')"
+sh: nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "setreg('\"','sentinel')"
 keys: l
 wait screen contains "Log"
 keys: c
@@ -16,5 +16,5 @@ wait
 expect screen contains "Unstaged changes"
 expect view_stack.count == 1
 snapshot: caller-restored
-sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "getreg('\"')")" = "$(git rev-parse HEAD~2)"
+sh: test "$(nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "getreg('\"')")" = "$(git rev-parse HEAD~2)"
 sh: test -z "$(git status --porcelain)"

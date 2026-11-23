@@ -6,7 +6,7 @@ env: MAGIT_LSP_CONFIG=.magit-lsp-user.toml
 ---
 wait
 expect screen contains "Unstaged changes (2)"
-sh: printf 'trust_repo_config = true\n' > .magit-lsp-user.toml; printf '[keys.status]\nstage = ["Z"]\n' > .magit-lsp.toml; nvim --headless --server ../nvim.sock --remote-expr "luaeval('(function() for _,v in pairs(require(\"magit-lsp.view\").views) do local c=vim.lsp.get_client_by_id(v.client_id); c:notify(\"workspace/didChangeConfiguration\",{}); local r=c:request_sync(\"view/resync\",{viewId=v.id},2000); assert(r and not r.err); return true end end)()')"
+sh: printf 'trust_repo_config = true\n' > .magit-lsp-user.toml; printf '[keys.status]\nstage = ["Z"]\n' > .magit-lsp.toml; nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "luaeval('(function() for _,v in pairs(require(\"magit-lsp.view\").views) do local c=vim.lsp.get_client_by_id(v.client_id); c:notify(\"workspace/didChangeConfiguration\",{}); local r=c:request_sync(\"view/resync\",{viewId=v.id},2000); assert(r and not r.err); return true end end)()')"
 wait
 goto "f.txt"
 keys: Z

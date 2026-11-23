@@ -939,14 +939,17 @@ def _run_shell(run: driver.Run, command: str, where: int) -> None:
     Scenarios use this to change the repository outside Neovim (the
     auto-refresh watcher test modifies a tracked file this way). Failures carry
     their statement and command so one combination can fail without aborting
-    later profile/size combinations.
+    later profile/size combinations. The live Neovim RPC socket is exposed as
+    `MAGIT_LSP_UI_SOCKET` so commands can address it independently of cwd.
     """
+    env = fixtures.determinism_env(run.home_path)
+    env["MAGIT_LSP_UI_SOCKET"] = run.socket
     try:
         result = subprocess.run(
             command,
             shell=True,
             cwd=run.repo_path,
-            env=fixtures.determinism_env(run.home_path),
+            env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

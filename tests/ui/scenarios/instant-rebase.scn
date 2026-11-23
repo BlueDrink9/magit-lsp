@@ -6,11 +6,11 @@ keys: c
 wait screen contains "Fixup"
 keys: F
 wait screen contains "Select commit"
-sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),cursor=vim.api.nvim_win_get_cursor(0)})')" > .git/selector-state && grep -q 'magit://log/v1:log' .git/selector-state && grep -q '"mode":"n"' .git/selector-state
-sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 3 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'three'
+sh: nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "luaeval('vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),cursor=vim.api.nvim_win_get_cursor(0)})')" > .git/selector-state && grep -q 'magit://log/v1:log' .git/selector-state && grep -q '"mode":"n"' .git/selector-state
+sh: test "$(nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "line('.')")" = 3 && nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "getline('.')" | grep -q 'three'
 keys: Down
 wait
-sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 4 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'two'
+sh: test "$(nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "line('.')")" = 4 && nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "getline('.')" | grep -q 'two'
 keys: Enter
 wait screen contains "Staged changes (0)"
 expect view_stack.count == 1
@@ -35,7 +35,7 @@ keys: c
 wait screen contains "Squash"
 keys: S
 wait screen contains "Select commit"
-sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 3 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'three'
+sh: test "$(nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "line('.')")" = 3 && nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "getline('.')" | grep -q 'three'
 keys: Down
 wait
 keys: Enter
@@ -61,13 +61,13 @@ keys: Down
 wait
 keys: Enter
 wait screen contains "Please enter the commit message"
-sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('(function() local function maps(mode) local out={} for _,m in ipairs(vim.api.nvim_buf_get_keymap(0,mode)) do out[#out+1]={lhs=m.lhs,desc=m.desc} end return out end return vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),uri=require(\"magit-lsp.view\").current().uri,base=require(\"magit-lsp.view\").current().base,stack=#require(\"magit-lsp.view\").order,normal=maps(\"n\"),insert=maps(\"i\")}) end)()')" > .git/cancel-editor-before && grep -q '"mode":"n"' .git/cancel-editor-before && grep -q 'COMMIT_EDITMSG' .git/cancel-editor-before && grep -q 'Cancel' .git/cancel-editor-before
+sh: nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "luaeval('(function() local function maps(mode) local out={} for _,m in ipairs(vim.api.nvim_buf_get_keymap(0,mode)) do out[#out+1]={lhs=m.lhs,desc=m.desc} end return out end return vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),uri=require(\"magit-lsp.view\").current().uri,base=require(\"magit-lsp.view\").current().base,stack=#require(\"magit-lsp.view\").order,normal=maps(\"n\"),insert=maps(\"i\")}) end)()')" > .git/cancel-editor-before && grep -q '"mode":"n"' .git/cancel-editor-before && grep -q 'COMMIT_EDITMSG' .git/cancel-editor-before && grep -q 'Cancel' .git/cancel-editor-before
 sh: git rev-parse "refs/heads/$(cat .git/cancel-branch-before)" > .git/cancel-marker-open && git rev-parse HEAD > .git/cancel-head-open && git ls-files --stage > .git/cancel-index-open && git hash-object two > .git/cancel-worktree-open && (git symbolic-ref --quiet --short HEAD || true) > .git/cancel-branch-open && test -d .git/rebase-merge
 keys standard: C-S-x
 keys vim: Z Q
 wait screen contains "Instant autosquash stopped during autosquash"
 expect view_stack.count == 1
-sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.json.encode({uri=require(\"magit-lsp.view\").current().uri,stack=#require(\"magit-lsp.view\").order,documents=(function() local n=0; for _,v in pairs(require(\"magit-lsp.view\").views) do if v.document then n=n+1 end end; return n end)()})')" > .git/cancel-editor-after && cat .git/cancel-editor-before .git/cancel-editor-after
+sh: nvim --headless --server "$MAGIT_LSP_UI_SOCKET" --remote-expr "luaeval('vim.json.encode({uri=require(\"magit-lsp.view\").current().uri,stack=#require(\"magit-lsp.view\").order,documents=(function() local n=0; for _,v in pairs(require(\"magit-lsp.view\").views) do if v.document then n=n+1 end end; return n end)()})')" > .git/cancel-editor-after && cat .git/cancel-editor-before .git/cancel-editor-after
 sh: git rev-parse "refs/heads/$(cat .git/cancel-branch-before)" > .git/cancel-marker && git rev-parse HEAD > .git/cancel-stopped-head && git ls-files --stage > .git/cancel-stopped-index && git hash-object two > .git/cancel-stopped-worktree && (git symbolic-ref --quiet --short HEAD || true) > .git/cancel-stopped-branch && cmp .git/cancel-marker-open .git/cancel-marker && test "$(cat .git/cancel-marker)" != "$(cat .git/cancel-ref-before)" && test "$(git rev-parse "$(cat .git/cancel-marker)^")" = "$(cat .git/cancel-ref-before)" && cmp .git/cancel-head-open .git/cancel-stopped-head && cmp .git/cancel-index-open .git/cancel-stopped-index && cmp .git/cancel-worktree-open .git/cancel-stopped-worktree && cmp .git/cancel-branch-open .git/cancel-stopped-branch && test -d .git/rebase-merge
 sh: git status --porcelain > .git/cancel-status
 keys: r
