@@ -1785,11 +1785,12 @@ fn replay_example_mode(
     let mut pending_edits: HashMap<String, Option<ServerEdit>> = HashMap::new();
 
     for (index, line) in lines.iter().enumerate() {
-        // The status handshake now precedes the open response, so its recorded
-        // create/begin/reply lines have already been inserted ahead of this
-        // loop; do not replay them a second time.
+        // The status handshake precedes the open response and its end lands at
+        // the next client request, so a recording that already carries those
+        // lines must not replay them: the insertion loop below re-inserts
+        // every one at the position this run actually observes, in the
+        // server's own publication order.
         if regenerate
-            && status_token.is_some()
             && [
                 "server asks the client to create the deferred status progress token",
                 "server reports the deferred status progress phase",

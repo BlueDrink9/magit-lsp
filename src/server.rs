@@ -614,13 +614,21 @@ impl Shared {
             .unwrap_or_else(|p| p.into_inner())
             .work_done_progress;
         if enabled {
-            let shared = self.clone();
-            let sender = sender.clone();
-            let token = token.clone();
-            let command = command.to_string();
-            tokio::spawn(async move {
-                shared.create_progress(&sender, &token, &command).await;
-            });
+            // Announce the create request synchronously so it precedes, on
+            // the same ordered channel, any begin the caller publishes next;
+            // a spawned announcer could race the caller and put the begin on
+            // the wire first, where a client may drop it without its create.
+            if let Some((pending, rx)) = self.announce_progress_create(&token) {
+                let shared = self.clone();
+                let sender = sender.clone();
+                let token = token.clone();
+                let command = command.to_string();
+                tokio::spawn(async move {
+                    shared
+                        .await_progress_create(&sender, &token, &command, pending, rx)
+                        .await;
+                });
+            }
         }
         (token, handle)
     }
@@ -629,10 +637,11 @@ impl Shared {
     ///
     /// The client observes idle as soon as it applies and acknowledges the
     /// loading render, so a begin published only after the create reply can
-    /// arrive too late and let an early key hit the loading guard. Publishing
-    /// begin here puts it ahead of the render on the same ordered channel.
-    /// The create request still follows the standard handshake; its reply does
-    /// not publish a second begin for an already-visible token.
+    /// arrive too late and let an early key hit the loading guard. The create
+    /// request is announced first, in the caller's publication order, and
+    /// this begin follows it on the same ordered channel, still ahead of the
+    /// render. The reply does not publish a second begin for an
+    /// already-visible token.
     fn begin_status_progress(
         &self,
         sender: &mpsc::UnboundedSender<Message>,
@@ -716,22 +725,53 @@ impl Shared {
         token: &str,
         command: &str,
     ) {
+        let Some((pending, rx)) = self.announce_progress_create(token) else {
+            return;
+        };
+        self.await_progress_create(sender, token, command, pending, rx)
+            .await;
+    }
+
+    /// Put a progress token's create request on the wire in the caller's own
+    /// publication order, ahead of any begin the caller publishes next.
+    ///
+    /// Marking the create in flight before announcing it keeps a racing end
+    /// deferring to the reply instead of removing the run unseen. Returns
+    /// `None`, after abandoning the pending create, when the run is gone or
+    /// the client request transport is closed.
+    fn announce_progress_create(
+        &self,
+        token: &str,
+    ) -> Option<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
         {
             let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             match runs.get_mut(token) {
-                // Mark the create in flight before announcing it, so a racing
-                // end defers to the reply instead of removing the run unseen.
                 Some(run) => run.create_pending = true,
-                None => return,
+                None => return None,
             }
         }
-        let Ok((pending, rx)) = self.register_outbound(
+        match self.register_outbound(
             "window/workDoneProgress/create",
             serde_json::json!({ "token": token }),
-        ) else {
-            self.abandon_pending_create(token);
-            return;
-        };
+        ) {
+            Ok(pending) => Some(pending),
+            Err(_) => {
+                self.abandon_pending_create(token);
+                None
+            }
+        }
+    }
+
+    /// Await a create reply, then publish the begin it unlocks, or the
+    /// complete begin/end pair for an owner that already ended.
+    async fn await_progress_create(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        token: &str,
+        command: &str,
+        pending: PendingOutbound,
+        rx: tokio::sync::oneshot::Receiver<Response>,
+    ) {
         if self.await_outbound(pending, rx).await.is_err() {
             self.abandon_pending_create(token);
             return;

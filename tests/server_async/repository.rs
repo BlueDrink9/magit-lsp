@@ -538,6 +538,22 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
         assert_eq!(server.response_with_id(3)["result"]["effects"], json!([]));
         if reply == "after-completion" {
             server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
+            // The late confirmation flushes the withheld pair (begin then
+            // end) for the mutation token. Receive both before shutdown so
+            // the phase sampling below observes a settled handshake rather
+            // than racing the shutdown drain for the last two frames.
+            let mut flushed = 0;
+            while flushed < 2 {
+                let message = server.recv();
+                let is_flush = progress_event(&message).is_some_and(|(token, phase)| {
+                    token == create["params"]["token"].as_str().unwrap_or_default()
+                        && phase != "create"
+                });
+                if is_flush {
+                    flushed += 1;
+                }
+                server.notifications.push(message);
+            }
         }
         shutdown_and_exit(&mut server);
         let phases: Vec<_> = server
