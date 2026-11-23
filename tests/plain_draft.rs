@@ -2272,6 +2272,412 @@ fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeo
     }
 }
 
+/// Apply every frame the server already queued, answering requests in order.
+///
+/// A burst scheduled by an earlier write must settle before a gate is armed,
+/// so the parked status read belongs to the deliberate burst.
+fn drain_pending(server: &mut stdio::TestServer, editor: &mut FakeEditor) {
+    loop {
+        let pending = server.drain_notifications();
+        if pending.is_empty() {
+            return;
+        }
+        for message in pending {
+            if message["method"].is_string() && !message["id"].is_null() {
+                for frame in editor.dispatch(&message) {
+                    server.send(frame);
+                }
+            }
+        }
+    }
+}
+
+/// A `git` PATH wrapper that parks the first `status` read after arming.
+///
+/// Unlike the single-use `GatedGit` fixture, arming happens after the server has
+/// opened its view: every earlier read runs immediately, and the first read
+/// after [`Self::arm_burst`] blocks until [`Self::release`]. That is exactly
+/// where a scheduled watcher burst sits once it has passed its publication
+/// window check and taken session ownership.
+struct StatusGate {
+    dir: tempfile::TempDir,
+    arm: std::path::PathBuf,
+    entered: std::path::PathBuf,
+    finished: std::path::PathBuf,
+    release: std::path::PathBuf,
+}
+
+impl StatusGate {
+    fn new() -> Self {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().expect("status gate tempdir");
+        let arm = dir.path().join("arm");
+        let claimed = dir.path().join("claimed");
+        let entered = dir.path().join("entered");
+        let finished = dir.path().join("finished");
+        let release = dir.path().join("release");
+        let script = dir.path().join("git");
+        let real = std::process::Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .expect("locate git");
+        assert!(real.status.success(), "git is not on PATH");
+        let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
+        fixtures::write(
+            &script,
+            &format!(
+                "#!/bin/sh\n\
+                 subcommand=\"$1\"\n\
+                 if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
+                 if [ \"$subcommand\" = 'status' ] && [ -f '{arm}' ] && [ ! -f '{claimed}' ]; then\n\
+                   : > '{claimed}'\n\
+                   echo \"$$\" > '{entered}'\n\
+                   n=0\n\
+                   while [ ! -f '{release}' ]; do\n\
+                     sleep 0.05\n\
+                     n=$((n+1))\n\
+                     [ \"$n\" -ge 4000 ] && break\n\
+                   done\n\
+                   rm -f '{entered}'\n\
+                   '{real}' \"$@\"\n\
+                   status=$?\n\
+                   : > '{finished}'\n\
+                   exit $status\n\
+                 fi\n\
+                 exec '{real}' \"$@\"\n",
+                arm = arm.display(),
+                claimed = claimed.display(),
+                entered = entered.display(),
+                finished = finished.display(),
+                release = release.display(),
+                real = real,
+            ),
+        );
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod status gate");
+        Self {
+            dir,
+            arm,
+            entered,
+            finished,
+            release,
+        }
+    }
+
+    /// Install the wrapper first on the spawned server's `PATH`.
+    fn child_env(&self) -> Vec<(String, String)> {
+        let path = format!(
+            "{}:{}",
+            self.dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        vec![("PATH".to_string(), path)]
+    }
+
+    /// Make the next `status` read park; every earlier read stays untouched.
+    fn arm_burst(&self) {
+        std::fs::write(&self.arm, b"armed\n").expect("arm status gate");
+    }
+
+    /// Block until the parked read has entered the gate (bounded).
+    fn wait_entered(&self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !self.entered.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the watcher's status read never entered the gate"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Block until the parked read has completed its real Git call (bounded).
+    fn wait_finished(&self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !self.finished.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the parked status read never finished"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Let the parked read proceed (idempotent).
+    fn release(&self) {
+        let _ = std::fs::write(&self.release, b"release\n");
+    }
+}
+
+impl Drop for StatusGate {
+    fn drop(&mut self) {
+        // A failed assertion must never leave the watcher parked.
+        let _ = std::fs::write(&self.release, b"release\n");
+    }
+}
+
+/// A watcher burst that passed its publication-window check before a
+/// commit-confirm opened the window must not publish the tree it read.
+///
+/// `Shared::wait_publication_window` is consulted before the watcher takes
+/// session ownership, so a burst can pass the check and then read Git while the
+/// confirm opens the window and resumes the commit. Publishing that read
+/// interleaved an intermediate status edit between the confirm and its
+/// `Committed:` outcome (recorded replay divergence at
+/// `commit-edit-confirm.jsonl:41`). The gate below parks the burst's status read
+/// after the check, inside `refresh_all`; the confirm then opens the window and
+/// the commit-msg hook parks Git, so the read lands mid-commit. The client must
+/// observe exactly one status transition — the settled tree reclaiming the
+/// pending row — and the committed message after it.
+#[cfg(unix)]
+#[test]
+fn a_watcher_refresh_inside_a_commit_window_does_not_publish_a_status_edit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let ready = repo.path().join(".git").join("hook.ready");
+    let hook_release = repo.path().join(".git").join("hook.release");
+    let hook = repo.path().join(".git").join("hooks").join("commit-msg");
+    fixtures::write(
+        &hook,
+        &format!(
+            "#!/bin/sh\nprintf ok > '{ready}'\ni=0\nwhile [ ! -f '{release}' ] && [ \"$i\" -lt 300 ]; do i=$((i+1)); sleep 0.05; done\nexit 0\n",
+            ready = ready.display(),
+            release = hook_release.display(),
+        ),
+    );
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Release the hook even when an assertion fails, so Git cannot outlive it.
+    struct ReleaseHook(std::path::PathBuf);
+    impl Drop for ReleaseHook {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "release");
+        }
+    }
+    let _hook = ReleaseHook(hook_release.clone());
+
+    let gate = StatusGate::new();
+    let mut env = gate.child_env();
+    env.push(("MAGIT_LSP_WATCH_DEBOUNCE_MS".to_string(), "0".to_string()));
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let (mut server, mut editor, uri) = open_plain_with_env(&repo, caps(true), &env);
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    server.send(editor.edit(&draft_uri, "Gated publication\n"));
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 300);
+
+    // Settle any burst the draft template write scheduled, so the gate below
+    // parks the deliberate burst and not a leftover refresh.
+    drain_pending(&mut server, &mut editor);
+
+    // This worktree write schedules the burst the gate parks: its refresh has
+    // already passed the (still closed) publication window when it blocks.
+    gate.arm_burst();
+    fixtures::write(&repo.path().join("touched.txt"), "worktree noise\n");
+    gate.wait_entered();
+
+    // The confirm opens the publication window and resumes Git, which parks in
+    // the commit-msg hook: the burst's read now runs inside the open window.
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        confirm,
+        301
+    )["error"]
+        .is_null());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "commit-msg hook did not become ready"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    gate.release();
+    gate.wait_finished();
+    std::fs::write(&hook_release, "release").unwrap();
+
+    // Apply every status transition until the settled tree and the outcome both
+    // arrive; the applied text is asserted, not just the presence of a render.
+    let mut transitions: Vec<String> = Vec::new();
+    let mut committed = false;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let settled = !editor.text(&uri).contains("COMMIT_EDITMSG")
+            && editor.text(&uri).contains("touched.txt");
+        if committed && settled {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no settled status and Committed outcome; transitions: {transitions:#?}"
+        );
+        let message = server.recv();
+        seen.push(message.clone());
+        if message["method"] == "workspace/applyEdit" && !draft_edit(&message, &draft_uri) {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            transitions.push(editor.text(&uri).to_owned());
+        } else if message["method"] == "workspace/applyEdit" {
+            let result = editor.apply_edit(&message["params"]["edit"]);
+            server.send(json!({"jsonrpc":"2.0","id":message["id"],"result":result}));
+        } else if message["method"].is_string() && !message["id"].is_null() {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+        }
+        if message["method"] == "window/showMessage"
+            && message["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("Committed: Gated publication"))
+        {
+            committed = true;
+        }
+    }
+
+    assert_eq!(
+        transitions.len(),
+        1,
+        "the confirm owns exactly one status transition, not an intermediate refresh: {transitions:#?}"
+    );
+    let settled = &transitions[0];
+    assert!(
+        settled.contains("Staged changes (0)") && settled.contains("Untracked files (1)"),
+        "the single transition carries the settled committed tree: {settled}"
+    );
+    assert!(
+        settled.contains("touched.txt") && !settled.contains("COMMIT_EDITMSG"),
+        "the settled tree lists the touched file and reclaims the pending row: {settled}"
+    );
+    assert!(
+        !settled.contains("Staged changes (1)"),
+        "no pending staged row survives the commit: {settled}"
+    );
+    wait_for_head_message(&repo, "Gated publication");
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes()
+    );
+    server.shutdown_and_exit();
+    assert!(server
+        .finish_with_messages(Duration::from_secs(10))
+        .0
+        .success());
+}
+
+/// A settled watcher read withheld inside a commit window is still delivered
+/// once, before the outcome message.
+///
+/// The counterpart to the degraded-read case: the burst passes the publication
+/// window check, the commit finishes while its status read is parked, and the
+/// read therefore sees the settled tree. Withholding it must not lose the
+/// client's only copy of that render — the owning worker publishes the withheld
+/// render when the settled session still carries it, ahead of `Committed:`.
+#[cfg(unix)]
+#[test]
+fn a_settled_watcher_read_inside_a_commit_window_publishes_before_the_outcome() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let gate = StatusGate::new();
+    let mut env = gate.child_env();
+    env.push(("MAGIT_LSP_WATCH_DEBOUNCE_MS".to_string(), "0".to_string()));
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let (mut server, mut editor, uri) = open_plain_with_env(&repo, caps(true), &env);
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    server.send(editor.edit(&draft_uri, "Settled publication\n"));
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 300);
+    drain_pending(&mut server, &mut editor);
+    let head = repo.git(&["rev-parse", "HEAD"]);
+
+    // The parked burst's read runs after the commit has settled, while the
+    // worker still cannot publish because the burst owns the session.
+    gate.arm_burst();
+    fixtures::write(&repo.path().join("touched.txt"), "worktree noise\n");
+    gate.wait_entered();
+    assert!(execute_action(
+        &mut server,
+        &mut editor,
+        &draft_uri,
+        &mut seen,
+        confirm,
+        301
+    )["error"]
+        .is_null());
+    wait_for_head_change(&repo, &head);
+    gate.release();
+    gate.wait_finished();
+
+    let mut transitions: Vec<String> = Vec::new();
+    let mut committed_at = None;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let settled = !editor.text(&uri).contains("COMMIT_EDITMSG")
+            && editor.text(&uri).contains("touched.txt");
+        if committed_at.is_some() && settled {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no settled status and Committed outcome; transitions: {transitions:#?}"
+        );
+        let message = server.recv();
+        seen.push(message.clone());
+        if message["method"] == "workspace/applyEdit" && !draft_edit(&message, &draft_uri) {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            transitions.push(editor.text(&uri).to_owned());
+        } else if message["method"] == "workspace/applyEdit" {
+            let result = editor.apply_edit(&message["params"]["edit"]);
+            server.send(json!({"jsonrpc":"2.0","id":message["id"],"result":result}));
+        } else if message["method"].is_string() && !message["id"].is_null() {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+        }
+        if message["method"] == "window/showMessage"
+            && message["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("Committed: Settled publication"))
+        {
+            committed_at = Some(transitions.len());
+        }
+    }
+
+    assert_eq!(
+        committed_at,
+        Some(1),
+        "the settled transition precedes the outcome and only one exists: {transitions:#?}"
+    );
+    let settled = &transitions[0];
+    assert!(
+        settled.contains("Staged changes (0)") && settled.contains("touched.txt"),
+        "the withheld settled render reached the client: {settled}"
+    );
+    wait_for_head_message(&repo, "Settled publication");
+    server.shutdown_and_exit();
+    assert!(server
+        .finish_with_messages(Duration::from_secs(10))
+        .0
+        .success());
+}
+
 #[test]
 fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
     for outcome in ["rejection", "error", "timeout"] {

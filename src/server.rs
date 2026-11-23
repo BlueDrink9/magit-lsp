@@ -113,15 +113,22 @@ impl Drop for MutationTurn {
 /// Keeps a repository's publication window open until the holder is done.
 ///
 /// Constructed without clearing the marker; the drop clears it, so the
-/// watcher may refresh only after the holder's last publication was sent.
+/// watcher may refresh only after the holder's last publication was sent. Any
+/// watcher render still deferred for the repository is discarded: the owning
+/// worker flushed the ones the settled tree still carries.
 struct PublicationGuard {
     publications: Arc<Mutex<HashSet<String>>>,
+    deferred: Arc<Mutex<HashMap<String, Vec<ViewRender>>>>,
     repo: String,
 }
 
 impl Drop for PublicationGuard {
     fn drop(&mut self) {
         self.publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.repo);
+        self.deferred
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&self.repo);
@@ -229,6 +236,10 @@ struct Shared {
     /// Repositories with an open publication window, set by the confirm lane
     /// and cleared by the detached worker after its last publication.
     deferred_publications: Arc<Mutex<HashSet<String>>>,
+    /// Watcher renders withheld while a publication window was open, keyed by
+    /// repository. The owning worker flushes the ones the settled session still
+    /// carries before it publishes the outcome.
+    deferred_renders: Arc<Mutex<HashMap<String, Vec<ViewRender>>>>,
     /// Running repository watchers, keyed by repository root.
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
 }
@@ -327,6 +338,7 @@ impl Shared {
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
             deferred_repositories: Arc::new(Mutex::new(HashSet::new())),
             deferred_publications: Arc::new(Mutex::new(HashSet::new())),
+            deferred_renders: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -459,6 +471,10 @@ impl Shared {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(repo);
+        self.deferred_renders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(repo);
     }
 
     /// Hold this repository's publication window open until the guard drops.
@@ -470,8 +486,34 @@ impl Shared {
     fn publication_guard(&self, repo: &str) -> PublicationGuard {
         PublicationGuard {
             publications: Arc::clone(&self.deferred_publications),
+            deferred: Arc::clone(&self.deferred_renders),
             repo: repo.to_string(),
         }
+    }
+
+    /// Withhold this repository's watcher renders until its worker publishes.
+    ///
+    /// Called while the caller owns the session, so the owning worker cannot
+    /// flush between the refresh that produced these renders and their storage.
+    fn defer_renders(&self, repo: &str, renders: Vec<ViewRender>) {
+        if renders.is_empty() {
+            return;
+        }
+        self.deferred_renders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(repo.to_string())
+            .or_default()
+            .extend(renders);
+    }
+
+    /// Take every watcher render withheld for this repository.
+    fn take_deferred_renders(&self, repo: &str) -> Vec<ViewRender> {
+        self.deferred_renders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(repo)
+            .unwrap_or_default()
     }
 
     /// Bounded synchronous wait for this repository's publication window to
@@ -493,6 +535,18 @@ impl Shared {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    /// Whether this repository's publication window is currently open.
+    ///
+    /// A caller that already owns the session may check this without waiting:
+    /// the owning worker needs that same ownership to publish and drop the
+    /// window, so an open window seen here cannot close underneath the check.
+    fn publication_window_open(&self, repo: &str) -> bool {
+        self.deferred_publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(repo)
     }
 
     /// Reserve exclusive mutation authority until a detached worker exits.
@@ -562,7 +616,25 @@ impl Shared {
                         match shared.session(&repo_for_handler) {
                             Some(handle) => {
                                 let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                                session.refresh_all()
+                                let renders = session.refresh_all();
+                                // A commit may have opened its publication
+                                // window while this refresh's Git reads ran —
+                                // its confirm passed the check above before the
+                                // marker existed. The worker owns the settled
+                                // render, so this burst must not publish the
+                                // tree it read. Withhold it for the worker,
+                                // which publishes the withheld render only when
+                                // the settled session still carries it; a read
+                                // the worker superseded is dropped instead. The
+                                // check and the withholding happen under the
+                                // session lock, where the worker cannot publish
+                                // and close the window before they are seen.
+                                if shared.publication_window_open(&repo_for_handler) {
+                                    shared.defer_renders(&repo_for_handler, renders);
+                                    Vec::new()
+                                } else {
+                                    renders
+                                }
                             }
                             None => Vec::new(),
                         }

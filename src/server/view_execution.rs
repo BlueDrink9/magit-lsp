@@ -959,6 +959,40 @@ impl Drop for RepositoryEdit {
     }
 }
 
+/// Publish the watcher renders withheld inside a commit's publication window.
+///
+/// A withheld render is delivered only while the settled session still carries
+/// the version it produced: a read the worker's own refresh superseded has a
+/// stale version and is dropped, while a read that already matched the settled
+/// tree is the render the client still needs. Delivery happens before the
+/// outcome message, so the client applies the committed status before
+/// `Committed:` reaches it.
+fn flush_deferred_renders(shared: &Shared, repo: &str) -> Vec<Message> {
+    let deferred = shared.take_deferred_renders(repo);
+    if deferred.is_empty() {
+        return Vec::new();
+    }
+    let current: Vec<ViewRender> = {
+        let Some(handle) = shared.session(repo) else {
+            return Vec::new();
+        };
+        let session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        deferred
+            .into_iter()
+            .filter(|render| {
+                session
+                    .views()
+                    .get(&render.view_id)
+                    .is_some_and(|view| view.version() == render.version)
+            })
+            .collect()
+    };
+    current
+        .into_iter()
+        .filter_map(|render| deliver_render(shared, render))
+        .collect()
+}
+
 /// Run `git commit` on a detached worker and refresh the views afterwards.
 ///
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
@@ -1156,6 +1190,7 @@ fn spawn_repository_operation(
                             .into_iter()
                             .filter_map(|render| deliver_render(&shared, render)),
                     );
+                    messages.extend(flush_deferred_renders(&shared, &repo));
                     // Replace the "Committing…" feedback with the outcome.
                     let subject = outcome
                         .message
@@ -1188,6 +1223,7 @@ fn spawn_repository_operation(
                             Err(refresh_error) => report_pending_refresh_error(&shared, refresh_error),
                         }
                     }
+                    messages.extend(flush_deferred_renders(&shared, &repo));
                     let (level, text) = match outcome {
                         crate::instant_rebase::InstantRebaseOutcome::Refused(error) =>
                             (MessageLevel::Warn, format!("Instant autosquash refused: {error}")),
@@ -1215,6 +1251,7 @@ fn spawn_repository_operation(
                             Err(refresh_error) => report_pending_refresh_error(&shared, refresh_error),
                         }
                     }
+                    messages.extend(flush_deferred_renders(&shared, &repo));
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
                         vec![Effect::message(MessageLevel::Error, error.to_string())]
                     });
