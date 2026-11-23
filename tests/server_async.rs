@@ -451,6 +451,113 @@ fn commit_confirm_holds_the_publication_order_against_a_watcher_refresh() {
 
 #[cfg(unix)]
 #[test]
+fn status_open_arms_watcher_after_open_response() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let trace_dir = tempfile::tempdir().unwrap();
+    let trace = trace_dir.path().join("status-watcher-deferred");
+    let trace_env = trace.to_string_lossy().into_owned();
+    let gate_env = gate.child_env();
+    let mut env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    env.push(("MAGIT_LSP_WATCH_DEBOUNCE_MS", "50"));
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(7);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().expect("status view id");
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Head: main", "Loading repository status…"])
+    );
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    assert!(!gate.is_released(), "the token began while Git is held");
+
+    // The deferred task installs trace id 7 on its blocking thread, so the
+    // watcher phases belong to this open's trace. Wait for the second "armed"
+    // event: the first is emitted before the recursive inotify walk, and only
+    // the full-duration one proves the watcher is registered.
+    let path = completion_trace_file(&trace);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let events = std::fs::read_to_string(&path).unwrap_or_default();
+        let records: Vec<Value> = events
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|record| record["id"] == json!(7))
+            .collect();
+        let handler_end = records
+            .iter()
+            .position(|record| record["event"] == json!("handler_end"));
+        let armed: Vec<usize> = records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| {
+                record["event"] == json!("phase_watcher_setup")
+                    && record["detail"]["outcome"] == json!("armed")
+            })
+            .map(|(index, _)| index)
+            .collect();
+        if let (Some(handler_end), Some(&first), Some(&full)) =
+            (handler_end, armed.first(), armed.get(1))
+        {
+            assert!(
+                first > handler_end && full > handler_end,
+                "watcher setup was traced before the open response's handler_end: {records:?}"
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "deferred watcher setup not observed for trace 7: {events}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    gate.release();
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(view, version);
+    assert_eq!(ready["params"]["viewId"], view, "{ready}");
+
+    // Only now, with the watcher demonstrably armed, does a real worktree
+    // event have to refresh the view.
+    write(
+        &tmp.path().join("watcher-deferred-proof.txt"),
+        "watcher is armed\n",
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the deferred watcher did not refresh for the marker"
+        );
+        let message = server.recv();
+        if message["method"] == "view/render"
+            && message["params"]["text"]
+                .to_string()
+                .contains("watcher-deferred-proof.txt")
+        {
+            break;
+        }
+    }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
 fn status_open_text_mode_defers_held_completion_until_exit() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
