@@ -29,7 +29,7 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 - [x] **CI-COVERAGE-RACE: De-flake owned-runner pid-file readiness.** CI `coverage-rust` failed on `runner::owned::unix::tests::exit_before_cancel_is_normal_success` — ParseIntError `Empty` at `src/runner/owned.rs:559`: the test's readiness loop gates on `Path::exists()` while the spawned shell has created but not yet written the pid file. test: readiness becomes content-based (deadline-bounded read/parse retry, other assertions unchanged); `make coverage-rust` passes.
   - Done: `09a56f7`
   - Verified: `make coverage-rust` (ambient toolchain: `/opt/env/default/bin/cargo-llvm-cov`) @ `247e84d` → exit 0 (`ok: coverage-rust (warnings detected; check log: build/test-logs/coverage-rust.o3um9d)`; `coverage-rust: 90 source files, 83.1% of 32438 lines covered in build/coverage/lcov.info`).
-- [ ] **CI-EDITOR: Isolate artifact-target unit tests from installed editors.** test: artifact input validation and spaced-path forwarding pass without a real VSCode-compatible editor, without invoking builds; retain production editor validation. Verify: `make ui-unit`.
+- [x] **CI-EDITOR: Isolate artifact-target unit tests from installed editors.** test: artifact input validation and spaced-path forwarding pass without a real VSCode-compatible editor, without invoking builds; retain production editor validation. Verify: `make ui-unit`. (Closed superseded 2026-11-23: work was reverted per user; replaced by CI-FLAKE-EDITOR, below.)
   - Done: `9e7137f`
   - Verified: `make ui-unit` → exit 0 (`ok: ui-unit`).
   - Reverted per user (2026-11-23): faking `MAGIT_VSCODE_BIN` in the test masked a real environment gap; superseded by CI-FLAKE-EDITOR below.
