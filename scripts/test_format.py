@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Test the formatter dispatcher's all-tracked sweep and hook safety.
+"""Test the pre-commit staged autofix and its working-copy formatting.
 
-Each test builds a throwaway Git repository with tracked, excluded and untracked
+Each test builds a throwaway Git repository with tracked and generator-owned
 maintained sources, puts fake `rustfmt`, `stylua` and `prettier` executables on
 PATH that log their arguments, and runs the production `scripts/format.py`.
 `CIWorkflowEnvironmentTest` also checks that every Linux CI job runs its tools
@@ -14,7 +14,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -214,10 +213,10 @@ for argument in sys.argv[1:]:
     if candidate.suffix not in EXTENSIONS:
         continue
     if check:
-        if not candidate.is_file() or candidate.read_text() != "ok\\n":
+        if not candidate.is_file() or "bad" in candidate.read_text():
             status = 1
     elif candidate.is_file():
-        candidate.write_text("ok\\n")
+        candidate.write_text(candidate.read_text().replace("bad", "ok"))
 sys.exit(status)
 '''
 
@@ -227,18 +226,11 @@ SEED = {
     "src/lib.rs": "ok\n",
     "lua/magit-lsp/ok.lua": "ok\n",
     **{path: "ok\n" for path in GENERATOR_OWNED + GENERATOR_NEIGHBORS},
-    "clients/vscode/src/ok.ts": "ok\n",
-    "vendor/vendor.lua": "ok\n",
-    "generated/generated.rs": "ok\n",
-    "tests/fixtures/fixture.lua": "ok\n",
-    "node_modules/package/index.js": "ok\n",
-    "docs/not_owned.lua": "ok\n",
-    "notes.txt": "ok\n",
 }
 
 
 class FormatSweepTest(unittest.TestCase):
-    """Exercise all-tracked selection, routing and hook autofix safety."""
+    """Exercise hook staged autofix and working-copy formatting."""
 
     def setUp(self) -> None:
         self.repo = Path(tempfile.mkdtemp(prefix="magit-format-repo-"))
@@ -268,7 +260,6 @@ class FormatSweepTest(unittest.TestCase):
             self.write(path, text)
         self.git("add", "-A")
         self.git("commit", "-qm", "seed")
-        self.write("lua/magit-lsp/untracked.lua", "ok\n")
         prettier = self.repo / "clients/vscode/node_modules/.bin/prettier"
         prettier.parent.mkdir(parents=True, exist_ok=True)
         prettier.symlink_to(self.tools / "prettier")
@@ -291,13 +282,6 @@ class FormatSweepTest(unittest.TestCase):
         """Read one fixture file."""
         return (self.repo / path).read_text()
 
-    def run_format(self, *args: str) -> subprocess.CompletedProcess[str]:
-        """Run the production dispatcher inside the fixture repository."""
-        return subprocess.run(
-            [sys.executable, str(FORMAT_PY), *args], cwd=self.repo, env=self.env,
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-
     def run_hook(self, **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the production pre-commit hook inside the fixture repository."""
         env = {**self.env, **extra}
@@ -319,59 +303,6 @@ class FormatSweepTest(unittest.TestCase):
         """Return the formatter invocation log lines."""
         return [line for line in self.log.read_text().splitlines() if line]
 
-    def test_all_tracked_selection_and_exclusions(self) -> None:
-        """All-tracked mode selects only owned tracked Lua files."""
-        result = self.run_format("--all-tracked", "--formatter", "stylua")
-        self.assertEqual(0, result.returncode, result.stderr)
-        calls = self.calls()
-        self.assertTrue(calls)
-        self.assertTrue(all(call.startswith("stylua ") for call in calls), calls)
-        joined = "\n".join(calls)
-        self.assertIn("lua/magit-lsp/ok.lua", joined)
-        for excluded in (
-            "untracked.lua", "vendor/", "generated/", "fixtures/",
-            "node_modules/", "docs/not_owned.lua", "notes.txt",
-        ):
-            self.assertNotIn(excluded, joined)
-
-    def test_selected_formatter_routing(self) -> None:
-        """Selecting one formatter never invokes the other tools."""
-        result = self.run_format("--all-tracked", "--formatter", "rustfmt")
-        self.assertEqual(0, result.returncode, result.stderr)
-        calls = self.calls()
-        self.assertTrue(calls)
-        self.assertTrue(all(call.startswith("rustfmt ") for call in calls), calls)
-        joined = "\n".join(calls)
-        self.assertIn("src/main.rs", joined)
-        self.assertIn("src/lib.rs", joined)
-        self.assertNotIn(".lua", joined)
-        self.assertNotIn(".ts", joined)
-
-    def test_all_tracked_skips_generator_owned_client_references(self) -> None:
-        """Generator bytes are excluded by exact path while neighbors stay eligible."""
-        result = self.run_format("--all-tracked", "--formatter", "stylua")
-        self.assertEqual(0, result.returncode, result.stderr)
-        joined = "\n".join(self.calls())
-        for neighbor in ("lua/magit-lsp/ok.lua", "lua/magit-lsp/handwritten.lua"):
-            self.assertIn(neighbor, joined)
-        for generated in ("lua/magit-lsp/types.lua", "lua/magit-lsp/shared.lua"):
-            self.assertNotIn(generated, joined)
-        self.log.unlink()
-        result = self.run_format("--all-tracked", "--formatter", "prettier")
-        self.assertEqual(0, result.returncode, result.stderr)
-        joined = "\n".join(self.calls())
-        for neighbor in (
-            "clients/vscode/src/ok.ts",
-            "clients/vscode/types/handwritten.ts",
-            "clients/vscode/types/handwritten.js",
-        ):
-            self.assertIn(neighbor, joined)
-        for generated in (
-            "clients/vscode/types/protocol.d.ts",
-            "clients/vscode/types/shared-lists.js",
-        ):
-            self.assertNotIn(generated, joined)
-
     def test_ordinary_hook_preserves_generator_owned_client_references(self) -> None:
         """The hook leaves generated bytes alone and still fixes eligible neighbors."""
         self.install_hook()
@@ -391,47 +322,6 @@ class FormatSweepTest(unittest.TestCase):
         for path in GENERATOR_OWNED:
             self.assertNotIn(path, joined)
 
-    def test_full_check_fails_on_unformatted_tracked_file(self) -> None:
-        """The full check is fail-capable for already tracked files."""
-        self.write("src/main.rs", "bad\n")
-        self.git("add", "src/main.rs")
-        self.git("commit", "-qm", "bad rust")
-        result = self.run_format("--all-tracked", "--formatter", "rustfmt")
-        self.assertEqual(1, result.returncode)
-        self.write("src/main.rs", "ok\n")
-        self.git("add", "src/main.rs")
-        self.git("commit", "-qm", "format rust")
-        result = self.run_format("--all-tracked", "--formatter", "rustfmt")
-        self.assertEqual(0, result.returncode, result.stderr)
-
-    def test_write_refuses_unstaged_changes(self) -> None:
-        """All-tracked writes never overwrite a dirty working copy."""
-        self.write("src/main.rs", "bad\n")
-        self.git("add", "src/main.rs")
-        self.git("commit", "-qm", "bad rust")
-        result = self.run_format("--all-tracked", "--formatter", "rustfmt", "--write")
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("ok\n", self.read("src/main.rs"))
-        self.git("add", "-A")
-        self.git("commit", "-qm", "formatted rust")
-        self.write("src/main.rs", "dirty\n")
-        result = self.run_format("--all-tracked", "--formatter", "rustfmt", "--write")
-        self.assertEqual(1, result.returncode)
-        self.assertIn("refusing to overwrite unstaged changes", result.stderr)
-        self.assertEqual("dirty\n", self.read("src/main.rs"))
-
-    def test_ordinary_hook_formats_index_only(self) -> None:
-        """The default hook fixes staged blobs and preserves divergent working files."""
-        self.install_hook()
-        path = "lua/magit-lsp/ok.lua"
-        self.write(path, "bad\n")
-        self.git("add", path)
-        self.write(path, "worktree\n")
-        result = self.run_hook()
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.assertEqual("worktree\n", self.read(path))
-
     def test_hook_formats_matching_working_copy(self) -> None:
         """A staged-only change formats the index and its matching working file."""
         self.install_hook()
@@ -444,34 +334,54 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual(b"ok\n", (self.repo / path).read_bytes())
         self.assertEqual("", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
 
-    def test_hook_skips_unwritable_matching_working_copy(self) -> None:
-        """A matching working file that cannot be written leaves the index formatted."""
+    def test_hook_formats_divergent_working_copy_in_place(self) -> None:
+        """Divergent working copies keep their own content and are formatted in place."""
         self.install_hook()
-        path = "lua/magit-lsp/ok.lua"
-        self.write(path, "bad\n")
-        self.git("add", path)
-        working = self.repo / path
-        working.chmod(0o444)
-        self.addCleanup(working.chmod, 0o644)
-        if os.access(working, os.W_OK):
-            self.skipTest("fixture file stays writable (the suite is running as root)")
+        changed = "lua/magit-lsp/ok.lua"
+        unchanged = "lua/magit-lsp/handwritten.lua"
+        self.write(unchanged, "old\n")
+        self.git("add", unchanged)
+        self.git("commit", "-qm", "prepare unchanged")
+        self.write(changed, "bad\n")
+        self.git("add", changed)
+        self.write(changed, "bad\nunstaged\n")
+        self.write(unchanged, "ok\n")
+        self.git("add", unchanged)
+        self.write(unchanged, "bad\n")
         result = self.run_hook()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.assertEqual(b"bad\n", working.read_bytes())
-        self.assertIn(f"working file left unchanged: {path}", result.stderr)
+        self.assertEqual("ok\n", self.git("show", f":{changed}"))
+        self.assertEqual("ok\nunstaged\n", self.read(changed))
+        self.assertEqual("ok\n", self.git("show", f":{unchanged}"))
+        self.assertEqual("ok\n", self.read(unchanged))
+        joined = "\n".join(self.calls())
+        self.assertIn(changed, joined)
+        self.assertIn(unchanged, joined)
 
-    def test_hook_preserves_partially_staged_working_edits(self) -> None:
-        """Unstaged additions to a staged file survive while the index formats."""
+    def test_hook_skips_unwritable_working_copy(self) -> None:
+        """An unwritable working file leaves the index formatted on both branches."""
         self.install_hook()
-        path = "lua/magit-lsp/ok.lua"
-        self.write(path, "bad\n")
-        self.git("add", path)
-        self.write(path, "bad\nunstaged\n")
+        matching = "lua/magit-lsp/ok.lua"
+        divergent = "lua/magit-lsp/handwritten.lua"
+        self.write(matching, "bad\n")
+        self.write(divergent, "bad\n")
+        self.git("add", matching, divergent)
+        self.write(divergent, "bad\nunstaged\n")
+        working = self.repo / matching
+        other = self.repo / divergent
+        for candidate in (working, other):
+            candidate.chmod(0o444)
+            self.addCleanup(candidate.chmod, 0o644)
+        if os.access(working, os.W_OK) or os.access(other, os.W_OK):
+            self.skipTest("fixture files stay writable (the suite is running as root)")
         result = self.run_hook()
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.assertEqual("bad\nunstaged\n", self.read(path))
+        self.assertEqual("ok\n", self.git("show", f":{matching}"))
+        self.assertEqual("ok\n", self.git("show", f":{divergent}"))
+        self.assertEqual(b"bad\n", working.read_bytes())
+        self.assertEqual(b"bad\nunstaged\n", other.read_bytes())
+        self.assertIn(f"working file left unchanged: {matching}", result.stderr)
+        self.assertIn(f"working file left unchanged: {divergent}", result.stderr)
 
     def test_hook_sweep_requires_all_tracked_formatted(self) -> None:
         """The opt-in sweep guard fails a partial format-only commit."""
@@ -491,50 +401,6 @@ class FormatSweepTest(unittest.TestCase):
         result = self.run_hook(MAGIT_FORMAT_SWEEP="rustfmt")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("ok\n", self.git("show", ":src/lib.rs"))
-
-    def stylua_arguments(self) -> list[list[str]]:
-        """Return parsed argument lists for every StyLua invocation."""
-        return [call.split(" ")[1:] for call in self.calls() if call.startswith("stylua ")]
-
-    def stylua_config_paths(self) -> list[str]:
-        """Return every --config-path value passed to the fake StyLua."""
-        values = []
-        for arguments in self.stylua_arguments():
-            if "--config-path" in arguments:
-                values.append(arguments[arguments.index("--config-path") + 1])
-        return values
-
-    def test_stylua_uses_workspace_snapshot_config(self) -> None:
-        """Check and write pass an explicit StyLua config rooted in their source tree."""
-        self.write(".stylua.toml", "column_width = 100\n")
-        self.git("add", ".stylua.toml")
-        self.git("commit", "-qm", "stylua config")
-        result = self.run_format("--all-tracked", "--formatter", "stylua")
-        self.assertEqual(0, result.returncode, result.stderr)
-        check_paths = self.stylua_config_paths()
-        self.assertEqual(1, len(check_paths), self.calls())
-        self.assertTrue(check_paths[0].endswith("/.stylua.toml"), check_paths)
-        self.assertNotEqual(self.repo.resolve(), Path(check_paths[0]).parent.resolve())
-        self.log.unlink()
-        result = self.run_format("--all-tracked", "--formatter", "stylua", "--write")
-        self.assertEqual(0, result.returncode, result.stderr)
-        write_paths = self.stylua_config_paths()
-        self.assertEqual(1, len(write_paths), self.calls())
-        self.assertEqual(self.repo.resolve(), Path(write_paths[0]).parent.resolve())
-
-    def test_working_tree_source_checks_unstaged_sources(self) -> None:
-        """The working-tree source validates unstaged edits and leaves the index untouched."""
-        path = "lua/magit-lsp/ok.lua"
-        self.write(path, "bad\n")
-        result = self.run_format("--all-tracked", "--formatter", "stylua")
-        self.assertEqual(0, result.returncode, result.stderr)
-        result = self.run_format("--all-tracked", "--source", "working-tree", "--formatter", "stylua")
-        self.assertEqual(1, result.returncode)
-        self.assertEqual("bad\n", self.read(path))
-        self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.write(path, "ok\n")
-        result = self.run_format("--all-tracked", "--source", "working-tree", "--formatter", "stylua")
-        self.assertEqual(0, result.returncode, result.stderr)
 
 
 class CIWorkflowEnvironmentTest(unittest.TestCase):

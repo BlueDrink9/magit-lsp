@@ -7,9 +7,10 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "magit-lsp hook: python3 is required; install Python 3 and retry the commit" >&2
     exit 1
 fi
-# Ordinary commits format only eligible staged blobs. A format-only sweep commit
-# opts in (MAGIT_FORMAT_SWEEP=rustfmt|stylua|prettier) so the hook also proves
-# every tracked file owned by that formatter is formatted before the commit.
+# Ordinary commits format eligible staged blobs, then bring every eligible staged
+# path's working copy to formatted form. A format-only sweep commit opts in
+# (MAGIT_FORMAT_SWEEP=rustfmt|stylua|prettier) so the hook also proves every
+# tracked file owned by that formatter is formatted before the commit.
 if [ -n "${MAGIT_FORMAT_SWEEP:-}" ]; then
     exec python3 scripts/format.py --staged --fix --sweep "$MAGIT_FORMAT_SWEEP"
 fi

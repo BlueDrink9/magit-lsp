@@ -265,35 +265,75 @@ def ensure_clean_worktree(paths: list[str]) -> None:
             raise RuntimeError(f"tracked formatter input is not a regular file: {path}")
 
 
-def mirror_working_files(changed: dict[str, str], original: dict[str, tuple[int, str]], snapshot_root: Path) -> list[str]:
-    """Overwrite working files that still match the pre-format staged blob, and return them.
+def format_working_file(path: str, data: bytes, snapshot_root: Path) -> bytes | None:
+    """Format one divergent working file's own bytes inside an isolated snapshot.
 
-    A working copy with any unstaged or partially staged edit hashes differently
-    and is left alone. Failures are reported as readable notes because the index
-    already holds the formatted content.
+    The staged snapshot supplies the workspace context (Cargo manifest, StyLua and
+    Prettier configuration), so the working file's own content is formatted exactly
+    as that path would be staged. Only ``path`` may change and the snapshot is
+    restored afterwards. Returns the formatted bytes, or ``None`` when the file
+    already holds formatted content.
+    """
+    snapshot_file = snapshot_root / path
+    formatted = snapshot_file.read_bytes()
+    formatter = formatter_for(path)
+    if formatter is None:
+        raise RuntimeError(f"no formatter owns the staged path: {path}")
+    before = tree_state(snapshot_root)
+    try:
+        snapshot_file.write_bytes(data)
+        if not format_paths([path], snapshot_root, True, [formatter]):
+            raise RuntimeError("formatter failed")
+        after = tree_state(snapshot_root)
+        touched = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+        unexpected = touched - {path}
+        if unexpected:
+            raise RuntimeError("formatter changed files outside the working copy: " + ", ".join(sorted(unexpected)))
+        if path not in after or after[path][2]:
+            raise RuntimeError("formatter removed or replaced the working file")
+        result = after[path][1]
+    finally:
+        snapshot_file.write_bytes(formatted)
+    return None if result == data else result
+
+
+def format_working_copies(allowed: list[str], original: dict[str, tuple[int, str]], snapshot_root: Path) -> list[str]:
+    """Bring every eligible staged path's working copy to formatted form, and return the changed paths.
+
+    A working file holding exactly the pre-format staged blob receives the formatted
+    snapshot bytes. A working file with unstaged or partially staged edits keeps
+    every byte of its own content and is formatted in place, so staged content is
+    never copied over divergent edits and a staged blob that needed no fix still
+    brings its divergent working copy in line. Failures are readable per-file notes
+    because the index already holds the formatted content.
     """
     # The working-tree hash must not consult a temporary index.
     working_env = {key: value for key, value in os.environ.items() if key != "GIT_INDEX_FILE"}
-    mirrored: list[str] = []
-    for path in changed:
+    updated: list[str] = []
+    for path in allowed:
         working = ROOT / path
         try:
             reject_symlink_components(path)
             if not working.is_file():
                 continue
+            data = working.read_bytes()
             current = git_bytes(["hash-object", "--", str(working)], env=working_env).decode().strip()
-            if current != original[path][1]:
+            if current == original[path][1]:
+                replacement = (snapshot_root / path).read_bytes()
+            else:
+                replacement = format_working_file(path, data, snapshot_root)
+            if replacement is None or replacement == data:
                 continue
-            working.write_bytes((snapshot_root / path).read_bytes())
+            working.write_bytes(replacement)
         except (RuntimeError, OSError) as error:
             print(f"format: staged content formatted but working file left unchanged: {path}: {error}", file=sys.stderr)
             continue
-        mirrored.append(path)
-    return mirrored
+        updated.append(path)
+    return updated
 
 
 def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_env_vars: dict[str, str], gitdir: Path) -> int:
-    """Format staged blobs in isolation, atomically publish them, then mirror matching working files."""
+    """Format staged blobs in isolation, atomically publish them, then format every staged working copy."""
     effective_index = Path(os.environ.get("GIT_INDEX_FILE", str(index_path))).resolve()
     observed_index = effective_index
     before_bytes = observed_index.read_bytes()
@@ -329,22 +369,20 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         blob = git_bytes(["hash-object", "-w", "--path", path, "--", str(candidate)], env=index_env_vars).decode().strip()
         if blob != original[path][1]:
             changed[path] = blob
-    if not changed:
-        return 0
-    if observed_index.read_bytes() != before_bytes:
-        raise RuntimeError("Git index changed concurrently; retry the commit")
-    updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
-    git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
-    # The index now holds the formatted blobs. Mirror them into the working tree
-    # only where the current bytes still match the pre-format staged blob, so
-    # partially staged or otherwise divergent edits are never overwritten, and a
-    # failed write stays a readable note instead of failing the commit.
-    mirrored = mirror_working_files(changed, original, snapshot_root)
-    summary = "format: formatted staged content"
-    if mirrored:
-        summary += "; updated matching working files: " + ", ".join(mirrored)
+    if changed:
+        if observed_index.read_bytes() != before_bytes:
+            raise RuntimeError("Git index changed concurrently; retry the commit")
+        updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
+        git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
+    # The index (or the snapshot) now holds formatted content. Bring every eligible
+    # staged path's working copy in line without ever replacing a divergent working
+    # file's own bytes; a failed write or formatter stays a readable note.
+    updated = format_working_copies(sorted(allowed), original, snapshot_root)
+    summary = "format: formatted staged content" if changed else "format: staged content already formatted"
+    if updated:
+        summary += "; formatted working files: " + ", ".join(updated)
     else:
-        summary += "; no matching working files were updated"
+        summary += "; no working files needed formatting"
     print(summary, file=sys.stderr)
     return 0
 
