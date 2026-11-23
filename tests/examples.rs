@@ -1958,6 +1958,63 @@ fn commit_edit_action_order_is_strict() {
     }
 }
 
+/// The recorded final commit-edit range end matches the pinned fixture root.
+///
+/// The final applyEdit of `commit-edit-confirm` replaces `Staged changes (`
+/// through the real commit-message line, so its recorded end is the end of
+/// `file://<root>/.git/COMMIT_EDITMSG` where `<root>` is the replay fixture
+/// root. The replay harness pins the root (see `apply_determinism_env`), so
+/// this test pins the relationship: the recorded end must equal the end of
+/// the commit-message line in the expanded recorded client text. It fails
+/// when the root length the recording baked in differs from the pinned one.
+#[test]
+fn commit_edit_confirm_final_range_end_matches_pinned_fixture_root() {
+    let lines = example_lines("commit-edit-confirm.jsonl");
+    let mut final_edit = None;
+    for (index, line) in lines.iter().enumerate() {
+        let is_status_edit = line.dir == Dir::ServerToClient
+            && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
+            && line.message["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"]
+                == "file:///repo/.magit";
+        if is_status_edit {
+            final_edit = Some((
+                index,
+                line.message["params"]["edit"]["documentChanges"][0]["edits"][0].clone(),
+            ));
+        }
+    }
+    let (final_index, final_edit) =
+        final_edit.expect("commit-edit-confirm records a status applyEdit");
+    let client_text = lines[..final_index]
+        .iter()
+        .rev()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("textDocument/didChange")
+                && line.message["params"]["textDocument"]["uri"] == "file:///repo/.magit"
+        })
+        .and_then(|line| line.message["params"]["contentChanges"][0]["text"].as_str())
+        .expect("a recorded client status text precedes the final edit")
+        .to_owned();
+    let fixture = replay_fixture("commit-edit-confirm");
+    let (repo, _git) = fixture.build();
+    let root = repo.path().to_string_lossy().to_string();
+    let real_text = client_text
+        .replace("file:///repo", &format!("file://{root}"))
+        .replace("/repo", &root);
+    let real_lines: Vec<&str> = real_text.split('\n').collect();
+    assert!(
+        real_lines.len() > 20,
+        "the status text must include the commit line"
+    );
+    let expected_end = json!({"line": 20, "character": real_lines[20].len()});
+    assert_eq!(
+        final_edit["range"]["end"], expected_end,
+        "the recorded range end must be the end of the real commit-message line under the pinned fixture root"
+    );
+}
+
 /// A deliberately divergent expectation must make the replay fail.
 #[test]
 fn a_divergent_example_expectation_fails_the_replay() {
