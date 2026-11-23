@@ -44,12 +44,39 @@ fn real_git_path() -> PathBuf {
 fn wrapper(dir: &Path, real_git: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("git");
-    std::fs::write(&path, format!("#!/bin/sh\nfor arg in \"$@\"; do [ \"$arg\" = --path-format=absolute ] && {{ echo 'unsupported --path-format' >&2; exit 129; }}; done\nif [ \"$GIT_DISCOVERY_MODE\" = failure ] && [ \"$1\" = rev-parse ]; then echo 'simulated git execution failure' >&2; exit 23; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+    std::fs::write(&path, format!("#!/bin/sh\n[ -n \"$GIT_DISCOVERY_LOG\" ] && printf '%s\\n' \"$*\" >> \"$GIT_DISCOVERY_LOG\"\nfor arg in \"$@\"; do [ \"$arg\" = --path-format=absolute ] && {{ echo 'unsupported --path-format' >&2; exit 129; }}; done\nif [ \"$GIT_DISCOVERY_MODE\" = failure ] && [ \"$1\" = rev-parse ]; then echo 'simulated git execution failure' >&2; exit 23; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-fn child(path: &Path, wrapper_dir: &Path, mode: &str) {
+fn checked_out_branch(path: &Path) -> String {
+    let output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(path)
+        .output()
+        .unwrap();
+    if output.status.success() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        "HEAD".to_string()
+    }
+}
+
+fn logged_git_calls() -> Vec<String> {
+    std::env::var("GIT_DISCOVERY_LOG")
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|calls| calls.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+fn reset_git_log() {
+    if let Ok(path) = std::env::var("GIT_DISCOVERY_LOG") {
+        std::fs::write(path, "").unwrap();
+    }
+}
+
+fn child(path: &Path, wrapper_dir: &Path, mode: &str, expected_branch: &str) {
     let old_path = std::env::var_os("PATH").unwrap();
     let mut paths = vec![wrapper_dir.to_path_buf()];
     paths.extend(std::env::split_paths(&old_path));
@@ -58,6 +85,8 @@ fn child(path: &Path, wrapper_dir: &Path, mode: &str) {
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("GIT_DISCOVERY_MODE", mode)
         .env("GIT_DISCOVERY_PATH", path)
+        .env("GIT_DISCOVERY_EXPECT_BRANCH", expected_branch)
+        .env("GIT_DISCOVERY_LOG", wrapper_dir.join("git-calls.log"))
         .output()
         .unwrap();
     assert!(
@@ -89,9 +118,21 @@ fn recommended_git_queries_discover_and_open_worktrees_and_propagate_failures() 
     let real_git = real_git_path();
     let wrapper_dir = temp.path().join("wrapper");
     wrapper(&wrapper_dir, &real_git);
-    child(&normal, &wrapper_dir, "compatible");
-    child(&linked, &wrapper_dir, "compatible");
-    child(&temp.path().join("not-a-repo"), &wrapper_dir, "failure");
+    child(
+        &normal,
+        &wrapper_dir,
+        "compatible",
+        &checked_out_branch(&normal),
+    );
+    child(
+        &linked,
+        &wrapper_dir,
+        "compatible",
+        &checked_out_branch(&linked),
+    );
+    git(&linked, &["checkout", "-q", "--detach"]);
+    child(&linked, &wrapper_dir, "compatible", "HEAD");
+    child(&temp.path().join("not-a-repo"), &wrapper_dir, "failure", "");
 }
 
 #[test]
@@ -128,8 +169,19 @@ fn child_checks_discovery() {
     } else {
         expected_git.clone()
     };
-    let discovered = magit_lsp::git::GitRepo::discover(&path).unwrap().unwrap();
+    let expected_branch = std::env::var("GIT_DISCOVERY_EXPECT_BRANCH").unwrap();
+    reset_git_log();
+    let (discovered, branch) = magit_lsp::git::GitRepo::discover_with_branch(&path)
+        .unwrap()
+        .unwrap();
+    let calls = logged_git_calls();
+    assert_eq!(calls.len(), 1, "discovery launched {calls:?}");
+    assert!(calls[0].starts_with("rev-parse "), "{}", calls[0]);
+    assert_eq!(branch, expected_branch);
+    reset_git_log();
     let opened = magit_lsp::git::GitRepo::open(&path).unwrap();
+    let calls = logged_git_calls();
+    assert_eq!(calls.len(), 1, "open launched {calls:?}");
     assert_eq!(discovered.root(), expected_root);
     assert_eq!(opened.root(), expected_root);
     assert_eq!(discovered.git_dir(), expected_git);
@@ -138,7 +190,15 @@ fn child_checks_discovery() {
     assert_eq!(opened.common_dir(), discovered.common_dir());
     let nested = expected_root.join("nested");
     if nested.exists() {
-        let nested_repo = magit_lsp::git::GitRepo::discover(&nested).unwrap().unwrap();
+        reset_git_log();
+        let (nested_repo, nested_branch) = magit_lsp::git::GitRepo::discover_with_branch(&nested)
+            .unwrap()
+            .unwrap();
+        let calls = logged_git_calls();
+        assert_eq!(calls.len(), 1, "nested discovery launched {calls:?}");
         assert_eq!(nested_repo.root(), expected_root);
+        assert_eq!(nested_repo.git_dir(), expected_git);
+        assert_eq!(nested_repo.common_dir(), expected_common);
+        assert_eq!(nested_branch, expected_branch);
     }
 }

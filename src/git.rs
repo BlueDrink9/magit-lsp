@@ -1315,13 +1315,30 @@ impl GitRepo {
 
     /// Discover a repository and its canonical worktree/Git identities.
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Option<Self>> {
+        Ok(Self::discover_with_branch(path)?.map(|(repo, _)| repo))
+    }
+
+    /// Discover a repository and its checked-out branch in one Git invocation.
+    ///
+    /// The branch is the checked-out branch name, or `"HEAD"` when HEAD is
+    /// detached, matching the status view's branch header. It is returned as
+    /// separate data because `current_branch` remains the authoritative query.
+    pub fn discover_with_branch<P: AsRef<Path>>(path: P) -> Result<Option<(Self, String)>> {
         let path = path.as_ref();
         let cwd = if path.is_dir() {
             path.to_path_buf()
         } else {
             path.parent().unwrap_or(path).to_path_buf()
         };
-        let out = match Self::command_in(&cwd, &["rev-parse", "--show-toplevel"]) {
+        let out = match Self::command_in(
+            &cwd,
+            &[
+                "rev-parse",
+                "--show-toplevel",
+                "--git-dir",
+                "--git-common-dir",
+            ],
+        ) {
             Ok(out) => out,
             Err(error)
                 if error.git.as_ref().is_some_and(|failure| {
@@ -1335,28 +1352,52 @@ impl GitRepo {
             }
             Err(error) => return Err(error),
         };
-        let root = out.trim();
+        let mut lines = out.lines();
+        let root = lines.next().unwrap_or_default().trim();
+        let git_dir = lines.next().unwrap_or_default().trim();
+        let common_dir = lines.next().unwrap_or_default().trim();
         if root.is_empty() {
             return Ok(None);
         }
+        if git_dir.is_empty() || common_dir.is_empty() {
+            return Err(Error::new(
+                "git rev-parse did not report the repository directories",
+            ));
+        }
         let root = std::fs::canonicalize(root)?;
-        let git_dir = Self::command_in(&root, &["rev-parse", "--git-dir"])?;
-        let common_dir = Self::command_in(&root, &["rev-parse", "--git-common-dir"])?;
         let resolve_dir = |value: &str| {
-            let path = Path::new(value.trim());
+            let path = Path::new(value);
             std::fs::canonicalize(if path.is_absolute() {
                 path.to_path_buf()
             } else {
-                root.join(path)
+                cwd.join(path)
             })
         };
-        let git_dir = resolve_dir(&git_dir)?;
-        let common_dir = resolve_dir(&common_dir)?;
-        Ok(Some(Self {
-            root,
-            git_dir,
-            common_dir,
-        }))
+        let git_dir = resolve_dir(git_dir)?;
+        let common_dir = resolve_dir(common_dir)?;
+        let branch = Self::read_head_branch(&git_dir)?;
+        Ok(Some((
+            Self {
+                root,
+                git_dir,
+                common_dir,
+            },
+            branch,
+        )))
+    }
+
+    /// Read the checked-out branch from HEAD, using `"HEAD"` when it is detached.
+    ///
+    /// Reading HEAD instead of resolving it through Git keeps discovery to one
+    /// invocation while still naming the branch of an unborn repository.
+    fn read_head_branch(git_dir: &Path) -> Result<String> {
+        let head = std::fs::read(git_dir.join("HEAD"))?;
+        let head = String::from_utf8_lossy(&head);
+        let head = head.trim();
+        Ok(head
+            .strip_prefix("ref: ")
+            .map(|name| name.strip_prefix("refs/heads/").unwrap_or(name).to_owned())
+            .unwrap_or_else(|| "HEAD".to_owned()))
     }
 
     /// The repository's working-tree root.
