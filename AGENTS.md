@@ -67,6 +67,7 @@ The list is a starting point, not exhaustive.
   the targets in "Verification". Never compose `cargo test`/`build`/`nextest`,
   `nvim`, `npm test` or `python3 scripts/ui run` command lines. If no target
   fits, stop and propose one.
+  Run `python*` only when a ticket explicitly directs it.
 - Keep changes scoped to the requested task; take on no unrelated backlog.
 - **Tests.** Feature work gets Rust state tests and conformance scenarios.
   Native-client evidence is required only for new visible behavior (Neovim) or

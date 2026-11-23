@@ -24,11 +24,6 @@ export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
 #   export MAGIT_VSCODE_BIN := /opt/env/vscode/bin/codium
 -include local.mk
 
-# Convention: targets that rewrite files must be named update-*, *-generate,
-# hooks-*, *-refresh, format or format-all (help-tags is a fixed exception),
-# because .opencode/agents/scout.md denies those patterns. Name any new
-# mutating target to match, or add a deny rule there.
-
 define run
 @if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)'; if grep -Eq '$(WARN_RE)' "$$log"; then printf ' (warnings detected; check log: %s)\n' "$$log"; else printf '\n'; rm -f "$$log"; fi; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
 endef
