@@ -1066,14 +1066,23 @@ impl Session {
     }
 
     /// Open a status view in its loading state without acquiring Git status.
+    ///
+    /// `branch` is the checked-out branch already resolved by repository
+    /// discovery, so the early render can show `Head:` without waiting.
     pub fn open_status_loading(
         &mut self,
         id: impl Into<String>,
         placement: Placement,
         viewport: Viewport,
         repo: GitRepo,
+        branch: String,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        self.open_provider_view(id, placement, viewport, Box::new(StatusView::loading(repo)))
+        self.open_provider_view(
+            id,
+            placement,
+            viewport,
+            Box::new(StatusView::loading_with_branch(repo, branch)),
+        )
     }
 
     fn open_internal(

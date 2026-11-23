@@ -38,7 +38,10 @@ pub struct StatusView {
 }
 
 enum StatusState {
-    Loading,
+    /// No status acquired yet; `branch` lets the early render show `Head:` when known.
+    Loading {
+        branch: Option<String>,
+    },
     Failed(String),
     Ready {
         status: Status,
@@ -102,7 +105,7 @@ impl StatusView {
     pub fn loading(repo: GitRepo) -> Self {
         Self {
             repo,
-            state: StatusState::Loading,
+            state: StatusState::Loading { branch: None },
             generation: 0,
             pending_refresh: false,
             hunks: HashMap::new(),
@@ -111,6 +114,15 @@ impl StatusView {
             level: LEVEL_DEFAULT,
             section_line_limit: None,
         }
+    }
+
+    /// Create a loading status view whose early render can show `Head: <branch>`.
+    pub fn loading_with_branch(repo: GitRepo, branch: impl Into<String>) -> Self {
+        let mut view = Self::loading(repo);
+        view.state = StatusState::Loading {
+            branch: Some(branch.into()),
+        };
+        view
     }
 
     /// Acquire current Git state tagged with this view's lifecycle generation.
@@ -182,7 +194,7 @@ impl StatusView {
 
     /// End loading with a readable error if this acquisition is still current.
     pub fn fail_loading(&mut self, message: String, generation: u64) -> bool {
-        if self.generation != generation || !matches!(self.state, StatusState::Loading) {
+        if self.generation != generation || !matches!(self.state, StatusState::Loading { .. }) {
             return false;
         }
         self.state = StatusState::Failed(message);
@@ -196,7 +208,7 @@ impl StatusView {
 
     /// Coalesce refresh requests that arrive while an acquisition is in flight.
     pub fn queue_refresh_while_loading(&mut self) -> Option<u64> {
-        if !matches!(self.state, StatusState::Loading) {
+        if !matches!(self.state, StatusState::Loading { .. }) {
             return None;
         }
         if !self.pending_refresh {
@@ -236,6 +248,10 @@ impl StatusView {
             return tree;
         }
         let StatusState::Ready { status, rebase } = &self.state else {
+            let branch = match &self.state {
+                StatusState::Loading { branch } => branch.clone(),
+                _ => None,
+            };
             let mut tree = Tree {
                 version: 0,
                 lines: Vec::new(),
@@ -245,6 +261,9 @@ impl StatusView {
                 symbols: Vec::new(),
                 links: Vec::new(),
             };
+            if let Some(branch) = branch {
+                push_head_header(&mut tree, &branch);
+            }
             tree.lines.push("Loading repository status…".to_string());
             tree.line_nodes
                 .push(LineNode::new("status:loading", NodeKind::Message));
@@ -481,19 +500,34 @@ mod reuse_tests {
         let dir = committed_repo();
         std::fs::write(dir.path().join("dirty.txt"), "not clean\n").unwrap();
         let repo = GitRepo::open(dir.path()).unwrap();
-        let mut view = StatusView::loading(repo);
+        let mut view = StatusView::loading_with_branch(repo, "main");
         assert!(!view.is_ready());
         let loading = view.render(&Ctx {
             viewport: Viewport::default(),
             pending: &[],
         });
-        assert_eq!(loading.lines, ["Loading repository status…"]);
-        assert_eq!(loading.line_nodes[0].node, "status:loading");
+        assert_eq!(loading.lines, ["Head: main", "Loading repository status…"]);
+        assert_eq!(loading.line_nodes[0].node, "header");
+        assert_eq!(loading.line_nodes[1].node, "status:loading");
         assert!(loading.links.is_empty());
+        assert!(loading
+            .nodes
+            .iter()
+            .all(|node| node.kind != NodeKind::Section));
 
+        // A stale completion must not replace the newer loading generation: the
+        // early Head render survives instead of the acquired file sections.
         let stale = view.acquire_fresh_state().unwrap();
-        view.on_refresh().unwrap();
+        assert!(view.queue_refresh_while_loading().is_some());
         assert!(!view.install_fresh_state(stale));
+        assert!(!view.is_ready());
+        let preserved = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert_eq!(preserved.lines, loading.lines);
+
+        view.on_refresh().unwrap();
         assert!(view.is_ready());
         let live = view.render(&Ctx {
             viewport: Viewport::default(),
@@ -790,6 +824,20 @@ where
     builder.finish()
 }
 
+/// Append the `Head:` line and its stable `header` node to a status tree.
+///
+/// The early loading render and the full status render share this so the node
+/// identity and text are byte-identical across the version they replace.
+fn push_head_header(tree: &mut Tree, branch: &str) {
+    let line = tree.lines.len();
+    let branch = if branch.is_empty() { "HEAD" } else { branch };
+    tree.lines.push(format!("Head: {branch}"));
+    tree.line_nodes
+        .push(LineNode::new("header", NodeKind::Header));
+    tree.nodes
+        .push(Node::new("header", NodeKind::Header, "Head", line));
+}
+
 struct Builder<'a, F> {
     tree: Tree,
     visibility: &'a Visibility,
@@ -838,19 +886,7 @@ where
     }
 
     fn header(&mut self, status: &Status) {
-        let line = self.tree.lines.len();
-        let branch = if status.branch.is_empty() {
-            "HEAD"
-        } else {
-            status.branch.as_str()
-        };
-        self.tree.lines.push(format!("Head: {branch}"));
-        self.tree
-            .line_nodes
-            .push(LineNode::new("header", NodeKind::Header));
-        self.tree
-            .nodes
-            .push(Node::new("header", NodeKind::Header, "Head", line));
+        push_head_header(&mut self.tree, &status.branch);
     }
 
     fn section(&mut self, key: &str, title: &str, files: &[FileEntry]) {

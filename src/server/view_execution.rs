@@ -24,7 +24,8 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
     let discovery = std::time::Instant::now();
-    let discovered_repo = crate::git::GitRepo::open(&repo)?;
+    let (discovered_repo, branch) = crate::git::GitRepo::discover_with_branch(&repo)?
+        .ok_or_else(|| Error::new("This folder is not inside a Git repository."))?;
     crate::runner::trace_current(
         "phase_repository_discovery",
         serde_json::json!({ "duration_ms": discovery.elapsed().as_secs_f64() * 1000.0 }),
@@ -90,7 +91,13 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         session.set_keymaps(keymaps);
         let placement = p.placement.unwrap_or_default();
         let (descriptor, render) = if is_status {
-            session.open_status_loading(id.clone(), placement, p.viewport, discovered_repo)?
+            session.open_status_loading(
+                id.clone(),
+                placement,
+                p.viewport,
+                discovered_repo,
+                branch,
+            )?
         } else {
             session.open_with_discovered_repo(
                 id.clone(),

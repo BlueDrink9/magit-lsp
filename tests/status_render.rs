@@ -8,8 +8,9 @@ use expect_test::expect;
 use lsp_types::{Position, SymbolKind};
 use magit_lsp::git::{FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
-use magit_lsp::status_view;
+use magit_lsp::status_view::{self, StatusView};
 use magit_lsp::tree::{NodeKind, Token, Tree, Visibility, VisibilityState};
+use magit_lsp::view::{Ctx, View, Viewport};
 
 fn hunk(id: &str, lines: Vec<(char, &str)>) -> Hunk {
     Hunk {
@@ -177,6 +178,42 @@ fn snapshot_shows_staged_unstaged_untracked_and_a_rename() {
         Untracked files (1)
           ? new.txt"#]]
     .assert_eq(&text);
+}
+
+/// The early loading render carries the discovered branch, and installing the
+/// full status keeps the same `header` node while adding the file sections.
+#[test]
+fn loading_render_shows_head_and_full_status_preserves_the_header() {
+    let (_tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut view = StatusView::loading_with_branch(repo, "main");
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
+    let early = view.render(&ctx);
+    assert_eq!(early.lines[0], "Head: main");
+    assert_eq!(early.line_nodes[0].node, "header");
+    let header = early.node("header").expect("early header node");
+    assert_eq!(header.kind, NodeKind::Header);
+    assert!(early
+        .nodes
+        .iter()
+        .all(|node| node.kind != NodeKind::Section));
+    assert!(early.lines.iter().all(|line| !line.contains("f.txt")));
+
+    let fresh = view.acquire_fresh_state().unwrap();
+    assert!(view.install_fresh_state(fresh));
+    let full = view.render(&ctx);
+    let installed_header = full.node("header").expect("installed header node");
+    assert_eq!(installed_header.id, header.id);
+    assert_eq!(installed_header.kind, NodeKind::Header);
+    assert_eq!(installed_header.start_line, header.start_line);
+    assert_eq!(full.lines[0], "Head: main");
+    assert!(full.node("section:unstaged").is_some());
+    assert!(full.lines.iter().any(|line| line.contains("f.txt")));
 }
 
 /// The clean-tree message the Lua suite used to assert: even an empty tree
