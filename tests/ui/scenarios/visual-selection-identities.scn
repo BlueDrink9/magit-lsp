@@ -4,7 +4,7 @@ profile: vim
 profile-only: true
 ---
 wait
-sh: seq 1 40 | sed 's/^/line/' > f.txt; git add f.txt; git commit -qm 'selection base'; sed -i '3aEARLY' f.txt; sed -i '/^line33$/aSELECTED\nNEIGHBOR' f.txt
+sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'selection base'; awk '{ print } /^line3$/ { print "EARLY" } /^line33$/ { print "SELECTED"; print "NEIGHBOR" }' f.txt > f.new && mv f.new f.txt
 wait screen contains "Unstaged changes (1)"
 goto "@@"
 keys: Tab

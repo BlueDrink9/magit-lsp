@@ -38,7 +38,7 @@ wait prompt
 expect screen contains "Custom ignore pattern"
 keys: C-u 'dir/*.log' Enter
 wait
-sh: test "$(tail -n 1 .git/info/exclude)" = 'dir/*.log' && head -c "$(stat -c %s .git/ignore-exclude-orig)" .git/info/exclude | cmp - .git/ignore-exclude-orig
+sh: test "$(tail -n 1 .git/info/exclude)" = 'dir/*.log' && head -c "$(wc -c < .git/ignore-exclude-orig | tr -d ' ')" .git/info/exclude | cmp - .git/ignore-exclude-orig
 sh: git check-ignore -v --no-index dir/top.log | grep -F '.git/info/exclude:' && ! git check-ignore -v --no-index dir/top.log | grep -F 'dir/.gitignore:'
 sh: test "$(cat .gitignore)" = '/dir/nested/a\ b\*.txt' && test "$(cat dir/.gitignore)" = '/top.txt' && test "$(cat .git/private-user-excludes)" = '# retained'
 goto "M f.txt"

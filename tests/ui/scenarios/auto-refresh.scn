@@ -7,7 +7,7 @@ fixture: modified-two-files
 ---
 wait screen contains "+line3 CHANGED"
 # Modify a tracked file outside Neovim; the new diff appears automatically.
-sh: sed -i 's/line3 CHANGED/line3 WATCHED/' f.txt
+sh: sed -i.bak 's/line3 CHANGED/line3 WATCHED/' f.txt && rm f.txt.bak
 wait screen contains "+line3 WATCHED"
 expect screen not-contains "+line3 CHANGED"
 snapshot: after-refresh

@@ -3,7 +3,7 @@ fixture: modified-two-files
 profile: vim
 profile-only: true
 ---
-sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'base'; sed -i '5s/$/ CHANGED/' f.txt; git add f.txt; sed -i '20s/$/ CHANGED/' f.txt
+sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'base'; sed -i.bak '5s/$/ CHANGED/' f.txt && rm f.txt.bak; git add f.txt; sed -i.bak '20s/$/ CHANGED/' f.txt && rm f.txt.bak
 keys: g r
 wait
 goto "Staged changes (1)"
