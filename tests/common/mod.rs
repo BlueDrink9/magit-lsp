@@ -34,7 +34,11 @@ static DETERMINISM: Once = Once::new();
 /// together) so recordings stay valid under any temporary-directory path.
 pub fn apply_determinism_env() {
     DETERMINISM.call_once(|| {
-        let home = TempDir::new().expect("tempdir for HOME").keep();
+        let home = TempDir::new()
+            .expect("tempdir for HOME")
+            .keep()
+            .canonicalize()
+            .expect("canonicalize tempdir for HOME");
         std::fs::create_dir_all(home.join("config")).expect("create XDG config dir");
         std::env::set_var("HOME", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join("config"));
