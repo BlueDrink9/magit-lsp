@@ -517,6 +517,20 @@ mod unix {
         use super::*;
         use crate::runner::{with_cancel, CancelHandle};
 
+        /// Read a pid file once it holds parseable content, bounded by `until`.
+        #[cfg(target_os = "linux")]
+        fn wait_pid_file(path: &std::path::Path, until: Instant) -> libc::pid_t {
+            loop {
+                if let Ok(contents) = std::fs::read_to_string(path) {
+                    if let Ok(pid) = contents.trim().parse() {
+                        return pid;
+                    }
+                }
+                assert!(Instant::now() < until, "pid file readiness timed out");
+                std::thread::yield_now();
+            }
+        }
+
         #[cfg(target_os = "linux")]
         #[test]
         fn exit_before_cancel_is_normal_success() {
@@ -543,20 +557,8 @@ mod unix {
                 tx.send((result, events)).unwrap();
             });
             let until = Instant::now() + Duration::from_secs(5);
-            while !leader_file.exists() || !daemon_file.exists() {
-                assert!(Instant::now() < until, "leader/daemon readiness timed out");
-                thread::yield_now();
-            }
-            let leader: libc::pid_t = std::fs::read_to_string(&leader_file)
-                .unwrap()
-                .trim()
-                .parse()
-                .unwrap();
-            let daemon: libc::pid_t = std::fs::read_to_string(&daemon_file)
-                .unwrap()
-                .trim()
-                .parse()
-                .unwrap();
+            let leader = wait_pid_file(&leader_file, until);
+            let daemon = wait_pid_file(&daemon_file, until);
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             loop {
                 let rc = unsafe {
