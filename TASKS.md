@@ -7,6 +7,12 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [x] **CI-EDITOR: Isolate artifact-target unit tests from installed editors.** test: artifact input validation and spaced-path forwarding pass without a real VSCode-compatible editor, without invoking builds; retain production editor validation. Verify: `make ui-unit`.
+  - Done: `9e7137f`
+  - Verified: `make ui-unit` → exit 0 (`ok: ui-unit`).
+- [ ] **CI-REPLAY: Stabilize commit-edit strict recording replay.** test: `plain_examples_replay_against_the_real_binary` preserves strict frame comparisons and passes for commit-edit-confirm under reproducible fixture state; diagnose before changing recordings. Verify: `make test-rust FILTER="--test examples"`.
+- [ ] **CI-WINDOWS: Use portable command-test fixture paths.** test: assume-unchanged, skip-worktree and ignore command tests retain literal metacharacter/scoping assertions with Windows-valid fixture filenames; do not skip Windows coverage. check: Linux commands suite passes; Windows verification remains CI-only. Verify: `make test-rust FILTER="--test commands"`.
+
 - [x] **PERF-FIXTURE: Per-process cached repo templates with copy-per-use.** test: a fork-from-template helper in `tests/common/` yields a byte-equivalent repo to a fresh `RepoFixture` build; `tests/capability_lattice.rs` rebuilds its 59 identical fixtures through it with all 4 tests and assertions unchanged. check: report the `capability_lattice` libtest wall time against the recorded 25.4s baseline.
   - Done: `e2a485d` (tests/common template cache `fork`/`fork_in`, capability_lattice conversion, fork-equivalence regression in plain_harness).
   - Verified: `make test-rust FILTER="--test capability_lattice --test plain_harness"` @ `e2a485d` → ok: rust (capability_lattice 4/4 in 24.91s vs 25.40s baseline — spawn+handshake dominates there; plain_harness 35/35 in 11.11s, +1 fork-equivalence test). The cache's real payoff is the loop-heavy conversions (PERF-DEBOUNCE, PERF-SWEEP).
