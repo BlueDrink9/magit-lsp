@@ -306,6 +306,149 @@ fn status_open_progress_end_does_not_wait_for_late_create_reply() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+/// A watcher burst that fires while a commit-confirm's detached worker still
+/// owns the repository's publication order must queue behind it instead of
+/// publishing an interleaved status edit. macOS CI observed exactly that
+/// interleave: an extra `workspace/applyEdit` landed between the confirm's
+/// own edit and the `Committed:` message. The commit-msg hook below parks Git
+/// mid-tail after the confirm replied, so a deliberate worktree touch arms an
+/// eager burst against the held publication turn — deterministically, with no
+/// timing window on the asserting side.
+#[cfg(unix)]
+#[test]
+fn commit_confirm_holds_the_publication_order_against_a_watcher_refresh() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .staged_file("f.txt", standard_changes())
+        .build();
+    // Gate markers live inside .git, where only state files the views render
+    // count as watcher-relevant, so nothing but the deliberate touch below
+    // can arm a refresh burst while Git is parked.
+    let ready = tmp.path().join(".git").join("hook.ready");
+    let release = tmp.path().join(".git").join("hook.release");
+    let hook = tmp.path().join(".git").join("hooks").join("commit-msg");
+    write(
+        &hook,
+        &format!(
+            "#!/bin/sh\nprintf ok > '{ready}'\ni=0\nwhile [ ! -f '{release}' ] && [ \"$i\" -lt 300 ]; do i=$((i+1)); sleep 0.05; done\nexit 0\n",
+            ready = ready.display(),
+            release = release.display(),
+        ),
+    );
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Release the gate even when an assertion fails, so Git can never outlive
+    // the test on the panic path.
+    struct ReleaseGate(std::path::PathBuf);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "release");
+        }
+    }
+    let _gate = ReleaseGate(release.clone());
+
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")]);
+    server.auto_respond_to_progress_create();
+    server.initialize_rich(json!({"window": {"workDoneProgress": true}}));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":view,"command":"commit.create"}}));
+    let mut edit = None;
+    while edit.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("view/effects") {
+            edit = message["params"]["effects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["type"] == json!("editDocument"))
+                .cloned()
+                .or(edit);
+        }
+    }
+    let edit = edit.unwrap();
+    // The one explicit full-sync stream, then a confirm barrier on the exact
+    // synchronized checkpoint, exactly as a rich client drives it.
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}})));
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":2},"contentChanges":[{"text":"Gated publication\n"}]}})));
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":501,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":2,"source":"synchronized"}]}})));
+    assert!(server.response_with_id(501).get("error").is_none());
+    // The hook's ready marker proves Git is parked mid-tail: the confirm has
+    // already replied, so the commit's publication turn is held.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "commit-msg hook did not become ready"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // A worktree touch arms an eager watcher burst against the held
+    // publication order: the refresh must queue behind the in-flight
+    // mutation, not publish an interleaved status edit of its own.
+    write(&tmp.path().join("touched.txt"), "worktree noise\n");
+    let drained = server.drain_notifications();
+    assert!(
+        drained.iter().all(|message| {
+            message["method"] != "view/render" && message["method"] != "workspace/applyEdit"
+        }),
+        "a watcher refresh published while the commit held the publication order: {drained:?}"
+    );
+
+    // Completing the commit releases the window: the worker's own render
+    // sees the touched file, the Committed outcome follows it, and only then
+    // may the queued burst refresh.
+    std::fs::write(&release, "release").unwrap();
+    // Full-text renders carry `text`; incremental renders carry per-edit
+    // `lines` against the acknowledged base version.
+    fn render_lines(render: &Value) -> Vec<String> {
+        let mut lines: Vec<String> =
+            serde_json::from_value(render["params"]["text"].clone()).unwrap_or_default();
+        if let Some(edits) = render["params"]["edits"].as_array() {
+            for edit in edits {
+                lines.extend(
+                    serde_json::from_value::<Vec<String>>(edit["lines"].clone())
+                        .unwrap_or_default(),
+                );
+            }
+        }
+        lines
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut committed = false;
+    let mut render_saw_touch = false;
+    while !(committed && render_saw_touch) {
+        for message in server.drain_notifications() {
+            if message["method"] == "view/effects"
+                && message["params"]["effects"]
+                    .as_array()
+                    .is_some_and(|effects| {
+                        effects.iter().any(|effect| {
+                            effect["type"] == "message"
+                                && effect["text"]
+                                    .as_str()
+                                    .is_some_and(|text| text.contains("Committed:"))
+                        })
+                    })
+            {
+                committed = true;
+            }
+            if message["method"] == "view/render"
+                && render_lines(&message).join("\n").contains("touched.txt")
+            {
+                render_saw_touch = true;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected the committed outcome and a render mentioning the touched file after the release"
+        );
+    }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[cfg(unix)]
 #[test]
 fn status_open_text_mode_defers_held_completion_until_exit() {

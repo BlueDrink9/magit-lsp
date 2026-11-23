@@ -1761,13 +1761,24 @@ fn replay_example_mode(
     lines: &[Line],
     regenerate: bool,
 ) -> Result<Vec<String>, String> {
+    replay_example_env(name, lines, regenerate, &[])
+}
+
+/// [`replay_example_mode`] with extra environment pairs passed to the spawned
+/// server binary, so a replay can tighten watcher or timing behavior.
+fn replay_example_env(
+    name: &str,
+    lines: &[Line],
+    regenerate: bool,
+    extra_env: &[(&str, &str)],
+) -> Result<Vec<String>, String> {
     let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
     let root = repo.path().to_string_lossy().to_string();
     let binary = env!("CARGO_BIN_EXE_magit-lsp");
 
-    let mut server = fixtures::stdio::TestServer::spawn(&[]);
+    let mut server = fixtures::stdio::TestServer::spawn(extra_env);
     // Outbound requests observed so far, indexed by their recorded number.
     let mut outbound: Vec<Value> = Vec::new();
     // The deferred status acquisition's progress token, once regeneration has
@@ -3364,4 +3375,25 @@ fn commit_start_publishes_pending_draft_row_before_any_refresh() {
     server.shutdown_and_exit();
     let (exit, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(exit.success());
+}
+
+/// A green canary for the commit-edit replay under an eager watcher.
+///
+/// Three focused runs at a zero debounce were green before the
+/// publication-window fix — the recorded interleave is macOS-timing, not
+/// Linux-forcing — so this test is a canary, not the RED regression (the
+/// deterministic proof lives in the server_async suite). It stays green
+/// through the fix: with git's own writes scheduling watcher bursts against
+/// the commit's publication window, strict replay requires each burst to
+/// coalesce into the identical-tree no-op refresh.
+#[test]
+fn commit_edit_confirm_replays_with_an_eager_watcher() {
+    let name = "commit-edit-confirm.jsonl";
+    replay_example_env(
+        name,
+        &example_lines(name),
+        false,
+        &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "0")],
+    )
+    .expect("the commit example replays strictly with an eager watcher");
 }

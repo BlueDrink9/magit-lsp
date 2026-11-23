@@ -1124,6 +1124,14 @@ fn spawn_repository_operation(
             // the client, including when Git was killed before opening an editor.
             drop(edit);
 
+            // Hold the publication window the confirm lane opened: the
+            // commit's renders and outcome messages publish before any
+            // watcher refresh held off by the window, covering the early
+            // return below. The underscore-prefixed binding still lives to
+            // the closure's end, closing the window only after every
+            // publication is sent.
+            let _publication = shared.publication_guard(&repo);
+
             let mut messages = Vec::new();
             match result {
                 Ok(crate::git::RepositoryOperationOutcome::Commit(outcome)) => {

@@ -110,6 +110,24 @@ impl Drop for MutationTurn {
     }
 }
 
+/// Keeps a repository's publication window open until the holder is done.
+///
+/// Constructed without clearing the marker; the drop clears it, so the
+/// watcher may refresh only after the holder's last publication was sent.
+struct PublicationGuard {
+    publications: Arc<Mutex<HashSet<String>>>,
+    repo: String,
+}
+
+impl Drop for PublicationGuard {
+    fn drop(&mut self) {
+        self.publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.repo);
+    }
+}
+
 /// Startup options parsed from the command line.
 #[derive(Debug, Clone, Default)]
 pub struct ServerOptions {
@@ -208,6 +226,9 @@ struct Shared {
     mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
     /// Repositories owned by detached workers after their request returned.
     deferred_repositories: Arc<Mutex<HashSet<String>>>,
+    /// Repositories with an open publication window, set by the confirm lane
+    /// and cleared by the detached worker after its last publication.
+    deferred_publications: Arc<Mutex<HashSet<String>>>,
     /// Running repository watchers, keyed by repository root.
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
 }
@@ -305,6 +326,7 @@ impl Shared {
             next_progress: Arc::new(AtomicU64::new(0)),
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
             deferred_repositories: Arc::new(Mutex::new(HashSet::new())),
+            deferred_publications: Arc::new(Mutex::new(HashSet::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -417,6 +439,62 @@ impl Shared {
         }
     }
 
+    /// Park this repository's publication window for its detached worker.
+    ///
+    /// The confirm lane inserts the marker before Git resumes; the owning
+    /// worker clears it after its last publication, so no watcher refresh can
+    /// interleave between the confirm's own effects and the commit outcome.
+    /// Inserting never blocks: the confirm runs on the reader loop, which
+    /// must stay live while a publication window is open.
+    fn hold_deferred_publication(&self, repo: String) {
+        self.deferred_publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(repo);
+    }
+
+    /// Return a publication window that never reached its worker.
+    fn reclaim_deferred_publication(&self, repo: &str) {
+        self.deferred_publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(repo);
+    }
+
+    /// Hold this repository's publication window open until the guard drops.
+    ///
+    /// Constructing never clears the marker: the holder keeps the window open
+    /// through its publications, and the drop clears it, so the watcher may
+    /// refresh only after the last publication was sent. An absent marker
+    /// makes the drop a no-op for workers without a confirm behind them.
+    fn publication_guard(&self, repo: &str) -> PublicationGuard {
+        PublicationGuard {
+            publications: Arc::clone(&self.deferred_publications),
+            repo: repo.to_string(),
+        }
+    }
+
+    /// Bounded synchronous wait for this repository's publication window to
+    /// close, for the watcher thread.
+    ///
+    /// The watcher runs off the reader loop, so it may poll. A closing server
+    /// or an overdue window proceeds with the refresh anyway — bounded lanes
+    /// never deadlock, and the owning worker's guard drop backstops leaks.
+    fn wait_publication_window(&self, repo: &str) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while self
+            .deferred_publications
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(repo)
+        {
+            if self.closing.load(Ordering::SeqCst) || std::time::Instant::now() > deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     /// Reserve exclusive mutation authority until a detached worker exits.
     fn reserve_deferred(&self, repo: String) -> Option<DeferredReservation> {
         let mut repositories = self
@@ -473,6 +551,13 @@ impl Shared {
                     if shared.closing.load(Ordering::SeqCst) {
                         return;
                     }
+                    // A commit's publication window may be open: hold this
+                    // burst off until the detached worker published the
+                    // outcome, so no refresh interleaves between the
+                    // confirm's own effects and the Committed message. This
+                    // watcher thread may wait bounded; the reader loop never
+                    // waits, so nothing here can starve a confirm.
+                    shared.wait_publication_window(&repo_for_handler);
                     let renders = {
                         match shared.session(&repo_for_handler) {
                             Some(handle) => {

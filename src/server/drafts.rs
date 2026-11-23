@@ -74,7 +74,24 @@ pub(super) fn draft_request(shared: &Shared, request: &Request) -> Result<Value>
                     ));
                 }
             }
-            if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
+            // Open the publication window before Git resumes: the detached
+            // worker holds it across the commit's renders and the Committed
+            // outcome, so no watcher refresh can interleave between the
+            // confirm's own effects and that outcome.
+            let repo = editor::registry().repo_for_uri(&shared.draft_owner, &p.uri)?;
+            shared.hold_deferred_publication(repo.clone());
+            let finished = editor::registry().finish(&shared.draft_owner, &p);
+            if finished.is_err()
+                && editor::registry()
+                    .run_for_uri(&shared.draft_owner, &p.uri)
+                    .is_ok()
+            {
+                // The action failed without releasing the draft: Git never
+                // resumes and no worker will open the window, so clear the
+                // marker. A released draft leaves it to the worker.
+                shared.reclaim_deferred_publication(&repo);
+            }
+            if let Some(warning) = finished? {
                 let _ = shared
                     .sender
                     .send(custom_ui(&shared.client).effects(ViewEffectsParams {

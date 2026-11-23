@@ -846,6 +846,17 @@ impl EditRegistry {
             .ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
     }
 
+    /// Resolve the repository key of the pending draft for this URI on this
+    /// connection, for publication-order coordination.
+    #[cfg(unix)]
+    pub fn repo_for_uri(&self, owner: &str, uri: &str) -> Result<String> {
+        self.lock()
+            .iter()
+            .find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
+            .map(|(_, entry)| entry.repo_path.clone())
+            .ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
+    }
+
     /// Snapshot pending draft identities for one trusted owner and repository.
     #[cfg(unix)]
     pub fn pending_for(&self, owner: &str, repo_path: &str) -> Vec<PendingDraft> {
@@ -868,6 +879,12 @@ impl EditRegistry {
     /// No editor-helper file synchronization is available outside Unix yet.
     #[cfg(not(unix))]
     pub fn run_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {
+        Err(Error::new("commit message editing requires Unix"))
+    }
+
+    /// No editor-helper file synchronization is available outside Unix yet.
+    #[cfg(not(unix))]
+    pub fn repo_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {
         Err(Error::new("commit message editing requires Unix"))
     }
 
