@@ -680,7 +680,7 @@ fn merge_base_and_active_operation_are_rejected_readably() {
     let output = std::process::Command::new("git")
         .args(["rebase", "-i", "HEAD~2"])
         .current_dir(dir.path())
-        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+        .env("GIT_SEQUENCE_EDITOR", "sed -i.bak '1s/^pick /edit /'")
         .output()
         .unwrap();
     assert!(

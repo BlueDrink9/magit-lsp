@@ -1107,11 +1107,6 @@ fn close_after_abort_is_ignored() {
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
         .build();
-    let expected_path = repo
-        .path()
-        .join(".git/COMMIT_EDITMSG")
-        .to_string_lossy()
-        .to_string();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
     let mut seen = Vec::new();
@@ -2276,6 +2271,7 @@ fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeo
 ///
 /// A burst scheduled by an earlier write must settle before a gate is armed,
 /// so the parked status read belongs to the deliberate burst.
+#[cfg(unix)]
 fn drain_pending(server: &mut stdio::TestServer, editor: &mut FakeEditor) {
     loop {
         let pending = server.drain_notifications();
@@ -2299,6 +2295,7 @@ fn drain_pending(server: &mut stdio::TestServer, editor: &mut FakeEditor) {
 /// after [`Self::arm_burst`] blocks until [`Self::release`]. That is exactly
 /// where a scheduled watcher burst sits once it has passed its publication
 /// window check and taken session ownership.
+#[cfg(unix)]
 struct StatusGate {
     dir: tempfile::TempDir,
     arm: std::path::PathBuf,
@@ -2307,6 +2304,7 @@ struct StatusGate {
     release: std::path::PathBuf,
 }
 
+#[cfg(unix)]
 impl StatusGate {
     fn new() -> Self {
         use std::os::unix::fs::PermissionsExt;
@@ -2410,6 +2408,7 @@ impl StatusGate {
     }
 }
 
+#[cfg(unix)]
 impl Drop for StatusGate {
     fn drop(&mut self) {
         // A failed assertion must never leave the watcher parked.

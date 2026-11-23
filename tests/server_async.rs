@@ -1128,7 +1128,7 @@ fn opening_multirow_rebase_todo_batches_object_resolution_once() {
         let pause = Command::new("git")
             .args(["rebase", "-i", &format!("HEAD~{}", rows + 1)])
             .current_dir(tmp.path())
-            .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+            .env("GIT_SEQUENCE_EDITOR", "sed -i.bak '1s/^pick /edit /'")
             .output()
             .unwrap();
         assert!(

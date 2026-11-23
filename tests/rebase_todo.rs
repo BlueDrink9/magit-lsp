@@ -31,7 +31,7 @@ fn paused_repo() -> (TempDir, GitRepo) {
     let output = std::process::Command::new("git")
         .args(["rebase", "-i", "HEAD~3"])
         .current_dir(dir.path())
-        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+        .env("GIT_SEQUENCE_EDITOR", "sed -i.bak '1s/^pick /edit /'")
         .output()
         .unwrap();
     let repo = GitRepo::open(dir.path()).unwrap();
@@ -178,7 +178,7 @@ fn old_todo_model_cannot_save_into_identical_restarted_rebase() {
     let output = std::process::Command::new("git")
         .args(["rebase", "-i", "HEAD~3"])
         .current_dir(dir.path())
-        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+        .env("GIT_SEQUENCE_EDITOR", "sed -i.bak '1s/^pick /edit /'")
         .output()
         .unwrap();
     assert!(
