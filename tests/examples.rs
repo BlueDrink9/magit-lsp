@@ -1122,14 +1122,18 @@ fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Val
             }
         });
     }
-    let text = serde_json::to_string(&value).expect("serialise client frame");
-    let text = text
-        .replace(
-            &format!("file://{RECORDED_ROOT}"),
-            &format!("file://{root}"),
-        )
-        .replace(RECORDED_ROOT, root);
-    serde_json::from_str(&text).expect("parse expanded client frame")
+    // The root is replaced within the parsed string values: a live root can
+    // contain backslashes (Windows), and splicing those into the serialized
+    // form would corrupt its escapes before the frame is sent.
+    for_each_string(&mut value, &mut |text| {
+        *text = text
+            .replace(
+                &format!("file://{RECORDED_ROOT}"),
+                &format!("file://{root}"),
+            )
+            .replace(RECORDED_ROOT, root);
+    });
+    value
 }
 
 /// One recorded client document as the recording's frames assert it.
@@ -1318,6 +1322,12 @@ fn refreshed_echo(
 }
 
 /// Visit every string leaf in a JSON value.
+///
+/// Machine-dependent values (repository roots, binary paths) are replaced
+/// through this walk on the parsed string values, never by splicing into
+/// serialized JSON text: a run root can contain backslashes (Windows), and
+/// splicing those into the serialized form would corrupt its escapes before
+/// a re-parse.
 fn for_each_string(value: &mut Value, apply: &mut dyn FnMut(&mut String)) {
     match value {
         Value::Object(map) => {
@@ -1507,6 +1517,10 @@ impl RootNormalizer {
 }
 
 /// Replace one side's repository root with the recording's placeholder.
+///
+/// Operates on plain string values (URIs, document text), never on serialized
+/// JSON text: a Windows root's backslashes are escaped there and would never
+/// match.
 fn canonical_root(text: &str, root: &str) -> String {
     text.replace(
         &format!("file://{root}"),
@@ -1516,12 +1530,15 @@ fn canonical_root(text: &str, root: &str) -> String {
 }
 
 /// Replace this run's repository root and binary path with the recording's
-/// placeholders.
+/// placeholders within one plain string value.
 ///
 /// This is the repository-root/binary half of [`canonical_frame`]'s contract,
 /// shared so a persisted client echo uses the same placeholders as a captured
-/// server frame. Replaying a recorded frame expands them back to the live
-/// values.
+/// server frame. Callers hand it parsed string values — [`canonical_frame`]
+/// walks the frame with [`for_each_string`] — never serialized JSON text: a
+/// live root can contain backslashes (Windows), which never match the
+/// serialized form's escapes. Replaying a recorded frame expands them back to
+/// the live values.
 fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
     canonical_root(text, root).replace(binary, RECORDED_BINARY)
 }
@@ -1555,9 +1572,13 @@ fn canonical_frame(
         }
     });
     hashes.normalize_frame(&mut value);
-    let text = serde_json::to_string(&value).expect("serialise observed frame");
-    let text = canonical_paths(&text, &roots.root, binary);
-    serde_json::from_str(&text).expect("parse canonical frame")
+    // Roots and binary paths are replaced within the parsed string values: a
+    // live root can contain backslashes (Windows), which never match — or
+    // corrupt — the serialized JSON form.
+    for_each_string(&mut value, &mut |text| {
+        *text = canonical_paths(text, &roots.root, binary);
+    });
+    value
 }
 
 /// Return first differing JSON path and its values.
@@ -2376,6 +2397,41 @@ fn root_normalization_is_invariant_to_root_length() {
     divergent["params"]["edit"]["documentChanges"][0]["edits"][0]["range"]["end"]["character"] =
         Value::from(0);
     assert_ne!(short, divergent);
+}
+
+/// Expanding a recorded client frame with a Windows-style backslash root must
+/// keep the frame valid JSON and carry the path verbatim.
+///
+/// Windows temporary roots contain backslashes; splicing those into the
+/// serialized JSON text corrupts its escapes before the re-parse (the CI
+/// failures: `invalid escape` while expanding a client frame). Expansion
+/// operates on the parsed string values, so any root survives intact.
+#[test]
+fn expanding_a_recorded_client_frame_carries_a_backslash_root_verbatim() {
+    let windows_root = r"C:\Users\runner\work\magit-lsp";
+    let recorded = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": {"uri": "file:///repo/.magit", "version": 5},
+            "contentChanges": [
+                {"text": "file:///repo/.git/COMMIT_EDITMSG\nroot /repo\n"}
+            ],
+        },
+    });
+    let expanded = expand_client_frame(&recorded, windows_root, None);
+    assert_eq!(
+        expanded["params"]["textDocument"]["uri"],
+        format!("file://{windows_root}/.magit"),
+        "the uri carries the backslash root verbatim"
+    );
+    assert_eq!(
+        expanded["params"]["contentChanges"][0]["text"],
+        format!("file://{windows_root}/.git/COMMIT_EDITMSG\nroot {windows_root}\n"),
+        "the text carries the backslash root verbatim"
+    );
+    // The expanded frame stays valid JSON, so the client driver can send it.
+    serde_json::to_string(&expanded).expect("the expanded frame serialises");
 }
 
 /// A deliberately divergent expectation must make the replay fail.
