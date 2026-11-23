@@ -1,4 +1,4 @@
-.PHONY: build vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -114,6 +114,22 @@ hooks-run:
 # (scripted Neovim screens) must be run when touching the UI harness or
 # user-visible rendering.
 test: build test-rust test-lua vscode-test
+
+# Same three suite groups as `make test`, run concurrently, for a shorter
+# local wall time; `test:` above stays the serial default and CI gate. One
+# `build` must finish first (a prerequisite here), and `-o build` keeps the
+# lua and vscode sub-makes from rebuilding it, so no two Cargo runs overlap.
+# Each group is its own sub-make, so every ok:/fail digest still prints (lines
+# may interleave). Every child pid is collected and waited on, so the recipe
+# exits nonzero if any group fails.
+test-parallel: build
+	@pids=""; \
+	for suite in test-rust test-lua vscode-test; do \
+	  $(MAKE) -o build $$suite & pids="$$pids $$!"; \
+	done; \
+	status=0; \
+	for pid in $$pids; do wait $$pid || status=1; done; \
+	exit $$status
 
 vscode-keybindings-generate:
 	$(call run,vscode-keybindings-generate,node clients/vscode/scripts/gen-keybindings.mjs)
