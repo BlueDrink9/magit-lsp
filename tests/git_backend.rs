@@ -121,7 +121,8 @@ fn configured_user_excludes_and_linked_worktree_repository_scope_resolve_correct
     let (tmp, repo) = RepoFixture::new()
         .commit("initial", [("tracked.txt", TEN_LINES)])
         .build();
-    let configured = tmp.path().join("private/excludes");
+    let root = tmp.path().canonicalize().unwrap();
+    let configured = root.join("private/excludes");
     git(
         tmp.path(),
         &[
@@ -191,7 +192,8 @@ fn user_excludes_rejects_symlink_destinations_and_parents() {
     let (tmp, repo) = RepoFixture::new()
         .commit("initial", [("tracked.txt", TEN_LINES)])
         .build();
-    let normal = tmp.path().join("normal/excludes");
+    let root = tmp.path().canonicalize().unwrap();
+    let normal = root.join("normal/excludes");
     git(
         tmp.path(),
         &[
@@ -205,9 +207,9 @@ fn user_excludes_rejects_symlink_destinations_and_parents() {
         .unwrap();
     assert_eq!(std::fs::read_to_string(&normal).unwrap(), "*.normal\n");
 
-    let target = tmp.path().join("target-excludes");
+    let target = root.join("target-excludes");
     std::fs::write(&target, "# exact target bytes\n").unwrap();
-    let configured = tmp.path().join("linked-excludes");
+    let configured = root.join("linked-excludes");
     std::os::unix::fs::symlink(&target, &configured).unwrap();
     git(
         tmp.path(),
@@ -222,13 +224,13 @@ fn user_excludes_rejects_symlink_destinations_and_parents() {
         .add_ignore_rule(IgnoreScope::User, IgnoreRule::Pattern("*.linked"))
         .is_err());
     assert_eq!(std::fs::read(&target).unwrap(), b"# exact target bytes\n");
-    assert!(!tmp.path().join("unrelated").exists());
+    assert!(!root.join("unrelated").exists());
 
-    let parent_target = tmp.path().join("real-parent");
+    let parent_target = root.join("real-parent");
     std::fs::create_dir(&parent_target).unwrap();
     let parent_file = parent_target.join("excludes");
     std::fs::write(&parent_file, "# parent target bytes\n").unwrap();
-    let linked_parent = tmp.path().join("linked-parent");
+    let linked_parent = root.join("linked-parent");
     std::os::unix::fs::symlink(&parent_target, &linked_parent).unwrap();
     let parent_destination = linked_parent.join("excludes");
     git(
@@ -247,7 +249,7 @@ fn user_excludes_rejects_symlink_destinations_and_parents() {
         std::fs::read(&parent_file).unwrap(),
         b"# parent target bytes\n"
     );
-    assert!(!tmp.path().join("unrelated").exists());
+    assert!(!root.join("unrelated").exists());
 }
 
 #[test]
