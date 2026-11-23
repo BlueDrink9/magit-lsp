@@ -2225,14 +2225,22 @@ impl GitRepo {
             "--branch",
         ])?;
         let mut status = self.parse_status(&raw, repo_path, presentation_files)?;
+        // HEAD presence answers the same for every entry of this read, and the
+        // porcelain branch header already carries it, so no per-file
+        // `rev-parse --verify HEAD` spawn is needed.
+        let head_present = status.head.is_some();
         for file in status
             .staged
             .iter_mut()
             .chain(&mut status.unstaged)
             .chain(&mut status.untracked)
         {
-            file.mutation_identity =
-                Some(self.file_mutation_identity(&file.path, file.orig_path.as_deref(), true)?);
+            file.mutation_identity = Some(self.file_mutation_identity_in(
+                &file.path,
+                file.orig_path.as_deref(),
+                true,
+                head_present,
+            )?);
         }
         Ok(status)
     }
@@ -2245,23 +2253,53 @@ impl GitRepo {
         original: Option<&str>,
         worktree: bool,
     ) -> Result<FileMutationIdentity> {
-        let head = match self.run(&["rev-parse", "--verify", "--quiet", "HEAD"]) {
-            Ok(_) => self.run(&["ls-tree", "-r", "-z", "HEAD", "--", path])?,
+        let head_present = self.head_present()?;
+        self.file_mutation_identity_in(path, original, worktree, head_present)
+    }
+
+    /// Whether `HEAD` resolves to a commit, probed once per caller.
+    ///
+    /// Absence is the quiet exit-1 failure of `rev-parse --verify --quiet`; any
+    /// other failure propagates.
+    fn head_present(&self) -> Result<bool> {
+        match self.run(&["rev-parse", "--verify", "--quiet", "HEAD"]) {
+            Ok(_) => Ok(true),
             Err(error)
                 if error
                     .git
                     .as_ref()
                     .is_some_and(|failure| failure.exit_code == 1 && failure.stderr.is_empty()) =>
             {
-                String::new()
+                Ok(false)
             }
-            Err(error) => return Err(error),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Capture identities for one endpoint with a HEAD-presence answer in hand.
+    ///
+    /// `head_present` is repository-global, so [`Self::status_listing_excluding`]
+    /// answers it once from the porcelain branch header and reuses it for every
+    /// entry and rename origin. The `ls-tree`/`ls-files` lookups stay per path:
+    /// both are pathspec lookups whose directory-descendant and per-path
+    /// semantics a batched query would change.
+    fn file_mutation_identity_in(
+        &self,
+        path: &str,
+        original: Option<&str>,
+        worktree: bool,
+        head_present: bool,
+    ) -> Result<FileMutationIdentity> {
+        let head = if head_present {
+            self.run(&["ls-tree", "-r", "-z", "HEAD", "--", path])?
+        } else {
+            String::new()
         };
         let literal = format!(":(literal){path}");
         let index = self.run(&["ls-files", "--stage", "-z", "--", &literal])?;
         let original = original
             .map(|origin| {
-                self.file_mutation_identity(origin, None, worktree)
+                self.file_mutation_identity_in(origin, None, worktree, head_present)
                     .map(|identity| (origin.to_string(), Box::new(identity)))
             })
             .transpose()?;
