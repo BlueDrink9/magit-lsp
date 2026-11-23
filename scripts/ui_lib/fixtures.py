@@ -333,7 +333,7 @@ def _paused_linear_rebase_todo(repo: Path, env: dict[str, str]) -> None:
     git(repo, env, "checkout", "-q", "-b", "topic")
     for message in ("first todo entry", "second todo entry", "third todo entry", "fourth todo entry"):
         commit(repo, env, message, {"f.txt": f"{message}\n"})
-    env = {**env, "GIT_SEQUENCE_EDITOR": "sed -i '1s/^pick /edit /'"}
+    env = {**env, "GIT_SEQUENCE_EDITOR": "sed -i.bak '1s/^pick /edit /'"}
     result = git(repo, env, "rebase", "-i", "HEAD~4", check=False)
     if result.returncode != 0:
         raise RuntimeError(f"paused linear rebase fixture failed: {result.stderr.strip()}")
