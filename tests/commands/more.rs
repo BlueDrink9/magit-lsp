@@ -4462,12 +4462,12 @@ fn ignore_root_literal_uses_selected_path() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .modify("other/other.txt", "changed too\n")
         .build();
     std::fs::write(tmp.path().join(".gitignore"), "# retained\n").unwrap();
@@ -4475,12 +4475,12 @@ fn ignore_root_literal_uses_selected_path() {
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let index = tmp.git(&["write-tree"]);
     let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
-    let decoy_before = std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap();
+    let decoy_before = std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap();
     let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
 
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
     test.ack();
-    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    let line = test.goto_file("unstaged", "dir/a[b].txt");
     assert_eq!(test.cursor().line, line);
     // A different modified file supplies a menu cursor whose line resolves to
     // another file in the source view, so the action can only succeed if it
@@ -4510,7 +4510,7 @@ fn ignore_root_literal_uses_selected_path() {
     );
     assert_eq!(
         std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
-        "# retained\n/dir/a\\*b.txt\n"
+        "# retained\n/dir/a\\[b\\].txt\n"
     );
 
     let ignored = |path: &str| -> bool {
@@ -4522,9 +4522,9 @@ fn ignore_root_literal_uses_selected_path() {
             .status
             .success()
     };
-    assert!(ignored("dir/a*b.txt"), "the literal file must be ignored");
+    assert!(ignored("dir/a[b].txt"), "the literal file must be ignored");
     assert!(
-        !ignored("dir/axxb.txt"),
+        !ignored("dir/ab.txt"),
         "the wildcard must be escaped, not expanded"
     );
     assert!(
@@ -4543,7 +4543,7 @@ fn ignore_root_literal_uses_selected_path() {
         base_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap(),
         decoy_before
     );
     assert_eq!(
@@ -4560,26 +4560,26 @@ fn ignore_subdir_literal_is_relative_and_scoped() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/nested/a*b.txt", "original\n"),
+                ("dir/nested/a[b].txt", "original\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/nested/a*b.txt", "changed\n")
+        .modify("dir/nested/a[b].txt", "changed\n")
         .modify("other/other.txt", "changed too\n")
         .build();
     // Pre-seed the selected parent's ignore file and place untracked decoys:
     // one with the same basename outside the parent, one with a non-literal
     // name inside it. The rule must be relative to and scoped to this parent.
     std::fs::write(tmp.path().join("dir/nested/.gitignore"), "# retained\n").unwrap();
-    std::fs::write(tmp.path().join("dir/nested/axxb.txt"), "decoy inside\n").unwrap();
-    std::fs::write(tmp.path().join("dir/a*b.txt"), "decoy outside\n").unwrap();
+    std::fs::write(tmp.path().join("dir/nested/ab.txt"), "decoy inside\n").unwrap();
+    std::fs::write(tmp.path().join("dir/a[b].txt"), "decoy outside\n").unwrap();
 
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let index = tmp.git(&["write-tree"]);
     let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
-    let selected_before = std::fs::read_to_string(tmp.path().join("dir/nested/a*b.txt")).unwrap();
-    let inside_before = std::fs::read_to_string(tmp.path().join("dir/nested/axxb.txt")).unwrap();
-    let outside_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
+    let selected_before = std::fs::read_to_string(tmp.path().join("dir/nested/a[b].txt")).unwrap();
+    let inside_before = std::fs::read_to_string(tmp.path().join("dir/nested/ab.txt")).unwrap();
+    let outside_before = std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap();
     let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
     let root_ignore_before = std::fs::read_to_string(tmp.path().join(".gitignore")).ok();
     let repo_exclude_before =
@@ -4590,7 +4590,7 @@ fn ignore_subdir_literal_is_relative_and_scoped() {
 
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
     test.ack();
-    let line = test.goto_file("unstaged", "dir/nested/a*b.txt");
+    let line = test.goto_file("unstaged", "dir/nested/a[b].txt");
     assert_eq!(test.cursor().line, line);
     // A different modified file supplies a menu cursor whose line resolves to
     // another file in the source view, so the action can only succeed if it
@@ -4619,7 +4619,7 @@ fn ignore_subdir_literal_is_relative_and_scoped() {
     );
     assert_eq!(
         std::fs::read_to_string(tmp.path().join("dir/nested/.gitignore")).unwrap(),
-        "# retained\n/a\\*b.txt\n"
+        "# retained\n/a\\[b\\].txt\n"
     );
 
     // No other scope was written: root ignore, repository exclude and the
@@ -4647,15 +4647,15 @@ fn ignore_subdir_literal_is_relative_and_scoped() {
             .success()
     };
     assert!(
-        ignored("dir/nested/a*b.txt"),
+        ignored("dir/nested/a[b].txt"),
         "the literal file in the selected parent must be ignored"
     );
     assert!(
-        !ignored("dir/nested/axxb.txt"),
+        !ignored("dir/nested/ab.txt"),
         "the wildcard must be escaped, not expanded"
     );
     assert!(
-        !ignored("dir/a*b.txt"),
+        !ignored("dir/a[b].txt"),
         "the same basename outside the selected parent must not be ignored"
     );
     assert!(
@@ -4674,15 +4674,15 @@ fn ignore_subdir_literal_is_relative_and_scoped() {
         base_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/nested/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/nested/a[b].txt")).unwrap(),
         selected_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/nested/axxb.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/nested/ab.txt")).unwrap(),
         inside_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap(),
         outside_before
     );
     assert_eq!(
@@ -4699,12 +4699,12 @@ fn ignore_repository_literal_is_private_and_scoped() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .modify("other/other.txt", "changed too\n")
         .build();
     // Pre-seed the repository exclude file and place an untracked decoy with
@@ -4712,14 +4712,14 @@ fn ignore_repository_literal_is_private_and_scoped() {
     // to this repository, relative to its root and anchored to the selected
     // path, so it must not affect that decoy.
     std::fs::write(tmp.path().join(".git/info/exclude"), "# retained\n").unwrap();
-    std::fs::write(tmp.path().join("other/a*b.txt"), "decoy outside\n").unwrap();
+    std::fs::write(tmp.path().join("other/a[b].txt"), "decoy outside\n").unwrap();
 
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let index = tmp.git(&["write-tree"]);
     let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
-    let selected_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
-    let decoy_before = std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap();
-    let outside_before = std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap();
+    let selected_before = std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap();
+    let decoy_before = std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap();
+    let outside_before = std::fs::read_to_string(tmp.path().join("other/a[b].txt")).unwrap();
     let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
     let root_ignore_before = std::fs::read_to_string(tmp.path().join(".gitignore")).ok();
     let subdir_ignore_before = std::fs::read_to_string(tmp.path().join("dir/.gitignore")).ok();
@@ -4729,7 +4729,7 @@ fn ignore_repository_literal_is_private_and_scoped() {
 
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
     test.ack();
-    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    let line = test.goto_file("unstaged", "dir/a[b].txt");
     assert_eq!(test.cursor().line, line);
     // A different modified file supplies a menu cursor whose line resolves to
     // another file in the source view, so the action can only succeed if it
@@ -4759,7 +4759,7 @@ fn ignore_repository_literal_is_private_and_scoped() {
     );
     assert_eq!(
         std::fs::read_to_string(tmp.path().join(".git/info/exclude")).unwrap(),
-        "# retained\n/dir/a\\*b.txt\n"
+        "# retained\n/dir/a\\[b\\].txt\n"
     );
 
     // No other scope was written: root/subdir ignores and the isolated user
@@ -4787,15 +4787,15 @@ fn ignore_repository_literal_is_private_and_scoped() {
             .success()
     };
     assert!(
-        ignored("dir/a*b.txt"),
+        ignored("dir/a[b].txt"),
         "the literal file must be ignored via repository excludes"
     );
     assert!(
-        !ignored("dir/axxb.txt"),
+        !ignored("dir/ab.txt"),
         "the wildcard must be escaped, not expanded"
     );
     assert!(
-        !ignored("other/a*b.txt"),
+        !ignored("other/a[b].txt"),
         "the same basename outside the selected path must not be ignored"
     );
     assert!(
@@ -4814,15 +4814,15 @@ fn ignore_repository_literal_is_private_and_scoped() {
         base_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap(),
         selected_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap(),
         decoy_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("other/a[b].txt")).unwrap(),
         outside_before
     );
     assert_eq!(
@@ -4848,13 +4848,13 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
-                ("other/a*b.txt", "decoy outside\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
+                ("other/a[b].txt", "decoy outside\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .modify("other/other.txt", "changed too\n")
         .build();
     let excludes_arg = user_ignore.to_string_lossy().into_owned();
@@ -4863,9 +4863,9 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let index = tmp.git(&["write-tree"]);
     let base_before = std::fs::read_to_string(tmp.path().join("base.txt")).unwrap();
-    let selected_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
-    let lookalike_before = std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap();
-    let outside_before = std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap();
+    let selected_before = std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap();
+    let lookalike_before = std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap();
+    let outside_before = std::fs::read_to_string(tmp.path().join("other/a[b].txt")).unwrap();
     let other_before = std::fs::read_to_string(tmp.path().join("other/other.txt")).unwrap();
     let root_ignore_before = std::fs::read_to_string(tmp.path().join(".gitignore")).ok();
     let subdir_ignore_before = std::fs::read_to_string(tmp.path().join("dir/.gitignore")).ok();
@@ -4889,7 +4889,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     {
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
         test.ack();
-        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let line = test.goto_file("unstaged", "dir/a[b].txt");
         assert_eq!(test.cursor().line, line);
         test.ui()
             .reply_choice(Some(PromptChoiceAnswer::Id {
@@ -4908,7 +4908,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         assert_eq!(confirm.yes_label.as_deref(), Some("Write user excludes"));
         let detail = confirm.detail.as_deref().unwrap_or_default();
         assert!(detail.contains("user-wide excludes file"), "{detail}");
-        assert!(detail.contains("dir/a*b.txt"), "{detail}");
+        assert!(detail.contains("dir/a[b].txt"), "{detail}");
         assert!(
             !message_texts(&result.effects)
                 .iter()
@@ -4934,11 +4934,11 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         repo_exclude_before
     );
     assert!(
-        !ignored("dir/a*b.txt"),
+        !ignored("dir/a[b].txt"),
         "a declined confirmation must not write a rule"
     );
-    assert!(!ignored("dir/axxb.txt"));
-    assert!(!ignored("other/a*b.txt"));
+    assert!(!ignored("dir/ab.txt"));
+    assert!(!ignored("other/a[b].txt"));
     assert!(!ignored("base.txt"));
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["write-tree"]), index);
@@ -4947,15 +4947,15 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         base_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap(),
         selected_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap(),
         lookalike_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("other/a[b].txt")).unwrap(),
         outside_before
     );
     assert_eq!(
@@ -4970,11 +4970,11 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     {
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
         test.ack();
-        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let line = test.goto_file("unstaged", "dir/a[b].txt");
         assert_eq!(test.cursor().line, line);
         let pattern = "dir/*.log";
         assert_ne!(
-            pattern, "dir/a*b.txt",
+            pattern, "dir/a[b].txt",
             "pattern must differ from the selected source path"
         );
         test.ui()
@@ -5000,7 +5000,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
             "user-wide scope must be named exactly once: {detail}"
         );
         assert!(
-            detail.contains("dir/a*b.txt"),
+            detail.contains("dir/a[b].txt"),
             "selected source path must be visible: {detail}"
         );
         assert!(
@@ -5020,7 +5020,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         user_ignore_before
     );
     assert!(
-        !ignored("dir/a*b.txt"),
+        !ignored("dir/a[b].txt"),
         "a declined custom-pattern confirmation must not write a rule"
     );
 
@@ -5029,7 +5029,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     {
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
         test.ack();
-        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let line = test.goto_file("unstaged", "dir/a[b].txt");
         assert_eq!(test.cursor().line, line);
         test.ui()
             .reply_choice(Some(PromptChoiceAnswer::Id {
@@ -5055,7 +5055,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     }
     assert_eq!(
         std::fs::read_to_string(&user_ignore).unwrap(),
-        "# retained\n/dir/a\\*b.txt\n"
+        "# retained\n/dir/a\\[b\\].txt\n"
     );
     assert_eq!(
         std::fs::read_to_string(tmp.path().join(".gitignore")).ok(),
@@ -5070,15 +5070,15 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         repo_exclude_before
     );
     assert!(
-        ignored("dir/a*b.txt"),
+        ignored("dir/a[b].txt"),
         "the accepted literal must be ignored via user excludes"
     );
     assert!(
-        !ignored("dir/axxb.txt"),
+        !ignored("dir/ab.txt"),
         "the wildcard must be escaped, not expanded"
     );
     assert!(
-        !ignored("other/a*b.txt"),
+        !ignored("other/a[b].txt"),
         "the same basename outside the selected path must not be ignored"
     );
     assert!(
@@ -5093,15 +5093,15 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
         base_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap(),
         selected_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/axxb.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/ab.txt")).unwrap(),
         lookalike_before
     );
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("other/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("other/a[b].txt")).unwrap(),
         outside_before
     );
     assert_eq!(
@@ -5119,22 +5119,22 @@ fn ignore_root_custom_pattern_is_deliberate() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
+                ("dir/a[b].txt", "original\n"),
                 ("cache.tmp", "cache\n"),
                 ("dir/nested.tmp", "nested\n"),
                 ("keep.txt", "keep\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .build();
 
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let index = tmp.git(&["write-tree"]);
-    let target_before = std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap();
+    let target_before = std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap();
 
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
     test.ack();
-    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    let line = test.goto_file("unstaged", "dir/a[b].txt");
 
     let started = test
         .session
@@ -5157,7 +5157,7 @@ fn ignore_root_custom_pattern_is_deliberate() {
     assert!(
         kind.detail
             .as_deref()
-            .is_some_and(|detail| detail.contains("dir/a*b.txt")),
+            .is_some_and(|detail| detail.contains("dir/a[b].txt")),
         "{:?}",
         kind.detail
     );
@@ -5178,7 +5178,7 @@ fn ignore_root_custom_pattern_is_deliberate() {
         value
             .detail
             .as_deref()
-            .is_some_and(|detail| detail.contains("dir/a*b.txt")),
+            .is_some_and(|detail| detail.contains("dir/a[b].txt")),
         "the selected path stays pinned across prompts: {:?}",
         value.detail
     );
@@ -5217,14 +5217,14 @@ fn ignore_root_custom_pattern_is_deliberate() {
     );
     assert!(!ignored("keep.txt"), "the custom pattern is selective");
     assert!(
-        !ignored("dir/a*b.txt"),
+        !ignored("dir/a[b].txt"),
         "a pattern is distinct from A1's literal selected path"
     );
 
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["write-tree"]), index);
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("dir/a*b.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("dir/a[b].txt")).unwrap(),
         target_before
     );
 }
@@ -5247,12 +5247,12 @@ fn ignore_rule_cancellation_never_writes() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .build();
     let excludes_arg = user_ignore.to_string_lossy().into_owned();
     tmp.git(&["config", "core.excludesFile", &excludes_arg]);
@@ -5269,9 +5269,9 @@ fn ignore_rule_cancellation_never_writes() {
     let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
     let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
     let user_before = std::fs::read(&user_ignore).unwrap();
-    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap();
     let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
-    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/ab.txt")).unwrap();
     let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
 
     let assert_unchanged = |stage: &str| {
@@ -5303,7 +5303,7 @@ fn ignore_rule_cancellation_never_writes() {
             "{stage}: status"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap(),
             selected_before,
             "{stage}: selected file"
         );
@@ -5313,7 +5313,7 @@ fn ignore_rule_cancellation_never_writes() {
             "{stage}: base file"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/ab.txt")).unwrap(),
             decoy_before,
             "{stage}: decoy file"
         );
@@ -5347,7 +5347,7 @@ fn ignore_rule_cancellation_never_writes() {
     let open = || {
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
         test.ack();
-        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let line = test.goto_file("unstaged", "dir/a[b].txt");
         (test, line)
     };
 
@@ -5443,12 +5443,12 @@ fn ignore_rule_invalid_inputs_never_write() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .build();
     let excludes_arg = user_ignore.to_string_lossy().into_owned();
     tmp.git(&["config", "core.excludesFile", &excludes_arg]);
@@ -5464,9 +5464,9 @@ fn ignore_rule_invalid_inputs_never_write() {
     let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
     let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
     let user_before = std::fs::read(&user_ignore).unwrap();
-    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap();
     let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
-    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/ab.txt")).unwrap();
     let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
 
     let assert_unchanged = |stage: &str| {
@@ -5498,7 +5498,7 @@ fn ignore_rule_invalid_inputs_never_write() {
             "{stage}: status"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap(),
             selected_before,
             "{stage}: selected file"
         );
@@ -5508,7 +5508,7 @@ fn ignore_rule_invalid_inputs_never_write() {
             "{stage}: base file"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/ab.txt")).unwrap(),
             decoy_before,
             "{stage}: decoy file"
         );
@@ -5542,7 +5542,7 @@ fn ignore_rule_invalid_inputs_never_write() {
     let open_pattern = || {
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
         test.ack();
-        let line = test.goto_file("unstaged", "dir/a*b.txt");
+        let line = test.goto_file("unstaged", "dir/a[b].txt");
         let started = start(&mut test, "ignore.topdir", line);
         let Execution::Prompt(kind) = started else {
             panic!("expected ignore-rule-kind prompt, got {started:?}");
@@ -5665,12 +5665,12 @@ fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
             "init",
             [
                 ("base.txt", "base\n"),
-                ("dir/a*b.txt", "original\n"),
-                ("dir/axxb.txt", "decoy\n"),
+                ("dir/a[b].txt", "original\n"),
+                ("dir/ab.txt", "decoy\n"),
                 ("other/other.txt", "other\n"),
             ],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b].txt", "changed\n")
         .build();
     let excludes_arg = user_ignore.to_string_lossy().into_owned();
     tmp.git(&["config", "core.excludesFile", &excludes_arg]);
@@ -5695,9 +5695,9 @@ fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
     let subdir_before = std::fs::read(tmp.path().join("dir/.gitignore")).unwrap();
     let repo_before = std::fs::read(tmp.path().join(".git/info/exclude")).unwrap();
     let user_before = std::fs::read(&user_ignore).unwrap();
-    let selected_before = std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap();
+    let selected_before = std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap();
     let base_before = std::fs::read(tmp.path().join("base.txt")).unwrap();
-    let decoy_before = std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap();
+    let decoy_before = std::fs::read(tmp.path().join("dir/ab.txt")).unwrap();
     let other_before = std::fs::read(tmp.path().join("other/other.txt")).unwrap();
 
     let assert_unchanged = |stage: &str| {
@@ -5733,7 +5733,7 @@ fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
             "{stage}: status"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/a*b.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/a[b].txt")).unwrap(),
             selected_before,
             "{stage}: selected file"
         );
@@ -5743,7 +5743,7 @@ fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
             "{stage}: base file"
         );
         assert_eq!(
-            std::fs::read(tmp.path().join("dir/axxb.txt")).unwrap(),
+            std::fs::read(tmp.path().join("dir/ab.txt")).unwrap(),
             decoy_before,
             "{stage}: decoy file"
         );
@@ -5756,7 +5756,7 @@ fn ignore_rule_write_failure_is_readable_and_never_claims_success() {
 
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Standard);
     test.ack();
-    let line = test.goto_file("unstaged", "dir/a*b.txt");
+    let line = test.goto_file("unstaged", "dir/a[b].txt");
     let started = test
         .session
         .start_invoke(&ViewInvokeParams {
@@ -5879,7 +5879,7 @@ fn skip_worktree_flag<'a>(listing: &'a str, target: &str) -> Option<char> {
 fn skip_worktree_commands_set_and_clear_explicit_path() {
     use magit_lsp::protocol::PromptKind;
 
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit(
             "init",
@@ -5913,7 +5913,7 @@ fn skip_worktree_commands_set_and_clear_explicit_path() {
     let line = test.goto_file("unstaged", path);
     assert_eq!(test.cursor().line, line);
 
-    // Real `i`/`w` ingress with the selected wildcard-and-space path; the
+    // Real `i`/`w` ingress with the selected bracket-and-space path; the
     // answer is typed literally and must never be split or expanded.
     test.ui().reply_text(Some(path.to_string()));
     test.press_ui("i");
@@ -5980,7 +5980,7 @@ fn skip_worktree_commands_set_and_clear_explicit_path() {
 fn assume_unchanged_commands_set_and_clear_explicit_path() {
     use magit_lsp::protocol::PromptKind;
 
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit("init", [(path, "original\n"), ("dir/other.txt", "other\n")])
         .modify(path, "changed\n")
@@ -6026,7 +6026,7 @@ fn assume_unchanged_commands_set_and_clear_explicit_path() {
 
 #[test]
 fn assume_unchanged_commands_refuse_cancel_invalid_and_locked_writes() {
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit("init", [(path, "original\n")])
         .modify(path, "changed\n")
@@ -6079,7 +6079,7 @@ fn assume_unchanged_commands_refuse_cancel_invalid_and_locked_writes() {
 
 #[test]
 fn skip_worktree_commands_cancel_never_writes() {
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
         .modify(path, "changed\n")
@@ -6150,7 +6150,7 @@ fn skip_worktree_commands_cancel_never_writes() {
 
 #[test]
 fn skip_worktree_commands_invalid_and_untracked_paths_do_not_write() {
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
         .modify(path, "changed\n")
@@ -6223,7 +6223,7 @@ fn skip_worktree_commands_invalid_and_untracked_paths_do_not_write() {
 
 #[test]
 fn skip_worktree_commands_index_lock_failure_is_readable() {
-    let path = "dir/a b*.txt";
+    let path = "dir/a b[1].txt";
     let (tmp, _) = RepoFixture::new()
         .commit("init", [(path, "original\n"), ("base.txt", "base\n")])
         .modify(path, "changed\n")
