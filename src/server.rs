@@ -622,10 +622,16 @@ impl Shared {
         let repo_for_handler = repo_key.clone();
         let presentation_files = self.config.config().presentation_files.clone();
         // The watch setup walks the whole tree off the open's critical path;
-        // a short-lived client can exit before it returns. Record the phase
-        // now as well, so the open is always traced; completion emits the
-        // full-duration event below when it happens.
-        emit_phase("armed");
+        // a short-lived client can exit before it returns. Record a distinct
+        // start marker now so the open is always traced; completion emits the
+        // terminal, full-duration `phase_watcher_setup` event below.
+        crate::runner::trace_current(
+            "phase_watcher_setup_start",
+            serde_json::json!({
+                "duration_ms": started.elapsed().as_secs_f64() * 1000.0,
+                "outcome": "start",
+            }),
+        );
         let result = RepoWatcher::start_with_presentation_files(
             Path::new(repo),
             WatcherConfig::from_env(),
@@ -695,17 +701,19 @@ impl Shared {
             Ok(watcher) => {
                 // Re-check after the recursive walk: another thread may have
                 // armed this repo, or its last view may have closed meanwhile.
-                let view_open = {
-                    self.view_repos
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .values()
-                        .any(|owner| owner.as_str() == repo)
-                };
+                // Lock `watchers` before `view_repos`, matching
+                // `stop_watcher_if_idle`, so a concurrent close cannot slip
+                // between this check and the insert and strand the watcher.
                 let mut watchers = self
                     .watchers
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let view_open = self
+                    .view_repos
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .any(|owner| owner.as_str() == repo);
                 if self.closing.load(Ordering::SeqCst) || !view_open {
                     drop(watchers);
                     drop(watcher);

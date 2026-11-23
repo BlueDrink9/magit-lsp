@@ -486,9 +486,9 @@ fn status_open_arms_watcher_after_open_response() {
     assert!(!gate.is_released(), "the token began while Git is held");
 
     // The deferred task installs trace id 7 on its blocking thread, so the
-    // watcher phases belong to this open's trace. Wait for the second "armed"
-    // event: the first is emitted before the recursive inotify walk, and only
-    // the full-duration one proves the watcher is registered.
+    // watcher phases belong to this open's trace. Wait for the one terminal
+    // "armed" `phase_watcher_setup` event (the full-duration registration)
+    // plus the `phase_watcher_setup_start` marker emitted before the walk.
     let path = completion_trace_file(&trace);
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -510,12 +510,28 @@ fn status_open_arms_watcher_after_open_response() {
             })
             .map(|(index, _)| index)
             .collect();
-        if let (Some(handler_end), Some(&first), Some(&full)) =
-            (handler_end, armed.first(), armed.get(1))
+        let started: Vec<usize> = records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| record["event"] == json!("phase_watcher_setup_start"))
+            .map(|(index, _)| index)
+            .collect();
+        if let (Some(handler_end), Some(&armed_at), Some(&started_at)) =
+            (handler_end, armed.first(), started.first())
         {
             assert!(
-                first > handler_end && full > handler_end,
-                "watcher setup was traced before the open response's handler_end: {records:?}"
+                armed_at > handler_end && started_at > handler_end,
+                "watcher phases were traced before the open response's handler_end: {records:?}"
+            );
+            assert_eq!(
+                armed.len(),
+                1,
+                "expected exactly one terminal armed watcher setup: {records:?}"
+            );
+            assert_eq!(
+                started.len(),
+                1,
+                "expected exactly one watcher setup start marker: {records:?}"
             );
             break;
         }
