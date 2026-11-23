@@ -34,7 +34,7 @@ mod fixtures;
 
 use fake_editor::{FakeEditor, Profile};
 use fixtures::schema::{read_schema, schema_errors};
-use magit_lsp::file_uri::uri_from_path;
+use magit_lsp::file_uri::{path_from_uri, uri_from_path};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -1110,6 +1110,36 @@ fn observed_run_id(message: &Value) -> Option<String> {
     found
 }
 
+/// The live repository root's `file://` URI, encoded by the shared
+/// native-path encoder so a native root never enters a URI by hand.
+fn live_root_uri(root: &str) -> String {
+    let uri = uri_from_path(Path::new(root)).expect("the replay fixture root is an absolute path");
+    uri.as_str().to_owned()
+}
+
+/// Expand the recording's root placeholders within one parsed string value.
+///
+/// A `file:///repo` occurrence becomes the live root's encoded URI and a bare
+/// `/repo` becomes the native root. The scan is single-pass so inserted text
+/// is never rescanned: a live root can itself contain the placeholder text.
+fn expand_root(text: &str, root_uri: &str, root: &str) -> String {
+    let mut expanded = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find(RECORDED_ROOT) {
+        let prefix_is_uri = rest[..index].ends_with("file://");
+        let keep = if prefix_is_uri {
+            index - "file://".len()
+        } else {
+            index
+        };
+        expanded.push_str(&rest[..keep]);
+        expanded.push_str(if prefix_is_uri { root_uri } else { root });
+        rest = &rest[index + RECORDED_ROOT.len()..];
+    }
+    expanded.push_str(rest);
+    expanded
+}
+
 /// Replace the recorded placeholders with this run's real values in a `c2s`
 /// frame, so the client drives the real temporary repository and answers the
 /// run the server actually started.
@@ -1123,15 +1153,13 @@ fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Val
         });
     }
     // The root is replaced within the parsed string values: a live root can
-    // contain backslashes (Windows), and splicing those into the serialized
-    // form would corrupt its escapes before the frame is sent.
+    // contain characters a URI must percent-encode and Windows roots contain
+    // backslashes, while splicing either into the serialized form would
+    // corrupt its escapes before the frame is sent. URI positions take the
+    // shared encoder's output; filesystem-path positions keep the native root.
+    let root_uri = live_root_uri(root);
     for_each_string(&mut value, &mut |text| {
-        *text = text
-            .replace(
-                &format!("file://{RECORDED_ROOT}"),
-                &format!("file://{root}"),
-            )
-            .replace(RECORDED_ROOT, root);
+        *text = expand_root(text, &root_uri, root);
     });
     value
 }
@@ -1451,11 +1479,11 @@ fn for_each_range(
 /// Per-side normalization of the machine-dependent repository root.
 ///
 /// The recorded side uses [`RECORDED_ROOT`] and the observed side the live
-/// fixture root. Both are reduced to the same canonical form: the root string
-/// is replaced in text, and a range endpoint that points beyond a root
-/// occurrence in its document is shifted by that side's root-length delta.
-/// Text and numbers therefore move together, so the strict frame comparison
-/// stays exact on any machine.
+/// fixture root. Both are reduced to the same canonical form: the root's
+/// native and encoded URI forms are replaced in text, and a range endpoint is
+/// shifted by the UTF-16 width its canonicalized prefix loses. Text and
+/// numbers therefore move together, so the strict frame comparison stays
+/// exact on any machine.
 struct RootNormalizer {
     /// This side's root, as it appears in frames before canonicalization.
     root: String,
@@ -1478,12 +1506,14 @@ impl RootNormalizer {
             .insert(canonical_root(uri, &self.root), text.to_owned());
     }
 
-    /// Shift range endpoints that land past a root occurrence in their document.
+    /// Shift range endpoints whose addressed text canonicalizes shorter.
+    ///
+    /// Endpoints are UTF-16 positions in the client document, while
+    /// canonicalization rewrites both the encoded URI root and the raw native
+    /// root. The shift is the UTF-16 width the canonicalized prefix loses,
+    /// computed per endpoint so several roots on one line and their different
+    /// encoded widths move together.
     fn normalize_ranges(&self, value: &mut Value) {
-        let delta = self.root.len() as i64 - RECORDED_ROOT.len() as i64;
-        if delta == 0 {
-            return;
-        }
         for_each_range(value, None, &mut |range, uri| {
             let Some(uri) = uri else { return };
             let Some(text) = self.documents.get(&canonical_root(uri, &self.root)) else {
@@ -1503,11 +1533,10 @@ impl RootNormalizer {
                 let Some(line_text) = lines.get(line as usize) else {
                     continue;
                 };
-                // The root is ASCII; endpoint characters are UTF-16 units.
-                let Some(root_start) = line_text.find(&self.root) else {
-                    continue;
-                };
-                if character < (root_start + self.root.len()) as u64 {
+                let prefix = utf16_prefix(line_text, character as usize);
+                let delta = utf16_len(prefix) as i64
+                    - utf16_len(&canonical_root(prefix, &self.root)) as i64;
+                if delta == 0 {
                     continue;
                 }
                 position["character"] = Value::from(character as i64 - delta);
@@ -1516,17 +1545,36 @@ impl RootNormalizer {
     }
 }
 
+/// The UTF-16 code-unit length of `text`, the unit of LSP character offsets.
+fn utf16_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// The prefix of `text` spanning at most `units` UTF-16 code units.
+fn utf16_prefix(text: &str, units: usize) -> &str {
+    let mut used = 0;
+    for (index, character) in text.char_indices() {
+        if used + character.len_utf16() > units {
+            return &text[..index];
+        }
+        used += character.len_utf16();
+    }
+    text
+}
+
 /// Replace one side's repository root with the recording's placeholder.
 ///
 /// Operates on plain string values (URIs, document text), never on serialized
 /// JSON text: a Windows root's backslashes are escaped there and would never
-/// match.
+/// match. The root's URI form is encoded by the shared native-path encoder, so
+/// a live encoded URI root reduces to the recorded `file:///repo` placeholder,
+/// while a filesystem-path occurrence keeps the native form.
 fn canonical_root(text: &str, root: &str) -> String {
-    text.replace(
-        &format!("file://{root}"),
-        &format!("file://{RECORDED_ROOT}"),
-    )
-    .replace(root, RECORDED_ROOT)
+    let mut canonical = text.to_owned();
+    if let Some(uri) = uri_from_path(Path::new(root)) {
+        canonical = canonical.replace(uri.as_str(), &format!("file://{RECORDED_ROOT}"));
+    }
+    canonical.replace(root, RECORDED_ROOT)
 }
 
 /// Replace this run's repository root and binary path with the recording's
@@ -2344,82 +2392,109 @@ fn commit_edit_confirm_final_range_end_matches_canonical_root() {
     );
 }
 
-/// Two roots of different length produce identical canonical frames.
+/// Two roots of different length and URI encoding produce identical canonical
+/// frames.
 ///
-/// Both sides carry the same text and range, but with roots of different
-/// lengths. Normalizing each side with its own root must shift the range
-/// endpoint by exactly the root-length delta, so the canonical frames match.
-/// A deliberately divergent range is still rejected by strict comparison.
+/// Both sides carry the same logical document, target URI and edit, but each
+/// side names its own root: the recording's ASCII placeholder and a long
+/// native root whose URI form is percent-encoded. The document text carries
+/// both the encoded URI root and the raw native root, so normalizing each side
+/// must canonicalize every root occurrence and shift the addressed UTF-16
+/// endpoint by the width it loses. A deliberately divergent range or text is
+/// still rejected by strict comparison.
 #[test]
-fn root_normalization_is_invariant_to_root_length() {
-    let long_root = "/a/deliberately/long/temporary/fixture/root";
-    let commit_line = |root: &str| format!("file://{root}/.git/COMMIT_EDITMSG");
-    let document = |root: &str| {
+fn root_normalization_is_invariant_to_root_encoding_and_length() {
+    // Spaces, non-ASCII, `#` and `%` all change width under URI encoding.
+    let long_root = std::env::temp_dir()
+        .join("a deliberately long fixture root/é space#percent%")
+        .to_string_lossy()
+        .into_owned();
+    let recorded_uri = format!("file://{RECORDED_ROOT}");
+    let commit_uri = |uri_root: &str| format!("{uri_root}/.git/COMMIT_EDITMSG");
+    let commit_line =
+        |uri_root: &str, native: &str| format!("{} root {native}", commit_uri(uri_root));
+    let document = |uri_root: &str, native: &str| {
         let mut text: String = (0..20).map(|index| format!("line{index}\n")).collect();
-        text.push_str(&commit_line(root));
+        text.push_str(&commit_line(uri_root, native));
         text.push('\n');
         text
     };
-    let frame = |root: &str| {
+    let frame = |uri_root: &str, native: &str| {
+        let commit_line = commit_line(uri_root, native);
         serde_json::json!({
             "jsonrpc": "2.0",
             "method": "workspace/applyEdit",
             "params": {"edit": {"documentChanges": [{
-                "textDocument": {"uri": format!("file://{root}/.magit"), "version": 5},
+                "textDocument": {"uri": format!("{uri_root}/.magit"), "version": 5},
                 "edits": [{
-                    "newText": commit_line(root),
+                    "newText": commit_uri(uri_root),
                     "range": {
                         "start": {"line": 2, "character": 16},
-                        "end": {"line": 20, "character": commit_line(root).len()},
+                        "end": {"line": 20, "character": commit_line.encode_utf16().count()},
                     },
                 }],
             }]}},
         })
     };
 
-    let canonical = |root: &str| {
-        let mut normalizer = RootNormalizer::new(root);
-        normalizer.note_document(&format!("file://{root}/.magit"), &document(root));
+    let canonical = |native: &str, uri_root: &str| {
+        let mut normalizer = RootNormalizer::new(native);
+        normalizer.note_document(&format!("{uri_root}/.magit"), &document(uri_root, native));
         canonical_frame(
-            &frame(root),
+            &frame(uri_root, native),
             &normalizer,
             RECORDED_BINARY,
             &mut HashNormalizer::new(),
         )
     };
-    let short = canonical(RECORDED_ROOT);
-    let long = canonical(long_root);
+    let short = canonical(RECORDED_ROOT, &recorded_uri);
+    let long_uri = uri_from_path(Path::new(&long_root))
+        .expect("absolute root has a file URI")
+        .as_str()
+        .to_owned();
+    let long = canonical(&long_root, &long_uri);
     assert_eq!(
         short, long,
-        "root length must not affect the canonical frame"
+        "root encoding and length must not affect the canonical frame"
     );
+    let placeholder_line = commit_line(&recorded_uri, RECORDED_ROOT);
     let edit = &short["params"]["edit"]["documentChanges"][0]["edits"][0];
-    assert_eq!(edit["newText"], commit_line(RECORDED_ROOT));
+    assert_eq!(edit["newText"], commit_uri(&recorded_uri));
     assert_eq!(
         edit["range"]["end"]["character"],
-        commit_line(RECORDED_ROOT).len()
+        placeholder_line.encode_utf16().count()
     );
     // The unaffected endpoint stays exact.
     assert_eq!(edit["range"]["start"]["character"], 16);
 
-    // Strict comparison is retained: a wrong range still diverges after both
-    // sides have been normalized.
-    let mut divergent = long;
+    // Strict comparison is retained: a wrong range or text still diverges
+    // after both sides have been normalized.
+    let mut divergent = long.clone();
     divergent["params"]["edit"]["documentChanges"][0]["edits"][0]["range"]["end"]["character"] =
         Value::from(0);
     assert_ne!(short, divergent);
+    let mut divergent = long;
+    divergent["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"] =
+        Value::String("file:///repo/.git/OTHER".to_owned());
+    assert_ne!(short, divergent);
 }
 
-/// Expanding a recorded client frame with a Windows-style backslash root must
-/// keep the frame valid JSON and carry the path verbatim.
+/// Expanding a recorded client frame encodes live file URIs with the shared
+/// native-path encoder and keeps filesystem-path substitutions native.
 ///
-/// Windows temporary roots contain backslashes; splicing those into the
-/// serialized JSON text corrupts its escapes before the re-parse (the CI
-/// failures: `invalid escape` while expanding a client frame). Expansion
-/// operates on the parsed string values, so any root survives intact.
+/// Windows temporary roots contain backslashes; splicing those into a URI
+/// carved out of the recording produced an invalid `file://` URI (the CI
+/// failures: `invalid escape` while expanding a client frame, then the server
+/// rejecting the document). Expansion operates on parsed string values, so a
+/// URI position takes the encoder's percent-encoded output while a position
+/// the protocol defines as a filesystem path keeps the raw native root.
 #[test]
-fn expanding_a_recorded_client_frame_carries_a_backslash_root_verbatim() {
-    let windows_root = r"C:\Users\runner\work\magit-lsp";
+fn expanding_a_recorded_client_frame_encodes_live_file_uris() {
+    // Roots whose native text differs from their URI form on each platform.
+    #[cfg(unix)]
+    let root = "/tmp/magit lsp répo#percent%/checkout";
+    #[cfg(windows)]
+    let root = r"C:\Users\runner\magit lsp répo#percent%\checkout";
     let recorded = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "textDocument/didChange",
@@ -2430,19 +2505,37 @@ fn expanding_a_recorded_client_frame_carries_a_backslash_root_verbatim() {
             ],
         },
     });
-    let expanded = expand_client_frame(&recorded, windows_root, None);
+    let expanded = expand_client_frame(&recorded, root, None);
+    let root_uri = uri_from_path(Path::new(root)).expect("absolute root has a file URI");
+    let status_uri = format!("{}/.magit", root_uri.as_str());
     assert_eq!(
-        expanded["params"]["textDocument"]["uri"],
-        format!("file://{windows_root}/.magit"),
-        "the uri carries the backslash root verbatim"
+        expanded["params"]["textDocument"]["uri"], status_uri,
+        "the URI is encoded, not a native root spliced into file://"
+    );
+    let expected_path = Path::new(root).join(".magit");
+    assert_eq!(
+        path_from_uri(&status_uri).as_deref(),
+        Some(expected_path.as_path()),
+        "the encoded URI round-trips to the live path"
     );
     assert_eq!(
         expanded["params"]["contentChanges"][0]["text"],
-        format!("file://{windows_root}/.git/COMMIT_EDITMSG\nroot {windows_root}\n"),
-        "the text carries the backslash root verbatim"
+        format!("{}/.git/COMMIT_EDITMSG\nroot {root}\n", root_uri.as_str()),
+        "document URI text is encoded while a filesystem path stays native"
     );
     // The expanded frame stays valid JSON, so the client driver can send it.
     serde_json::to_string(&expanded).expect("the expanded frame serialises");
+
+    // A verbatim Windows root is canonicalized by the same encoder.
+    #[cfg(windows)]
+    {
+        let verbatim = r"\\?\C:\Users\runner\magit lsp";
+        let expanded = expand_client_frame(&recorded, verbatim, None);
+        assert_eq!(
+            expanded["params"]["textDocument"]["uri"],
+            "file:///C:/Users/runner/magit%20lsp/.magit"
+        );
+    }
 }
 
 /// A deliberately divergent expectation must make the replay fail.

@@ -32,8 +32,12 @@ only temp paths and timings.
 `make test-rust FILTER="--test examples"` replays every maintained recording
 against the real binary. Server frames and action arrays remain strictly
 ordered; only the path, binary, outbound-id, run-id and commit-hash
-canonicalization documented in `tests/examples.rs` is allowed. Strict replay
-fails on a divergent payload, a reordered action array or changed frame
+canonicalization documented in `tests/examples.rs` is allowed. Live client
+frames substitute the placeholder root with the shared native-path encoder's
+`file://` URI in URI positions and with the native path where the protocol
+expects a filesystem path; canonicalization reduces both forms, including the
+UTF-16 range widths they address, back to the recorded placeholders. Strict
+replay fails on a divergent payload, a reordered action array or changed frame
 ordering; only files that do not record a dynamic `view/keymap` push may skip
 one, while a file that records one keeps it in strict order
 ([tests/examples.rs:1197–1204](../tests/examples.rs#L1197),
