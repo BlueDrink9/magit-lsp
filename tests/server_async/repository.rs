@@ -839,7 +839,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     assert!(initial["params"]["baseVersion"].is_null());
     assert_eq!(
         initial["params"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     let ready = server.wait_for_view_render_after(&view_id, loading_version);
     let version = ready["params"]["version"].as_u64().unwrap();

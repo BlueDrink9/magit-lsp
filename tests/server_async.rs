@@ -481,7 +481,7 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
     assert_eq!(loading["method"], "view/render");
     assert_eq!(
         loading["params"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     let version = loading["params"]["version"].as_u64().unwrap();
     assert_eq!(server.recv()["method"], "view/keymap");
@@ -509,7 +509,7 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
     assert_eq!(held["result"]["version"], json!(version));
     assert_eq!(
         held["result"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     // The acquired success must stay unpublished and unversioned in text mode.
     assert!(
@@ -609,7 +609,7 @@ fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
     assert_eq!(held["result"]["version"], json!(version));
     assert_eq!(
         held["result"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     assert!(
         !server.notifications.iter().any(
@@ -824,7 +824,7 @@ fn status_open_refreshes_while_loading_are_coalesced() {
     let loading = server.recv();
     assert_eq!(
         loading["params"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     assert_eq!(server.recv()["method"], "view/keymap");
     gate.wait_entered();
@@ -936,7 +936,7 @@ fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
     let loading = server.recv();
     assert_eq!(
         loading["params"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     assert_eq!(server.recv()["method"], "view/keymap");
     gate.wait_entered();
@@ -1052,7 +1052,7 @@ fn status_open_held_git(acknowledge: bool) {
     assert_eq!(loading["params"]["viewId"], view);
     assert_eq!(
         loading["params"]["text"],
-        json!(["Loading repository status…"])
+        json!(["Head: main", "Loading repository status…"])
     );
     let version = loading["params"]["version"].as_u64().unwrap();
     assert_eq!(server.recv()["method"], "view/keymap");
@@ -1087,7 +1087,10 @@ fn status_open_held_git(acknowledge: bool) {
         assert!(ready["params"].get("text").is_none(), "{ready}");
         let edits: Vec<magit_lsp::protocol::LineEdit> =
             serde_json::from_value(ready["params"]["edits"].clone()).unwrap();
-        magit_lsp::diff_text::apply_edits(&["Loading repository status…".into()], &edits)
+        magit_lsp::diff_text::apply_edits(
+            &["Head: main".into(), "Loading repository status…".into()],
+            &edits,
+        )
     } else {
         assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
         assert!(ready["params"].get("edits").is_none(), "{ready}");
