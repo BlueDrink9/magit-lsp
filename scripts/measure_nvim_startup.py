@@ -12,20 +12,65 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def wait_for_trace_quiescence(path: Path, quiet_s: float = 0.25, timeout_s: float = 15.0) -> None:
-    """Wait for the detached server to stop appending after the client exits.
+REQUIRED_PHASES = {"phase_repository_discovery", "phase_session_open_render", "phase_tree_render",
+                   "phase_render_delivery", "phase_watcher_setup", "phase_status_listing", "phase_rebase_state"}
+
+
+def trace_records(path: Path) -> tuple[list[dict], bool]:
+    """Parse whole JSONL records; the flag says whether the file ends in a newline.
+
+    A record torn mid-write is dropped rather than raising, so a partial final
+    line is reported as an incomplete trace instead of a parse error.
+    """
+    if not path.exists():
+        return [], False
+    text = path.read_text()
+    complete = text.endswith("\n")
+    if not complete:
+        text = text[: text.rfind("\n") + 1]
+    return [json.loads(line) for line in text.splitlines() if line.strip()], complete
+
+
+def trace_readiness(client_trace: Path,
+                    server_trace: Path) -> tuple[list[str], dict[str, list[str]]]:
+    """Report what still blocks a safe trace read.
+
+    Returns the blocking issues (no correlated open, or a server trace without
+    a complete final line) and, per correlated ``view_open_requested`` id, the
+    required phases the server trace has not emitted yet.
+    """
+    clients, _ = trace_records(client_trace)
+    servers, server_complete = trace_records(server_trace)
+    opens = [event.get("id") for event in clients if event.get("event") == "view_open_requested"]
+    missing = {}
+    for trace_id in opens:
+        present = {event.get("event") for event in servers if event.get("id") == trace_id}
+        lacking = sorted(REQUIRED_PHASES - present)
+        if lacking:
+            missing[str(trace_id)] = lacking
+    issues = [] if opens else ["no correlated opens"]
+    if not server_complete:
+        issues.append("server trace lacks a complete final line")
+    return issues, missing
+
+
+def wait_for_traces_ready(client_trace: Path, server_trace: Path,
+                          poll_s: float = 0.25, timeout_s: float = 15.0) -> None:
+    """Wait until every open in the client trace has its required server phases.
 
     The server acquires status after its early render, so it can outlive the
-    headless client. Reading then yields a truncated or torn final line.
+    headless client. Polling until the phase events and a complete final line
+    exist avoids reading a trace that is still missing status or mid-write.
     """
-    previous = None
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        size = path.stat().st_size if path.exists() else None
-        if size is not None and size == previous:
+        issues, missing = trace_readiness(client_trace, server_trace)
+        if not issues and not missing:
             return
-        previous = size
-        time.sleep(quiet_s)
+        time.sleep(poll_s)
+    issues, missing = trace_readiness(client_trace, server_trace)
+    reasons = list(issues) + [f"id {trace_id} missing {phases}" for trace_id, phases in sorted(missing.items())]
+    raise RuntimeError(f"trace {server_trace} not ready within {timeout_s}s: {'; '.join(reasons)}")
 
 
 def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, label: str) -> list[dict]:
@@ -46,7 +91,7 @@ def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, l
     if {event["case"] for event in events} != wanted or not all(e["valid_status"] for e in events):
         raise RuntimeError(f"missing event or invalid status: {events}")
     server_trace = Path(str(client_trace) + ".server")
-    wait_for_trace_quiescence(server_trace)
+    wait_for_traces_ready(client_trace, server_trace)
     raw = []
     for path in (client_trace, server_trace):
         if path.exists():
@@ -55,8 +100,7 @@ def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, l
     opens = [event for event in raw if event.get("event") == "view_open_requested"]
     if not opens:
         raise RuntimeError(f"trace has no correlated opens: {stem}")
-    required = {"phase_repository_discovery", "phase_session_open_render", "phase_tree_render",
-                "phase_render_delivery", "phase_watcher_setup", "phase_status_listing", "phase_rebase_state"}
+    required = REQUIRED_PHASES
     for opened in opens:
         correlated = [event for event in raw if event.get("id") == opened.get("id")]
         present = {event.get("event") for event in correlated}
