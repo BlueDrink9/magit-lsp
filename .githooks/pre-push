@@ -1,0 +1,43 @@
+#!/bin/sh
+# Regenerate the committed documentation artifacts before a push and commit any
+# drift as its own commit. A commit created here is not part of the push already
+# in flight, so the push is aborted and must be repeated. Pre-existing working
+# tree changes and untracked files are never committed.
+set -eu
+repo_root=$(git rev-parse --show-toplevel) || exit
+cd "$repo_root"
+
+# The pre-push protocol sends "<local ref> <local sha> <remote ref> <remote sha>"
+# lines on stdin; this hook needs none of them but must consume them.
+cat >/dev/null
+
+before=$(mktemp)
+after=$(mktemp)
+paths=$(mktemp)
+trap 'rm -f "$before" "$after" "$paths"' EXIT
+
+git status --porcelain --untracked-files=all | sort >"$before"
+if ! make docs-generate; then
+    echo "magit-lsp pre-push: documentation generation failed; run 'make docs-generate' and commit the result, then push again" >&2
+    exit 1
+fi
+git status --porcelain --untracked-files=all | sort >"$after"
+
+# Paths that regeneration made dirty: present after but absent before. Status
+# lines are "XY <path>", so the path starts at column 4.
+comm -13 "$before" "$after" | cut -c4- >"$paths"
+[ -s "$paths" ] || exit 0
+
+set --
+while IFS= read -r path; do
+    git add -- "$path"
+    set -- "$@" "$path"
+done <"$paths"
+
+# Path-limited commit: commits only the regenerated paths, so unrelated staged
+# or unstaged work stays out of the commit.
+git commit -q -m "docs: regenerate committed documentation artifacts" -- "$@"
+
+echo "magit-lsp pre-push: committed regenerated documentation as $(git rev-parse --short HEAD)" >&2
+echo "magit-lsp pre-push: that commit is not part of this push; the push was aborted, push again" >&2
+exit 1

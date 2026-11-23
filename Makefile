@@ -1,4 +1,4 @@
-.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -108,6 +108,12 @@ hooks-remove:
 
 hooks-run:
 	.githooks/pre-commit
+
+# Mirrors `hooks-run` for the pre-push hook: regenerate the committed docs and
+# commit any drift. The hook reads the pre-push refs from stdin, so feed it an
+# empty stream when run by hand.
+hooks-run-pre-push:
+	.githooks/pre-push </dev/null
 
 # `make test` covers the Rust, Neovim and VSCode suites. The real-UI Python
 # suites are separate: `make ui-unit` (harness) and `make ui-test`/`make ui-tour`
