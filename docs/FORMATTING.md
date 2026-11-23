@@ -77,8 +77,12 @@ selected inputs with `skip_children=true`, so a sweep stays inside the eligible
 set. Prettier is the locked `clients/vscode/node_modules/.bin/prettier` tool.
 
 The pre-commit hook formats staged content through the same dispatcher. It
-updates only eligible staged blobs and never changes working files. For a
-format-only sweep commit, opt in to a completeness guard:
+updates only eligible staged blobs, then mirrors that formatted content into the
+working file wherever the working file still holds exactly what was staged, so a
+staged-only change leaves no formatting diff behind. A working file with unstaged
+or partially staged edits is never touched, and a file the hook cannot write is
+reported as a readable note without failing the commit. For a format-only sweep
+commit, opt in to a completeness guard:
 
 ```sh
 MAGIT_FORMAT_SWEEP=rustfmt git commit ...

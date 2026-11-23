@@ -238,7 +238,7 @@ SEED = {
 
 
 class FormatSweepTest(unittest.TestCase):
-    """Exercise all-tracked selection, routing and index-only hook behavior."""
+    """Exercise all-tracked selection, routing and hook autofix safety."""
 
     def setUp(self) -> None:
         self.repo = Path(tempfile.mkdtemp(prefix="magit-format-repo-"))
@@ -385,7 +385,7 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual("bad\n", self.git("show", f":{generated}"))
         self.assertEqual("bad\n", self.read(generated))
         self.assertEqual("ok\n", self.git("show", f":{handwritten}"))
-        self.assertEqual("bad\n", self.read(handwritten))
+        self.assertEqual("ok\n", self.read(handwritten))
         joined = "\n".join(self.calls())
         self.assertIn(handwritten, joined)
         for path in GENERATOR_OWNED:
@@ -432,8 +432,8 @@ class FormatSweepTest(unittest.TestCase):
         self.assertEqual("ok\n", self.git("show", f":{path}"))
         self.assertEqual("worktree\n", self.read(path))
 
-    def test_hook_leaves_matching_working_copy_unchanged(self) -> None:
-        """A staged-only change formats the index and never rewrites the working file."""
+    def test_hook_formats_matching_working_copy(self) -> None:
+        """A staged-only change formats the index and its matching working file."""
         self.install_hook()
         path = "lua/magit-lsp/ok.lua"
         self.write(path, "bad\n")
@@ -441,8 +441,25 @@ class FormatSweepTest(unittest.TestCase):
         result = self.run_hook()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("ok\n", self.git("show", f":{path}"))
-        self.assertEqual(b"bad\n", (self.repo / path).read_bytes())
-        self.assertEqual(f" M {path}\n", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
+        self.assertEqual(b"ok\n", (self.repo / path).read_bytes())
+        self.assertEqual("", self.git("status", "--porcelain", "--untracked-files=no", "--", path))
+
+    def test_hook_skips_unwritable_matching_working_copy(self) -> None:
+        """A matching working file that cannot be written leaves the index formatted."""
+        self.install_hook()
+        path = "lua/magit-lsp/ok.lua"
+        self.write(path, "bad\n")
+        self.git("add", path)
+        working = self.repo / path
+        working.chmod(0o444)
+        self.addCleanup(working.chmod, 0o644)
+        if os.access(working, os.W_OK):
+            self.skipTest("fixture file stays writable (the suite is running as root)")
+        result = self.run_hook()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("ok\n", self.git("show", f":{path}"))
+        self.assertEqual(b"bad\n", working.read_bytes())
+        self.assertIn(f"working file left unchanged: {path}", result.stderr)
 
     def test_hook_preserves_partially_staged_working_edits(self) -> None:
         """Unstaged additions to a staged file survive while the index formats."""

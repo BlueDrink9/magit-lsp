@@ -238,6 +238,15 @@ def tracked_eligible(formatters: list[str] | None = None) -> list[str]:
     return sorted(paths)
 
 
+def reject_symlink_components(path: str) -> None:
+    """Refuse a formatter path that resolves through a symbolic link."""
+    current = ROOT
+    for part in Path(path).parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(f"unsafe staged formatter path through symlink: {path}")
+
+
 def ensure_clean_worktree(paths: list[str]) -> None:
     """Refuse to overwrite tracked inputs that differ from the index."""
     if not paths:
@@ -256,8 +265,35 @@ def ensure_clean_worktree(paths: list[str]) -> None:
             raise RuntimeError(f"tracked formatter input is not a regular file: {path}")
 
 
+def mirror_working_files(changed: dict[str, str], original: dict[str, tuple[int, str]], snapshot_root: Path) -> list[str]:
+    """Overwrite working files that still match the pre-format staged blob, and return them.
+
+    A working copy with any unstaged or partially staged edit hashes differently
+    and is left alone. Failures are reported as readable notes because the index
+    already holds the formatted content.
+    """
+    # The working-tree hash must not consult a temporary index.
+    working_env = {key: value for key, value in os.environ.items() if key != "GIT_INDEX_FILE"}
+    mirrored: list[str] = []
+    for path in changed:
+        working = ROOT / path
+        try:
+            reject_symlink_components(path)
+            if not working.is_file():
+                continue
+            current = git_bytes(["hash-object", "--", str(working)], env=working_env).decode().strip()
+            if current != original[path][1]:
+                continue
+            working.write_bytes((snapshot_root / path).read_bytes())
+        except (RuntimeError, OSError) as error:
+            print(f"format: staged content formatted but working file left unchanged: {path}: {error}", file=sys.stderr)
+            continue
+        mirrored.append(path)
+    return mirrored
+
+
 def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_env_vars: dict[str, str], gitdir: Path) -> int:
-    """Format staged blobs in isolation, then atomically publish eligible replacements."""
+    """Format staged blobs in isolation, atomically publish them, then mirror matching working files."""
     effective_index = Path(os.environ.get("GIT_INDEX_FILE", str(index_path))).resolve()
     observed_index = effective_index
     before_bytes = observed_index.read_bytes()
@@ -270,11 +306,7 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
     # A temporary commit index may contain only explicitly selected paths. Clean
     # checks are safe; changing it could alter Git's path-only commit semantics.
     for path in allowed:
-        current = ROOT
-        for part in Path(path).parts:
-            current = current / part
-            if current.is_symlink():
-                raise RuntimeError(f"unsafe staged formatter path through symlink: {path}")
+        reject_symlink_components(path)
     git_bytes(["checkout-index", "--all", "--force", f"--prefix={snapshot_root}/"], env=index_env_vars)
     if unusual and not format_paths(sorted(allowed), snapshot_root, False):
         raise RuntimeError("staged formatter autofix needs the normal index; stage changes and commit without paths")
@@ -303,9 +335,17 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         raise RuntimeError("Git index changed concurrently; retry the commit")
     updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
     git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
-    # Working-tree sources are never written here: a hook cannot compare-and-swap
-    # against a concurrent editor save, so synchronization stays deferred.
-    print("format: formatted staged content; working-tree files are left unchanged", file=sys.stderr)
+    # The index now holds the formatted blobs. Mirror them into the working tree
+    # only where the current bytes still match the pre-format staged blob, so
+    # partially staged or otherwise divergent edits are never overwritten, and a
+    # failed write stays a readable note instead of failing the commit.
+    mirrored = mirror_working_files(changed, original, snapshot_root)
+    summary = "format: formatted staged content"
+    if mirrored:
+        summary += "; updated matching working files: " + ", ".join(mirrored)
+    else:
+        summary += "; no matching working files were updated"
+    print(summary, file=sys.stderr)
     return 0
 
 
