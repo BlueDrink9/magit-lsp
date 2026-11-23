@@ -29,6 +29,13 @@ make hooks-install
 make hooks-remove
 ```
 
+`hooks-install` also activates `.githooks/post-checkout`, which copies the
+paths listed in the repo root's `.worktreeinclude` (one path per line, `#`
+comments allowed) from the main worktree into every newly created
+`git worktree add` checkout. Those paths are normally git-ignored (e.g.
+`.opencode`), so keep `.worktreeinclude` in `.git/info/exclude` unless all
+clones should share it.
+
 Check or format working-tree sources:
 
 ```sh

@@ -1,0 +1,23 @@
+#!/bin/sh
+# Copy files listed in .worktreeinclude (in the main worktree) into a newly
+# created git worktree, since git does not copy ignored files into worktrees.
+# Only `git worktree add` checks out from the empty tree ($1 is all-zero), so
+# ordinary checkouts in the main worktree are left alone.
+set -u
+
+case "${1:-}" in
+    0000000000000000000000000000000000000000) ;;
+    *) exit 0 ;;
+esac
+
+main_worktree=$(git worktree list | head -n 1 | awk '{print $1}') || exit 0
+copy_list=$main_worktree/.worktreeinclude
+[ -f "$copy_list" ] || exit 0
+
+while IFS= read -r f || [ -n "$f" ]; do
+    case "$f" in ''|\#*) continue ;; esac
+    if [ -e "$main_worktree/$f" ] && [ ! -e "$f" ]; then
+        cp -R "$main_worktree/$f" "$f"
+        echo "Copied $f"
+    fi
+done < "$copy_list"
