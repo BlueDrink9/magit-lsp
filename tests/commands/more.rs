@@ -4839,7 +4839,8 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     // file. The repository's LOCAL config points at it, so neither the real
     // HOME/XDG config nor any global file is ever touched.
     let private = tempfile::TempDir::new().expect("tempdir for private user excludes");
-    let user_ignore = private.path().join("user-ignore");
+    let private_path = std::fs::canonicalize(private.path()).unwrap();
+    let user_ignore = private_path.join("user-ignore");
     std::fs::write(&user_ignore, "# retained\n").unwrap();
 
     let (tmp, _) = RepoFixture::new()
