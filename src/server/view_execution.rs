@@ -128,12 +128,10 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(id.clone(), repo.to_string());
-    let watcher = std::time::Instant::now();
-    shared.ensure_watcher(repo);
-    crate::runner::trace_current(
-        "phase_watcher_setup",
-        serde_json::json!({ "duration_ms": watcher.elapsed().as_secs_f64() * 1000.0 }),
-    );
+    // status opens arm in the deferred acquisition (`requests.rs`) so the early Head render never waits on the recursive inotify walk (`watcher.watch(…, Recursive)` at src/watcher.rs:110, measured 34–55 ms on the large repo).
+    if !is_status {
+        shared.ensure_watcher(repo);
+    }
 
     let delivery = std::time::Instant::now();
     let mut notifications: Vec<_> = deliver_render(shared, render).into_iter().collect();

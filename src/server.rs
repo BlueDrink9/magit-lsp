@@ -581,20 +581,51 @@ impl Shared {
     /// start failure only warns the user — watching is an enhancement, so the
     /// view still opens.
     fn ensure_watcher(&self, repo: &str) {
-        let mut watchers = self
-            .watchers
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if self.closing.load(Ordering::SeqCst) {
+        let started = std::time::Instant::now();
+        let emit_phase = |outcome: &str| {
+            crate::runner::trace_current(
+                "phase_watcher_setup",
+                serde_json::json!({
+                    "duration_ms": started.elapsed().as_secs_f64() * 1000.0,
+                    "outcome": outcome,
+                }),
+            );
+        };
+        let already_armed = {
+            let watchers = self
+                .watchers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.closing.load(Ordering::SeqCst) {
+                return;
+            }
+            watchers.contains_key(repo)
+        };
+        if already_armed {
+            emit_phase("already_armed");
             return;
         }
-        if watchers.contains_key(repo) {
+        // A deferred arm may run after its view closed; `stop_watcher_if_idle`
+        // already ran, so arming would strand a watcher.
+        let view_open = self
+            .view_repos
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .any(|owner| owner.as_str() == repo);
+        if !view_open {
+            emit_phase("skipped");
             return;
         }
         let shared = self.clone();
         let repo_key = repo.to_string();
         let repo_for_handler = repo_key.clone();
         let presentation_files = self.config.config().presentation_files.clone();
+        // The watch setup walks the whole tree off the open's critical path;
+        // a short-lived client can exit before it returns. Record the phase
+        // now as well, so the open is always traced; completion emits the
+        // full-duration event below when it happens.
+        emit_phase("armed");
         let result = RepoWatcher::start_with_presentation_files(
             Path::new(repo),
             WatcherConfig::from_env(),
@@ -662,7 +693,34 @@ impl Shared {
         );
         match result {
             Ok(watcher) => {
+                // Re-check after the recursive walk: another thread may have
+                // armed this repo, or its last view may have closed meanwhile.
+                let view_open = {
+                    self.view_repos
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .values()
+                        .any(|owner| owner.as_str() == repo)
+                };
+                let mut watchers = self
+                    .watchers
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if self.closing.load(Ordering::SeqCst) || !view_open {
+                    drop(watchers);
+                    drop(watcher);
+                    emit_phase("skipped");
+                    return;
+                }
+                if watchers.contains_key(repo) {
+                    drop(watchers);
+                    drop(watcher);
+                    emit_phase("already_armed");
+                    return;
+                }
                 watchers.insert(repo_key, watcher);
+                drop(watchers);
+                emit_phase("armed");
             }
             Err(error) => {
                 tracing::debug!(%error, "repository watcher failed to start");
@@ -670,6 +728,7 @@ impl Shared {
                     2,
                     format!("magit-lsp: file watching unavailable ({error}); views refresh only on common.refresh"),
                 ));
+                emit_phase("skipped");
             }
         }
     }
