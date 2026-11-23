@@ -1098,9 +1098,6 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
                 fake = fake_bin / tool
                 fake.write_text(f'#!/bin/sh\necho {tool}-called >> "$CAPTURE"\n', encoding="utf-8")
                 fake.chmod(0o755)
-            editor = fake_bin / "vscode-editor"
-            editor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            editor.chmod(0o755)
             paths = {}
             for name in ("server binary", "candidate archive.tar.gz", "release manifest.json", "candidate client.vsix"):
                 item = root / name
@@ -1113,7 +1110,7 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
                 f"RELEASE_MANIFEST={paths['release manifest.json']}",
                 f"RELEASE_VSIX={paths['candidate client.vsix']}",
             ]
-            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture), DISPLAY=":99", MAGIT_VSCODE_BIN=str(editor))
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture), DISPLAY=":99")
             result = subprocess.run(["make", "-s", "native-vscode-artifact-check", *variables], cwd=ROOT, env=env, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(str(paths["candidate client.vsix"]), capture.read_text(encoding="utf-8"))
