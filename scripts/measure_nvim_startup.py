@@ -15,6 +15,26 @@ from pathlib import Path
 REQUIRED_PHASES = {"phase_repository_discovery", "phase_session_open_render", "phase_tree_render",
                    "phase_render_delivery", "phase_watcher_setup", "phase_status_listing", "phase_rebase_state"}
 
+# The terminal `phase_watcher_setup` event follows the recursive inotify walk,
+# which a short-lived client can outrun: the server exits before the deferred
+# blocking arm registers the tree, so that event may never be written. The
+# `phase_watcher_setup_start` marker is recorded on every arm and is the
+# reliable per-open watcher signal. Keep the full-duration event in the phase
+# report when it exists; only readiness uses the marker as its substitute.
+WATCHER_START_PHASE = "phase_watcher_setup_start"
+
+
+def missing_required_phases(present: set[str | None]) -> set[str]:
+    """Required phase names absent from a trace, tolerating an early exit.
+
+    ``WATCHER_START_PHASE`` satisfies ``phase_watcher_setup`` for readiness;
+    neither the required set nor the duration report is otherwise altered.
+    """
+    lacking = REQUIRED_PHASES - present
+    if "phase_watcher_setup" in lacking and WATCHER_START_PHASE in present:
+        lacking.discard("phase_watcher_setup")
+    return lacking
+
 
 def trace_records(path: Path) -> tuple[list[dict], bool]:
     """Parse whole JSONL records; the flag says whether the file ends in a newline.
@@ -45,7 +65,7 @@ def trace_readiness(client_trace: Path,
     missing = {}
     for trace_id in opens:
         present = {event.get("event") for event in servers if event.get("id") == trace_id}
-        lacking = sorted(REQUIRED_PHASES - present)
+        lacking = sorted(missing_required_phases(present))
         if lacking:
             missing[str(trace_id)] = lacking
     issues = [] if opens else ["no correlated opens"]
@@ -100,11 +120,10 @@ def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, l
     opens = [event for event in raw if event.get("event") == "view_open_requested"]
     if not opens:
         raise RuntimeError(f"trace has no correlated opens: {stem}")
-    required = REQUIRED_PHASES
     for opened in opens:
         correlated = [event for event in raw if event.get("id") == opened.get("id")]
         present = {event.get("event") for event in correlated}
-        missing = required - present
+        missing = missing_required_phases(present)
         if missing:
             raise RuntimeError(f"trace {stem} id={opened.get('id')} missing phases {sorted(missing)}")
     by_id = {}
