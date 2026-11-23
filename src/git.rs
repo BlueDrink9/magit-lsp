@@ -235,6 +235,14 @@ pub struct Status {
     pub untracked: Vec<FileEntry>,
 }
 
+impl Status {
+    /// Whether this listing reports an unresolved conflict, derived from the
+    /// porcelain `u` records the parser surfaced as `U` entries.
+    pub fn has_conflicts(&self) -> bool {
+        self.unstaged.iter().any(|file| file.status == "U")
+    }
+}
+
 /// Git operation state relevant to an in-progress rebase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RebaseState {
@@ -555,6 +563,8 @@ pub(crate) struct RebaseTodoSnapshot {
     pub owner: RebaseTodoOwner,
 }
 
+/// A Git repository handle, cheap to clone once discovery resolved its identities.
+#[derive(Debug, Clone)]
 pub struct GitRepo {
     root: PathBuf,
     git_dir: PathBuf,
@@ -637,12 +647,7 @@ impl GitRepo {
 
     /// Detect an active merge/apply rebase in this worktree, including conflict state.
     pub fn rebase_state(&self) -> Result<Option<RebaseState>> {
-        let merge = self.git_dir.join("rebase-merge").is_dir();
-        let apply_dir = self.git_dir.join("rebase-apply");
-        let apply = apply_dir.is_dir()
-            && (apply_dir.join("rebasing").exists() || apply_dir.join("applying").exists())
-            && apply_dir.join("rebasing").exists();
-        if !merge && !apply {
+        if !self.rebase_in_progress() {
             return Ok(None);
         }
         let status = self.run(&["status", "--porcelain"])?;
@@ -653,6 +658,30 @@ impl GitRepo {
             )
         });
         Ok(Some(RebaseState { conflicted }))
+    }
+
+    /// Detect an active rebase, reusing the conflict state of a render-time status listing.
+    ///
+    /// The rebase directories are still inspected on disk; only the duplicate
+    /// `status --porcelain` read is avoided by deriving conflicts from the
+    /// parsed porcelain `u` records of `status`.
+    pub fn rebase_state_from_status(&self, status: &Status) -> Result<Option<RebaseState>> {
+        if !self.rebase_in_progress() {
+            return Ok(None);
+        }
+        Ok(Some(RebaseState {
+            conflicted: status.has_conflicts(),
+        }))
+    }
+
+    /// Whether a merge- or apply-backend rebase currently owns this worktree.
+    fn rebase_in_progress(&self) -> bool {
+        let merge = self.git_dir.join("rebase-merge").is_dir();
+        let apply_dir = self.git_dir.join("rebase-apply");
+        let apply = apply_dir.is_dir()
+            && (apply_dir.join("rebasing").exists() || apply_dir.join("applying").exists())
+            && apply_dir.join("rebasing").exists();
+        merge || apply
     }
 
     /// Continue an active rebase without opening an editor for its unchanged message.

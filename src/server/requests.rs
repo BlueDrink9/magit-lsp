@@ -116,6 +116,9 @@ pub(super) struct Dispatched {
 
 pub(super) struct DeferredStatus {
     pub(super) repo_path: String,
+    /// Repository handle discovered by the opening request; each acquisition
+    /// clones it so a status open performs discovery once.
+    pub(super) repository: crate::git::GitRepo,
     pub(super) view_id: String,
     pub(super) generation: u64,
     /// Correlation id of the originating request, carried onto the deferred
@@ -127,6 +130,7 @@ impl DeferredStatus {
     async fn run(self, shared: Shared) {
         super::view_execution::acquire_status(
             shared,
+            self.repository,
             self.repo_path,
             self.view_id,
             self.generation,

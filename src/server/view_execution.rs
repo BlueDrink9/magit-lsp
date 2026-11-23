@@ -65,6 +65,9 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     };
     let session_start = std::time::Instant::now();
     let is_status = matches!(&p.kind, ViewKind::Status);
+    // The opening discovery already resolved the repository identities, so the
+    // deferred acquisition clones this handle instead of discovering again.
+    let acquisition_repo = is_status.then(|| discovered_repo.clone());
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         let rich = match shared
@@ -140,9 +143,10 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         serde_json::json!({ "duration_ms": total.elapsed().as_secs_f64() * 1000.0 }),
     );
     let dispatched = Dispatched::with(serde_json::to_value(descriptor)?, notifications);
-    if is_status {
+    if let Some(repository) = acquisition_repo {
         Ok(dispatched.with_deferred(DeferredStatus {
             repo_path: repo.to_string(),
+            repository,
             view_id: id,
             generation: 0,
             trace_id: crate::runner::current_trace_id(),
@@ -161,34 +165,41 @@ enum InstallStatus {
 }
 
 /// Acquire one status generation off-runtime, then publish it in repository order.
+///
+/// `repository` is the handle discovered by the opening request; every
+/// generation reuses a clone of it instead of running discovery again.
 pub(super) async fn acquire_status(
     shared: Shared,
+    repository: crate::git::GitRepo,
     repo_path: String,
     view_id: String,
     generation: u64,
     trace_id: u64,
 ) {
-    let acquisition_path = repo_path.clone();
+    let acquire_repo = repository.clone();
     let acquired = tokio::task::spawn_blocking(move || {
         crate::runner::with_trace_id(trace_id, || {
-            let repo = crate::git::GitRepo::open(&acquisition_path)?;
-            crate::status_view::StatusView::acquire_opening_state(&repo, generation)
+            crate::status_view::StatusView::acquire_opening_state(&acquire_repo, generation)
         })
     })
     .await;
-    finish_status_acquisition(shared, repo_path, view_id, generation, trace_id, acquired).await;
+    finish_status_acquisition(
+        shared, repository, repo_path, view_id, generation, trace_id, acquired,
+    )
+    .await;
 }
 
 /// Start the single coalesced follow-up acquisition on its own task.
 fn spawn_status_acquisition(
     shared: Shared,
+    repository: crate::git::GitRepo,
     repo_path: String,
     view_id: String,
     generation: u64,
     trace_id: u64,
 ) {
     tokio::spawn(acquire_status(
-        shared, repo_path, view_id, generation, trace_id,
+        shared, repository, repo_path, view_id, generation, trace_id,
     ));
 }
 
@@ -201,6 +212,7 @@ fn spawn_status_acquisition(
 /// mirrors command dispatch: no Tokio worker waits on the session mutex.
 pub(super) async fn finish_status_acquisition(
     shared: Shared,
+    repository: crate::git::GitRepo,
     repo_path: String,
     view_id: String,
     generation: u64,
@@ -231,6 +243,7 @@ pub(super) async fn finish_status_acquisition(
         Ok(InstallStatus::Coalesced(next_generation)) => {
             spawn_status_acquisition(
                 shared,
+                repository,
                 repo_path,
                 view_id.clone(),
                 next_generation,

@@ -95,7 +95,7 @@ impl StatusView {
             serde_json::json!({ "duration_ms": status_started.elapsed().as_secs_f64() * 1000.0 }),
         );
         let rebase_started = std::time::Instant::now();
-        let rebase = repo.rebase_state()?;
+        let rebase = repo.rebase_state_from_status(&status)?;
         crate::runner::trace_current(
             "phase_rebase_state",
             serde_json::json!({ "duration_ms": rebase_started.elapsed().as_secs_f64() * 1000.0 }),
