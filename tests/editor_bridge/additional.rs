@@ -528,6 +528,19 @@ fn a_cancel_creates_no_commit() {
     assert!(exit.success(), "server exited: {exit:?}");
 }
 
+/// Identify the deferred status acquisition's progress token, when published.
+fn status_progress_token(server: &TestServer) -> Option<String> {
+    server.notifications.iter().find_map(|message| {
+        let is_status_begin = message["method"] == "$/progress"
+            && message["params"]["value"]["kind"] == "begin"
+            && message["params"]["value"]["message"] == "status open";
+        if !is_status_begin {
+            return None;
+        }
+        message["params"]["token"].as_str().map(str::to_string)
+    })
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
@@ -553,6 +566,16 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
             server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
             let enabled = capabilities["window"]["workDoneProgress"] == true;
+            // Opening a status view publishes its deferred acquisition as
+            // `status open` progress when the client declared the capability.
+            // Filter that token by identity below so the editor-worker
+            // assertions keep testing only the worker's own (absent) progress.
+            let status_token = status_progress_token(&server);
+            let is_status_progress = |message: &Value| {
+                status_token
+                    .as_deref()
+                    .is_some_and(|token| message["params"]["token"].as_str() == Some(token))
+            };
             // A mutation request announces its own progress run, and the
             // commit worker announces a second one: await both before the
             // edit so the unanswered-create count is deterministic.
@@ -562,7 +585,9 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             let mut edit = None;
             while edit.is_none() || creates < expected_creates {
                 let message = server.recv_raw();
-                if message["method"] == "window/workDoneProgress/create" {
+                if message["method"] == "window/workDoneProgress/create"
+                    && !is_status_progress(&message)
+                {
                     create = Some(message.clone());
                     creates += 1;
                 }
@@ -580,12 +605,13 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             assert!(!server
                 .notifications
                 .iter()
-                .any(|m| m["method"] == "$/progress"));
+                .any(|m| { m["method"] == "$/progress" && !is_status_progress(m) }));
             assert_eq!(
                 server
                     .notifications
                     .iter()
-                    .filter(|m| m["method"] == "window/workDoneProgress/create")
+                    .filter(|m| m["method"] == "window/workDoneProgress/create"
+                        && !is_status_progress(m))
                     .count(),
                 expected_creates
             );
@@ -603,7 +629,7 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
                     !server
                         .notifications
                         .iter()
-                        .any(|m| m["method"] == "$/progress"),
+                        .any(|m| { m["method"] == "$/progress" && !is_status_progress(m) }),
                     "terminal emitted orphan progress"
                 );
                 server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
@@ -611,13 +637,15 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             let (exit, remaining) = server.finish_with_messages(Duration::from_secs(10));
             assert!(exit.success());
             assert!(
-                !remaining.iter().any(|m| m["method"] == "$/progress"),
+                !remaining
+                    .iter()
+                    .any(|m| m["method"] == "$/progress" && !is_status_progress(m)),
                 "orphan progress through EOF: {remaining:?}"
             );
             assert!(
-                !remaining
-                    .iter()
-                    .any(|m| m["method"] == "window/workDoneProgress/create"),
+                !remaining.iter().any(|m| {
+                    m["method"] == "window/workDoneProgress/create" && !is_status_progress(m)
+                }),
                 "late create through EOF: {remaining:?}"
             );
             assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);

@@ -42,7 +42,16 @@ class IntegrationClient extends LanguageClient {
     this.createdProgress = new Set();
     this.progress = new Map();
     this.onNotification("$/progress", ({ token, value }) => {
-      assert(this.createdProgress.has(token), "progress must be created before use");
+      // The server publishes the status-open begin ahead of its create reply
+      // so an early key cannot beat the loading render; that one token may
+      // legitimately arrive first. Every other token still needs create-before-use.
+      const earlyStatus =
+        value.kind === "begin" &&
+        value.message === "status open" &&
+        !this.createdProgress.has(token);
+      if (!earlyStatus) {
+        assert(this.createdProgress.has(token), "progress must be created before use");
+      }
       if (value.kind === "begin") {
         assert(!this.progress.has(token), "progress begins once");
       } else {

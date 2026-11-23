@@ -119,7 +119,7 @@ hooks-run-pre-push:
 # suites are separate: `make ui-unit` (harness) and `make ui-test`/`make ui-tour`
 # (scripted Neovim screens) must be run when touching the UI harness or
 # user-visible rendering.
-test: build test-rust test-lua vscode-test
+test: build test-rust test-lua vscode-test ui-test
 
 # Same three suite groups as `make test`, run concurrently, for a shorter
 # local wall time; `test:` above stays the serial default and CI gate. One

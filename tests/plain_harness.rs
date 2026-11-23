@@ -1540,6 +1540,23 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
             break;
         }
     }
+    // Opening the status view announces its deferred acquisition as `status
+    // open` progress. Filter that token by identity so the counts below cover
+    // only the progress driven by the command under test.
+    let status_token = client.server.notifications.iter().find_map(|message| {
+        let is_status_begin = message["method"] == "$/progress"
+            && message["params"]["value"]["kind"] == "begin"
+            && message["params"]["value"]["message"] == "status open";
+        if !is_status_begin {
+            return None;
+        }
+        message["params"]["token"].as_str().map(str::to_string)
+    });
+    let is_status = |message: &Value| {
+        status_token
+            .as_deref()
+            .is_some_and(|token| message["params"]["token"].as_str() == Some(token))
+    };
     let id=client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
     let response = client.until_response(id);
     assert!(response.get("result").is_some(), "{response}");
@@ -1556,7 +1573,11 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
             && c.server
                 .notifications
                 .iter()
-                .filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end")
+                .filter(|m| {
+                    m["method"] == "$/progress"
+                        && m["params"]["value"]["kind"] == "end"
+                        && !is_status(m)
+                })
                 .count()
                 == 3
     });
@@ -1564,7 +1585,7 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
         .editor
         .outbound
         .iter()
-        .filter(|m| m["method"] == "window/workDoneProgress/create")
+        .filter(|m| m["method"] == "window/workDoneProgress/create" && !is_status(m))
         .collect();
     assert_eq!(requests.len(), 3);
     assert_ne!(requests[0]["id"], requests[1]["id"]);
