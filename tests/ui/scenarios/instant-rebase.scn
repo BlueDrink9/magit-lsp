@@ -44,6 +44,8 @@ keys: g g d G i "Native squash message"
 keys: Escape
 keys standard: C-Enter
 keys vim: Z Z
+wait
+wait screen contains "Instant autosquash completed"
 wait screen contains "Staged changes (0)"
 expect view_stack.count == 1
 sh: test "$(git show -s --format=%s HEAD~1)" = "Native squash message"
