@@ -1,0 +1,4 @@
+# Recorded example artifacts are compared byte-for-byte by the replay tests, so
+# they must be checked out with LF endings on every platform (Windows runners
+# default to core.autocrlf=true).
+docs/examples/*.jsonl text eol=lf

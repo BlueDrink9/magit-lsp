@@ -2333,6 +2333,32 @@ fn capture_preserves_fragments_and_rejects_overflow() {
     assert!(regenerated_fragments("unrelated.jsonl", &[]).is_err());
 }
 
+/// Recording artifacts contain no CR bytes, so replay byte comparisons hold.
+///
+/// `docs/examples/*.jsonl` is pinned to `eol=lf` in `.gitattributes`; a checkout
+/// that converts line endings fails here with the artifact name instead of the
+/// opaque byte-diff mismatch the replay tests report.
+#[test]
+fn recording_artifacts_use_lf_line_endings() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let files = example_recordings::recordings(&root.join(EXAMPLES_DIR))
+        .unwrap_or_else(|error| panic!("load examples: {error}"));
+    assert!(
+        !files.is_empty(),
+        "expected at least one example under {EXAMPLES_DIR}"
+    );
+    for (name, bytes) in files {
+        if let Some(offset) = bytes.iter().position(|byte| *byte == b'\r') {
+            panic!(
+                "{}: carriage return at byte {offset}; recordings must be checked out with LF \
+                 endings (docs/examples/*.jsonl is pinned to eol=lf in .gitattributes, \
+                 re-checkout the file)",
+                root.join(EXAMPLES_DIR).join(&name).display()
+            );
+        }
+    }
+}
+
 /// Regeneration refreshes a recorded c2s content hash from the live offer.
 #[test]
 fn regeneration_refreshes_recorded_content_hashes() {
