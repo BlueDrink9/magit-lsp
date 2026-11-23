@@ -164,6 +164,36 @@ async function waitFor(condition, label, timeout = 10000) {
 }
 
 /**
+ * Wall-clock durations of the scenario phases, recorded by {@link phase} and
+ * printed by {@link reportTimings}. Instrumentation only: it changes no work.
+ *
+ * @type {[string, number][]}
+ */
+const phaseTimings = [];
+let phaseMark = Date.now();
+
+/**
+ * Close the current phase, recording the wall time since the previous mark.
+ *
+ * @param {string} label
+ */
+function phase(label) {
+  const now = Date.now();
+  phaseTimings.push([label, now - phaseMark]);
+  phaseMark = now;
+}
+
+/** Print one `timing <label>=<ms>ms` line per phase plus the total. */
+function reportTimings() {
+  let total = 0;
+  for (const [label, ms] of phaseTimings) {
+    total += ms;
+    console.log(`timing ${label}=${ms}ms`);
+  }
+  console.log(`timing total=${total}ms`);
+}
+
+/**
  * Run Git in the fixture repository.
  *
  * @param {string} repo
@@ -407,6 +437,7 @@ async function run() {
   );
 
   await automaticStartup(binary);
+  phase("startup");
 
   const repo = createRepository();
   __test.reset();
@@ -498,12 +529,14 @@ async function run() {
       "acknowledged the render caused by the key press",
     );
 
+    phase("status");
     await require("./selection-integration").checkShapes({
       vscode: vscodeModule,
       commands,
       client,
       editor: statusEditor,
     });
+    phase("selection-shapes");
 
     // Static mode is a metadata-only transition: it must not invalidate the
     // virtual document or disturb the user's selection.
@@ -666,6 +699,7 @@ async function run() {
       { pickId: cancelPickId, cancelled: true, selected: [] },
     );
 
+    phase("static");
     // Exercise real showMenu accept handlers on live menu views. Synthetic
     // structured rows cover canonical shapes absent from the standard profile;
     // their keys still travel through requests.press to the real server.
@@ -791,6 +825,7 @@ async function run() {
       assert(binding, `generated binding for ${command}`);
       await commands.get(binding.command)(binding.args);
     };
+    phase("menus");
     const { store: draftStore } = require("../lib/store");
     const progress = client.progress;
     assert.equal(
@@ -1411,6 +1446,7 @@ async function run() {
     assert.match(statusEditor.document.getText(), /Unstaged changes/);
     assert.equal(__test.output.filter((line) => line.startsWith("unknown effect")).length, 0);
 
+    phase("drafts");
     // Quit is dispatched through the registered command and scoped to the
     // repository that owns the originating view. This harness uses mocked
     // VSCode APIs; it is not evidence of native tab behavior.
@@ -1440,11 +1476,13 @@ async function run() {
     await commands.get("magit.open")();
     await waitFor(() => store.views.size === 1, "reopened repository view");
     fs.rmSync(secondRepo, { recursive: true, force: true });
+    phase("quit");
     await require("./selection-integration").checkGitSelections({
       vscode: vscodeModule,
       commands,
       client,
     });
+    phase("selection-git");
     // A disconnected owner cannot finish or restart against a new connection;
     // server shutdown aborts the pending helper, while native text is retained.
     __test.setWorkspaceFolder(repo);
@@ -1473,6 +1511,8 @@ async function run() {
   ]);
   assert(exited, "the language server exited after deactivate");
   fs.rmSync(repo, { recursive: true, force: true });
+  phase("exit");
+  reportTimings();
 }
 
 run()

@@ -26,6 +26,13 @@ const advertisementVectors = require("../../../tests/data/client-contracts.json"
 
 const failures = [];
 let passed = 0;
+/**
+ * Wall-clock duration of each executed test, printed after the suite result.
+ * Instrumentation only: it changes no work.
+ *
+ * @type {[string, number][]}
+ */
+const timings = [];
 
 /**
  * Run one named test and record its failure instead of stopping the suite.
@@ -34,12 +41,25 @@ let passed = 0;
  * @param {() => void} body
  */
 function test(name, body) {
+  const start = Date.now();
   try {
     body();
     passed += 1;
   } catch (error) {
     failures.push({ name, error });
+  } finally {
+    timings.push([name, Date.now() - start]);
   }
+}
+
+/** Print the ten slowest tests and suite phases, then the recorded total. */
+function reportTimings() {
+  const slowest = [...timings].sort((left, right) => right[1] - left[1]).slice(0, 10);
+  let total = 0;
+  for (const [, ms] of timings) total += ms;
+  console.log("slowest tests (timing):");
+  for (const [name, ms] of slowest) console.log(`${name}: ${ms}ms`);
+  console.log(`timing total=${total}ms`);
 }
 
 test("optional VSCode runner selects explicit and PATH editors in precedence order", () => {
@@ -770,13 +790,18 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+const asyncStarted = Date.now();
 require("./open.test")()
   .then(async () => {
     await require("./open.test").protocolAdmission();
     await require("./open.test").serverStartup();
     await require("./open.test").serverCommands();
+    timings.push(["open.test suite (async)", Date.now() - asyncStarted]);
+    const downloadStarted = Date.now();
     passed += await require("./server-download.test")();
+    timings.push(["server-download suite (async)", Date.now() - downloadStarted]);
     console.log(`ok ${passed} tests`);
+    reportTimings();
   })
   .catch((error) => {
     console.error(error && error.stack ? error.stack : error);
