@@ -7,6 +7,10 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
 ## Ad hoc
 
+- [ ] **CI-UI-HANG: Restore the real-UI scenario suite.** `make ui-test` fails catastrophically at HEAD — locally 48/80 (`build/test-logs/ui-test.9e0IVH`), on CI 53/80 — mostly scenarios frozen at `Loading repository status…`, plus dead interactions (cursor row 0, menus never open, E247 nvim.sock refused). The suite was chronic-low-flake through Nov 20 04:16 (`71 PASS, 2 FAIL`, `build/test-logs/ui-test.cu4tNW`), so a Nov 20–23 change caused the mass failure; diagnose the stall and fix it. test: `make ui-test` returns to its pre-regression floor (no mass freeze), ideally full green.
+- [x] **CI-COVERAGE-RACE: De-flake owned-runner pid-file readiness.** CI `coverage-rust` failed on `runner::owned::unix::tests::exit_before_cancel_is_normal_success` — ParseIntError `Empty` at `src/runner/owned.rs:559`: the test's readiness loop gates on `Path::exists()` while the spawned shell has created but not yet written the pid file. test: readiness becomes content-based (deadline-bounded read/parse retry, other assertions unchanged); `make coverage-rust` passes.
+  - Done: `09a56f7`
+  - Verified: `make coverage-rust` (ambient toolchain: `/opt/env/default/bin/cargo-llvm-cov`) @ `247e84d` → exit 0 (`ok: coverage-rust (warnings detected; check log: build/test-logs/coverage-rust.o3um9d)`; `coverage-rust: 90 source files, 83.1% of 32438 lines covered in build/coverage/lcov.info`).
 - [ ] **CI-EDITOR: Isolate artifact-target unit tests from installed editors.** test: artifact input validation and spaced-path forwarding pass without a real VSCode-compatible editor, without invoking builds; retain production editor validation. Verify: `make ui-unit`.
   - Done: `9e7137f`
   - Verified: `make ui-unit` → exit 0 (`ok: ui-unit`).
