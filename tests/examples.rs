@@ -830,8 +830,8 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     });
     assert_eq!(
         lines[loading_render].message["params"]["text"],
-        json!(["Loading repository status…"]),
-        "the initial render is the loading placeholder"
+        json!(["Head: main", "Loading repository status…"]),
+        "the initial render carries the discovered branch above the loading placeholder"
     );
     let fresh_render = index(&|line| {
         line.dir == Dir::ServerToClient
