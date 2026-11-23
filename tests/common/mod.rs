@@ -27,16 +27,13 @@ const FIXED_DATE: &str = "2000-01-01T00:00:00+0000";
 static DETERMINISM: Once = Once::new();
 
 /// Make spawned `git` deterministic: fixed identity and dates, no system
-/// config, an isolated `HOME`/`XDG_CONFIG_HOME`, `LC_ALL=C`, and a pinned
-/// `TMPDIR`.
+/// config, an isolated `HOME`/`XDG_CONFIG_HOME` and `LC_ALL=C`.
 ///
-/// The environment is process-global, so this runs once. Tests only rely on it
-/// being constant, never on a particular value; the one absolute path length
-/// they do encode is the replay fixture root in `commit-edit` recordings, so
-/// the root is pinned to the default temporary directory.
+/// The environment is process-global, so this runs once. `TMPDIR` is left
+/// untouched: the example replay normalizes fixture roots (text and ranges
+/// together) so recordings stay valid under any temporary-directory path.
 pub fn apply_determinism_env() {
     DETERMINISM.call_once(|| {
-        std::env::set_var("TMPDIR", "/tmp");
         let home = TempDir::new().expect("tempdir for HOME").keep();
         std::fs::create_dir_all(home.join("config")).expect("create XDG config dir");
         std::env::set_var("HOME", &home);

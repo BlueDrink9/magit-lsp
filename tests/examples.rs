@@ -1383,6 +1383,122 @@ impl HashNormalizer {
     }
 }
 
+/// Visit every LSP `range` in a frame, carrying the document URI in scope.
+///
+/// A `documentUri` or `textDocument.uri` on any enclosing object scopes the
+/// ranges below it, so an edit's range is matched with the document it edits.
+fn for_each_range(
+    value: &mut Value,
+    uri: Option<&str>,
+    apply: &mut dyn FnMut(&mut Value, Option<&str>),
+) {
+    match value {
+        Value::Object(map) => {
+            let scoped: Option<String> = map
+                .get("documentUri")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    map.get("textDocument")
+                        .and_then(|document| document.get("uri"))
+                        .and_then(Value::as_str)
+                })
+                .or(uri)
+                .map(str::to_owned);
+            if let Some(range) = map.get_mut("range") {
+                apply(range, scoped.as_deref());
+            }
+            for (key, item) in map.iter_mut() {
+                if key != "range" {
+                    for_each_range(item, scoped.as_deref(), apply);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                for_each_range(item, uri, apply);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Per-side normalization of the machine-dependent repository root.
+///
+/// The recorded side uses [`RECORDED_ROOT`] and the observed side the live
+/// fixture root. Both are reduced to the same canonical form: the root string
+/// is replaced in text, and a range endpoint that points beyond a root
+/// occurrence in its document is shifted by that side's root-length delta.
+/// Text and numbers therefore move together, so the strict frame comparison
+/// stays exact on any machine.
+struct RootNormalizer {
+    /// This side's root, as it appears in frames before canonicalization.
+    root: String,
+    /// Canonical-URI-keyed client documents whose ranges may cross the root.
+    documents: HashMap<String, String>,
+}
+
+impl RootNormalizer {
+    /// A normalizer for one side of the replay comparison.
+    fn new(root: &str) -> Self {
+        Self {
+            root: root.to_owned(),
+            documents: HashMap::new(),
+        }
+    }
+
+    /// Remember the full text a client document holds on this side.
+    fn note_document(&mut self, uri: &str, text: &str) {
+        self.documents
+            .insert(canonical_root(uri, &self.root), text.to_owned());
+    }
+
+    /// Shift range endpoints that land past a root occurrence in their document.
+    fn normalize_ranges(&self, value: &mut Value) {
+        let delta = self.root.len() as i64 - RECORDED_ROOT.len() as i64;
+        if delta == 0 {
+            return;
+        }
+        for_each_range(value, None, &mut |range, uri| {
+            let Some(uri) = uri else { return };
+            let Some(text) = self.documents.get(&canonical_root(uri, &self.root)) else {
+                return;
+            };
+            let lines: Vec<&str> = text.split('\n').collect();
+            for endpoint in ["start", "end"] {
+                let Some(position) = range.get_mut(endpoint) else {
+                    continue;
+                };
+                let (Some(line), Some(character)) = (
+                    position.get("line").and_then(Value::as_u64),
+                    position.get("character").and_then(Value::as_u64),
+                ) else {
+                    continue;
+                };
+                let Some(line_text) = lines.get(line as usize) else {
+                    continue;
+                };
+                // The root is ASCII; endpoint characters are UTF-16 units.
+                let Some(root_start) = line_text.find(&self.root) else {
+                    continue;
+                };
+                if character < (root_start + self.root.len()) as u64 {
+                    continue;
+                }
+                position["character"] = Value::from(character as i64 - delta);
+            }
+        });
+    }
+}
+
+/// Replace one side's repository root with the recording's placeholder.
+fn canonical_root(text: &str, root: &str) -> String {
+    text.replace(
+        &format!("file://{root}"),
+        &format!("file://{RECORDED_ROOT}"),
+    )
+    .replace(root, RECORDED_ROOT)
+}
+
 /// Replace this run's repository root and binary path with the recording's
 /// placeholders.
 ///
@@ -1391,12 +1507,7 @@ impl HashNormalizer {
 /// server frame. Replaying a recorded frame expands them back to the live
 /// values.
 fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
-    text.replace(
-        &format!("file://{root}"),
-        &format!("file://{RECORDED_ROOT}"),
-    )
-    .replace(root, RECORDED_ROOT)
-    .replace(binary, RECORDED_BINARY)
+    canonical_root(text, root).replace(binary, RECORDED_BINARY)
 }
 
 /// The recorded comparison form of a frame.
@@ -1406,14 +1517,16 @@ fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
 /// opaque hashes, and commit/object hashes differ between runs. The recordings
 /// normalized those by adding the member and by the `/repo`, binary-path and
 /// `run-1` placeholders; [`HashNormalizer`] maps 40-hex hashes to `hash-N`.
-/// Versions and every other value stay exact.
+/// [`RootNormalizer`] reduces each side's root string and root-dependent range
+/// endpoints to the same form. Versions and every other value stay exact.
 fn canonical_frame(
     message: &Value,
-    root: &str,
+    roots: &RootNormalizer,
     binary: &str,
     hashes: &mut HashNormalizer,
 ) -> Value {
     let mut value = message.clone();
+    roots.normalize_ranges(&mut value);
     if value.get("jsonrpc").is_none() {
         value
             .as_object_mut()
@@ -1427,7 +1540,7 @@ fn canonical_frame(
     });
     hashes.normalize_frame(&mut value);
     let text = serde_json::to_string(&value).expect("serialise observed frame");
-    let text = canonical_paths(&text, root, binary);
+    let text = canonical_paths(&text, &roots.root, binary);
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
@@ -1593,6 +1706,10 @@ fn replay_example_mode(
     // first-seen position on its own side.
     let mut recorded_hashes = HashNormalizer::new();
     let mut observed_hashes = HashNormalizer::new();
+    // Each side normalizes its own root: the recording already carries the
+    // placeholder, the live frames carry this run's temporary fixture root.
+    let mut recorded_roots = RootNormalizer::new(RECORDED_ROOT);
+    let mut observed_roots = RootNormalizer::new(&root);
     // The code-action and commit recordings deliberately exclude the server's
     // dynamic `view/keymap` pushes (client display metadata, not part of the
     // recorded exchange). Only those files may skip them; a file that does
@@ -1680,7 +1797,17 @@ fn replay_example_mode(
                         );
                     }
                 }
-                server.send(expand_client_frame(&message, &root, run_id.as_deref()));
+                let expanded = expand_client_frame(&message, &root, run_id.as_deref());
+                // Track each side's client documents so root-dependent range
+                // endpoints can be shifted together with the text they address.
+                if let Some(update) = recorded_document_update(&line.message) {
+                    recorded_roots.note_document(&update.uri, &update.text);
+                    if let Some(observed) = expanded.as_object().and_then(recorded_document_update)
+                    {
+                        observed_roots.note_document(&observed.uri, &observed.text);
+                    }
+                }
+                server.send(expanded);
             }
             Dir::ServerToClient => {
                 let mut actual =
@@ -1704,10 +1831,11 @@ fn replay_example_mode(
                 if actual.get("method").is_some() && actual.get("id").is_some() {
                     outbound.push(actual["id"].clone());
                 }
-                let observed = canonical_frame(&actual, &root, binary, &mut observed_hashes);
+                let observed =
+                    canonical_frame(&actual, &observed_roots, binary, &mut observed_hashes);
                 let expected = canonical_frame(
                     &Value::Object(line.message.clone()),
-                    RECORDED_ROOT,
+                    &recorded_roots,
                     RECORDED_BINARY,
                     &mut recorded_hashes,
                 );
@@ -1958,17 +2086,16 @@ fn commit_edit_action_order_is_strict() {
     }
 }
 
-/// The recorded final commit-edit range end matches the pinned fixture root.
+/// The recorded final commit-edit range end matches the canonical root.
 ///
 /// The final applyEdit of `commit-edit-confirm` replaces `Staged changes (`
-/// through the real commit-message line, so its recorded end is the end of
-/// `file://<root>/.git/COMMIT_EDITMSG` where `<root>` is the replay fixture
-/// root. The replay harness pins the root (see `apply_determinism_env`), so
-/// this test pins the relationship: the recorded end must equal the end of
-/// the commit-message line in the expanded recorded client text. It fails
-/// when the root length the recording baked in differs from the pinned one.
+/// through the commit-message line, so its end is the length of the
+/// `file:///repo/.git/COMMIT_EDITMSG` line in the recorded client text. The
+/// recording stores that text with the placeholder root, so the stored range
+/// must be computed against the same placeholder — never against a real
+/// fixture root, whose length varies with `TMPDIR`.
 #[test]
-fn commit_edit_confirm_final_range_end_matches_pinned_fixture_root() {
+fn commit_edit_confirm_final_range_end_matches_canonical_root() {
     let lines = example_lines("commit-edit-confirm.jsonl");
     let mut final_edit = None;
     for (index, line) in lines.iter().enumerate() {
@@ -1997,22 +2124,86 @@ fn commit_edit_confirm_final_range_end_matches_pinned_fixture_root() {
         .and_then(|line| line.message["params"]["contentChanges"][0]["text"].as_str())
         .expect("a recorded client status text precedes the final edit")
         .to_owned();
-    let fixture = replay_fixture("commit-edit-confirm");
-    let (repo, _git) = fixture.build();
-    let root = repo.path().to_string_lossy().to_string();
-    let real_text = client_text
-        .replace("file:///repo", &format!("file://{root}"))
-        .replace("/repo", &root);
-    let real_lines: Vec<&str> = real_text.split('\n').collect();
+    let canonical_lines: Vec<&str> = client_text.split('\n').collect();
     assert!(
-        real_lines.len() > 20,
+        canonical_lines.len() > 20,
         "the status text must include the commit line"
     );
-    let expected_end = json!({"line": 20, "character": real_lines[20].len()});
+    assert_eq!(
+        canonical_lines[20], "file:///repo/.git/COMMIT_EDITMSG",
+        "the recorded commit line must use the canonical root"
+    );
+    let expected_end = json!({"line": 20, "character": canonical_lines[20].len()});
     assert_eq!(
         final_edit["range"]["end"], expected_end,
-        "the recorded range end must be the end of the real commit-message line under the pinned fixture root"
+        "the recorded range end must match the canonical commit-message line"
     );
+}
+
+/// Two roots of different length produce identical canonical frames.
+///
+/// Both sides carry the same text and range, but with roots of different
+/// lengths. Normalizing each side with its own root must shift the range
+/// endpoint by exactly the root-length delta, so the canonical frames match.
+/// A deliberately divergent range is still rejected by strict comparison.
+#[test]
+fn root_normalization_is_invariant_to_root_length() {
+    let long_root = "/a/deliberately/long/temporary/fixture/root";
+    let commit_line = |root: &str| format!("file://{root}/.git/COMMIT_EDITMSG");
+    let document = |root: &str| {
+        let mut text: String = (0..20).map(|index| format!("line{index}\n")).collect();
+        text.push_str(&commit_line(root));
+        text.push('\n');
+        text
+    };
+    let frame = |root: &str| {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "workspace/applyEdit",
+            "params": {"edit": {"documentChanges": [{
+                "textDocument": {"uri": format!("file://{root}/.magit"), "version": 5},
+                "edits": [{
+                    "newText": commit_line(root),
+                    "range": {
+                        "start": {"line": 2, "character": 16},
+                        "end": {"line": 20, "character": commit_line(root).len()},
+                    },
+                }],
+            }]}},
+        })
+    };
+
+    let canonical = |root: &str| {
+        let mut normalizer = RootNormalizer::new(root);
+        normalizer.note_document(&format!("file://{root}/.magit"), &document(root));
+        canonical_frame(
+            &frame(root),
+            &normalizer,
+            RECORDED_BINARY,
+            &mut HashNormalizer::new(),
+        )
+    };
+    let short = canonical(RECORDED_ROOT);
+    let long = canonical(long_root);
+    assert_eq!(
+        short, long,
+        "root length must not affect the canonical frame"
+    );
+    let edit = &short["params"]["edit"]["documentChanges"][0]["edits"][0];
+    assert_eq!(edit["newText"], commit_line(RECORDED_ROOT));
+    assert_eq!(
+        edit["range"]["end"]["character"],
+        commit_line(RECORDED_ROOT).len()
+    );
+    // The unaffected endpoint stays exact.
+    assert_eq!(edit["range"]["start"]["character"], 16);
+
+    // Strict comparison is retained: a wrong range still diverges after both
+    // sides have been normalized.
+    let mut divergent = long;
+    divergent["params"]["edit"]["documentChanges"][0]["edits"][0]["range"]["end"]["character"] =
+        Value::from(0);
+    assert_ne!(short, divergent);
 }
 
 /// A deliberately divergent expectation must make the replay fail.
@@ -2472,8 +2663,9 @@ fn commit_hashes_normalize_by_first_seen_position() {
     });
     let mut recorded = HashNormalizer::new();
     let mut observed = HashNormalizer::new();
-    let expected = canonical_frame(&frame, RECORDED_ROOT, RECORDED_BINARY, &mut recorded);
-    let actual = canonical_frame(&frame, RECORDED_ROOT, RECORDED_BINARY, &mut observed);
+    let roots = RootNormalizer::new(RECORDED_ROOT);
+    let expected = canonical_frame(&frame, &roots, RECORDED_BINARY, &mut recorded);
+    let actual = canonical_frame(&frame, &roots, RECORDED_BINARY, &mut observed);
     assert_eq!(actual, expected);
     assert_eq!(actual["result"]["text"][0], "commit hash-1");
     assert_eq!(actual["result"]["text"][1], "parent hash-2");
@@ -2487,7 +2679,7 @@ fn commit_hashes_normalize_by_first_seen_position() {
         "result": {"text": [format!("parent {second}")]},
     });
     let mut other = HashNormalizer::new();
-    let renumbered = canonical_frame(&only_second, RECORDED_ROOT, RECORDED_BINARY, &mut other);
+    let renumbered = canonical_frame(&only_second, &roots, RECORDED_BINARY, &mut other);
     assert_eq!(renumbered["result"]["text"][0], "parent hash-1");
 }
 
