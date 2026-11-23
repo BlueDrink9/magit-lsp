@@ -142,6 +142,32 @@ fn user_excludes_path(root: &Path) -> Result<PathBuf> {
     })
 }
 
+/// Canonical hash input for one file's permission bits.
+///
+/// Two ASCII flag bytes followed by a NUL: `1`/`0` for read-only, then `1`/`0`
+/// for any executable bit set (`#[cfg(unix)]` mode `& 0o111`; always `0`
+/// elsewhere). Both come from `Permissions::readonly()` and the Unix mode, so
+/// the same semantic state hashes identically on every platform; never derive
+/// this from `Debug` output, which varies by platform.
+fn permission_encoding(permissions: &std::fs::Permissions) -> [u8; 3] {
+    let executable = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    };
+    [
+        if permissions.readonly() { b'1' } else { b'0' },
+        if executable { b'1' } else { b'0' },
+        0,
+    ]
+}
+
 // Hash only this path's subtree. Never follow symlinks (including directory
 // links), and include sorted membership so collapsed untracked directories are
 // as strongly bound to their render as individual files.
@@ -158,7 +184,7 @@ fn worktree_identity(path: &Path) -> Result<String> {
         hash.update(b"link\0");
         hash.update(std::fs::read_link(path)?.as_os_str().as_encoded_bytes());
     } else {
-        hash.update(format!("{:?}\0", metadata.permissions()));
+        hash.update(permission_encoding(&metadata.permissions()));
         if metadata.is_file() {
             hash.update(b"file\0");
             let mut file = std::fs::File::open(path)?;
@@ -3480,6 +3506,30 @@ mod tests {
         header_repo()
             .parse_status(raw, "/repo".to_string(), &[".magit".to_owned()])
             .expect("parse")
+    }
+
+    #[test]
+    fn permission_encoding_pins_canonical_bytes() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("fixture");
+        std::fs::write(&path, b"x").expect("fixture");
+        let mut permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_readonly(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o555);
+        }
+        std::fs::set_permissions(&path, permissions).expect("chmod");
+        let permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        let executable = if cfg!(unix) { b'1' } else { b'0' };
+        assert_eq!(permission_encoding(&permissions), [b'1', executable, 0]);
+
+        let mut writable = permissions.clone();
+        writable.set_readonly(false);
+        std::fs::set_permissions(&path, writable).expect("chmod back");
+        let permissions = std::fs::metadata(&path).expect("metadata").permissions();
+        assert_eq!(permission_encoding(&permissions), [b'0', executable, 0]);
     }
 
     #[test]

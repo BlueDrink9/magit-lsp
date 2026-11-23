@@ -1349,6 +1349,87 @@ fn refreshed_echo(
     apply_text_edit(current_text, &edit.observed_range, &edit.observed_text).map(Some)
 }
 
+/// Content-target hashes the live server offers in band, keyed
+/// `(command, nodeId)`.
+///
+/// One `textDocument/codeAction` response offers a different `mutationHash`
+/// per command for the same node, and the hash binds the command itself, so
+/// the key must carry both. Regeneration uses these offers to refresh the
+/// recorded client's stale content hashes before sending its request.
+#[derive(Default)]
+struct ContentOffers(HashMap<(String, String), String>);
+
+impl ContentOffers {
+    /// Record every content target `frame` offers as a code-action argument.
+    fn note(&mut self, frame: &Value) {
+        let Some(actions) = frame.get("result").and_then(Value::as_array) else {
+            return;
+        };
+        for action in actions {
+            let arguments = action
+                .get("command")
+                .and_then(|command| command.get("arguments"))
+                .and_then(Value::as_array);
+            for argument in arguments.into_iter().flatten() {
+                let Some(target) = argument.get("target") else {
+                    continue;
+                };
+                if target.get("kind").and_then(Value::as_str) != Some("content") {
+                    continue;
+                }
+                let (Some(command), Some(node), Some(hash)) = (
+                    argument.get("command").and_then(Value::as_str),
+                    target.get("nodeId").and_then(Value::as_str),
+                    target.get("mutationHash").and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                self.0
+                    .insert((command.to_owned(), node.to_owned()), hash.to_owned());
+            }
+        }
+    }
+
+    /// Substitute the live offer into every content target of a client frame.
+    ///
+    /// Returns whether a target changed. A content target no captured frame
+    /// offered is a hard regeneration error: keeping the recorded stale hash
+    /// would silently replay a request the server now rejects.
+    fn refresh(&self, message: &mut Value, where_: &str) -> Result<bool, String> {
+        let arguments = message
+            .get_mut("params")
+            .and_then(|params| params.get_mut("arguments"))
+            .and_then(Value::as_array_mut);
+        let mut changed = false;
+        for argument in arguments.into_iter().flatten() {
+            if argument
+                .get("target")
+                .and_then(|target| target.get("kind"))
+                .and_then(Value::as_str)
+                != Some("content")
+            {
+                continue;
+            }
+            let (Some(command), Some(node)) = (
+                argument.get("command").and_then(Value::as_str),
+                argument["target"]["nodeId"].as_str(),
+            ) else {
+                continue;
+            };
+            let Some(hash) = self.0.get(&(command.to_owned(), node.to_owned())) else {
+                return Err(format!(
+                    "{where_}: no in-band offer for content target ({command}, {node})"
+                ));
+            };
+            if argument["target"]["mutationHash"].as_str() != Some(hash.as_str()) {
+                argument["target"]["mutationHash"] = Value::String(hash.clone());
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
+}
+
 /// Visit every string leaf in a JSON value.
 ///
 /// Machine-dependent values (repository roots, binary paths) are replaced
@@ -1804,6 +1885,11 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
 /// text yields exactly the recorded echo), the echo is re-derived from the edit
 /// the current server actually sent. Authored or divergent client changes are
 /// left untouched, and a proven echo that cannot be re-derived is an error.
+///
+/// Regeneration likewise refreshes a recorded client content target's
+/// `mutationHash` from the live server's in-band `textDocument/codeAction`
+/// offers, keyed by `(command, nodeId)`; the substituted hash is persisted in
+/// the artifact, and a content target with no live offer is an error.
 fn replay_example_mode(
     name: &str,
     lines: &[Line],
@@ -1848,6 +1934,8 @@ fn replay_example_env(
     // placeholder, the live frames carry this run's temporary fixture root.
     let mut recorded_roots = RootNormalizer::new(RECORDED_ROOT);
     let mut observed_roots = RootNormalizer::new(&root);
+    // Regeneration only: the live server's in-band content-target offers.
+    let mut content_offers = ContentOffers::default();
     // The code-action and commit recordings deliberately exclude the server's
     // dynamic `view/keymap` pushes (client display metadata, not part of the
     // recorded exchange). Only those files may skip them; a file that does
@@ -1979,6 +2067,12 @@ fn replay_example_env(
                         );
                     }
                 }
+                if regenerate && content_offers.refresh(&mut message, &where_)? {
+                    // Persist the substituted hash in the artifact with the
+                    // recorded envelope, like the renumbered replies above.
+                    regenerated[index + inserted - skipped] = captured_line(line, &message)
+                        .map_err(|error| format!("{where_}: {error}"))?;
+                }
                 let expanded = expand_client_frame(&message, &root, run_id.as_deref());
                 // Track each side's client documents so root-dependent range
                 // endpoints can be shifted together with the text they address.
@@ -2084,6 +2178,9 @@ fn replay_example_env(
                     }
                     observed =
                         canonical_frame(&actual, &observed_roots, binary, &mut observed_hashes);
+                }
+                if regenerate {
+                    content_offers.note(&observed);
                 }
                 let expected = canonical_frame(
                     &Value::Object(line.message.clone()),
@@ -2234,6 +2331,99 @@ fn capture_preserves_fragments_and_rejects_overflow() {
             .contains("fragment too large"));
     }
     assert!(regenerated_fragments("unrelated.jsonl", &[]).is_err());
+}
+
+/// Regeneration refreshes a recorded c2s content hash from the live offer.
+#[test]
+fn regeneration_refreshes_recorded_content_hashes() {
+    let name = "plain-code-action.jsonl";
+    let stale = "0".repeat(64);
+    let content_request = |line: &Line| {
+        line.dir == Dir::ClientToServer
+            && line.message.get("method").and_then(Value::as_str)
+                == Some("workspace/executeCommand")
+            && line.message["params"]["arguments"][0]["target"]["kind"] == "content"
+    };
+    let mut lines = example_lines(name);
+    let request = lines
+        .iter_mut()
+        .find(|line| content_request(line))
+        .expect("a recorded content command");
+    request.message["params"]["arguments"][0]["target"]["mutationHash"] =
+        Value::String(stale.clone());
+    let command = request.message["params"]["arguments"][0]["command"]
+        .as_str()
+        .expect("content command name")
+        .to_owned();
+    let node = request.message["params"]["arguments"][0]["target"]["nodeId"]
+        .as_str()
+        .expect("content node id")
+        .to_owned();
+
+    let regenerated = replay_example_mode(name, &lines, true).expect("regeneration");
+    assert!(
+        !regenerated.iter().any(|raw| raw.contains(&stale)),
+        "the stale recorded hash must not survive regeneration"
+    );
+    let parsed = regenerated
+        .iter()
+        .map(|raw| parse_line(raw).unwrap_or_else(|error| panic!("{error}")))
+        .collect::<Vec<_>>();
+    // The live offer, read straight from the captured codeAction response.
+    let mut offer = None;
+    for line in parsed.iter().filter(|line| line.dir == Dir::ServerToClient) {
+        let Some(actions) = line.message.get("result").and_then(Value::as_array) else {
+            continue;
+        };
+        for action in actions {
+            let argument = action
+                .get("command")
+                .and_then(|command| command.get("arguments"))
+                .and_then(|arguments| arguments.get(0));
+            let Some(argument) = argument else {
+                continue;
+            };
+            let target = &argument["target"];
+            if argument.get("command").and_then(Value::as_str) != Some(command.as_str())
+                || target.get("kind").and_then(Value::as_str) != Some("content")
+                || target.get("nodeId").and_then(Value::as_str) != Some(node.as_str())
+            {
+                continue;
+            }
+            offer = target
+                .get("mutationHash")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+    }
+    let offer = offer.expect("the captured codeAction response offers the command");
+    assert_ne!(
+        offer, stale,
+        "the live offer is not the stale recorded hash"
+    );
+    let sent = parsed
+        .iter()
+        .find(|line| content_request(line))
+        .expect("the regenerated content command");
+    assert_eq!(
+        sent.message["params"]["arguments"][0]["target"]["mutationHash"],
+        Value::String(offer),
+        "the regenerated client frame persists the live offer"
+    );
+
+    let mut missing = example_lines(name);
+    let request = missing
+        .iter_mut()
+        .find(|line| content_request(line))
+        .expect("a recorded content command");
+    request.message["params"]["arguments"][0]["target"]["nodeId"] =
+        Value::String("unstaged/not-offered.txt".to_owned());
+    let error =
+        replay_example_mode(name, &missing, true).expect_err("an unoffered content hash must fail");
+    assert!(
+        error.contains("no in-band offer") && error.contains("plain-code-action.jsonl:"),
+        "the missing offer must be named: {error}"
+    );
 }
 
 /// Regeneration maps every maintained recording to its exact artifact files.
