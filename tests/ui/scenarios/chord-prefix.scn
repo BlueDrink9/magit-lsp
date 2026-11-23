@@ -1,4 +1,6 @@
 # Bugs 7 and 8: `-` exposes a pending chord and Backspace undoes a step.
+# The `=A` option key carries the canonical `muted` role in both states
+# (pinned by tests/menu.rs), which this harness renders as plain style.
 fixture: modified-two-files
 ---
 keys: c
@@ -6,13 +8,13 @@ wait
 keys: -
 wait
 expect pending == "-"
-expect style "=A" dim
+expect style "=A" plain
 expect screen contains "Commit"
 snapshot: prefix
 keys: BSpace
 wait
 expect pending == ""
-expect style "=A" coloured
+expect style "=A" plain
 expect screen contains "Commit"
 snapshot: popped
 keys: - a
