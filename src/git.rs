@@ -215,6 +215,22 @@ pub struct FileMutationIdentity {
     pub original: Option<(String, Box<FileMutationIdentity>)>,
 }
 
+/// Destination path → origin path for the renames and copies on one side.
+///
+/// Built by one whole-repository scan and scoped to a single status read, so
+/// every file body of that render looks its origin up instead of rescanning.
+#[derive(Debug, Default)]
+pub struct RenameOrigins {
+    origins: HashMap<String, String>,
+}
+
+impl RenameOrigins {
+    /// The old path when `path` is the new side of a rename or copy.
+    pub fn origin(&self, path: &str) -> Option<&str> {
+        self.origins.get(path).map(String::as_str)
+    }
+}
+
 /// Repository status: branch plus the staged and unstaged file lists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Status {
@@ -2383,27 +2399,30 @@ impl GitRepo {
 
     /// Unified diff of the unstaged changes to `path` (index vs working tree).
     pub fn diff_unstaged(&self, path: &str) -> Result<String> {
-        self.diff_side(path, false)
+        let origin = self.rename_origin(path, false)?;
+        self.diff_side(path, false, origin.as_deref())
     }
 
     /// Unified diff of the staged changes to `path` (HEAD vs index).
     pub fn diff_staged(&self, path: &str) -> Result<String> {
-        self.diff_side(path, true)
+        let origin = self.rename_origin(path, true)?;
+        self.diff_side(path, true, origin.as_deref())
     }
 
-    /// Diff one side of `path`, including the old path of a rename.
+    /// Diff one side of `path`, including `origin` when it is a rename side.
     ///
     /// Path limiting disables Git's rename detection, so a rename pair has to
-    /// be passed to `git diff` together or it looks like a new file.
-    fn diff_side(&self, path: &str, staged: bool) -> Result<String> {
+    /// be passed to `git diff` together or it looks like a new file. Callers
+    /// pass the origin from [`Self::rename_origin`] or a snapshot-scoped
+    /// [`RenameOrigins`] lookup.
+    fn diff_side(&self, path: &str, staged: bool, origin: Option<&str>) -> Result<String> {
         record_diff_call(&self.root.join(path));
         let mut args = vec!["-c", "core.quotepath=false", "diff"];
         if staged {
             args.push("--cached");
         }
         args.extend(["-M", "-U3", "--"]);
-        let origin = self.rename_origin(path, staged)?;
-        match &origin {
+        match origin {
             Some(origin) => {
                 args.push(origin);
                 args.push(path);
@@ -2687,14 +2706,21 @@ impl GitRepo {
         }
     }
 
-    /// The old path when `path` is the new side of a rename or copy.
-    fn rename_origin(&self, path: &str, staged: bool) -> Result<Option<String>> {
+    /// Rename and copy origins for one side of the working tree.
+    ///
+    /// `staged` compares HEAD against the index; the other side compares the
+    /// index against the working tree. One whole-repository scan serves every
+    /// file body of a render, which then looks its origin up in the returned
+    /// map instead of rescanning; one-shot dispatch-time actions keep using
+    /// [`Self::rename_origin`].
+    pub fn rename_origins(&self, staged: bool) -> Result<RenameOrigins> {
         let mut args = vec!["diff"];
         if staged {
             args.push("--cached");
         }
         args.extend(["--name-status", "-z", "--find-renames"]);
         let raw = self.run(&args)?;
+        let mut origins = HashMap::new();
         let mut tokens = raw.split('\0');
         while let Some(status) = tokens.next() {
             if status.is_empty() {
@@ -2703,12 +2729,20 @@ impl GitRepo {
             let first = tokens.next().unwrap_or("");
             if status.starts_with('R') || status.starts_with('C') {
                 let second = tokens.next().unwrap_or("");
-                if second == path {
-                    return Ok(Some(first.to_string()));
-                }
+                origins
+                    .entry(second.to_string())
+                    .or_insert_with(|| first.to_string());
             }
         }
-        Ok(None)
+        Ok(RenameOrigins { origins })
+    }
+
+    /// The old path when `path` is the new side of a rename or copy.
+    fn rename_origin(&self, path: &str, staged: bool) -> Result<Option<String>> {
+        Ok(self
+            .rename_origins(staged)?
+            .origin(path)
+            .map(str::to_string))
     }
 
     /// Stage all tracked modifications and deletions.
@@ -2761,6 +2795,23 @@ impl GitRepo {
         } else {
             self.diff_unstaged(path)?
         };
+        Ok(patch::parse_file_diff(&diff)
+            .map(|file| file.hunks)
+            .unwrap_or_default())
+    }
+
+    /// The diff hunks for one file, reusing a snapshot-scoped origin map.
+    ///
+    /// Same hunks as [`Self::file_hunks`] without the per-file whole-repository
+    /// rename scan; `origins` must be the map for the same side of one status
+    /// read.
+    pub fn file_hunks_with_origins(
+        &self,
+        path: &str,
+        staged: bool,
+        origins: &RenameOrigins,
+    ) -> Result<Vec<Hunk>> {
+        let diff = self.diff_side(path, staged, origins.origin(path))?;
         Ok(patch::parse_file_diff(&diff)
             .map(|file| file.hunks)
             .unwrap_or_default())

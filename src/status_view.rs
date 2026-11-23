@@ -3,7 +3,7 @@
 //! The text format is the one the Neovim client has always shown, so clients
 //! only replace buffer lines and never compose the view themselves.
 
-use crate::git::{FileEntry, GitRepo, RebaseState, Status};
+use crate::git::{FileEntry, GitRepo, RebaseState, RenameOrigins, Status};
 use crate::patch::Hunk;
 use crate::tree::{
     last_nonblank, LineNode, Link, Node, NodeKind, Symbol, Token, Tree, Visibility, VisibilityState,
@@ -27,6 +27,8 @@ pub struct StatusView {
     pending_refresh: bool,
     /// Hunks loaded for visible files this refresh, keyed by `(path, staged)`.
     hunks: HashMap<(String, bool), Vec<Hunk>>,
+    /// Rename origins for the current status read, scanned once per side.
+    renames: RenameMaps,
     /// Per-view visibility, keyed by node id so it survives a refresh.
     visibility: Visibility,
     /// The last visibility level set by `more-detail`/`less-detail`.
@@ -50,6 +52,35 @@ pub struct FreshStatus {
     status: Status,
     rebase: Option<RebaseState>,
     hunks: HashMap<(String, bool), Vec<Hunk>>,
+    /// Rename origins for this status read, scanned once per side.
+    renames: RenameMaps,
+}
+
+/// Snapshot-scoped rename origin maps, one whole-repository scan per side.
+///
+/// They are replaced with the hunks on every installed status read, so a map
+/// never outlives the Git state it was scanned from.
+#[derive(Default)]
+struct RenameMaps {
+    staged: Option<RenameOrigins>,
+    unstaged: Option<RenameOrigins>,
+}
+
+impl RenameMaps {
+    /// The origin map for one side, scanning the repository only on first use.
+    fn origins(&mut self, repo: &GitRepo, staged: bool) -> Result<&RenameOrigins> {
+        let slot = if staged {
+            &mut self.staged
+        } else {
+            &mut self.unstaged
+        };
+        if slot.is_none() {
+            *slot = Some(repo.rename_origins(staged)?);
+        }
+        // The scan above fills the slot, so the lookup always succeeds.
+        slot.as_ref()
+            .ok_or_else(|| crate::Error::new("rename origin map was not scanned"))
+    }
 }
 
 impl StatusView {
@@ -75,6 +106,7 @@ impl StatusView {
             generation: 0,
             pending_refresh: false,
             hunks: HashMap::new(),
+            renames: RenameMaps::default(),
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
             section_line_limit: None,
@@ -105,6 +137,7 @@ impl StatusView {
             status,
             rebase,
             hunks: HashMap::new(),
+            renames: RenameMaps::default(),
         })
     }
 
@@ -116,7 +149,11 @@ impl StatusView {
             (false, &fresh.status.unstaged),
         ] {
             for file in files {
-                let hunks = match repo.file_hunks(&file.path, staged) {
+                let loaded = fresh
+                    .renames
+                    .origins(repo, staged)
+                    .and_then(|origins| repo.file_hunks_with_origins(&file.path, staged, origins));
+                let hunks = match loaded {
                     Ok(hunks) => hunks,
                     Err(error) => {
                         tracing::warn!(path = %file.path, %error, "failed to load file body");
@@ -139,6 +176,7 @@ impl StatusView {
             rebase: fresh.rebase,
         };
         self.hunks = fresh.hunks;
+        self.renames = fresh.renames;
         true
     }
 
@@ -228,13 +266,16 @@ impl StatusView {
             let key = (path.clone(), section == "staged");
             if !self.hunks.contains_key(&key) {
                 let hunk_started = std::time::Instant::now();
-                let loaded = match self.repo.file_hunks(&path, key.1) {
-                    Ok(hunks) => hunks,
-                    Err(error) => {
-                        tracing::warn!(path = %path, %error, "failed to load file body");
-                        Vec::new()
-                    }
-                };
+                let loaded =
+                    match self.renames.origins(&self.repo, key.1).and_then(|origins| {
+                        self.repo.file_hunks_with_origins(&path, key.1, origins)
+                    }) {
+                        Ok(hunks) => hunks,
+                        Err(error) => {
+                            tracing::warn!(path = %path, %error, "failed to load file body");
+                            Vec::new()
+                        }
+                    };
                 crate::runner::trace_current(
                     "phase_hunk_acquisition",
                     serde_json::json!({ "duration_ms": hunk_started.elapsed().as_secs_f64() * 1000.0, "path": path, "staged": key.1 }),
