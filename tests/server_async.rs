@@ -71,6 +71,260 @@ fn status_open_held_git_acknowledged_completion_uses_exact_base() {
 
 #[cfg(unix)]
 #[test]
+fn status_open_progress_spans_deferred_acquisition() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.auto_respond_to_progress_create();
+    server.initialize_rich(json!({"window": {"workDoneProgress": true}}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    // The deferred acquisition must announce itself while Git status is still
+    // held: the client's idle observation stays false from the token's begin
+    // until the completion render is delivered.
+    let deadline = Instant::now() + server.recv_timeout;
+    let mut token = None;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no progress begin while Git status is held: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "$/progress" && message["params"]["value"]["kind"] == json!("begin")
+        {
+            token = Some(message["params"]["token"].clone());
+            break;
+        }
+    }
+    assert!(!gate.is_released(), "the token began while Git is held");
+    let token = token.expect("progress begin carries a token");
+
+    gate.release();
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(&view, version);
+    assert_eq!(ready["params"]["viewId"], view, "{ready}");
+    // The token must survive past the fresh render: its end is enqueued only
+    // after the completion render, so the client cannot be observed idle
+    // between the acknowledged loading render and the delivered status.
+    let deadline = Instant::now() + server.recv_timeout;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the acquisition token did not end after the completion: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "$/progress"
+            && message["params"]["token"] == token
+            && message["params"]["value"]["kind"] == json!("end")
+        {
+            break;
+        }
+    }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_progress_ends_when_view_closes_during_acquisition() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.auto_respond_to_progress_create();
+    server.initialize_rich(json!({"window": {"workDoneProgress": true}}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    let deadline = Instant::now() + server.recv_timeout;
+    let mut token = None;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no progress begin while Git status is held: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "$/progress" && message["params"]["value"]["kind"] == json!("begin")
+        {
+            token = Some(message["params"]["token"].clone());
+            break;
+        }
+    }
+    let token = token.expect("progress begin carries a token");
+
+    // Closing the view mid-acquisition leaves the completion with nothing to
+    // install; its token must still end, so no busy state can get stuck.
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/close",
+        "params":{"viewId":view}}));
+    let closed = server.response_with_id(3);
+    assert!(closed["error"].is_null(), "{closed}");
+    assert!(!gate.is_released(), "the close answered while Git is held");
+    gate.release();
+    server.recv_timeout = Duration::from_secs(10);
+    let deadline = Instant::now() + server.recv_timeout;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the closed view's token did not end: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "$/progress"
+            && message["params"]["token"] == token
+            && message["params"]["value"]["kind"] == json!("end")
+        {
+            break;
+        }
+    }
+    let drained = server.drain_notifications();
+    assert!(
+        drained
+            .iter()
+            .chain(server.notifications.iter())
+            .all(
+                |message| message["method"] != "view/render" || message["params"]["viewId"] != view
+            ),
+        "the closed view received a completion render: {:?}",
+        drained
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_progress_flushes_end_when_create_reply_arrives_late() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("status");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    // No automatic create reply: this client answers the progress create only
+    // after the deferred acquisition has already completed.
+    server.initialize_rich(json!({"window": {"workDoneProgress": true}}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(loading["method"], "view/render");
+    let version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    // Hold the create reply while Git status is still gated, so the token is
+    // ended before the client has confirmed it.
+    let deadline = Instant::now() + server.recv_timeout;
+    let mut create = None;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "no progress create while Git status is held: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "window/workDoneProgress/create" {
+            create = Some(message);
+            break;
+        }
+    }
+    let create = create.expect("progress create carries the request");
+    let token = create["params"]["token"].clone();
+    assert!(!gate.is_released(), "the create arrived while Git is held");
+
+    gate.release();
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(&view, version);
+    assert_eq!(ready["params"]["viewId"], view, "{ready}");
+    assert!(
+        !server.notifications.iter().any(|message| {
+            message["method"] == "$/progress" && message["params"]["token"] == token
+        }),
+        "no phase may publish before the create reply: {:?}",
+        server.notifications
+    );
+
+    // The late reply must still observe the pair, begin before end, so the
+    // confirmed token can never be silently dropped or wedged busy.
+    server.send(json!({"jsonrpc": "2.0", "id": create["id"], "result": null}));
+    let deadline = Instant::now() + server.recv_timeout;
+    let mut began = false;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the late create reply did not publish the held token: {:?}",
+            server.notifications
+        );
+        let message = server.recv();
+        if message["method"] == "$/progress" && message["params"]["token"] == token {
+            assert_eq!(
+                message["params"]["value"]["kind"],
+                json!("begin"),
+                "the token's first observed phase must be begin: {message}"
+            );
+            began = true;
+            break;
+        }
+    }
+    assert!(began, "the late reply began the token");
+    let ended = server.recv();
+    assert_eq!(ended["method"], "$/progress", "{ended}");
+    assert_eq!(ended["params"]["token"], token, "{ended}");
+    assert_eq!(
+        ended["params"]["value"]["kind"],
+        json!("end"),
+        "the token must end right after its begin: {ended}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
 fn status_open_text_mode_defers_held_completion_until_exit() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

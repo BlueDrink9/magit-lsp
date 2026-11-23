@@ -176,6 +176,29 @@ pub(super) async fn acquire_status(
     generation: u64,
     trace_id: u64,
 ) {
+    // The client acknowledges the loading render and can already be observed
+    // idle while this acquisition is still pending, so the deferred work runs
+    // under a progress token: the client's idle observation stays false until
+    // the completion render is delivered. Clients without progress support
+    // never see the token.
+    let (token, _cancel) =
+        shared.begin_progress(&shared.sender, "status open", None, Some(&repo_path));
+    acquire_status_with_token(
+        shared, repository, repo_path, view_id, generation, trace_id, token,
+    )
+    .await;
+}
+
+/// Acquire one generation under a caller-owned progress token.
+async fn acquire_status_with_token(
+    shared: Shared,
+    repository: crate::git::GitRepo,
+    repo_path: String,
+    view_id: String,
+    generation: u64,
+    trace_id: u64,
+    token: String,
+) {
     let acquire_repo = repository.clone();
     let acquired = tokio::task::spawn_blocking(move || {
         crate::runner::with_trace_id(trace_id, || {
@@ -184,7 +207,7 @@ pub(super) async fn acquire_status(
     })
     .await;
     finish_status_acquisition(
-        shared, repository, repo_path, view_id, generation, trace_id, acquired,
+        shared, repository, repo_path, view_id, generation, trace_id, acquired, token,
     )
     .await;
 }
@@ -197,9 +220,10 @@ fn spawn_status_acquisition(
     view_id: String,
     generation: u64,
     trace_id: u64,
+    token: String,
 ) {
-    tokio::spawn(acquire_status(
-        shared, repository, repo_path, view_id, generation, trace_id,
+    tokio::spawn(acquire_status_with_token(
+        shared, repository, repo_path, view_id, generation, trace_id, token,
     ));
 }
 
@@ -221,6 +245,7 @@ pub(super) async fn finish_status_acquisition(
         std::result::Result<crate::status_view::FreshStatus, crate::Error>,
         tokio::task::JoinError,
     >,
+    token: String,
 ) {
     let turn = shared.reserve_mutation(repo_path.clone());
     turn.wait().await;
@@ -239,16 +264,20 @@ pub(super) async fn finish_status_acquisition(
         )
     })
     .await;
-    match outcome {
+    // The coalesced successor inherits the progress token, so the client stays
+    // busy across consecutive generations with no idle gap between them.
+    let token = match outcome {
         Ok(InstallStatus::Coalesced(next_generation)) => {
             spawn_status_acquisition(
-                shared,
+                shared.clone(),
                 repository,
                 repo_path,
                 view_id.clone(),
                 next_generation,
                 trace_id,
+                token,
             );
+            None
         }
         Ok(InstallStatus::Installed(render)) => {
             if let Some(render) = render {
@@ -256,15 +285,26 @@ pub(super) async fn finish_status_acquisition(
                     let _ = shared.sender.send(message);
                 }
             }
+            Some(token)
         }
-        Err(error) => tracing::warn!(%error, "status completion install failed"),
-    }
+        Err(error) => {
+            tracing::warn!(%error, "status completion install failed");
+            Some(token)
+        }
+    };
     if trace_id > 0 {
         crate::runner::trace(
             trace_id,
             "status_completion_processed",
             serde_json::json!({ "view": view_id }),
         );
+    }
+    // End the token only after the completion render is enqueued (or the
+    // install failed), so the client's idle observation stays false until the
+    // new state is on its way. This also covers an Installed(None) render where
+    // the view was closed or missing, leaving no stuck busy token.
+    if let Some(token) = token {
+        let _ = shared.end_progress(&shared.sender, &token);
     }
     drop(turn);
 }

@@ -878,11 +878,27 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
         "the key is pressed against the acknowledged fresh render"
     );
 
-    let create = index(&|line| {
-        line.dir == Dir::ServerToClient && method(line, "window/workDoneProgress/create")
+    // The status-open handshake also emits progress frames now; pin the
+    // mutation handshake by its begin message and matching token.
+    let begin = index(&|line| {
+        line.dir == Dir::ServerToClient
+            && phase(line, "begin")
+            && line.message["params"]["value"]["message"] == "view/key"
     });
-    let begin = index(&|line| line.dir == Dir::ServerToClient && phase(line, "begin"));
-    let end = index(&|line| line.dir == Dir::ServerToClient && phase(line, "end"));
+    let mutation_token = lines[begin].message["params"]["token"]
+        .as_str()
+        .expect("progress token")
+        .to_owned();
+    let create = index(&|line| {
+        line.dir == Dir::ServerToClient
+            && method(line, "window/workDoneProgress/create")
+            && line.message["params"]["token"].as_str() == Some(mutation_token.as_str())
+    });
+    let end = index(&|line| {
+        line.dir == Dir::ServerToClient
+            && phase(line, "end")
+            && line.message["params"]["token"].as_str() == Some(mutation_token.as_str())
+    });
     let key_id = lines[key].message["id"].clone();
     let key_response =
         index(&|line| line.dir == Dir::ServerToClient && line.message.get("id") == Some(&key_id));
@@ -1633,15 +1649,48 @@ fn captured_line(line: &Line, observed: &Value) -> Result<String, String> {
     let recorded_identity = frame_identity(&line.message);
     let observed_identity = frame_identity(observed_object);
     if recorded_identity != observed_identity {
-        return Err(format!(
-            "captured frame identity changed: recorded {recorded_identity}, observed {observed_identity}"
-        ));
+        // The deferred status acquisition now reports progress while Git runs:
+        // its `window/workDoneProgress/create` request takes the slot that used
+        // to carry the fresh status render. Accept only that intended wire
+        // change; every other identity change stays a replay failure.
+        let status_progress_handshake = recorded_identity == "notification view/render"
+            && observed_identity
+                == "request window/workDoneProgress/create id \"magit-lsp/outbound/1\"";
+        // The status handshake consumes the first outbound id, so the mutation's
+        // progress-create request shifts from outbound/1 to outbound/2. Accept
+        // only that renumbering; any other method or id change still fails.
+        let shifted_progress_id = recorded_identity
+            == "request window/workDoneProgress/create id \"magit-lsp/outbound/1\""
+            && observed_identity
+                == "request window/workDoneProgress/create id \"magit-lsp/outbound/2\"";
+        if !status_progress_handshake && !shifted_progress_id {
+            return Err(format!(
+                "captured frame identity changed: recorded {recorded_identity}, observed {observed_identity}"
+            ));
+        }
     }
     let mut value: Value = serde_json::from_str(&line.raw).map_err(|error| error.to_string())?;
     value["message"] = observed.clone();
     let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
     parse_line(&text)
         .map_err(|error| format!("captured line is not a recorded exchange: {error}"))?;
+    Ok(text)
+}
+
+/// Build an extra recorded line for a server frame added by regeneration.
+///
+/// The status-acquisition progress handshake is new wire traffic that the old
+/// recording predates; it is inserted alongside the frame it precedes rather
+/// than overwriting that frame's identity.
+fn inserted_line(template: &Line, message: &Value, note: &str) -> Result<String, String> {
+    let mut value: Value =
+        serde_json::from_str(&template.raw).map_err(|error| error.to_string())?;
+    value["message"] = message.clone();
+    value["note"] = Value::String(note.to_owned());
+    value["source"] = Value::String("recorded".to_owned());
+    let text = serde_json::to_string(&value).map_err(|error| error.to_string())?;
+    parse_line(&text)
+        .map_err(|error| format!("inserted line is not a recorded exchange: {error}"))?;
     Ok(text)
 }
 
@@ -1700,6 +1749,11 @@ fn replay_example_mode(
     let mut server = fixtures::stdio::TestServer::spawn(&[]);
     // Outbound requests observed so far, indexed by their recorded number.
     let mut outbound: Vec<Value> = Vec::new();
+    // The deferred status acquisition's progress token, once regeneration has
+    // inserted its create request; its begin/end frames are inserted too.
+    let mut status_token: Option<String> = None;
+    // Extra lines inserted into the regenerated recording before this index.
+    let mut inserted: usize = 0;
     // The commit run id this server generated, if the exchange starts one.
     let mut run_id: Option<String> = None;
     // Recorded and observed frames name commit hashes independently, each by
@@ -1732,13 +1786,39 @@ fn replay_example_mode(
         match line.dir {
             Dir::ClientToServer => {
                 let mut message = Value::Object(line.message.clone());
+                // The inserted status handshake took outbound id 1, so the
+                // mutation's recorded progress-create reply becomes id 2 and
+                // answers the request observed after the status create.
+                let mut shifted_by_status_handshake = false;
+                if regenerate && status_token.is_some() {
+                    if let Some(id) = line.message.get("id").and_then(Value::as_str) {
+                        if id == "magit-lsp/outbound/1" {
+                            shifted_by_status_handshake = true;
+                            let mut value: Value = serde_json::from_str(&line.raw)
+                                .map_err(|error| error.to_string())?;
+                            value["message"]["id"] =
+                                Value::String("magit-lsp/outbound/2".to_owned());
+                            let text =
+                                serde_json::to_string(&value).map_err(|error| error.to_string())?;
+                            parse_line(&text).map_err(|error| {
+                                format!("{where_}: renumbered reply is not a recorded exchange: {error}")
+                            })?;
+                            regenerated[index + inserted] = text;
+                        }
+                    }
+                }
                 if message.get("method").is_none() {
                     if let Some(recorded) = message.get("id").and_then(Value::as_str) {
                         if let Some(number) = recorded.strip_prefix("magit-lsp/outbound/") {
                             let number: usize = number
                                 .parse()
                                 .map_err(|error| format!("{where_}: bad outbound id: {error}"))?;
-                            let actual = outbound.get(number.wrapping_sub(1)).ok_or_else(|| {
+                            let observed_index = if shifted_by_status_handshake {
+                                number
+                            } else {
+                                number.wrapping_sub(1)
+                            };
+                            let actual = outbound.get(observed_index).ok_or_else(|| {
                                 format!(
                                     "{where_}: reply to outbound request {number} has no observed request"
                                 )
@@ -1781,7 +1861,7 @@ fn replay_example_mode(
                                 let mut persisted = message.clone();
                                 persisted["params"]["contentChanges"][0]["text"] =
                                     Value::String(canonical_paths(refreshed, &root, binary));
-                                regenerated[index] = captured_line(line, &persisted)
+                                regenerated[index + inserted] = captured_line(line, &persisted)
                                     .map_err(|error| format!("{where_}: {error}"))?;
                             }
                             let sent_text = refreshed.unwrap_or_else(|| update.text.clone());
@@ -1831,8 +1911,70 @@ fn replay_example_mode(
                 if actual.get("method").is_some() && actual.get("id").is_some() {
                     outbound.push(actual["id"].clone());
                 }
-                let observed =
+                let mut observed =
                     canonical_frame(&actual, &observed_roots, binary, &mut observed_hashes);
+                // The deferred status acquisition announces progress before the
+                // fresh render. Regeneration keeps those extra frames in the
+                // recording rather than letting them overwrite the render.
+                loop {
+                    let method = actual.get("method").and_then(Value::as_str);
+                    let token = actual["params"]["token"].as_str().unwrap_or("");
+                    let is_create = regenerate
+                        && method == Some("window/workDoneProgress/create")
+                        && line.message.get("method").and_then(Value::as_str)
+                            == Some("view/render");
+                    let is_phase = regenerate
+                        && method == Some("$/progress")
+                        && status_token.as_deref().is_some_and(|live| live == token);
+                    if !is_create && !is_phase {
+                        break;
+                    }
+                    let note = if is_create {
+                        "server asks the client to create the deferred status progress token"
+                    } else {
+                        "server reports the deferred status progress phase"
+                    };
+                    let text = inserted_line(line, &observed, note)
+                        .map_err(|error| format!("{where_}: {error}"))?;
+                    // The handshake precedes this recorded frame on the wire,
+                    // so each inserted line takes the slot before it and the
+                    // captured frame's write at `index + inserted` still lands
+                    // on this line's own slot.
+                    regenerated.insert(index + inserted, text);
+                    inserted += 1;
+                    if is_create {
+                        status_token = observed["params"]["token"].as_str().map(str::to_owned);
+                        let reply =
+                            json!({"jsonrpc":"2.0","id":actual["id"].clone(),"result":null});
+                        let mut recorded_reply = reply.clone();
+                        recorded_reply["id"] =
+                            Value::String(format!("magit-lsp/outbound/{}", outbound.len()));
+                        let mut reply_value: Value = serde_json::from_str(&inserted_line(
+                            line,
+                            &recorded_reply,
+                            "the client answers the deferred status progress-create request",
+                        )?)
+                        .map_err(|error| error.to_string())?;
+                        reply_value["dir"] = Value::String("c2s".to_owned());
+                        let reply_text = serde_json::to_string(&reply_value)
+                            .map_err(|error| error.to_string())?;
+                        parse_line(&reply_text).map_err(|error| {
+                            format!("{where_}: inserted reply is not a recorded exchange: {error}")
+                        })?;
+                        regenerated.insert(index + inserted, reply_text);
+                        inserted += 1;
+                        server.send(reply);
+                    }
+                    actual = server.recv();
+                    // A request the insertion loop stepped past (for example
+                    // the mutation's progress create) still needs its observed
+                    // id registered, so the recorded reply answers it.
+                    if actual.get("method").is_some() && actual.get("id").is_some() {
+                        outbound.push(actual["id"].clone());
+                    }
+                    observed =
+                        canonical_frame(&actual, &observed_roots, binary, &mut observed_hashes);
+                }
                 let expected = canonical_frame(
                     &Value::Object(line.message.clone()),
                     &recorded_roots,
@@ -1853,7 +1995,7 @@ fn replay_example_mode(
                     // of blessing the stale recording, but only for the same
                     // exchange: a different method or request/response id is a
                     // replay failure, not a capture.
-                    regenerated[index] = captured_line(line, &observed)
+                    regenerated[index + inserted] = captured_line(line, &observed)
                         .map_err(|error| format!("{where_}: {error}"))?;
                 }
                 if regenerate

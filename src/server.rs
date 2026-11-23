@@ -230,6 +230,12 @@ struct ProgressRun {
     cancellation_requested: bool,
     repo: Option<String>,
     visible: bool,
+    // A `window/workDoneProgress/create` reply is still awaited, so a racing
+    // end defers to the confirmed create instead of dropping the token.
+    create_pending: bool,
+    // The owner released the token before its begin was published; the create
+    // reply flushes the pair.
+    ended: bool,
 }
 
 /// Removes an outbound request if its waiter future is abandoned.
@@ -584,6 +590,8 @@ impl Shared {
                 cancellation_requested: false,
                 repo: repo.map(str::to_string),
                 visible: false,
+                create_pending: false,
+                ended: false,
             },
         );
         drop(progress);
@@ -620,22 +628,75 @@ impl Shared {
         token: &str,
         command: &str,
     ) {
+        {
+            let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+            match runs.get_mut(token) {
+                // Mark the create in flight before announcing it, so a racing
+                // end defers to the reply instead of removing the run unseen.
+                Some(run) => run.create_pending = true,
+                None => return,
+            }
+        }
         let Ok((pending, rx)) = self.register_outbound(
             "window/workDoneProgress/create",
             serde_json::json!({ "token": token }),
         ) else {
+            self.abandon_pending_create(token);
             return;
         };
         if self.await_outbound(pending, rx).await.is_err() {
+            self.abandon_pending_create(token);
             return;
         }
         let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
         if self.closing.load(Ordering::SeqCst) {
+            drop(runs);
+            self.abandon_pending_create(token);
             return;
         }
-        if let Some(run) = runs.get_mut(token) {
-            run.visible = true;
-            let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
+        let Some(run) = runs.get_mut(token) else {
+            return;
+        };
+        run.create_pending = false;
+        if run.ended {
+            // The owner finished before the client confirmed the token, so
+            // nothing was published at the time. Publish the complete pair
+            // now: the client observes begin then end and never a token that
+            // was confirmed but silently dropped.
+            runs.remove(token);
+            let _ = sender.send(Message::Notification(Notification::new(
+                "$/progress".to_string(),
+                serde_json::json!({ "token": token, "value": {
+                    "kind": "begin", "title": "Git", "message": command, "cancellable": true,
+                } }),
+            )));
+            let _ = sender.send(Message::Notification(Notification::new(
+                "$/progress".to_string(),
+                serde_json::json!({ "token": token, "value": { "kind": "end" } }),
+            )));
+            drop(runs);
+            self.progress_changed.notify_waiters();
+            return;
+        }
+        run.visible = true;
+        let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
+    }
+
+    /// Retire an in-flight create that can no longer publish.
+    ///
+    /// The pending marker is cleared, and a run whose owner already ended is
+    /// removed: no reply will ever arrive to flush its pair, so the token
+    /// stays unobserved and cannot wedge progress waiting.
+    fn abandon_pending_create(&self, token: &str) {
+        let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(run) = runs.get_mut(token) else {
+            return;
+        };
+        run.create_pending = false;
+        if run.ended {
+            runs.remove(token);
+            drop(runs);
+            self.progress_changed.notify_waiters();
         }
     }
 
@@ -644,17 +705,26 @@ impl Shared {
         // Serialize report/end sends with removal, so a racing cancel cannot
         // resurrect an ended token. Repeated terminal release is harmless.
         let mut progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(run) = progress.remove(token) else {
+        let Some(run) = progress.get_mut(token) else {
             return;
         };
-        if !run.visible {
+        let (visible, create_pending) = (run.visible, run.create_pending);
+        if !visible && create_pending {
+            // The client has not confirmed the token yet, so the end cannot
+            // be published without its begin. Defer it: the confirmed create
+            // publishes begin then end instead of silently dropping both.
+            run.ended = true;
+            drop(progress);
             self.progress_changed.notify_waiters();
             return;
         }
-        let _ = sender.send(Message::Notification(Notification::new(
-            "$/progress".to_string(),
-            serde_json::json!({ "token": token, "value": { "kind": "end" } }),
-        )));
+        progress.remove(token);
+        if visible {
+            let _ = sender.send(Message::Notification(Notification::new(
+                "$/progress".to_string(),
+                serde_json::json!({ "token": token, "value": { "kind": "end" } }),
+            )));
+        }
         self.progress_changed.notify_waiters();
     }
 
@@ -1930,7 +2000,7 @@ mod commit_tests {
     }
 
     #[tokio::test]
-    async fn completed_or_terminal_progress_never_begins_after_create_reply() {
+    async fn late_create_reply_flushes_ended_progress_unless_terminal() {
         for terminal in [false, true] {
             let (shared, mut messages) = test_shared();
             let (token, _) = shared.begin_progress(&shared.sender, "stage", None, None);
@@ -1943,13 +2013,27 @@ mod commit_tests {
             shared.resolve_outbound(Response::new_ok(id, Value::Null));
             if terminal {
                 shared.terminal_cleanup();
+                create.await;
+                shared.end_progress(&shared.sender, &token);
+                assert!(messages.try_recv().is_err(), "no orphan begin/end");
             } else {
                 shared.end_progress(&shared.sender, &token);
+                create.await;
+                shared.end_progress(&shared.sender, &token);
+                // The confirmed create publishes the deferred pair in order,
+                // so the client never sees an end without its begin.
+                for phase in ["begin", "end"] {
+                    let Message::Notification(notice) = messages.try_recv().unwrap() else {
+                        panic!("expected the flushed progress pair")
+                    };
+                    assert_eq!(notice.method, "$/progress");
+                    assert_eq!(notice.params["token"], token);
+                    assert_eq!(notice.params["value"]["kind"], phase);
+                }
+                assert!(messages.try_recv().is_err(), "no phase after the pair");
             }
-            create.await;
-            shared.end_progress(&shared.sender, &token);
-            assert!(messages.try_recv().is_err(), "no orphan begin/end");
             assert!(shared.outbound.lock().unwrap().is_empty());
+            assert!(shared.progress.lock().unwrap().is_empty());
         }
     }
 

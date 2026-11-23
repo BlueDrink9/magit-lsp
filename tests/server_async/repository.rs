@@ -494,13 +494,18 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
         server.auto_respond_to_progress_create();
         server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+        let status_token = status_progress_token(&server);
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         let create = loop {
             let message = server.recv_raw();
-            assert!(
-                message["method"] != "$/progress",
-                "begin before create success: {message}"
-            );
+            if message["method"] == "$/progress" {
+                // The deferred status acquisition's terminal frame can race
+                // this loop; it is not the mutation's progress handshake.
+                if message["params"]["token"].as_str() == Some(status_token.as_str()) {
+                    continue;
+                }
+                panic!("begin before create success: {message}");
+            }
             if message["method"] == "window/workDoneProgress/create" {
                 break message;
             }
@@ -515,10 +520,10 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
             !server.sent.iter().any(|m| m["id"] == create["id"]),
             "raw receive replied"
         );
-        assert!(!server
-            .notifications
-            .iter()
-            .any(|m| m["method"] == "$/progress"));
+        assert!(!server.notifications.iter().any(|m| {
+            m["method"] == "$/progress"
+                && m["params"]["token"].as_str() != Some(status_token.as_str())
+        }));
         match reply {
             "success" => {
                 server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
@@ -539,6 +544,7 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
             .notifications
             .iter()
             .filter_map(progress_event)
+            .filter(|(token, _)| token != &status_token)
             .map(|(_, phase)| phase)
             .collect();
         assert_eq!(
@@ -571,6 +577,28 @@ fn progress_event(message: &Value) -> Option<(String, String)> {
     }
 }
 
+/// Identify the deferred status acquisition's progress token.
+///
+/// Opening a status view announces its deferred acquisition as `status open`
+/// work-done progress; its `end` is enqueued only after the completion render,
+/// so it can reach a later receive loop. Mutation-progress assertions filter
+/// this token by identity, keeping their original handshake contract intact.
+fn status_progress_token(server: &TestServer) -> String {
+    server
+        .notifications
+        .iter()
+        .find_map(|message| {
+            let is_status_begin = message["method"] == "$/progress"
+                && message["params"]["value"]["kind"] == "begin"
+                && message["params"]["value"]["message"] == "status open";
+            if !is_status_begin {
+                return None;
+            }
+            message["params"]["token"].as_str().map(str::to_string)
+        })
+        .expect("opening a status view announces its deferred acquisition")
+}
+
 #[cfg(unix)]
 #[test]
 fn mutations_for_one_repository_apply_in_request_order() {
@@ -591,6 +619,7 @@ fn mutations_for_one_repository_apply_in_request_order() {
     );
 
     let view_id = open_view(&mut server, 2, &repo);
+    let status_token = status_progress_token(&server);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -608,13 +637,15 @@ fn mutations_for_one_repository_apply_in_request_order() {
             "the gated mutation finished without the gate: {message}"
         );
         match progress_event(&message) {
-            Some(event) => {
+            // Ignore the deferred status acquisition's token; only mutation
+            // handshakes belong in the ordering assertion below.
+            Some(event) if event.0 != status_token => {
                 progress.push(event.clone());
                 if event.1 == "begin" {
                     break event.0;
                 }
             }
-            None => {}
+            _ => {}
         }
     };
     // The first mutation is now verifiably blocked inside real Git.
@@ -642,7 +673,9 @@ fn mutations_for_one_repository_apply_in_request_order() {
             Some(4) => unstaged = Some(message),
             _ => {
                 if let Some(event) = progress_event(&message) {
-                    progress.push(event);
+                    if event.0 != status_token {
+                        progress.push(event);
+                    }
                 }
             }
         }
@@ -1729,6 +1762,7 @@ fn a_mutation_reports_work_done_progress() {
         "initialize response: {response}"
     );
     let view_id = open_view(&mut server, 2, &repo);
+    let status_token = status_progress_token(&server);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -1755,18 +1789,22 @@ fn a_mutation_reports_work_done_progress() {
                 );
             }
             "$/progress" => {
+                let token = message["params"]["token"]
+                    .as_str()
+                    .expect("a progress token")
+                    .to_string();
+                // The deferred status acquisition's terminal frame races this
+                // loop; it is not part of the mutation's progress handshake.
+                if token == status_token {
+                    continue;
+                }
                 phases.push(
                     message["params"]["value"]["kind"]
                         .as_str()
                         .unwrap_or_default()
                         .to_string(),
                 );
-                tokens.push(
-                    message["params"]["token"]
-                        .as_str()
-                        .expect("a progress token")
-                        .to_string(),
-                );
+                tokens.push(token);
             }
             _ => {}
         }
