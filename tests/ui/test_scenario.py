@@ -959,18 +959,25 @@ class ShellStepTest(unittest.TestCase):
     def test_shell_step_disables_terminal_input(self) -> None:
         directory = tempfile.mkdtemp()
         run = SimpleNamespace(
-            repo_path=Path(directory), home_path=Path(directory) / "home"
+            repo_path=Path(directory),
+            home_path=Path(directory) / "home",
+            socket=str(Path(directory) / "nvim.sock"),
         )
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch.object(scenario.subprocess, "run", return_value=result) as shell:
             scenario._run_shell(run, "true", where=3)
         self.assertIs(shell.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertTrue(shell.call_args.kwargs["shell"])
+        self.assertEqual(
+            shell.call_args.kwargs["env"]["MAGIT_LSP_UI_SOCKET"], run.socket
+        )
 
     def test_shell_failures_keep_statement_command_and_error(self) -> None:
         directory = tempfile.mkdtemp()
         run = SimpleNamespace(
-            repo_path=Path(directory), home_path=Path(directory) / "home"
+            repo_path=Path(directory),
+            home_path=Path(directory) / "home",
+            socket=str(Path(directory) / "nvim.sock"),
         )
         failures = (
             (
@@ -993,9 +1000,13 @@ class ShellStepTest(unittest.TestCase):
                     side_effect=error if isinstance(error, BaseException) else None,
                     return_value=None if isinstance(error, BaseException) else error,
                 )
-                with patcher:
+                with patcher as shell:
                     with self.assertRaises(scenario.ShellStepError) as caught:
                         scenario._run_shell(run, "test-register", where=17)
+                    self.assertEqual(
+                        shell.call_args.kwargs["env"]["MAGIT_LSP_UI_SOCKET"],
+                        run.socket,
+                    )
                 self.assertIn("statement 17", str(caught.exception))
                 self.assertIn("test-register", str(caught.exception))
                 self.assertIn(detail, str(caught.exception))
