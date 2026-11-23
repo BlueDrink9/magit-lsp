@@ -1752,8 +1752,12 @@ fn replay_example_mode(
     // The deferred status acquisition's progress token, once regeneration has
     // inserted its create request; its begin/end frames are inserted too.
     let mut status_token: Option<String> = None;
+    // Whether the status progress create has already been inserted.
+    let mut create_seen = false;
     // Extra lines inserted into the regenerated recording before this index.
     let mut inserted: usize = 0;
+    // Recorded status-handshake lines already inserted earlier and skipped.
+    let mut skipped: usize = 0;
     // The commit run id this server generated, if the exchange starts one.
     let mut run_id: Option<String> = None;
     // Recorded and observed frames name commit hashes independently, each by
@@ -1781,6 +1785,22 @@ fn replay_example_mode(
     let mut pending_edits: HashMap<String, Option<ServerEdit>> = HashMap::new();
 
     for (index, line) in lines.iter().enumerate() {
+        // The status handshake now precedes the open response, so its recorded
+        // create/begin/reply lines have already been inserted ahead of this
+        // loop; do not replay them a second time.
+        if regenerate
+            && status_token.is_some()
+            && [
+                "server asks the client to create the deferred status progress token",
+                "server reports the deferred status progress phase",
+                "the client answers the deferred status progress-create request",
+            ]
+            .iter()
+            .any(|note| line.raw.contains(&format!("\"note\":\"{note}\"")))
+        {
+            skipped += 1;
+            continue;
+        }
         regenerated.push(line.raw.clone());
         let where_ = format!("{name}:{}", index + 1);
         match line.dir {
@@ -1803,7 +1823,7 @@ fn replay_example_mode(
                             parse_line(&text).map_err(|error| {
                                 format!("{where_}: renumbered reply is not a recorded exchange: {error}")
                             })?;
-                            regenerated[index + inserted] = text;
+                            regenerated[index + inserted - skipped] = text;
                         }
                     }
                 }
@@ -1861,8 +1881,9 @@ fn replay_example_mode(
                                 let mut persisted = message.clone();
                                 persisted["params"]["contentChanges"][0]["text"] =
                                     Value::String(canonical_paths(refreshed, &root, binary));
-                                regenerated[index + inserted] = captured_line(line, &persisted)
-                                    .map_err(|error| format!("{where_}: {error}"))?;
+                                regenerated[index + inserted - skipped] =
+                                    captured_line(line, &persisted)
+                                        .map_err(|error| format!("{where_}: {error}"))?;
                             }
                             let sent_text = refreshed.unwrap_or_else(|| update.text.clone());
                             current_documents.insert(current_uri, sent_text);
@@ -1921,11 +1942,15 @@ fn replay_example_mode(
                     let token = actual["params"]["token"].as_str().unwrap_or("");
                     let is_create = regenerate
                         && method == Some("window/workDoneProgress/create")
-                        && line.message.get("method").and_then(Value::as_str)
-                            == Some("view/render");
+                        && !create_seen;
+                    let is_early_begin = regenerate
+                        && method == Some("$/progress")
+                        && actual["params"]["value"]["kind"] == "begin"
+                        && actual["params"]["value"]["message"] == "status open";
                     let is_phase = regenerate
                         && method == Some("$/progress")
-                        && status_token.as_deref().is_some_and(|live| live == token);
+                        && (status_token.as_deref().is_some_and(|live| live == token)
+                            || is_early_begin);
                     if !is_create && !is_phase {
                         break;
                     }
@@ -1938,11 +1963,15 @@ fn replay_example_mode(
                         .map_err(|error| format!("{where_}: {error}"))?;
                     // The handshake precedes this recorded frame on the wire,
                     // so each inserted line takes the slot before it and the
-                    // captured frame's write at `index + inserted` still lands
+                    // captured frame's write at `index + inserted - skipped` still lands
                     // on this line's own slot.
-                    regenerated.insert(index + inserted, text);
+                    regenerated.insert(index + inserted - skipped, text);
                     inserted += 1;
+                    if is_early_begin {
+                        status_token = Some(token.to_string());
+                    }
                     if is_create {
+                        create_seen = true;
                         status_token = observed["params"]["token"].as_str().map(str::to_owned);
                         let reply =
                             json!({"jsonrpc":"2.0","id":actual["id"].clone(),"result":null});
@@ -1961,7 +1990,7 @@ fn replay_example_mode(
                         parse_line(&reply_text).map_err(|error| {
                             format!("{where_}: inserted reply is not a recorded exchange: {error}")
                         })?;
-                        regenerated.insert(index + inserted, reply_text);
+                        regenerated.insert(index + inserted - skipped, reply_text);
                         inserted += 1;
                         server.send(reply);
                     }
@@ -1995,7 +2024,7 @@ fn replay_example_mode(
                     // of blessing the stale recording, but only for the same
                     // exchange: a different method or request/response id is a
                     // replay failure, not a capture.
-                    regenerated[index + inserted] = captured_line(line, &observed)
+                    regenerated[index + inserted - skipped] = captured_line(line, &observed)
                         .map_err(|error| format!("{where_}: {error}"))?;
                 }
                 if regenerate

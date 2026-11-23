@@ -547,9 +547,13 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
             .filter(|(token, _)| token != &status_token)
             .map(|(_, phase)| phase)
             .collect();
+        // An early-visible status token needs no flush: its begin was already
+        // published with the open response. A mutation token that ends before
+        // its create is confirmed still flushes begin/end on the late reply,
+        // whether that reply arrives during Git or after completion.
         assert_eq!(
             phases,
-            if reply == "success" {
+            if reply == "success" || reply == "after-completion" {
                 vec!["begin", "end"]
             } else {
                 vec![]

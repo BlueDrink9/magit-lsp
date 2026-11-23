@@ -109,6 +109,13 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         serde_json::json!({ "duration_ms": session_start.elapsed().as_secs_f64() * 1000.0 }),
     );
     let repo = repo.as_str();
+    // Publish the status begin before the loading render: the client goes idle
+    // as soon as it acknowledges that render, so a begin that waited for the
+    // create reply could arrive after an early key was already sent.
+    let status_progress = shared.begin_status_progress(&shared.sender, repo);
+    if let Some(token) = status_progress.as_ref() {
+        shared.track_status_progress(&id, token);
+    }
     shared
         .view_repos
         .lock()
@@ -150,6 +157,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             view_id: id,
             generation: 0,
             trace_id: crate::runner::current_trace_id(),
+            progress_token: status_progress,
         }))
     } else {
         Ok(dispatched)
@@ -175,14 +183,11 @@ pub(super) async fn acquire_status(
     view_id: String,
     generation: u64,
     trace_id: u64,
+    token: Option<String>,
 ) {
-    // The client acknowledges the loading render and can already be observed
-    // idle while this acquisition is still pending, so the deferred work runs
-    // under a progress token: the client's idle observation stays false until
-    // the completion render is delivered. Clients without progress support
-    // never see the token.
-    let (token, _cancel) =
-        shared.begin_progress(&shared.sender, "status open", None, Some(&repo_path));
+    // The open request published the begin before its loading render, so the
+    // client stays non-idle until this acquisition ends the token after its
+    // completion render. Clients without progress support pass no token.
     acquire_status_with_token(
         shared, repository, repo_path, view_id, generation, trace_id, token,
     )
@@ -197,7 +202,7 @@ async fn acquire_status_with_token(
     view_id: String,
     generation: u64,
     trace_id: u64,
-    token: String,
+    token: Option<String>,
 ) {
     let acquire_repo = repository.clone();
     let acquired = tokio::task::spawn_blocking(move || {
@@ -220,7 +225,7 @@ fn spawn_status_acquisition(
     view_id: String,
     generation: u64,
     trace_id: u64,
-    token: String,
+    token: Option<String>,
 ) {
     tokio::spawn(acquire_status_with_token(
         shared, repository, repo_path, view_id, generation, trace_id, token,
@@ -245,7 +250,7 @@ pub(super) async fn finish_status_acquisition(
         std::result::Result<crate::status_view::FreshStatus, crate::Error>,
         tokio::task::JoinError,
     >,
-    token: String,
+    token: Option<String>,
 ) {
     let turn = shared.reserve_mutation(repo_path.clone());
     turn.wait().await;
@@ -285,11 +290,11 @@ pub(super) async fn finish_status_acquisition(
                     let _ = shared.sender.send(message);
                 }
             }
-            Some(token)
+            token
         }
         Err(error) => {
             tracing::warn!(%error, "status completion install failed");
-            Some(token)
+            token
         }
     };
     if trace_id > 0 {
@@ -303,8 +308,8 @@ pub(super) async fn finish_status_acquisition(
     // install failed), so the client's idle observation stays false until the
     // new state is on its way. This also covers an Installed(None) render where
     // the view was closed or missing, leaving no stuck busy token.
-    if let Some(token) = token {
-        let _ = shared.end_progress(&shared.sender, &token);
+    if let Some(token) = token.as_ref() {
+        shared.end_status_progress(&shared.sender, &view_id, token);
     }
     drop(turn);
 }
@@ -810,6 +815,14 @@ pub(super) fn dispatched_outcome(
             .find_map(|views| views.current_snapshot(&view_id));
         route_plain_render(shared, &view_id, snapshot, None);
     }
+    // Text mode takes ownership of the buffer and accepts no state-dependent
+    // keys, so a loading status token can end with its text-mode render. The
+    // completion task then sees no token and never ends it twice.
+    let text_view = [pending_render.as_ref(), outcome.render.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|render| render.mode == ViewMode::Text)
+        .map(|render| render.view_id.clone());
     if let Some(render) = pending_render {
         notifications.extend(deliver_render(shared, render));
     }
@@ -859,6 +872,12 @@ pub(super) fn dispatched_outcome(
             &shared.client,
             outcome.effects.clone(),
         ));
+    }
+
+    if let Some(view) = text_view {
+        if let Some(end) = shared.release_status_progress(&view) {
+            notifications.push(end);
+        }
     }
 
     Ok(Dispatched::with(

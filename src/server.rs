@@ -197,6 +197,9 @@ struct Shared {
     /// Running mutations keyed by their progress token, so a client cancel can
     /// kill the child on the blocking worker thread.
     progress: Arc<Mutex<HashMap<String, ProgressRun>>>,
+    /// Status-open progress tokens keyed by view, so a text-mode switch can
+    /// retire the busy indicator before the client goes idle.
+    status_progress: Arc<Mutex<HashMap<String, String>>>,
     closing: Arc<AtomicBool>,
     progress_changed: Arc<Notify>,
     /// Global progress-token counter.
@@ -296,6 +299,7 @@ impl Shared {
             prompts: Arc::new(PromptBridge::new(&sender, client)),
             picks: Arc::new(PickBridge::new(&sender)),
             progress: Arc::new(Mutex::new(HashMap::new())),
+            status_progress: Arc::new(Mutex::new(HashMap::new())),
             closing: Arc::new(AtomicBool::new(false)),
             progress_changed: Arc::new(Notify::new()),
             next_progress: Arc::new(AtomicU64::new(0)),
@@ -621,6 +625,90 @@ impl Shared {
         (token, handle)
     }
 
+    /// Begin a status-open progress span before its loading render is sent.
+    ///
+    /// The client observes idle as soon as it applies and acknowledges the
+    /// loading render, so a begin published only after the create reply can
+    /// arrive too late and let an early key hit the loading guard. Publishing
+    /// begin here puts it ahead of the render on the same ordered channel.
+    /// The create request still follows the standard handshake; its reply does
+    /// not publish a second begin for an already-visible token.
+    fn begin_status_progress(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        repo: &str,
+    ) -> Option<String> {
+        let enabled = self
+            .client
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .work_done_progress;
+        if !enabled {
+            return None;
+        }
+        let (token, _cancel) = self.begin_progress(sender, "status open", None, Some(repo));
+        {
+            let mut progress = self
+                .progress
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(run) = progress.get_mut(&token) {
+                run.visible = true;
+            }
+        }
+        let _ = sender.send(Message::Notification(Notification::new(
+            "$/progress".to_string(),
+            serde_json::json!({ "token": token, "value": {
+                "kind": "begin", "title": "Git", "message": "status open", "cancellable": true,
+            } }),
+        )));
+        Some(token)
+    }
+
+    /// Remember which status view owns a published progress token.
+    pub(super) fn track_status_progress(&self, view_id: &str, token: &str) {
+        self.status_progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(view_id.to_string(), token.to_string());
+    }
+
+    /// Retire a status-open token when its view enters text mode.
+    ///
+    /// Text mode owns the buffer and accepts no state-dependent keys, so the
+    /// busy indicator ends with the text-mode render. The completion task then
+    /// finds no token and cannot end it a second time.
+    pub(super) fn release_status_progress(&self, view_id: &str) -> Option<Message> {
+        let token = self
+            .status_progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(view_id)?;
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&token);
+        self.progress_changed.notify_waiters();
+        Some(Message::Notification(Notification::new(
+            "$/progress".to_string(),
+            serde_json::json!({ "token": token, "value": { "kind": "end" } }),
+        )))
+    }
+
+    /// End a status-open token, forgetting its view once the work completes.
+    pub(super) fn end_status_progress(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        view_id: &str,
+        token: &str,
+    ) {
+        self.status_progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(view_id);
+        self.end_progress(sender, token);
+    }
+
     /// Publish progress only after successful creation, while its owner is live.
     async fn create_progress(
         &self,
@@ -658,6 +746,12 @@ impl Shared {
             return;
         };
         run.create_pending = false;
+        if run.visible {
+            // The status-open token published its begin before the loading
+            // render, so a late confirmation must not repeat it. The owner
+            // still ends the token once the completion render is enqueued.
+            return;
+        }
         if run.ended {
             // The owner finished before the client confirmed the token, so
             // nothing was published at the time. Publish the complete pair

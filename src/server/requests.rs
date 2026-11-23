@@ -124,6 +124,9 @@ pub(super) struct DeferredStatus {
     /// Correlation id of the originating request, carried onto the deferred
     /// blocking acquisition so its Git/status phases stay traceable.
     pub(super) trace_id: u64,
+    /// Status-open progress token whose begin was published before the loading
+    /// render; the acquisition ends it after its completion render.
+    pub(super) progress_token: Option<String>,
 }
 
 impl DeferredStatus {
@@ -135,6 +138,7 @@ impl DeferredStatus {
             self.view_id,
             self.generation,
             self.trace_id,
+            self.progress_token,
         )
         .await;
     }
