@@ -112,6 +112,143 @@ function git(repo, ...args) {
   return execFileSync("git", ["-C", repo, ...args]);
 }
 
+// The five surviving range-axis values. `context/0` is the only context-row
+// cursor paired with a column-zero exclusive endpoint; `changed/0` is the
+// changed-row equivalent; `/1` includes SECOND; `eof/0` is the same-line
+// hunk/EOF edge with no later row to include.
+const RANGE_CURSORS = ["context/0", "context/1", "changed/0", "changed/1", "eof/0"];
+
+/**
+ * Map one range-axis value to its forward cursor, exclusive endpoint, selected
+ * rows and the changed fixture lines the selection covers.
+ */
+function rangeSelection(range, first, last, document) {
+  const [position, nonzero] = range.split("/");
+  assert(["context", "changed", "eof"].includes(position), `known range cursor: ${range}`);
+  assert(["0", "1"].includes(nonzero), `known endpoint mode: ${range}`);
+  if (position === "eof") {
+    assert.equal(nonzero, "0", "same-line EOF selection has no later row");
+    return {
+      start: [last, 0],
+      end: [last, document.lineAt(last).text.length],
+      rows: [last, last],
+      selected: ["GUARD"],
+    };
+  }
+  const start = [position === "context" ? first - 1 : first, 0];
+  return {
+    start,
+    end: [first + 1, nonzero === "1" ? 1 : 0],
+    rows: [start[0], nonzero === "1" ? first + 1 : first],
+    selected: nonzero === "1" ? ["FIRST", "SECOND"] : ["FIRST"],
+  };
+}
+
+/**
+ * Enumerate the blessed 64-case selection matrix: the 60-case core product
+ * deletion(2) × ending(3) × unstage(2) × range(5) at baseline dispatch
+ * (registered key, forward selection), plus two dedicated alternate-method
+ * cases spanning both stage and unstage payloads, plus two dedicated reverse
+ * cases spanning the context-start exclusive and changed-row inclusive cursors.
+ */
+function selectionCases() {
+  const cases = [];
+  for (const deletion of [false, true]) {
+    for (const ending of ["interior", "newline", "no-newline"]) {
+      for (const unstage of [false, true]) {
+        for (const range of RANGE_CURSORS) {
+          cases.push({ deletion, ending, unstage, range, method: "view/key", reverse: false });
+        }
+      }
+    }
+  }
+  // Alternate dispatcher for both key/command payloads: `s`/`status.stage`
+  // and `u`/`status.unstage`.
+  cases.push({
+    deletion: false,
+    ending: "interior",
+    unstage: false,
+    range: "changed/1",
+    method: "view/invoke",
+    reverse: false,
+    focus: "stage invoke",
+  });
+  cases.push({
+    deletion: true,
+    ending: "newline",
+    unstage: true,
+    range: "context/1",
+    method: "view/invoke",
+    reverse: false,
+    focus: "unstage invoke",
+  });
+  // Swapped anchor/active at both cursor positions and endpoint modes.
+  cases.push({
+    deletion: false,
+    ending: "no-newline",
+    unstage: false,
+    range: "context/0",
+    method: "view/key",
+    reverse: true,
+    focus: "context-start reverse",
+  });
+  cases.push({
+    deletion: true,
+    ending: "interior",
+    unstage: false,
+    range: "changed/1",
+    method: "view/key",
+    reverse: true,
+    focus: "changed-row reverse",
+  });
+  assert.equal(cases.length, 64, "blessed 64-case selection matrix");
+  // Every original axis keeps coverage after the collapse.
+  for (const deletion of [false, true])
+    assert(
+      cases.some((c) => c.deletion === deletion),
+      `deletion=${deletion} covered`,
+    );
+  for (const ending of ["interior", "newline", "no-newline"])
+    assert(
+      cases.some((c) => c.ending === ending),
+      `ending=${ending} covered`,
+    );
+  for (const unstage of [false, true])
+    assert(
+      cases.some((c) => c.unstage === unstage),
+      `unstage=${unstage} covered`,
+    );
+  for (const range of RANGE_CURSORS)
+    assert(
+      cases.some((c) => c.range === range),
+      `range=${range} covered`,
+    );
+  for (const method of ["view/key", "view/invoke"])
+    assert(
+      cases.some((c) => c.method === method),
+      `method=${method} covered`,
+    );
+  for (const reverse of [false, true])
+    assert(
+      cases.some((c) => c.reverse === reverse),
+      `reverse=${reverse} covered`,
+    );
+  for (const unstage of [false, true])
+    assert(
+      cases.some((c) => c.method === "view/invoke" && c.unstage === unstage),
+      `alternate method covers unstage=${unstage} payload`,
+    );
+  assert(
+    cases.some((c) => c.reverse && c.range === "context/0"),
+    "reverse covers the context-start exclusive cursor",
+  );
+  assert(
+    cases.some((c) => c.reverse && c.range === "changed/1"),
+    "reverse covers the changed-row inclusive cursor",
+  );
+  return cases;
+}
+
 /** Stage/unstage real rendered ranges via registered commands and real RPC. */
 async function checkGitSelections({ vscode, commands, client }) {
   const messageStart = vscode.__test.messages.length;
@@ -140,6 +277,7 @@ async function checkGitSelections({ vscode, commands, client }) {
     assert.equal(fixtureState.repo, repo, "registered open focused the fixture repository");
     // Each fixture has three adjacent changed lines. The last is always a
     // guard: colzero excludes SECOND; nonzero includes SECOND but not GUARD.
+    const cases = selectionCases();
     for (const deletion of [false, true]) {
       for (const ending of ["interior", "newline", "no-newline"]) {
         const prefix = "head\ncontext\n";
@@ -151,123 +289,108 @@ async function checkGitSelections({ vscode, commands, client }) {
         fs.writeFileSync(file, base);
         git(repo, "add", "boundary.txt");
         git(repo, "commit", "--allow-empty", "-qm", `${deletion ? "delete" : "add"} ${ending}`);
-        for (const unstage of [false, true]) {
-          for (const method of ["view/key", "view/invoke"]) {
-            for (const reverse of [false, true]) {
-              // Context through the first change, first change alone, and the
-              // last changed line (hunk/EOF edge) all retain adjacent guards.
-              for (const range of ["context", "changed", "eof"]) {
-                for (const nonzero of [false, true]) {
-                  // A same-line EOF selection has no later row to exclude.
-                  if (range === "eof" && nonzero) continue;
-                  fs.writeFileSync(file, base);
-                  git(repo, "add", "boundary.txt");
-                  fs.writeFileSync(file, work);
-                  if (unstage) git(repo, "add", "boundary.txt");
-                  editor.selection = new vscode.Selection(
-                    new vscode.Position(0, 0),
-                    new vscode.Position(0, 0),
-                  );
-                  await commands.get("magit.invoke")({ command: "common.refresh" });
-                  // Symbols come from the acknowledged server tree. Never
-                  // discover hunk rows by parsing rendered text.
-                  let files;
-                  const deadline = Date.now() + 10000;
-                  do {
-                    const symbols = await client.sendRequest("textDocument/documentSymbol", {
-                      textDocument: { uri: fixtureState.descriptor.uri },
-                    });
-                    files = symbols
-                      .filter((s) => s.name === (unstage ? "Staged changes" : "Unstaged changes"))
-                      .flatMap((s) => s.children || []);
-                    const candidate = files[0]?.children?.[0];
-                    const firstRow = candidate?.range.start.line + 3;
-                    const marker = deletion ? "-" : "+";
-                    // Render acknowledgements are asynchronous. Validate the
-                    // known fixture at metadata-derived rows before using it;
-                    // neither names nor rendered text discover row positions.
-                    if (
-                      files.length === 1 &&
-                      candidate &&
-                      ["FIRST", "SECOND", "GUARD"].every(
-                        (line, offset) =>
-                          editor.document.lineAt(firstRow + offset).text === `    ${marker}${line}`,
-                      ) &&
-                      candidate.range.end.line >= firstRow + 2
-                    )
-                      break;
-                    assert(Date.now() < deadline, "fresh acknowledged fixture symbols");
-                    await new Promise((resolve) => setTimeout(resolve, 10));
-                  } while (true);
-                  assert.equal(files.length, 1, "one structured fixture file");
-                  const symbol = files[0];
-                  assert.equal(symbol.kind, 1, "structured file kind");
-                  assert.equal(symbol.children.length, 1, "one structured hunk");
-                  const hunk = symbol.children[0];
-                  const first = hunk.range.start.line + 3; // header + two fixture context lines
-                  const last = first + 2;
-                  const marker = deletion ? "-" : "+";
-                  assert.equal(editor.document.lineAt(first).text, `    ${marker}FIRST`);
-                  assert.equal(editor.document.lineAt(first + 1).text, `    ${marker}SECOND`);
-                  assert.equal(editor.document.lineAt(last).text, `    ${marker}GUARD`);
-                  let start = [range === "context" ? first - 1 : first, 0];
-                  let end = [first + 1, nonzero ? 1 : 0];
-                  let rows = [start[0], nonzero ? first + 1 : first];
-                  let selected = nonzero ? ["FIRST", "SECOND"] : ["FIRST"];
-                  if (range === "eof") {
-                    start = [last, 0];
-                    end = [last, editor.document.lineAt(last).text.length];
-                    rows = [last, last];
-                    selected = ["GUARD"];
-                  }
-                  const anchor = reverse ? end : start;
-                  const active = reverse ? start : end;
-                  select(vscode, editor, anchor, active);
-                  const before = client.requests.length;
-                  const command = unstage ? "status.unstage" : "status.stage";
-                  if (method === "view/key")
-                    await commands.get("magit.key")({ key: unstage ? "u" : "s" });
-                  else await commands.get("magit.invoke")({ command });
-                  const request = checkRequest(client.requests, before, method, active, rows);
-                  assert.equal(request.params.viewId, fixtureState.id);
-                  assert.equal(
-                    request.params[method === "view/key" ? "key" : "command"],
-                    method === "view/key" ? (unstage ? "u" : "s") : command,
-                  );
-                  const retained = ["FIRST", "SECOND", "GUARD"].filter((line) => {
-                    const applied = unstage ? !selected.includes(line) : selected.includes(line);
-                    return deletion ? !applied : applied;
-                  });
-                  // No-newline belongs to GUARD, not to whichever line becomes
-                  // last after partial staging. Other original lines keep LF.
-                  const retainedSuffix =
-                    ending === "no-newline" && !retained.includes("GUARD") ? "\n" : suffix;
-                  const expected = retained.length
-                    ? `${prefix}${retained.join("\n")}${retainedSuffix}`
-                    : unchanged;
-                  const label = `${deletion ? "deletion" : "addition"} ${ending} ${command} ${method} reverse=${reverse} ${range} nonzero=${nonzero}`;
-                  assert.deepEqual(
-                    git(repo, "show", ":boundary.txt"),
-                    Buffer.from(expected),
-                    `${label}: exact index (including guards)`,
-                  );
-                  assert.deepEqual(
-                    fs.readFileSync(file),
-                    Buffer.from(work),
-                    `${label}: exact untouched worktree`,
-                  );
-                  assert.equal(
-                    vscode.__test.messages
-                      .slice(messageStart)
-                      .filter((m) => m.level === "warning" || m.level === "error").length,
-                    0,
-                    label,
-                  );
-                  count += 1;
-                }
-              }
-            }
-          }
+        for (const selectionCase of cases) {
+          if (selectionCase.deletion !== deletion || selectionCase.ending !== ending) continue;
+          const { unstage, method, reverse, range } = selectionCase;
+          fs.writeFileSync(file, base);
+          git(repo, "add", "boundary.txt");
+          fs.writeFileSync(file, work);
+          if (unstage) git(repo, "add", "boundary.txt");
+          editor.selection = new vscode.Selection(
+            new vscode.Position(0, 0),
+            new vscode.Position(0, 0),
+          );
+          await commands.get("magit.invoke")({ command: "common.refresh" });
+          // Symbols come from the acknowledged server tree. Never
+          // discover hunk rows by parsing rendered text.
+          let files;
+          const deadline = Date.now() + 10000;
+          do {
+            const symbols = await client.sendRequest("textDocument/documentSymbol", {
+              textDocument: { uri: fixtureState.descriptor.uri },
+            });
+            files = symbols
+              .filter((s) => s.name === (unstage ? "Staged changes" : "Unstaged changes"))
+              .flatMap((s) => s.children || []);
+            const candidate = files[0]?.children?.[0];
+            const firstRow = candidate?.range.start.line + 3;
+            const marker = deletion ? "-" : "+";
+            // Render acknowledgements are asynchronous. Validate the
+            // known fixture at metadata-derived rows before using it;
+            // neither names nor rendered text discover row positions.
+            if (
+              files.length === 1 &&
+              candidate &&
+              ["FIRST", "SECOND", "GUARD"].every(
+                (line, offset) =>
+                  editor.document.lineAt(firstRow + offset).text === `    ${marker}${line}`,
+              ) &&
+              candidate.range.end.line >= firstRow + 2
+            )
+              break;
+            assert(Date.now() < deadline, "fresh acknowledged fixture symbols");
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          } while (true);
+          assert.equal(files.length, 1, "one structured fixture file");
+          const symbol = files[0];
+          assert.equal(symbol.kind, 1, "structured file kind");
+          assert.equal(symbol.children.length, 1, "one structured hunk");
+          const hunk = symbol.children[0];
+          const first = hunk.range.start.line + 3; // header + two fixture context lines
+          const last = first + 2;
+          const marker = deletion ? "-" : "+";
+          assert.equal(editor.document.lineAt(first).text, `    ${marker}FIRST`);
+          assert.equal(editor.document.lineAt(first + 1).text, `    ${marker}SECOND`);
+          assert.equal(editor.document.lineAt(last).text, `    ${marker}GUARD`);
+          const { start, end, rows, selected } = rangeSelection(
+            range,
+            first,
+            last,
+            editor.document,
+          );
+          const anchor = reverse ? end : start;
+          const active = reverse ? start : end;
+          select(vscode, editor, anchor, active);
+          const before = client.requests.length;
+          const command = unstage ? "status.unstage" : "status.stage";
+          if (method === "view/key") await commands.get("magit.key")({ key: unstage ? "u" : "s" });
+          else await commands.get("magit.invoke")({ command });
+          const request = checkRequest(client.requests, before, method, active, rows);
+          assert.equal(request.params.viewId, fixtureState.id);
+          assert.equal(
+            request.params[method === "view/key" ? "key" : "command"],
+            method === "view/key" ? (unstage ? "u" : "s") : command,
+          );
+          const retained = ["FIRST", "SECOND", "GUARD"].filter((line) => {
+            const applied = unstage ? !selected.includes(line) : selected.includes(line);
+            return deletion ? !applied : applied;
+          });
+          // No-newline belongs to GUARD, not to whichever line becomes
+          // last after partial staging. Other original lines keep LF.
+          const retainedSuffix =
+            ending === "no-newline" && !retained.includes("GUARD") ? "\n" : suffix;
+          const expected = retained.length
+            ? `${prefix}${retained.join("\n")}${retainedSuffix}`
+            : unchanged;
+          const label = `${deletion ? "deletion" : "addition"} ${ending} ${command} ${method} reverse=${reverse} range=${range}${selectionCase.focus ? ` (${selectionCase.focus})` : ""}`;
+          assert.deepEqual(
+            git(repo, "show", ":boundary.txt"),
+            Buffer.from(expected),
+            `${label}: exact index (including guards)`,
+          );
+          assert.deepEqual(
+            fs.readFileSync(file),
+            Buffer.from(work),
+            `${label}: exact untouched worktree`,
+          );
+          assert.equal(
+            vscode.__test.messages
+              .slice(messageStart)
+              .filter((m) => m.level === "warning" || m.level === "error").length,
+            0,
+            label,
+          );
+          count += 1;
         }
       }
     }
