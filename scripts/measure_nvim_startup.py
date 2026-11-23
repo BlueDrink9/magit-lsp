@@ -12,6 +12,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def wait_for_trace_quiescence(path: Path, quiet_s: float = 0.25, timeout_s: float = 15.0) -> None:
+    """Wait for the detached server to stop appending after the client exits.
+
+    The server acquires status after its early render, so it can outlive the
+    headless client. Reading then yields a truncated or torn final line.
+    """
+    previous = None
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        size = path.stat().st_size if path.exists() else None
+        if size is not None and size == previous:
+            return
+        previous = size
+        time.sleep(quiet_s)
+
+
 def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, label: str) -> list[dict]:
     stem = f"{label}-{time.time_ns()}"
     client_trace = artifact / f"{stem}.client.jsonl"
@@ -30,6 +46,7 @@ def run_sample(repo: Path, root: Path, nvim: str, server: str, artifact: Path, l
     if {event["case"] for event in events} != wanted or not all(e["valid_status"] for e in events):
         raise RuntimeError(f"missing event or invalid status: {events}")
     server_trace = Path(str(client_trace) + ".server")
+    wait_for_trace_quiescence(server_trace)
     raw = []
     for path in (client_trace, server_trace):
         if path.exists():
@@ -98,8 +115,13 @@ def main() -> int:
     for case in ("process_cold_first_open", "initialized_server_reopen", "already_open_focus"):
         for label in ("fixture", "worktree"):
             values = [r["elapsed_ms"] for r in rows if r["case"] == case and r["label"] == label]
+            head_values = [r["head_visible_ms"] for r in rows if r["case"] == case and r["label"] == label]
             distributions[f"{label}.{case}"] = {"samples_ms": values, "median_ms": statistics.median(values),
-                                                   "range_ms": [min(values), max(values)]}
+                                                   "range_ms": [min(values), max(values)],
+                                                   "head_visible_ms": {
+                                                       "samples_ms": head_values,
+                                                       "median_ms": statistics.median(head_values),
+                                                       "range_ms": [min(head_values), max(head_values)]}}
     metadata = {"nvim": nvim, "nvim_version": subprocess.check_output([nvim, "--version"], text=True).splitlines()[0],
                 "server": str(Path(server).resolve()), "profile": "debug (Makefile MAGIT_LSP_BIN)",
                 "host": subprocess.check_output(["uname", "-a"], text=True).strip(),

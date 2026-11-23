@@ -479,3 +479,37 @@ above Neovim's 107-byte socket limit, so the verification ran through a
 bind mount of the same checkout at a shorter path. That is a harness
 path limitation, not a product behavior finding. No `magit-lsp` process
 remained after the run.
+
+## Head-visible startup latency (2026-11-23)
+
+`make nvim-startup-check` exits 0 (`ok: nvim-startup-check`) with the early
+render in place. Artifact: `build/startup-diagnosis/20261123T203405Z/summary.json`
+(3 samples per repository, medians below).
+
+Each case's distribution now also records `head_visible_ms`: the moment the
+existing `Head:` poll first succeeded
+(`scripts/measure_nvim_startup.lua:8-14`), captured before the report write, so
+it excludes the post-wait bookkeeping. `elapsed_ms` keeps its previous meaning
+(the poll's reported duration); only the added field is new.
+
+| case | repository | `head_visible_ms` median | `elapsed_ms` median |
+| --- | --- | --- | --- |
+| `process_cold_first_open` | fixture | 79.586 ms (77.742–82.413) | 79.636 ms |
+| `process_cold_first_open` | worktree | 165.500 ms (163.618–249.244) | 165.544 ms |
+| `initialized_server_reopen` | fixture | 19.260 ms (18.952–19.405) | 19.281 ms |
+| `initialized_server_reopen` | worktree | 98.088 ms (97.567–106.926) | 98.114 ms |
+| `already_open_focus` | fixture | 0.063 ms | 0.063 ms |
+| `already_open_focus` | worktree | 0.061 ms | 0.061 ms |
+
+Against the earlier baseline `build/startup-diagnosis/20261123T200559Z/summary.json`
+(`elapsed_ms` medians 208.259/219.484 ms cold, 114.705/117.776 ms reopen), the
+first cold render now shows `Head:` in 79.586 ms (fixture) and 165.500 ms
+(worktree), and reopened views are no slower (19.260/98.088 ms).
+
+These numbers come from the debug profile with client and server tracing
+(`MAGIT_LSP_TRACE`) enabled, on this host only. They are not a release claim,
+not a CPU profile and not a CI threshold: the script asserts no timing bound.
+The one worktree cold sample at 249.244 ms shows how much host variance the
+median absorbs. The trace writer also emits each line as one write
+(`src/runner.rs`), because the early render runs status acquisition on another
+thread and interleaved fragments corrupted the artifact.

@@ -189,7 +189,7 @@ pub fn trace(id: u64, event: &str, detail: Value) {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs_f64() * 1000.0)
         .unwrap_or(0.0);
-    let line = serde_json::json!({
+    let event = serde_json::json!({
         "t_ms": t_ms,
         "t_unix_ms": t_unix_ms,
         "id": id,
@@ -197,12 +197,18 @@ pub fn trace(id: u64, event: &str, detail: Value) {
         "detail": detail,
         "source": "server",
     });
+    // One write per line: `Value`'s `Display` emits many small fragments, so
+    // concurrent threads could interleave into a corrupt line.
+    let Ok(mut line) = serde_json::to_string(&event) else {
+        return;
+    };
+    line.push('\n');
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
     {
-        let _ = writeln!(file, "{line}");
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
