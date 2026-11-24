@@ -5572,7 +5572,7 @@ fn ignore_rule_invalid_inputs_never_write() {
         test.ack();
         let header = test.tree().navigation_node(0);
         assert!(
-            header.map_or(true, |node| node.kind != NodeKind::File),
+            header.is_none_or(|node| node.kind != NodeKind::File),
             "line 0 must not be a File node for the missing-selection case"
         );
         let started = start(&mut test, "ignore.topdir", 0);

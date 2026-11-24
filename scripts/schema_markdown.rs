@@ -180,7 +180,7 @@ pub fn worked_exchanges_block() -> Result<String, String> {
 
 /// Render worked exchanges loaded from an examples directory.
 pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
-    let files = super::example_recordings::recordings(&dir)
+    let files = super::example_recordings::recordings(dir)
         .map_err(|error| format!("{}: {error}", dir.display()))?;
     if files.is_empty() {
         return Err(format!("{}: no JSONL examples found", dir.display()));

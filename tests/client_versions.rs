@@ -14,7 +14,7 @@ fn lua_adapter_version(source: &str) -> Option<&str> {
         let declaration = declaration.trim_start().strip_prefix('M')?;
         match declaration.chars().next() {
             // `M.check` and friends are not the declaration itself.
-            Some(c) if c.is_alphanumeric() || c == '_' => return None,
+            Some(c) if c.is_alphanumeric() || c == '_' => None,
             _ => Some(declaration),
         }
     })?;

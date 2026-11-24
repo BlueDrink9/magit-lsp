@@ -217,6 +217,18 @@ const NAMED_KEYS: &[&str] = &[
     "ArrowDown",
     "ArrowLeft",
     "ArrowRight",
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
 ];
 
 impl KeyChord {
@@ -315,20 +327,6 @@ fn parse_step(step: &str) -> Result<KeyStep, KeyError> {
     } else if key_part == "Plus" {
         Key::Char('+')
     } else if NAMED_KEYS.contains(&key_part) {
-        Key::Named(key_part.to_string())
-    } else if key_part == "F1"
-        || key_part == "F2"
-        || key_part == "F3"
-        || key_part == "F4"
-        || key_part == "F5"
-        || key_part == "F6"
-        || key_part == "F7"
-        || key_part == "F8"
-        || key_part == "F9"
-        || key_part == "F10"
-        || key_part == "F11"
-        || key_part == "F12"
-    {
         Key::Named(key_part.to_string())
     } else if key_part.chars().count() == 1 {
         let c = key_part.chars().next().expect("one char");

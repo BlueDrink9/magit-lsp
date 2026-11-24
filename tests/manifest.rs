@@ -26,8 +26,7 @@ fn binary() -> Command {
 
 /// Keep the host's config out of CLI tests.
 fn isolated() -> tempfile::TempDir {
-    let dir = tempfile::TempDir::new().expect("temp dir");
-    dir
+    tempfile::TempDir::new().expect("temp dir")
 }
 
 fn isolated_command(dir: &Path) -> Command {

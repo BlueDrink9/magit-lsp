@@ -1,13 +1,12 @@
 //! Directional schema generation and committed-artifact drift checks.
 
-#[path = "../scripts/example_recordings.rs"]
-mod example_recordings;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "../scripts/generate_schema.rs"]
 mod generate_schema;
 
 use fixtures::schema::{read_schema, schema_errors};
+use generate_schema::example_recordings;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 

@@ -391,7 +391,7 @@ fn selection_members(
             if node.section.as_deref() != Some(section) {
                 return false;
             }
-            let included = match node.kind {
+            match node.kind {
                 NodeKind::File => {
                     start as usize <= node.start_line && node.start_line <= end as usize
                 }
@@ -399,8 +399,7 @@ fn selection_members(
                     start as usize <= node.end_line && node.start_line <= end as usize
                 }
                 _ => false,
-            };
-            included
+            }
         })
         .map(|node| {
             let mut target = offer_target(tree, command, &node.id)?;

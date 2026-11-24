@@ -480,7 +480,7 @@ fn contradictory_merge_filters_report_error_and_leave_menu_usable() {
     assert!(!result.effects.iter().any(|effect| matches!(effect, Effect::PushView { descriptor, .. } if descriptor.kind == ViewKind::Log)), "{:?}", result.effects);
     assert_ne!(test.view_id(), menu);
     assert_eq!(test.view_id(), "v1");
-    assert!(test.session().views().get(&test.view_id()).is_some());
+    assert!(test.session().views().get(test.view_id()).is_some());
 
     test.press("l");
     test.press("=");

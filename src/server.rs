@@ -950,6 +950,10 @@ impl Shared {
     }
 
     /// Publish progress only after successful creation, while its owner is live.
+    ///
+    /// The progress tests drive this directly; production callers publish the
+    /// create request through the same helpers in their own order.
+    #[cfg(test)]
     async fn create_progress(
         &self,
         sender: &mpsc::UnboundedSender<Message>,
@@ -976,10 +980,8 @@ impl Shared {
     ) -> Option<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
         {
             let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
-            match runs.get_mut(token) {
-                Some(run) => run.create_pending = true,
-                None => return None,
-            }
+            let run = runs.get_mut(token)?;
+            run.create_pending = true;
         }
         match self.register_outbound(
             "window/workDoneProgress/create",

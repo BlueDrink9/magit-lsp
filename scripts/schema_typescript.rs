@@ -240,14 +240,14 @@ fn type_expr(schema: &Value, indent: usize) -> Result<String, String> {
                     if rendered.is_empty() {
                         return Err("`type` array must not be empty".to_string());
                     }
-                    return Ok(join_types(rendered, " | ", indent));
+                    Ok(join_types(rendered, " | ", indent))
                 }
-                Some(other) => return Err(format!("unsupported `type` value {other}")),
+                Some(other) => Err(format!("unsupported `type` value {other}")),
                 None => {
                     if map.contains_key("properties") || map.contains_key("additionalProperties") {
                         return object_type(map, indent);
                     }
-                    return Ok("unknown".to_string());
+                    Ok("unknown".to_string())
                 }
             }
         }
@@ -356,7 +356,7 @@ fn object_type(map: &serde_json::Map<String, Value>, indent: usize) -> Result<St
         .transpose()?
         .unwrap_or_default();
 
-    let has_properties = properties.map_or(false, |properties| !properties.is_empty());
+    let has_properties = properties.is_some_and(|properties| !properties.is_empty());
     let has_additional = matches!(additional, Some(Value::Bool(true)) | Some(Value::Object(_)));
     if !has_properties && !has_additional {
         return Ok("Record<string, never>".to_string());

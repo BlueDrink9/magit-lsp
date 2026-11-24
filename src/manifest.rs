@@ -403,7 +403,7 @@ pub fn denied_entries(manifest: &Manifest) -> Vec<DeniedEntry> {
             allow.key == entry.key
                 && allow
                     .scope
-                    .map_or(true, |scope| scope == entry.scope.as_str())
+                    .is_none_or(|scope| scope == entry.scope.as_str())
         });
         if !allowed {
             denied.push(DeniedEntry {

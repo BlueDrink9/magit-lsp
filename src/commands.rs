@@ -853,13 +853,11 @@ pub fn resume_prompt(
             }
             let repo = GitRepo::open(ctx.repo_path)?;
             match repo.checkout_remote_ref(&remote_ref) {
-                Ok(local) => {
-                    return checkout_action(
-                        ctx,
-                        Ok(()),
-                        format!("Checked out {local} tracking {remote_ref}"),
-                    );
-                }
+                Ok(local) => checkout_action(
+                    ctx,
+                    Ok(()),
+                    format!("Checked out {local} tracking {remote_ref}"),
+                ),
                 Err(err) => checkout_action(ctx, Err(err), String::new()),
             }
         }
@@ -4607,7 +4605,7 @@ fn displayed_file_is_current(
                 _ => false,
             }
     }
-    Ok(matches(&captured, &current, section == "staged"))
+    Ok(matches(captured, &current, section == "staged"))
 }
 
 fn file_worktree_section<'a>(tree: &'a Tree, path: &str) -> &'a str {

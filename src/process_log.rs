@@ -18,6 +18,12 @@ impl ProcessLogView {
     }
 }
 
+impl Default for ProcessLogView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl View for ProcessLogView {
     fn kind(&self) -> ViewKind {
         ViewKind::ProcessLog

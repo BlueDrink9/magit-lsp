@@ -2,13 +2,11 @@
 mod editor_model;
 #[path = "common/fake_editor.rs"]
 mod fake_editor;
-#[cfg(unix)]
-#[path = "common/fake_git.rs"]
-mod fake_git;
 #[path = "common/mod.rs"]
 mod fixtures;
-#[path = "common/stdio.rs"]
-mod stdio;
+#[cfg(unix)]
+use fixtures::fake_git;
+use fixtures::stdio;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::file_uri::uri_from_path;

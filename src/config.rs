@@ -843,7 +843,7 @@ fn apply_document(
                 // every `menus.*` setting is obsolete and rejected by its exact
                 // name instead of being parsed and silently ignored.
                 let table = settings_table(item, "menus", file, line)?;
-                for (name, value) in table.iter() {
+                if let Some((name, value)) = table.iter().next() {
                     let line = item_line(source, value);
                     return Err(unknown_key(file, line, "menus", name));
                 }
@@ -1459,10 +1459,8 @@ fn expand_vars(input: &str) -> String {
                 break;
             }
         }
-        if braced {
-            if chars.peek() == Some(&'}') {
-                chars.next();
-            }
+        if braced && chars.peek() == Some(&'}') {
+            chars.next();
         }
         if name.is_empty() {
             out.push('$');

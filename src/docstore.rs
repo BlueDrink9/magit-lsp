@@ -24,6 +24,10 @@ pub struct Change {
     pub text: String,
 }
 
+/// A rejected document-store operation; the store never carries more detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rejected;
+
 /// A tracked open document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
@@ -43,11 +47,11 @@ impl Document {
         version: i32,
         changes: &[Change],
         encoding: Encoding,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Rejected> {
         if version <= self.observed_version {
             self.repair = true;
             self.observed_version = self.observed_version.max(version);
-            return Err(());
+            return Err(Rejected);
         }
         let mut text = self.text.clone();
         if self.repair
@@ -57,24 +61,24 @@ impl Document {
         {
             self.repair = true;
             self.observed_version = self.observed_version.max(version);
-            return Err(());
+            return Err(Rejected);
         }
         let result = (|| {
             for change in changes {
                 match (change.start, change.end) {
                     (None, None) => text.clone_from(&change.text),
                     (Some(start), Some(end)) => {
-                        let a = offset(&text, start, encoding).ok_or(())?;
-                        let b = offset(&text, end, encoding).ok_or(())?;
+                        let a = offset(&text, start, encoding).ok_or(Rejected)?;
+                        let b = offset(&text, end, encoding).ok_or(Rejected)?;
                         if a > b {
-                            return Err(());
+                            return Err(Rejected);
                         }
                         text.replace_range(a..b, &change.text);
                     }
-                    _ => return Err(()),
+                    _ => return Err(Rejected),
                 }
             }
-            Ok::<(), ()>(())
+            Ok::<(), Rejected>(())
         })();
         if result.is_err() {
             self.repair = true;
@@ -121,18 +125,18 @@ impl DocStore {
         self.documents.get(uri)
     }
     /// Replace one tracked document snapshot after external acceptance.
-    pub fn replace(&mut self, uri: &str, document: Document) -> Result<(), ()> {
-        let current = self.documents.get_mut(uri).ok_or(())?;
+    pub fn replace(&mut self, uri: &str, document: Document) -> Result<(), Rejected> {
+        let current = self.documents.get_mut(uri).ok_or(Rejected)?;
         *current = document;
         Ok(())
     }
     /// Validate versionless save text; it cannot replace the live snapshot or repair it.
-    pub fn save_text(&self, uri: &str, text: &str) -> Result<(), ()> {
-        let document = self.documents.get(uri).ok_or(())?;
+    pub fn save_text(&self, uri: &str, text: &str) -> Result<(), Rejected> {
+        let document = self.documents.get(uri).ok_or(Rejected)?;
         if document.text == text {
             Ok(())
         } else {
-            Err(())
+            Err(Rejected)
         }
     }
     /// Flag an unknown client state without replacing the last accepted snapshot.
@@ -151,10 +155,10 @@ impl DocStore {
         version: i32,
         changes: &[Change],
         encoding: Encoding,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Rejected> {
         self.documents
             .get_mut(uri)
-            .ok_or(())?
+            .ok_or(Rejected)?
             .change(version, changes, encoding)
     }
 }

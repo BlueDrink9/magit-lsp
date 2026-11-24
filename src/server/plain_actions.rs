@@ -803,7 +803,7 @@ pub(super) fn execute_plain_action(
                 );
                 let applies = crate::commands::registry()
                     .get(&params.command)
-                    .is_some_and(|command| command.applies_to(&scope));
+                    .is_some_and(|command| command.applies_to(scope));
                 if !supported
                     || target.view_id != view_id
                     || !(applies || (params.command == "common.cancel" && scope != "status"))

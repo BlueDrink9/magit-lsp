@@ -223,7 +223,7 @@ fn plain_commit_menu_option_renders_the_log_select_document() {
         .modify("f.txt", "changed\n")
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo);
-    let file_row = row_containing(&editor.text(&uri), "f.txt");
+    let file_row = row_containing(editor.text(&uri), "f.txt");
     let open = offered_for_range(
         &mut server,
         &uri,
@@ -476,7 +476,7 @@ fn plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit() {
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo);
     let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
-    let file_row = row_containing(&editor.text(&uri), "f.txt");
+    let file_row = row_containing(editor.text(&uri), "f.txt");
     let open = offered_for_range(
         &mut server,
         &uri,
@@ -486,7 +486,7 @@ fn plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit() {
     );
     let opened = execute_offered(&mut server, &mut editor, open, 51);
     assert!(opened["error"].is_null(), "open.commit failed: {opened}");
-    let reuse = row_containing(&editor.text(&uri), "Reuse commit message");
+    let reuse = row_containing(editor.text(&uri), "Reuse commit message");
     let option = offered_menu_option(&mut server, &uri, reuse, "=C", 52);
     assert!(!option.is_null(), "menu.run-option =C not offered");
 
@@ -555,7 +555,7 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
         .modify("f.txt", "changed\n")
         .build();
     let (mut server, mut editor, uri) = open_plain(&repo);
-    let file_row = row_containing(&editor.text(&uri), "f.txt");
+    let file_row = row_containing(editor.text(&uri), "f.txt");
     let open = offered_for_range(
         &mut server,
         &uri,
@@ -589,7 +589,7 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
     let cancel_row = row_containing(&text, "Log — Reuse commit message");
     let cancel_range =
         json!({"start":{"line":cancel_row,"character":0},"end":{"line":cancel_row,"character":0}});
-    let cancel = loop {
+    let cancel = {
         server.send(
             json!({"jsonrpc":"2.0","id":64,"method":"textDocument/codeAction","params":{
             "textDocument":{"uri":uri},"range":cancel_range,"context":{"diagnostics":[]}}}),
@@ -598,11 +598,11 @@ fn plain_log_select_cancel_returns_the_caller_without_changes() {
             .as_array()
             .unwrap()
             .clone();
-        break actions
+        actions
             .iter()
             .find(|action| action["command"]["arguments"][0]["command"] == "common.cancel")
             .map(|action| action["command"]["arguments"][0].clone())
-            .unwrap_or_else(|| panic!("common.cancel not offered: {actions:?}"));
+            .unwrap_or_else(|| panic!("common.cancel not offered: {actions:?}"))
     };
     let cancelled = execute_offered(&mut server, &mut editor, cancel, 65);
     assert!(

@@ -6,14 +6,10 @@ use super::*;
 pub(super) fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(String, String)> {
     let format = {
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(document) = documents.get(&uri) else {
-            return None;
-        };
+        let document = documents.get(&uri)?;
         DocumentFormat::from_text(&document.text)
     };
-    let Some(path) = crate::file_uri::path_from_uri(&uri) else {
-        return None;
-    };
+    let path = crate::file_uri::path_from_uri(&uri)?;
     if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) {
         return None;
     }
@@ -329,9 +325,7 @@ pub(super) fn plain_change(
         .unwrap_or_else(|p| p.into_inner())
         .get(uri)
         .cloned();
-    let Some(snapshot) = snapshot else {
-        return None;
-    };
+    let snapshot = snapshot?;
 
     // The policy header is a structured node. If the client edits that row,
     // restore the retained authoritative tree without interpreting document text.
@@ -872,7 +866,7 @@ fn execute_plain_key(shared: &Shared, dispatch: PlainKeyDispatch) -> Result<()> 
                 }
                 _ => repair_plain_authoritative(shared, &uri, incarnation),
             }
-            return Ok(());
+            Ok(())
         }
         PlainKeyDispatch::Key {
             uri,
@@ -1099,9 +1093,7 @@ pub(super) fn close_plain(shared: &Shared, uri: &str) -> Option<(String, String)
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .remove(uri);
-    let Some(mut entry) = entry else {
-        return None;
-    };
+    let mut entry = entry?;
     entry.controller.close();
     shared
         .view_repos

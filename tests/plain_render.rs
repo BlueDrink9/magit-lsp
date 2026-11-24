@@ -15,8 +15,7 @@ use std::time::{Duration, Instant};
 
 #[path = "common/mod.rs"]
 mod fixtures;
-#[path = "common/stdio.rs"]
-mod stdio;
+use fixtures::stdio;
 
 fn controller(encoding: Encoding, versioned: bool) -> PlainDocument {
     PlainDocument::new(

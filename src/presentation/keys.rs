@@ -335,7 +335,7 @@ pub fn classify(state: &mut State, edit: NetEdit, now_ms: u64, timeout_ms: u64) 
     if edit.inserted.chars().count() != 1 {
         return Outcome::Reject { repair: true };
     }
-    let shape = (sl, sc) == (el, ec) || (sl, sc) < (el, ec);
+    let shape = (sl, sc) <= (el, ec);
     if !shape {
         return Outcome::Reject { repair: true };
     }

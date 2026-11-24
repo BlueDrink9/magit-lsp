@@ -950,7 +950,7 @@ fn the_registry_exposes_open_commit_and_the_menu_commands() {
             panic!("{key} is an action");
         };
         let registered = registry()
-            .get(&command)
+            .get(command)
             .unwrap_or_else(|| panic!("{command} is registered"));
         match &registered.status {
             CommandStatus::Implemented => {

@@ -154,7 +154,7 @@ impl PlainDocument {
         if self
             .authoritative
             .as_ref()
-            .map_or(true, |old| old.hash != snapshot.hash)
+            .is_none_or(|old| old.hash != snapshot.hash)
         {
             self.rejected = None;
         }
@@ -339,9 +339,7 @@ impl PlainDocument {
 
     /// Resolve an applyEdit result; late responses after close/reopen are ignored.
     pub fn response(&mut self, id: u64, applied: bool) -> Option<ApplyEdit> {
-        let Some(flight) = self.in_flight.as_mut() else {
-            return None;
-        };
+        let flight = self.in_flight.as_mut()?;
         if flight.request.id != id {
             return None;
         }
@@ -374,9 +372,7 @@ impl PlainDocument {
     /// The correlated request ID prevents stale timers from affecting newer flights.
     /// The observed client snapshot remains distinct from server-authoritative rendered text.
     pub fn expire(&mut self, id: u64) -> Option<ApplyEdit> {
-        let Some(flight) = self.in_flight.as_ref() else {
-            return None;
-        };
+        let flight = self.in_flight.as_ref()?;
         if flight.request.id != id || flight.response != Some(true) || flight.echoed {
             return None;
         }

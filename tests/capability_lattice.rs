@@ -7,8 +7,7 @@ mod editor_model;
 mod fake_editor;
 #[path = "common/mod.rs"]
 mod fixtures;
-#[path = "common/stdio.rs"]
-mod stdio;
+use fixtures::stdio;
 
 use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
