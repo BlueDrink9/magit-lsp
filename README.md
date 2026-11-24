@@ -3,9 +3,14 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/BlueDrink9/magit-lsp?label=last%20commit)](https://github.com/BlueDrink9/magit-lsp)
 [![Licensing: GPL-3.0-only / Apache-2.0](https://img.shields.io/badge/licensing-GPL--3.0--only%20%2F%20Apache--2.0-blue)](LICENSING.md)
 
-An LSP-based Git interface: a server-owned structured status document with
-Neovim and VSCode clients. Features and native workflow limitations are listed
-below; this is not a claim of release or registry readiness.
+Magit, the powerful and much-loved Git interface, as a language server any editor can use.
+
+**Neovim · VS Code · Helix\*** and anything else with an LSP client
+
+Stage hunks or single lines (select them, or use visual mode), commit, branch,
+tag, reset and browse history. It's fully keyboard-driven, with discoverable
+menus, and it integrates natively into any LSP-capable editor, even with minimal plugin
+support.
 
 The purpose is a Git interface whose state, structure, rendering and keys live
 in the server, so a client only displays server-rendered text, forwards input
@@ -18,6 +23,26 @@ See [client installation and quickstart](docs/CLIENT_INSTALL.md),
 [external client specification](docs/CLIENT_SPEC.md). Helix, Zed and JetBrains
 adapters are welcome as COMMUNITY clients through that specification; no
 first-party implementations are promised.
+
+## Workflows it makes easy
+
+<!-- T032: list only what docs/parity.md shows as Implemented. -->
+
+Rewriting history is mostly about being sure of the target. Each of these lets
+you look at the commit before anything runs.
+
+- **Find the commit first.** Filter the log by author, date, message, changed
+  string or path, and copy commit IDs.
+- **Put a change in the commit it belonged in.** Stage just those hunks or
+  lines, then fix them up into an earlier commit picked from the log.
+- **Fixups without ceremony.** Fold staged changes into a commit and let the
+  rebase happen in one step.
+- **Rebases you can see.** Reorder and drop commits in an interactive todo view
+  before submitting it.
+- **Branch surgery.** Spin commits off onto a new branch, or reset a branch to a
+  commit you picked from the log, with a confirmation when it would discard
+  work.
+
 
 ## Binary release installation (not yet published)
 
