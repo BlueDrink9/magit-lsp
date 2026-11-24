@@ -39,6 +39,51 @@ pub fn git_compatible_absolute(path: &Path) -> PathBuf {
     out
 }
 
+/// Why `path` would fail a Windows Git or filesystem operation, if it would.
+///
+/// Windows reserves the filename characters `< > : " | ? *`, and Git for
+/// Windows rejects the verbatim `\\?\` prefix that `canonicalize` returns, so a
+/// fixture that only passes on Unix hides the failure. The first segment is a
+/// root — empty on Unix (`/tmp/x`) or a drive (`C:`) on Windows, where the
+/// colon is not a name character — and is exempt from the name check.
+///
+/// `check_name_chars` also rejects reserved characters in every path segment.
+/// Callers pass `false` for values that are not filenames (git arguments such
+/// as commit messages or ignore patterns) so only the verbatim prefix is
+/// rejected there.
+///
+/// See [Naming Files, Paths, and Namespaces].
+///
+/// [Naming Files, Paths, and Namespaces]:
+///     https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+pub fn windows_path_problem(path: &Path, check_name_chars: bool) -> Option<&'static str> {
+    let text = path.to_string_lossy();
+    if text.starts_with(r"\\?\") {
+        return Some("verbatim `\\\\?\\` paths are rejected by Git for Windows");
+    }
+    if !check_name_chars {
+        return None;
+    }
+    for (index, segment) in text.split(['/', '\\']).enumerate() {
+        if index == 0 {
+            let mut chars = segment.chars();
+            let drive = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+                && chars.next() == Some(':')
+                && chars.next().is_none();
+            if segment.is_empty() || drive {
+                continue;
+            }
+        }
+        if segment
+            .chars()
+            .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        {
+            return Some("windows-reserved filename character in path segment (`< > : \" | ? *`)");
+        }
+    }
+    None
+}
+
 /// Make spawned `git` deterministic: fixed identity and dates, no system
 /// config, an isolated `HOME`/`XDG_CONFIG_HOME` and `LC_ALL=C`.
 ///
@@ -66,6 +111,14 @@ pub fn apply_determinism_env() {
 /// Run `git` in `dir`, panicking with its stderr when it fails.
 pub fn git(dir: &Path, args: &[&str]) -> String {
     apply_determinism_env();
+    if let Some(reason) = windows_path_problem(dir, true) {
+        panic!("git directory {dir:?} is not Windows-portable: {reason}");
+    }
+    for arg in args {
+        if let Some(reason) = windows_path_problem(Path::new(arg), false) {
+            panic!("git argument {arg:?} is not Windows-portable: {reason}");
+        }
+    }
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -83,6 +136,9 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 
 /// Write `content` to `path`, creating any missing parent directories.
 pub fn write(path: &Path, content: &str) {
+    if let Some(reason) = windows_path_problem(path, true) {
+        panic!("fixture path {path:?} is not Windows-portable: {reason}");
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).expect("create parent directories");
     }
@@ -214,8 +270,12 @@ impl RepoFixture {
 
     /// Wrap `dir`, recording its canonical root so it matches the repository
     /// identity that [`GitRepo::open`] derives.
+    ///
+    /// The root is normalized through [`git_compatible_absolute`]: canonical on
+    /// Unix, plain on Windows (where the canonical verbatim form is unusable as
+    /// a git argument).
     fn with_tempdir(dir: TempDir) -> Self {
-        let root = std::fs::canonicalize(dir.path()).expect("canonicalize fixture root");
+        let root = git_compatible_absolute(dir.path());
         Self {
             dir,
             root,

@@ -13,29 +13,31 @@ fn index_flags_are_independent_literal_and_atomic() {
     let (tmp, repo) = RepoFixture::new()
         .commit(
             "initial",
-            [("-odd [x]*.txt", "literal"), ("other.txt", "other")],
+            [("-odd [x]glob.txt", "literal"), ("other.txt", "other")],
         )
         .build();
     let flags = || git(tmp.path(), &["ls-files", "-v"]);
     let head = git(tmp.path(), &["rev-parse", "HEAD"]);
     let index = git(tmp.path(), &["ls-files", "--stage"]);
-    repo.set_skip_worktree(&["-odd [x]*.txt"], true).unwrap();
+    repo.set_skip_worktree(&["-odd [x]glob.txt"], true).unwrap();
     assert!(flags()
         .lines()
-        .any(|line| line.starts_with('S') && line.ends_with("-odd [x]*.txt")));
-    repo.set_assume_unchanged(&["-odd [x]*.txt"], true).unwrap();
-    assert!(flags()
-        .lines()
-        .any(|line| line.starts_with('s') && line.ends_with("-odd [x]*.txt")));
-    repo.set_skip_worktree(&["-odd [x]*.txt"], false).unwrap();
-    assert!(flags()
-        .lines()
-        .any(|line| line.starts_with('h') && line.ends_with("-odd [x]*.txt")));
-    repo.set_assume_unchanged(&["-odd [x]*.txt"], false)
+        .any(|line| line.starts_with('S') && line.ends_with("-odd [x]glob.txt")));
+    repo.set_assume_unchanged(&["-odd [x]glob.txt"], true)
         .unwrap();
     assert!(flags()
         .lines()
-        .any(|line| line.starts_with('H') && line.ends_with("-odd [x]*.txt")));
+        .any(|line| line.starts_with('s') && line.ends_with("-odd [x]glob.txt")));
+    repo.set_skip_worktree(&["-odd [x]glob.txt"], false)
+        .unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('h') && line.ends_with("-odd [x]glob.txt")));
+    repo.set_assume_unchanged(&["-odd [x]glob.txt"], false)
+        .unwrap();
+    assert!(flags()
+        .lines()
+        .any(|line| line.starts_with('H') && line.ends_with("-odd [x]glob.txt")));
     let before = flags();
     assert!(repo
         .set_skip_worktree(&["other.txt", "missing"], true)
@@ -46,7 +48,7 @@ fn index_flags_are_independent_literal_and_atomic() {
     assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
     assert_eq!(git(tmp.path(), &["ls-files", "--stage"]), index);
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("-odd [x]*.txt")).unwrap(),
+        std::fs::read_to_string(tmp.path().join("-odd [x]glob.txt")).unwrap(),
         "literal"
     );
     std::fs::write(repo.git_dir().join("index.lock"), "locked").unwrap();
@@ -1822,4 +1824,45 @@ fn unstage_selection_context_only_is_noop() {
 
     assert!(!applied, "context-only selection must not apply anything");
     assert!(cached_diff(tmp.path()).contains("line3 CHANGED"));
+}
+
+#[test]
+fn windows_path_portability_rejects_verbatim_prefixes_and_reserved_names() {
+    // Synthetic Windows inputs, so the portability rule is exercised on Linux
+    // (`src/file_uri.rs` uses the same pattern for its Windows URI tests).
+    for verbatim in [r"\\?\C:\repo\a b.txt", r"\\?\UNC\server\share\a b.txt"] {
+        let reason = windows_path_problem(Path::new(verbatim), true).expect("verbatim rejected");
+        assert!(reason.contains("verbatim"), "{verbatim}: {reason}");
+    }
+    let reason = windows_path_problem(Path::new("/repo/dir/a*b.txt"), true)
+        .expect("reserved name character rejected");
+    assert!(
+        reason.contains("windows-reserved filename character"),
+        "{reason}"
+    );
+    let reason = windows_path_problem(Path::new(r"\\?\C:\repo\a*b.txt"), false)
+        .expect("argument rule still rejects a verbatim prefix");
+    assert!(reason.contains("verbatim"), "{reason}");
+
+    assert_eq!(
+        windows_path_problem(Path::new("/tmp/magit-lsp-fixture"), true),
+        None
+    );
+    // A plain Windows path: its first segment is a drive, not a name.
+    assert_eq!(
+        windows_path_problem(Path::new(r"C:\repo\a b.txt"), true),
+        None
+    );
+    // Git arguments are names only sometimes, so reserved characters are fine.
+    assert_eq!(
+        windows_path_problem(Path::new("*.configured-private"), false),
+        None
+    );
+}
+
+#[test]
+#[should_panic(expected = "windows-reserved filename character")]
+fn shared_write_rejects_windows_reserved_file_names() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    write(&dir.path().join("odd [x]*.txt"), "literal");
 }

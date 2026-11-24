@@ -4,6 +4,18 @@ mod common;
 
 use common::*;
 use rstest::rstest;
+use std::path::Path;
+
+/// Commit a file whose name Windows cannot represent.
+///
+/// `"` is a reserved Windows filename character, so the shared fixture helpers,
+/// which reject unportable names, cannot create it: the fixture is built with a
+/// placeholder and the real path is committed afterwards.
+fn commit_unportable_path(tmp: &Path, path: &str) {
+    std::fs::rename(tmp.join("placeholder.txt"), tmp.join(path)).expect("rename to unusual path");
+    git(tmp, &["add", "-A"]);
+    git(tmp, &["commit", "-q", "-m", "unusual path"]);
+}
 
 fn status_paths(status: &magit_lsp::git::Status, staged: bool) -> Vec<String> {
     let files = if staged {
@@ -22,13 +34,28 @@ fn untracked_paths(status: &magit_lsp::git::Status) -> Vec<String> {
 
 #[rstest]
 #[case::status_reports_path_with_spaces("a b.txt")]
-#[case::status_reports_path_with_quote_and_backslash("a\"b\\c.txt")]
 #[case::status_reports_unicode_path("héllo wörld/日本.txt")]
 fn status_reports_unusual_path(#[case] path: &str) {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [(path, TEN_LINES)])
         .build();
     write(&tmp.path().join(path), &standard_changes());
+
+    let status = repo.status().expect("status");
+    assert_eq!(status_paths(&status, false), vec![path]);
+    assert_eq!(status.unstaged[0].hunks.len(), 1);
+}
+
+/// Windows reserves `"` in file names, so this fixture only exists on Unix.
+#[cfg(unix)]
+#[test]
+fn status_reports_path_with_quote_and_backslash() {
+    let path = "a\"b\\c.txt";
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("placeholder.txt", TEN_LINES)])
+        .build();
+    commit_unportable_path(tmp.path(), path);
+    std::fs::write(tmp.path().join(path), standard_changes()).expect("modify unusual path");
 
     let status = repo.status().expect("status");
     assert_eq!(status_paths(&status, false), vec![path]);
@@ -74,13 +101,16 @@ fn unstage_hunk_works_on_unicode_path() {
     assert_eq!(status_paths(&status, false), vec![path]);
 }
 
+/// Windows reserves `"` in file names, so this fixture only exists on Unix.
+#[cfg(unix)]
 #[test]
 fn stage_lines_works_on_quote_and_backslash_path() {
     let path = "a\"b\\c.txt";
     let (tmp, repo) = RepoFixture::new()
-        .commit("init", [(path, TEN_LINES)])
+        .commit("init", [("placeholder.txt", TEN_LINES)])
         .build();
-    write(&tmp.path().join(path), &standard_changes());
+    commit_unportable_path(tmp.path(), path);
+    std::fs::write(tmp.path().join(path), standard_changes()).expect("modify unusual path");
 
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id

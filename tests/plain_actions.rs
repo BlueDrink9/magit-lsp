@@ -1805,9 +1805,9 @@ fn plain_ignore_topdir_uses_a_choice_document_and_submits_literal_id() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit(
             "initial",
-            [("dir/a*b.txt", "one\n"), ("other.txt", "other\n")],
+            [("dir/a[b]b.txt", "one\n"), ("other.txt", "other\n")],
         )
-        .modify("dir/a*b.txt", "changed\n")
+        .modify("dir/a[b]b.txt", "changed\n")
         .build();
     std::fs::write(repo.path().join(".gitignore"), "# retained\n").unwrap();
     let head = repo.git(&["rev-parse", "HEAD"]);
@@ -1815,7 +1815,7 @@ fn plain_ignore_topdir_uses_a_choice_document_and_submits_literal_id() {
     let row = editor
         .text(&uri)
         .lines()
-        .position(|line| line.contains("a*b.txt"))
+        .position(|line| line.contains("a[b]b.txt"))
         .expect("file row") as u32;
     let (view_id, version) = offered_status_view(&mut server, &editor, &uri, row, 139);
     let invoked = invoke_plain(
@@ -1872,14 +1872,14 @@ fn plain_ignore_topdir_uses_a_choice_document_and_submits_literal_id() {
     );
     assert_eq!(
         std::fs::read_to_string(repo.path().join(".gitignore")).unwrap(),
-        "# retained\n/dir/a\\*b.txt\n",
+        "# retained\n/dir/a\\[b\\]b.txt\n",
         "literal root ignore rule must be appended verbatim"
     );
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "HEAD must not move");
     assert_eq!(fixtures::read(&repo.path().join("other.txt")), "other\n");
     assert_eq!(
         repo.git(&["status", "--short"]),
-        " M dir/a*b.txt\n?? .gitignore\n",
+        " M dir/a[b]b.txt\n?? .gitignore\n",
         "only the modified file and the newly written ignore file may change"
     );
     server.shutdown_and_exit();
