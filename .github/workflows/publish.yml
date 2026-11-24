@@ -66,10 +66,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - name: Set up pinned pnpm
-        run: corepack prepare pnpm@10.13.1 --activate
+      # pnpm comes from the flake's locked dev shell. Node stays on the runner:
+      # the publisher executes the frozen vsce/ovsx from node_modules and `gh`,
+      # neither of which the dev shell provides.
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
       - name: Install the frozen publication tooling
-        run: make vscode-deps
+        run: nix develop --no-update-lock-file -c make vscode-deps
       # The make target owns release creation and the OIDC registry lanes; this
       # job only hands it the exact downloaded bytes, and nothing here rebuilds,
       # repackages, installs a PAT or runs the crate lane.
