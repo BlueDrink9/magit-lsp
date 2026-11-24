@@ -8,7 +8,7 @@ keys: r
 wait screen contains "Continue"
 keys: r
 wait
-expect screen contains "git rebase --continue failed:"
+expect screen contains "git rebase --continue failed (exit code 1)"
 expect screen contains "continue: unavailable (resolve conflicts)"
 expect view_stack.count == 1
 sh: git ls-files --stage > .git/rebase-index-after && test "$(cat .git/rebase-index-after)" = "$(cat .git/rebase-index)" && test "$(git status --porcelain)" = "$(cat .git/rebase-status)"
