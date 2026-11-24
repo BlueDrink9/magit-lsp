@@ -587,6 +587,16 @@ fn side_status(flag: Option<u8>) -> Option<String> {
 
 impl std::fmt::Display for GitFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.stderr.is_empty() {
+            // A silent failure would otherwise show nothing after the colon;
+            // the exit status is the only clue left.
+            return write!(
+                f,
+                "git {} failed (exit code {})",
+                self.args.join(" "),
+                self.exit_code
+            );
+        }
         write!(f, "git {} failed: {}", self.args.join(" "), self.stderr)
     }
 }

@@ -554,3 +554,25 @@ fn normal_and_piped_apply_failures_keep_original_details() {
         );
     }
 }
+
+#[test]
+fn git_failure_display_shows_exit_status_when_stderr_is_empty() {
+    let silent = GitFailure {
+        exit_code: 128,
+        stderr: String::new(),
+        args: vec!["status".to_owned()],
+        subcommand: "status".to_owned(),
+        warning: None,
+    };
+    assert_eq!(silent.to_string(), "git status failed (exit code 128)");
+
+    // Non-empty stderr keeps the user-facing message unchanged.
+    let verbose = GitFailure {
+        stderr: "fatal: not a git repository".to_owned(),
+        ..silent
+    };
+    assert_eq!(
+        verbose.to_string(),
+        "git status failed: fatal: not a git repository"
+    );
+}

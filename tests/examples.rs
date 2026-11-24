@@ -1782,6 +1782,43 @@ fn json_excerpt(value: Option<&Value>) -> String {
     format!("{:?}... ({total} chars total)", excerpt)
 }
 
+/// Maximum bytes of the server's stderr attached to a replay mismatch.
+const STDERR_TAIL_LIMIT: usize = 2048;
+
+/// A bounded, newline-normalized tail of the server's stderr, or a marker when
+/// the server logged nothing.
+fn stderr_tail(stderr: &str) -> String {
+    let normalized = stderr.replace("\r\n", "\n");
+    let normalized = normalized.trim_end();
+    if normalized.is_empty() {
+        return "<empty>".to_owned();
+    }
+    let start = normalized.len().saturating_sub(STDERR_TAIL_LIMIT);
+    let start = (start..normalized.len())
+        .find(|index| normalized.is_char_boundary(*index))
+        .unwrap_or(normalized.len());
+    let tail = &normalized[start..];
+    if start == 0 {
+        tail.to_owned()
+    } else {
+        format!("...{tail}")
+    }
+}
+
+/// Format a recorded s2c frame mismatch, including a bounded server stderr tail
+/// so a failure whose frame text omits the cause stays diagnosable.
+fn s2c_mismatch_message(where_: &str, expected: &Value, observed: &Value, stderr: &str) -> String {
+    let (path, expected_value, observed_value) = first_difference(expected, observed)
+        .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
+    format!(
+        "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}\n  server stderr tail: {}",
+        json_excerpt(expected_value),
+        json_excerpt(observed_value),
+        json_excerpt(Some(observed)),
+        stderr_tail(stderr)
+    )
+}
+
 /// The exchange identity of a recorded or captured frame.
 ///
 /// Regeneration may replace a response payload but must not silently rename an
@@ -2201,12 +2238,11 @@ fn replay_example_env(
                 );
                 if observed != expected {
                     if !regenerate {
-                        let (path, expected_value, observed_value) =
-                            first_difference(&expected, &observed)
-                                .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
-                        return Err(format!(
-                            "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
-                            json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
+                        return Err(s2c_mismatch_message(
+                            &where_,
+                            &expected,
+                            &observed,
+                            &server.stderr_text(),
                         ));
                     }
                     // Regeneration captures the server's current answer instead
@@ -3330,6 +3366,30 @@ fn json_excerpt_bounds_long_values() {
     );
     assert!(excerpt.contains("500 chars total"));
     assert!(!excerpt.contains(&"x".repeat(500)));
+}
+
+#[test]
+fn mismatch_message_includes_bounded_server_stderr_tail() {
+    let expected = serde_json::json!({"result": {"text": ["expected"]}});
+    let observed = serde_json::json!({"result": {"text": ["observed"]}});
+
+    let message = s2c_mismatch_message(
+        "plain-status.jsonl:42",
+        &expected,
+        &observed,
+        "log line\r\nwarning: boom\n",
+    );
+    assert!(message.contains("plain-status.jsonl:42: recorded s2c frame mismatch"));
+    assert!(message.contains("server stderr tail: log line\nwarning: boom"));
+    assert!(!message.contains('\r'));
+
+    let empty = s2c_mismatch_message("plain-status.jsonl:42", &expected, &observed, "");
+    assert!(empty.contains("server stderr tail: <empty>"));
+
+    let noisy = "x".repeat(STDERR_TAIL_LIMIT + 100);
+    let bounded = s2c_mismatch_message("plain-status.jsonl:42", &expected, &observed, &noisy);
+    assert!(bounded.contains(&format!("...{}", "x".repeat(STDERR_TAIL_LIMIT))));
+    assert!(!bounded.contains(&noisy));
 }
 
 #[test]
