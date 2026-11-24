@@ -434,8 +434,12 @@ fn commit_confirm_holds_the_publication_order_against_a_watcher_refresh() {
             {
                 committed = true;
             }
+            // The published render keeps sections closed, so the touched file
+            // is visible through its section count rather than a file row.
             if message["method"] == "view/render"
-                && render_lines(&message).join("\n").contains("touched.txt")
+                && render_lines(&message)
+                    .iter()
+                    .any(|line| line == "Untracked files (1)")
             {
                 render_saw_touch = true;
             }
@@ -560,10 +564,12 @@ fn status_open_arms_watcher_after_open_response() {
             "the deferred watcher did not refresh for the marker"
         );
         let message = server.recv();
+        // Sections stay closed on the published render: the new worktree file
+        // surfaces as the untracked count, not as a file row.
         if message["method"] == "view/render"
             && message["params"]["text"]
                 .to_string()
-                .contains("watcher-deferred-proof.txt")
+                .contains("Untracked files (1)")
         {
             break;
         }
@@ -658,11 +664,17 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
     assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
     assert!(ready["params"].get("edits").is_none(), "{ready}");
     let text: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    // The stored completion publishes the closed render: the fresh untracked
+    // file appears in its section count, with no file or hunk row.
     assert!(
-        text.iter()
-            .any(|line| line.contains("status-open-text.txt")),
+        text.iter().any(|line| line == "Untracked files (1)"),
         "{text:?}"
     );
+    assert!(
+        text.iter().any(|line| line == "Unstaged changes (1)"),
+        "{text:?}"
+    );
+    assert!(text.iter().all(|line| !line.contains("@@")), "{text:?}");
     assert!(!text
         .iter()
         .any(|line| line.contains("Loading repository status")));
@@ -772,15 +784,18 @@ fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
     assert!(ready["params"].get("baseVersion").is_none(), "{ready}");
     assert!(ready["params"].get("edits").is_none(), "{ready}");
     let text: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    // Both untracked files — the one present at acquisition and the one added
+    // before the queued refresh — are counted in the closed render. The count
+    // of two is only reachable from the refreshed status, not the older one.
     assert!(
-        text.iter().any(|line| line.contains("later-refresh.txt")),
+        text.iter().any(|line| line == "Untracked files (2)"),
         "the exit refresh must include the file created after the completion: {text:?}"
     );
     assert!(
-        text.iter()
-            .any(|line| line.contains("status-open-text.txt")),
+        text.iter().any(|line| line == "Unstaged changes (1)"),
         "{text:?}"
     );
+    assert!(text.iter().all(|line| !line.contains("@@")), "{text:?}");
     assert!(!text
         .iter()
         .any(|line| line.contains("Loading repository status")));
@@ -980,8 +995,10 @@ fn status_open_refreshes_while_loading_are_coalesced() {
     let loading_version = loading["params"]["version"].as_u64().unwrap();
     let ready = server.wait_for_view_render_after(&view, loading_version);
     let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    // The follow-up's status is published as a closed render: the fresh file
+    // is visible only through the untracked section's count.
     assert!(
-        lines.iter().any(|line| line.contains("overlap-fresh.txt")),
+        lines.iter().any(|line| line == "Untracked files (1)"),
         "{lines:?}"
     );
     assert!(
@@ -1220,12 +1237,25 @@ fn status_open_held_git(acknowledge: bool) {
         serde_json::from_value(ready["params"]["text"].clone()).unwrap()
     };
     assert!(
-        text.iter()
-            .any(|line| line.contains("status-open-fresh.txt")),
+        text.iter().any(|line| line == "Unstaged changes (1)"),
         "{text:?}"
     );
     assert!(
-        text.iter().any(|line| line.contains("+line3 CHANGED")),
+        text.iter().any(|line| line == "Untracked files (1)"),
+        "{text:?}"
+    );
+    // The published completion is the closed render: headers and counts, no
+    // file row and no hunk line.
+    assert!(
+        !text
+            .iter()
+            .any(|line| line.contains("status-open-fresh.txt")),
+        "{text:?}"
+    );
+    assert!(!text.iter().any(|line| line.contains("f.txt")), "{text:?}");
+    assert!(!text.iter().any(|line| line.contains("@@")), "{text:?}");
+    assert!(
+        !text.iter().any(|line| line.contains("+line3 CHANGED")),
         "{text:?}"
     );
     assert!(!text
@@ -1236,6 +1266,24 @@ fn status_open_held_git(acknowledge: bool) {
     let resync = server.response_with_id(4);
     assert_eq!(resync["result"]["version"], ready["params"]["version"]);
     assert_eq!(resync["result"]["text"], json!(text));
+    // A later visibility open still serves the on-demand hunk path.
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.show-all"}}));
+    assert!(server.response_with_id(5)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let opened: Vec<String> =
+        serde_json::from_value(server.response_with_id(6)["result"]["text"].clone()).unwrap();
+    assert!(
+        opened
+            .iter()
+            .any(|line| line.contains("status-open-fresh.txt")),
+        "{opened:?}"
+    );
+    assert!(
+        opened.iter().any(|line| line.contains("+line3 CHANGED")),
+        "{opened:?}"
+    );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -2967,6 +3015,24 @@ fn open_view_message(id: i64, repo: &Value) -> Value {
             "viewport": {"cols": 80, "rows": 24},
         },
     })
+}
+
+/// Expand every section of a freshly acquired status render and acknowledge
+/// the result, returning the version tests must cite for positional reads.
+/// The acquired render starts with its sections closed, so its outline has no
+/// hunk to address until the client opens them.
+fn show_all_and_ack(server: &mut TestServer, id: i64, view: &str, version: u64) -> u64 {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.show-all","version":version}}));
+    let opened = server.response_with_id(id);
+    assert!(opened["error"].is_null(), "{opened}");
+    let expanded = server.wait_for_view_render_after(view, version);
+    let expanded_version = expanded["params"]["version"]
+        .as_u64()
+        .expect("expanded render version");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":view,"version":expanded_version}}));
+    expanded_version
 }
 
 /// The 0-based cursor line of the first hunk, resolved from the server's own

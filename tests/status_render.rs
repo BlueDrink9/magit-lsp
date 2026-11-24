@@ -6,11 +6,11 @@ mod common;
 use common::*;
 use expect_test::expect;
 use lsp_types::{Position, SymbolKind};
-use magit_lsp::git::{FileEntry, Status};
+use magit_lsp::git::{diff_invocation_count, FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
 use magit_lsp::status_view::{self, StatusView};
 use magit_lsp::tree::{NodeKind, Token, Tree, Visibility, VisibilityState};
-use magit_lsp::view::{Ctx, View, Viewport};
+use magit_lsp::view::{Ctx, View, Viewport, VisibilityCommand};
 
 fn hunk(id: &str, lines: Vec<(char, &str)>) -> Hunk {
     Hunk {
@@ -180,8 +180,9 @@ fn snapshot_shows_staged_unstaged_untracked_and_a_rename() {
     .assert_eq(&text);
 }
 
-/// The early loading render carries the discovered branch, and installing the
-/// full status keeps the same `header` node while adding the file sections.
+/// The early loading render carries the discovered branch, and the deferred
+/// install keeps the same `header` node while publishing closed section
+/// headers; opening a section then reveals its files.
 #[test]
 fn loading_render_shows_head_and_full_status_preserves_the_header() {
     let (_tmp, repo) = RepoFixture::new()
@@ -213,7 +214,188 @@ fn loading_render_shows_head_and_full_status_preserves_the_header() {
     assert_eq!(installed_header.start_line, header.start_line);
     assert_eq!(full.lines[0], "Head: main");
     assert!(full.node("section:unstaged").is_some());
-    assert!(full.lines.iter().any(|line| line.contains("f.txt")));
+    // The deferred install publishes the closed render: the section header with
+    // its count, and no file or hunk line below it yet.
+    assert!(full.lines.iter().any(|line| line == "Unstaged changes (1)"));
+    assert!(full.lines.iter().all(|line| !line.contains("f.txt")));
+    assert!(full
+        .nodes
+        .iter()
+        .all(|node| !matches!(node.kind, NodeKind::File | NodeKind::Hunk | NodeKind::Line)));
+    // Opening the section renders its files.
+    let section = full.node("section:unstaged").unwrap().start_line;
+    assert!(view.set_visibility(
+        &full,
+        Some(section),
+        VisibilityCommand::Show { recursive: false }
+    ));
+    let opened = view.render(&ctx);
+    assert!(opened.lines.iter().any(|line| line.contains("f.txt")));
+}
+
+/// A1: the deferred acquisition publishes the closed render — `Head:` plus the
+/// section headers with counts, and no file, hunk or diff line at all.
+#[test]
+fn deferred_install_renders_only_head_and_closed_section_headers() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+    let changed = tmp.path().join("f.txt");
+    let mut view = StatusView::loading_with_branch(repo, "main");
+    let fresh = view.acquire_fresh_state().unwrap();
+    assert!(view.install_fresh_state(fresh));
+    let before = diff_invocation_count(&changed);
+    let tree = view.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    assert_eq!(
+        tree.lines,
+        [
+            "Head: main",
+            "",
+            "Staged changes (0)",
+            "",
+            "Unstaged changes (1)",
+            "",
+            "Untracked files (1)",
+        ]
+    );
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .filter(|node| matches!(node.kind, NodeKind::File | NodeKind::Hunk | NodeKind::Line))
+            .count(),
+        0
+    );
+    assert!(tree.node("section:unstaged").is_some());
+    assert!(tree.node("section:untracked").is_some());
+    assert_eq!(
+        diff_invocation_count(&changed),
+        before,
+        "the closed render must not diff any file"
+    );
+}
+
+/// A2: opening a section renders its files and fetches their hunks on demand
+/// through the existing lazy path; a full open then matches the old
+/// fully-expanded fixture byte for byte.
+#[test]
+fn opening_a_section_fetches_hunks_on_demand_and_matches_the_full_fixture() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+    let status = repo.status().expect("status");
+    let path = tmp.path().join("f.txt");
+    let mut view = StatusView::loading_with_branch(repo, "main");
+    let fresh = view.acquire_fresh_state().unwrap();
+    assert!(view.install_fresh_state(fresh));
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
+    let closed = view.render(&ctx);
+    assert!(!closed.lines.iter().any(|line| line.contains("f.txt")));
+    let before = diff_invocation_count(&path);
+
+    // Opening the section reveals the file row and loads its hunks on demand:
+    // the hunk header appears but its body stays closed at this level.
+    let section = closed.node("section:unstaged").unwrap().start_line;
+    assert!(view.set_visibility(
+        &closed,
+        Some(section),
+        VisibilityCommand::Show { recursive: false }
+    ));
+    let opened = view.render(&ctx);
+    assert!(opened.lines.iter().any(|line| line == "  M f.txt"));
+    assert!(opened.lines.iter().any(|line| line.starts_with("    @@ ")));
+    assert!(!opened
+        .lines
+        .iter()
+        .any(|line| line.contains("+line3 CHANGED")));
+    assert!(opened.lines.iter().all(|line| !line.contains("new.txt")));
+    assert_eq!(
+        diff_invocation_count(&path),
+        before + 1,
+        "the open fetches the file's hunk exactly once"
+    );
+
+    // Raising the detail to the old default expands every body; the render is
+    // then the pre-change fully-expanded fixture.
+    assert!(view.set_visibility(&opened, None, VisibilityCommand::SetDetail(4)));
+    let full = view.render(&ctx);
+    let expected = status_view::build(&status);
+    assert_eq!(full.lines, expected.lines);
+    assert_eq!(
+        diff_invocation_count(&path),
+        before + 1,
+        "a later render reuses the loaded hunk"
+    );
+}
+
+/// A3: a refresh keeps the server-owned fold state: a section the user opened
+/// stays open and a section left closed stays closed.
+#[test]
+fn refresh_keeps_the_opened_and_closed_section_state() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+    let mut view = StatusView::loading_with_branch(repo, "main");
+    let fresh = view.acquire_fresh_state().unwrap();
+    assert!(view.install_fresh_state(fresh));
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
+    let closed = view.render(&ctx);
+    let section = closed.node("section:unstaged").unwrap().start_line;
+    assert!(view.set_visibility(
+        &closed,
+        Some(section),
+        VisibilityCommand::Show { recursive: false }
+    ));
+    let opened = view.render(&ctx);
+    assert!(opened.lines.iter().any(|line| line == "  M f.txt"));
+    assert!(opened.lines.iter().all(|line| !line.contains("new.txt")));
+
+    view.on_refresh().unwrap();
+    let refreshed = view.render(&ctx);
+    assert!(
+        refreshed.lines.iter().any(|line| line == "  M f.txt"),
+        "the user-opened section stays open across a refresh: {:?}",
+        refreshed.lines
+    );
+    assert!(
+        refreshed.lines.iter().all(|line| !line.contains("new.txt")),
+        "the untouched section stays closed across a refresh: {:?}",
+        refreshed.lines
+    );
+
+    // Closing it again is folded state too and survives the next refresh.
+    let section = refreshed.node("section:unstaged").unwrap().start_line;
+    assert!(view.set_visibility(
+        &refreshed,
+        Some(section),
+        VisibilityCommand::Hide { recursive: false }
+    ));
+    let hidden = view.render(&ctx);
+    assert!(hidden.lines.iter().all(|line| !line.contains("f.txt")));
+    view.on_refresh().unwrap();
+    let hidden_again = view.render(&ctx);
+    assert!(
+        hidden_again
+            .lines
+            .iter()
+            .all(|line| !line.contains("f.txt")),
+        "the closed section stays closed across a refresh: {:?}",
+        hidden_again.lines
+    );
 }
 
 /// The clean-tree message the Lua suite used to assert: even an empty tree

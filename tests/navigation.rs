@@ -621,17 +621,29 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
             .contains("Head:"),
         "status completion was not published: {initial_render}"
     );
-    let v1 = initial_render["params"]["version"]
+    let ready = initial_render["params"]["version"]
         .as_u64()
-        .expect("v1 version");
-    assert!(loading_version < v1, "loading render must precede status");
+        .expect("ready version");
+    assert!(
+        loading_version < ready,
+        "loading render must precede status"
+    );
+    server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view_id,"version":ready}}));
+    // The fresh rich render starts with its sections closed. Open them so the
+    // acknowledged baseline has the full structure the symbols below describe.
+    server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
+        "params":{"viewId":view_id,"command":"common.show-all"}}));
+    let opened = server.response_with_id(3);
+    assert_eq!(opened["result"]["effects"], json!([]), "{opened}");
+    let expanded = server.wait_for_view_render_after(&view_id, ready);
+    let v1 = expanded["params"]["version"].as_u64().expect("v1 version");
     let v1_symbols = status_view::build(&repo.status().expect("initial status")).document_symbols();
     server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view_id,"version":v1}}));
 
     write(&tmp.path().join("new.txt"), "new file\n");
-    server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
+    server.send(json!({"jsonrpc":"2.0", "id":4, "method":"view/invoke",
         "params":{"viewId":view_id,"command":"common.refresh"}}));
-    let refreshed = server.response_with_id(3);
+    let refreshed = server.response_with_id(4);
     assert_eq!(refreshed["result"]["effects"], json!([]), "{refreshed}");
     let v2_render = server.wait_for_view_render_after(&view_id, v1);
     let v2 = v2_render["params"]["version"].as_u64().expect("v2 version");
@@ -652,15 +664,15 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
         json!({"jsonrpc":"2.0","id":id,"method":"textDocument/documentSymbol",
         "params":{"textDocument":{"uri":uri}}})
     };
-    server.send(definition_request(4));
-    let def_v1 = server.response_with_id(4);
+    server.send(definition_request(5));
+    let def_v1 = server.response_with_id(5);
     assert_eq!(
         def_v1["result"],
         Value::Null,
         "unacked v2 must not affect definition: {def_v1}"
     );
-    server.send(symbols_request(5));
-    let symbols_v1 = server.response_with_id(5);
+    server.send(symbols_request(6));
+    let symbols_v1 = server.response_with_id(6);
     assert_eq!(
         symbols_v1["result"],
         json!(v1_symbols),
@@ -670,15 +682,15 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
     server.send(
         json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":v2}}),
     );
-    server.send(definition_request(6));
-    let def_v2 = server.response_with_id(6);
+    server.send(definition_request(7));
+    let def_v2 = server.response_with_id(7);
     assert_eq!(
         def_v2["result"]["uri"],
         json!(file_uri(&tmp.path().to_string_lossy(), "new.txt")),
         "{def_v2}"
     );
-    server.send(symbols_request(7));
-    let symbols_v2 = server.response_with_id(7);
+    server.send(symbols_request(8));
+    let symbols_v2 = server.response_with_id(8);
     assert_eq!(symbols_v2["result"], json!(v2_symbols));
     assert_ne!(symbols_v1["result"], symbols_v2["result"]);
 

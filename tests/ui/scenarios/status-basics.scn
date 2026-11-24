@@ -12,6 +12,10 @@ wait
 keys: j j j j
 wait
 expect cursor on "Unstaged changes"
+# Sections start closed, so the first Tab opens this one; the second folds it.
+keys: Tab
+wait
+expect screen contains "M f.txt"
 keys: Tab
 wait
 expect screen not-contains "M f.txt"
@@ -26,14 +30,21 @@ keys: s
 wait
 expect screen contains "Staged changes (1)"
 snapshot: staged-file
+# The staged section is closed by default, so open it and move onto the staged file before unstaging.
+goto "Staged changes (1)"
+keys: Tab
+wait
+goto "M f.txt"
 keys: u
 wait
 expect screen contains "Staged changes (0)"
 expect screen contains "Unstaged changes (2)"
 snapshot: unstaged-file
-keys: k k k k k k k k k k k k k k k k k k k k
-keys: j j j j j j j j j j
-keys: Right Right Right Right
+# Hunk bodies are collapsed by default now, so raise detail before targeting its body line.
+goto "@@ -1,10 +1,10 @@"
+keys: z r z r z r z r
+wait
+goto "+line3 CHANGED"
 wait
 expect cursor on "+line3 CHANGED"
 document: before-edit

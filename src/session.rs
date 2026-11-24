@@ -1077,12 +1077,18 @@ impl Session {
         repo: GitRepo,
         branch: String,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        self.open_provider_view(
+        let opened = self.open_provider_view(
             id,
             placement,
             viewport,
             Box::new(StatusView::loading_with_branch(repo, branch)),
-        )
+        )?;
+        // The deferred opening starts with its sections closed, so keep the
+        // cycle tracker on that level instead of the default full one.
+        if let Some(view) = self.views.get_mut(&opened.0.id) {
+            view.visibility_level = 1;
+        }
+        Ok(opened)
     }
 
     fn open_internal(

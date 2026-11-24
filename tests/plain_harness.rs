@@ -798,11 +798,15 @@ fn rich_server_render_ack_and_stale_resync_preserve_caller_reply() {
         .unwrap();
     assert!(resync["id"].is_number());
     assert_eq!(resync["params"]["viewId"], view);
+    // The published status keeps sections closed, so the watcher-driven render
+    // shows the updated count rather than a file row.
     client.until(|c| {
         c.rich.as_ref().is_some_and(|r| {
-            r.views
-                .get(&view)
-                .is_some_and(|s| s.lines.iter().any(|line| line.contains("new-file.txt")))
+            r.views.get(&view).is_some_and(|s| {
+                s.lines
+                    .iter()
+                    .any(|line| line.contains("Untracked files (1)"))
+            })
         })
     });
     let recovered = &client.rich.as_ref().unwrap().views[&view];

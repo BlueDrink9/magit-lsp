@@ -90,15 +90,23 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
     );
     let base_version = initial["params"]["version"].as_u64().unwrap();
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":base_version}}));
+    let mut text: Vec<String> = serde_json::from_value(initial["params"]["text"].clone()).unwrap();
     // The acquired render has closed sections. Open them so the visibility
-    // baseline below is the full tree the fold assertions describe.
-    let expanded_version = super::show_all_and_ack(&mut server, 9, &view, base_version);
-    server.send(json!({"jsonrpc":"2.0","id":13,"method":"view/resync",
-        "params":{"viewId":view}}));
-    let expanded = server.response_with_id(13);
-    assert_eq!(expanded["result"]["version"], expanded_version);
-    let initial_text = expanded["result"]["text"].clone();
-    let mut text: Vec<String> = serde_json::from_value(initial_text.clone()).unwrap();
+    // baseline below is the full tree the fold assertions describe. Derive the
+    // baseline from this render: a resync would mark the next one as a full
+    // replacement instead of the acknowledged edits the loop expects.
+    server.send(json!({"jsonrpc":"2.0","id":9,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.show-all"}}));
+    let opened = server.response_with_id(9);
+    assert!(opened["error"].is_null(), "{opened}");
+    let expanded = server.wait_for_view_render_after(&view, base_version);
+    let expanded_version = expanded["params"]["version"].as_u64().unwrap();
+    let edits: Vec<magit_lsp::protocol::LineEdit> =
+        serde_json::from_value(expanded["params"]["edits"].clone()).unwrap();
+    text = magit_lsp::diff_text::apply_edits(&text, &edits);
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":view,"version":expanded_version}}));
+    let initial_text = serde_json::json!(text);
     assert!(initial_text
         .as_array()
         .unwrap()

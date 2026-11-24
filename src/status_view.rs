@@ -16,8 +16,14 @@ use std::collections::HashMap;
 const LEVEL_MIN: u8 = 1;
 /// The deepest visibility level: sections, files, hunks and hunk bodies.
 const LEVEL_MAX: u8 = 4;
-/// The level the status view opens at, which matches the old full render.
+/// The level the synchronous status open starts at, which matches the old full
+/// render (and is what Plain rendering's section bound is defined against).
 const LEVEL_DEFAULT: u8 = LEVEL_MAX;
+/// The level a deferred interactive opening starts at: section headers only.
+///
+/// Files and their diffs stay closed until the user opens a section; the
+/// per-file hunks are then loaded on demand at render time.
+const LEVEL_OPENING: u8 = LEVEL_MIN;
 
 /// A live status view: the repository root plus the last read status.
 pub struct StatusView {
@@ -86,6 +92,19 @@ impl RenameMaps {
     }
 }
 
+/// The opening visibility: every file section starts closed.
+///
+/// The states are recorded explicitly rather than left implicit, because an
+/// unknown node is expanded: without them a refresh that adds a section would
+/// render it expanded.
+fn default_visibility() -> Visibility {
+    let mut visibility = Visibility::new();
+    for section in ["staged", "unstaged", "untracked"] {
+        visibility.set(format!("section:{section}"), VisibilityState::Collapsed);
+    }
+    visibility
+}
+
 impl StatusView {
     /// Read the repository status and prepare a view for it.
     pub fn open(repo_path: &str) -> Result<Self> {
@@ -117,11 +136,16 @@ impl StatusView {
     }
 
     /// Create a loading status view whose early render can show `Head: <branch>`.
+    ///
+    /// This is the deferred interactive opening: when the acquisition installs,
+    /// the first full render shows only the closed section headers.
     pub fn loading_with_branch(repo: GitRepo, branch: impl Into<String>) -> Self {
         let mut view = Self::loading(repo);
         view.state = StatusState::Loading {
             branch: Some(branch.into()),
         };
+        view.level = LEVEL_OPENING;
+        view.visibility = default_visibility();
         view
     }
 
@@ -153,7 +177,7 @@ impl StatusView {
         })
     }
 
-    /// Acquire the default-expanded opening bodies before taking the session lock.
+    /// Acquire every file body eagerly, for the background open-or-cancel path.
     pub fn acquire_opening_state(repo: &GitRepo, generation: u64) -> Result<FreshStatus> {
         let mut fresh = Self::acquire_for_generation(repo, generation)?;
         for (staged, files) in [
@@ -315,7 +339,6 @@ impl StatusView {
                 }
             }
         }
-        let status = status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
         let mut tree = build_with_limit(
@@ -476,7 +499,7 @@ impl StatusView {
 #[cfg(test)]
 mod reuse_tests {
     use super::*;
-    use crate::view::{Ctx, View, Viewport};
+    use crate::view::{Ctx, View, Viewport, VisibilityCommand};
     use std::path::Path;
     use std::process::Command;
 
@@ -538,13 +561,45 @@ mod reuse_tests {
             viewport: Viewport::default(),
             pending: &[],
         });
+        // The deferred install publishes the closed render: headers and counts
+        // only, with no file row and no hunk.
+        assert!(live.lines[0].starts_with("Head: "), "{:?}", live.lines);
+        let body: Vec<&str> = live.lines[1..].iter().map(String::as_str).collect();
+        assert_eq!(
+            body,
+            [
+                "",
+                "Staged changes (0)",
+                "",
+                "Unstaged changes (0)",
+                "",
+                "Untracked files (1)",
+            ]
+        );
+        // Opening the section renders its files.
+        let section = live.node("section:untracked").unwrap().start_line;
+        assert!(view.set_visibility(
+            &live,
+            Some(section),
+            VisibilityCommand::Show { recursive: false }
+        ));
+        let opened = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
+        assert!(opened.lines.iter().any(|line| line.contains("dirty.txt")));
+        // A full open still matches the synchronous fully-expanded render.
+        assert!(view.set_visibility(&opened, None, VisibilityCommand::ShowAll));
+        let full = view.render(&Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        });
         let mut authoritative = StatusView::open(view.repo.root().to_str().unwrap()).unwrap();
         let expected = authoritative.render(&Ctx {
             viewport: Viewport::default(),
             pending: &[],
         });
-        assert_eq!(live.lines, expected.lines);
-        assert!(live.lines.iter().any(|line| line.contains("dirty.txt")));
+        assert_eq!(full.lines, expected.lines);
         std::fs::write(dir.path().join("later.txt"), "new change\n").unwrap();
         view.on_refresh().unwrap();
         let refreshed = view.render(&Ctx {

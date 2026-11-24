@@ -210,7 +210,7 @@ async fn acquire_status_with_token(
     let acquire_repo = repository.clone();
     let acquired = tokio::task::spawn_blocking(move || {
         crate::runner::with_trace_id(trace_id, || {
-            crate::status_view::StatusView::acquire_opening_state(&acquire_repo, generation)
+            crate::status_view::StatusView::acquire_for_generation(&acquire_repo, generation)
         })
     })
     .await;

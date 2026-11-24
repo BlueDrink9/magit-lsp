@@ -1,7 +1,10 @@
 -- Run inside an isolated Neovim process; all evidence is structured text.
 local root = vim.env.MAGIT_STARTUP_ROOT
 local output = vim.env.MAGIT_STARTUP_OUTPUT
+-- Client runtime is prepended last so it wins rtp resolution after the
+-- clients/neovim relocation (mirror scripts/neovim_init.lua's client_runtime).
 vim.opt.rtp:prepend(vim.env.MAGIT_STARTUP_REPO)
+vim.opt.rtp:prepend(vim.env.MAGIT_STARTUP_REPO .. "/clients/neovim")
 if vim.env.MAGIT_LSP_TRACE then
   require("magit-lsp.debug")
 end
