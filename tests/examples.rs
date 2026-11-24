@@ -1646,23 +1646,75 @@ fn utf16_prefix(text: &str, units: usize) -> &str {
     text
 }
 
+/// Every spelling this machine knows for one repository root.
+///
+/// The harness and the server reach the root by different routes, so their
+/// spellings can differ while naming the same directory: the fixture
+/// normalizes its temporary directory with the shared resolver, which preserves
+/// a Windows 8.3 short name or a symlinked component, while the server adopts
+/// the spelling Git discovery reports — the long, resolved form on Windows —
+/// and Git spells Windows paths with forward separators. Reducing a root
+/// therefore means reducing each of its spellings: as given, its
+/// [`std::fs::canonicalize`] form (without the verbatim prefix Windows adds and
+/// neither Git nor the server uses) and its separator variants.
+fn root_spellings(root: &str) -> Vec<String> {
+    let mut spellings = vec![root.to_owned()];
+    if let Ok(resolved) = fs::canonicalize(root) {
+        let resolved = resolved.to_string_lossy();
+        spellings.push(
+            resolved
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&resolved)
+                .to_owned(),
+        );
+    }
+    for spelling in spellings.clone() {
+        if spelling.contains('\\') {
+            spellings.push(spelling.replace('\\', "/"));
+        }
+        // Only a Windows-shaped spelling has a backslash form; a POSIX path
+        // with a literal backslash in a name is not a separator variant.
+        if spelling.contains('/') && windows_shaped(&spelling) {
+            spellings.push(spelling.replace('/', "\\"));
+        }
+    }
+    let mut unique: Vec<String> = Vec::new();
+    for spelling in spellings {
+        if !unique.contains(&spelling) {
+            unique.push(spelling);
+        }
+    }
+    unique
+}
+
+/// Whether `path` is spelled as a Windows absolute path (a drive or UNC), so a
+/// backslash variant names one location rather than unrelated text.
+fn windows_shaped(path: &str) -> bool {
+    path.starts_with("//")
+        || (path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            && path.as_bytes().get(1) == Some(&b':'))
+}
+
 /// Replace one side's repository root with the recording's placeholder.
 ///
 /// Operates on plain string values (URIs, document text), never on serialized
 /// JSON text: a Windows root's backslashes are escaped there and would never
-/// match. The root's URI form is encoded by the shared native-path encoder, so
-/// a live encoded URI root reduces to the recorded `file:///repo` placeholder,
-/// while a filesystem-path occurrence keeps the native form. A status view's
-/// URI embeds the native root after exactly one separator, and the server trims
-/// the root's leading separators: a root without one (Windows drive or
-/// verbatim-prefixed) leaves the recorded form's separator doubled, so that
-/// artifact is repaired to [`RECORDED_STATUS_URI`].
+/// match. Each [`root_spellings`] form is replaced — its native text and its
+/// URI form, encoded by the shared native-path encoder — so a live encoded URI
+/// root reduces to the recorded `file:///repo` placeholder while a
+/// filesystem-path occurrence keeps the native form. A status view's URI embeds
+/// the native root after exactly one separator, and the server trims the root's
+/// leading separators: a root without one (Windows drive or verbatim-prefixed)
+/// leaves the recorded form's separator doubled, so that artifact is repaired
+/// to [`RECORDED_STATUS_URI`].
 fn canonical_root(text: &str, root: &str) -> String {
     let mut canonical = text.to_owned();
-    if let Some(uri) = uri_from_path(Path::new(root)) {
-        canonical = canonical.replace(uri.as_str(), &format!("file://{RECORDED_ROOT}"));
+    for spelling in root_spellings(root) {
+        if let Some(uri) = uri_from_path(Path::new(&spelling)) {
+            canonical = canonical.replace(uri.as_str(), &format!("file://{RECORDED_ROOT}"));
+        }
+        canonical = canonical.replace(&spelling, RECORDED_ROOT);
     }
-    let canonical = canonical.replace(root, RECORDED_ROOT);
     canonical.replace(
         &format!("magit://status/{RECORDED_ROOT}"),
         RECORDED_STATUS_URI,
@@ -2755,7 +2807,10 @@ fn root_normalization_is_invariant_to_root_encoding_and_length() {
 /// its leading separators trimmed, which a POSIX root supplies and a Windows
 /// drive or verbatim-prefixed root does not. Replacing the live root with the
 /// recording's placeholder must restore the form the recorded exchange pins
-/// (`rich-lifecycle.jsonl:8`) without moving a POSIX reduction.
+/// (`rich-lifecycle.jsonl:8`) without moving a POSIX reduction. The harness and
+/// the server reach one directory through different spellings — a Windows 8.3
+/// short name vs its long form, a symlinked component vs its target, or Git's
+/// forward separators vs the native form — and every such pair must reduce.
 #[test]
 fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
     let recorded_uri = "magit://status/repo";
@@ -2767,30 +2822,55 @@ fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
     );
     // Synthetic roots only: on Linux a Windows root has no file URI, which
     // `canonical_root` already tolerates, and the status URI embeds the native
-    // root rather than its encoded form on either platform.
-    for root in [
-        "/tmp/fixture-root",
-        r"C:\Users\me\repo",
-        r"\\?\C:\Users\me\repo",
-    ] {
-        let live = magit_lsp::session::status_uri(root);
+    // root rather than its encoded form on either platform. Each pair is the
+    // harness's spelling then the server's: Git reports Windows roots with
+    // forward separators while the native form keeps backslashes.
+    let mut cases: Vec<(String, String)> = vec![
+        ("/tmp/fixture-root".into(), "/tmp/fixture-root".into()),
+        (r"C:\Users\me\repo".into(), r"C:\Users\me\repo".into()),
+        (
+            r"\\?\C:\Users\me\repo".into(),
+            r"\\?\C:\Users\me\repo".into(),
+        ),
+        (r"C:\Users\me\repo".into(), r"C:/Users/me/repo".into()),
+        (r"C:/Users/me/repo".into(), r"C:\Users\me\repo".into()),
+    ];
+    // One real directory, two spellings: the fixture's form and the resolved
+    // form the server's Git discovery can report instead. On Windows that is
+    // the long form of an 8.3 name, which canonicalization returns; on Unix a
+    // symlinked component is the same divergence.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let raw = dir.path().to_string_lossy().into_owned();
+    let resolved = fs::canonicalize(dir.path())
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| raw.clone());
+    cases.push((raw.clone(), resolved.clone()));
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("spelling");
+        std::os::unix::fs::symlink(dir.path(), &link).expect("symlink");
+        cases.push((link.to_string_lossy().into_owned(), resolved));
+    }
+
+    for (root, server) in cases {
+        let live = magit_lsp::session::status_uri(&server);
         assert!(
             live.starts_with("magit://status/"),
-            "{root}: the construction keeps one separator after the scope"
+            "{server}: the construction keeps one separator after the scope"
         );
         assert_ne!(
             live, recorded_uri,
-            "{root}: the live URI names this run's root"
+            "{server}: the live URI names this run's root"
         );
         let canonical = canonical_frame(
             &json!({"id": 2, "result": {"id": "v1", "kind": "status", "uri": live}}),
-            &RootNormalizer::new(root),
+            &RootNormalizer::new(&root),
             RECORDED_BINARY,
             &mut HashNormalizer::new(),
         );
         assert_eq!(
             canonical, recorded_frame,
-            "{root}: the status URI must reduce to the recorded form"
+            "{root} vs {server}: the status URI must reduce to the recorded form"
         );
     }
 }
