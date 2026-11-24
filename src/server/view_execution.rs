@@ -337,16 +337,37 @@ fn install_status_acquisition(
     }
     let render = match acquired {
         Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
-        Ok(Err(error)) => session.fail_fresh_status(
-            &view_id,
-            generation,
-            format!("Unable to load repository status: {error}"),
-        ),
-        Err(error) => session.fail_fresh_status(
-            &view_id,
-            generation,
-            format!("Unable to load repository status: {error}"),
-        ),
+        Ok(Err(error)) => {
+            // A terminal acquisition failure still completes this lifecycle: the
+            // view stores the error as its state and stays interactive, so no
+            // later command is refused on its behalf.
+            tracing::warn!(
+                %error,
+                repo = %repo_path,
+                view = %view_id,
+                generation,
+                "status acquisition failed"
+            );
+            session.fail_fresh_status(
+                &view_id,
+                generation,
+                format!("Unable to load repository status: {error}"),
+            )
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                repo = %repo_path,
+                view = %view_id,
+                generation,
+                "status acquisition task failed"
+            );
+            session.fail_fresh_status(
+                &view_id,
+                generation,
+                format!("Unable to load repository status: {error}"),
+            )
+        }
     };
     match render {
         Ok(render) => InstallStatus::Installed(render),

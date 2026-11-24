@@ -566,6 +566,17 @@ fn git_failure_display_shows_exit_status_when_stderr_is_empty() {
     };
     assert_eq!(silent.to_string(), "git status failed (exit code 128)");
 
+    // A signal death carries no exit status; naming the signal keeps the
+    // message self-describing instead of a bare negative number.
+    let killed = GitFailure {
+        exit_code: -15,
+        ..silent.clone()
+    };
+    assert_eq!(
+        killed.to_string(),
+        "git status failed (killed by signal 15)"
+    );
+
     // Non-empty stderr keeps the user-facing message unchanged.
     let verbose = GitFailure {
         stderr: "fatal: not a git repository".to_owned(),
@@ -574,5 +585,22 @@ fn git_failure_display_shows_exit_status_when_stderr_is_empty() {
     assert_eq!(
         verbose.to_string(),
         "git status failed: fatal: not a git repository"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_signal_killed_git_failure_names_the_signal() {
+    use std::os::unix::process::ExitStatusExt;
+
+    // Raw 9 is a wait status whose low bits are signal 9, exactly what
+    // `ExitStatus` reports for a child the kernel killed.
+    let status = std::process::ExitStatus::from_raw(9);
+    assert_eq!(status.code(), None, "a killed child has no exit code");
+    let failure = GitFailure::from_output(&["status"], status, b"");
+    assert_eq!(failure.exit_code, -9);
+    assert_eq!(
+        failure.to_string(),
+        "git status failed (killed by signal 9)"
     );
 }

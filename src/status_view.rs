@@ -201,9 +201,14 @@ impl StatusView {
         true
     }
 
-    /// Whether repository state has been acquired for this view.
+    /// Whether this view accepts state-dependent actions.
+    ///
+    /// An acquisition still in flight has not produced their state yet, so they
+    /// wait for it. A failed acquisition is terminal: nothing will arrive to
+    /// make the view ready, so actions must proceed and report their own errors
+    /// (or refresh) instead of being refused forever.
     pub fn is_ready(&self) -> bool {
-        matches!(self.state, StatusState::Ready { .. })
+        !matches!(self.state, StatusState::Loading { .. })
     }
 
     /// Coalesce refresh requests that arrive while an acquisition is in flight.

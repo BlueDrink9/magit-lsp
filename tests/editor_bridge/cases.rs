@@ -543,6 +543,75 @@ fn a_commit_is_created_from_the_typed_message() {
     assert!(exit.success(), "server exited: {exit:?}");
 }
 
+/// A terminal status-acquisition failure must not wedge the view: the next
+/// mutation still opens the editor draft and commits (macOS CI: a signal-killed
+/// `git status` left every later command refused as "still loading").
+#[cfg(unix)]
+#[test]
+fn a_failed_status_acquisition_does_not_wedge_the_next_commit() {
+    let (tmp, _) = staged_repo();
+    let gate = fake_git::GatedGit::arm("status");
+    let gate_env = gate.child_env();
+    let env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(rich_capabilities());
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
+    server.send(
+        json!({"jsonrpc":"2.0","id":2,"method":"view/open","params":{
+            "kind":"status",
+            "args":{"repo_path": json!(tmp.path().to_string_lossy())},
+            "viewport":{"cols":80,"rows":24},
+        }}),
+    );
+    let opened = server.response_with_id(2);
+    let status = opened["result"]["id"].as_str().expect("view id").to_owned();
+    gate.wait_entered();
+    let loading = server.recv();
+    assert_eq!(loading["method"], json!("view/render"), "{loading}");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    // Fail the acquisition the way a dying Git process does: the repository is
+    // gone once the blocked `git status` resumes.
+    let git_dir = tmp.path().join(".git");
+    let saved_git = tmp.path().join(".git-unavailable");
+    std::fs::rename(&git_dir, &saved_git).unwrap();
+    gate.release();
+    let mut failed = None;
+    while failed.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("view/render")
+            && message["params"]["text"]
+                .to_string()
+                .contains("Unable to load repository status")
+        {
+            failed = Some(message);
+            continue;
+        }
+        server.notifications.push(message);
+    }
+    let failed = failed.expect("the acquisition failure render");
+    assert_eq!(failed["params"]["viewId"], json!(status), "{failed}");
+    std::fs::rename(&saved_git, &git_dir).unwrap();
+
+    // The view is terminally failed: the mutation must still run instead of a
+    // message-only refusal that never opens the draft.
+    let edit = start_head_operation(&mut server, &status, "commit.create", json!(null));
+    assert!(edit["runId"].is_string(), "{edit}");
+    sync_draft(&mut server, &edit, "Commit after a failed acquisition\n");
+    let confirmed = finish_draft(&mut server, 5, &edit);
+    assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
+    wait_for_commit(&tmp, "Commit after a failed acquisition");
+    server.shutdown_and_exit();
+    let exit = server.finish(Duration::from_secs(20));
+    assert!(exit.success(), "server exited: {exit:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn typed_commit_options_reach_real_git_through_the_editor_worker() {

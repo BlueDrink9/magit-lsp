@@ -547,15 +547,34 @@ pub struct GitFailure {
 
 impl GitFailure {
     /// Build a failure from a finished Git invocation.
+    ///
+    /// `exit_code` is negative when the child died without an exit status: it
+    /// carries the negated terminating signal, so the failure stays
+    /// self-describing instead of collapsing every signal death to `-1`.
     pub fn from_output(args: &[&str], status: std::process::ExitStatus, stderr: &[u8]) -> Self {
         Self {
-            exit_code: status.code().unwrap_or(-1),
+            exit_code: exit_code_of(status),
             stderr: String::from_utf8_lossy(stderr).trim_end().to_string(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
             subcommand: subcommand_of(args).to_string(),
             warning: None,
         }
     }
+}
+
+/// The exit code of a finished child, or the negated signal that killed it.
+fn exit_code_of(status: std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal() {
+            return -signal;
+        }
+    }
+    -1
 }
 
 /// The Git subcommand in `args`, skipping global options such as `-c key=value`.
@@ -589,7 +608,16 @@ impl std::fmt::Display for GitFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.stderr.is_empty() {
             // A silent failure would otherwise show nothing after the colon;
-            // the exit status is the only clue left.
+            // the exit status is the only clue left. A signal death has no exit
+            // status, so name the signal the child died from.
+            if self.exit_code < 0 {
+                return write!(
+                    f,
+                    "git {} failed (killed by signal {})",
+                    self.args.join(" "),
+                    -self.exit_code
+                );
+            }
             return write!(
                 f,
                 "git {} failed (exit code {})",
