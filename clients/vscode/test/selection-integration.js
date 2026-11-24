@@ -275,6 +275,17 @@ async function checkGitSelections({ vscode, commands, client }) {
       require("../lib/store").store.activeViewId,
     );
     assert.equal(fixtureState.repo, repo, "registered open focused the fixture repository");
+    // Status sections open collapsed (src/status_view.rs:99-107), so unfold
+    // them once: the matrix addresses file and hunk rows through the
+    // acknowledged tree, which a closed section does not publish. Wait for the
+    // fresh render first — an invoke during the deferred acquisition reports
+    // against the loading tree, whose sections are not yet in the view.
+    const sectionsDeadline = Date.now() + 10000;
+    while (!fixtureState.lines.some((line) => line.startsWith("Unstaged changes"))) {
+      assert(Date.now() < sectionsDeadline, "fresh status sections rendered");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await commands.get("magit.invoke")({ command: "common.show-all" });
     // Each fixture has three adjacent changed lines. The last is always a
     // guard: colzero excludes SECOND; nonzero includes SECOND but not GUARD.
     const cases = selectionCases();

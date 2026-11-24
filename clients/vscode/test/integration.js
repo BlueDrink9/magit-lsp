@@ -520,10 +520,9 @@ async function run() {
     fs.writeFileSync(path.join(repo, "added.txt"), "new\n");
     const rendersBefore = client.notes.filter((note) => note.method === "view/rendered").length;
     await commands.get("magit.key")({ key: "g" });
-    await waitFor(
-      () => /added\.txt/.test(statusEditor.document.getText()),
-      "refreshed status text",
-    );
+    // Assert the request went out before waiting for its text: on timeout this
+    // names "the key never reached the server" instead of "the render never
+    // applied", which the text poll cannot distinguish.
     assert(
       client.requests.some(
         (request) =>
@@ -532,6 +531,12 @@ async function run() {
           request.params.viewId === "v1",
       ),
       "forwarded the canonical key with the server view id",
+    );
+    // Status sections open collapsed (src/status_view.rs:99-107), so the
+    // refresh shows the new count in the untracked heading, not the file row.
+    await waitFor(
+      () => /Untracked files \(1\)/.test(statusEditor.document.getText()),
+      "refreshed status text after the forwarded key",
     );
     assert(
       client.notes.filter((note) => note.method === "view/rendered").length > rendersBefore,
@@ -589,7 +594,7 @@ async function run() {
       "interactive-mode context",
     );
     await waitFor(
-      () => /queued\.txt/.test(statusEditor.document.getText()),
+      () => /Untracked files \(2\)/.test(statusEditor.document.getText()),
       "queued refresh after static mode",
     );
     assert.equal(__test.contextValues.get("magit.textMode"), false);
