@@ -321,9 +321,20 @@ impl RepoFixture {
     }
 
     /// `git mv` `from` to `to` after the commits, staging the rename.
+    ///
+    /// Both names are fixture paths, so they are checked against the Windows
+    /// portability rules when recorded. `git mv` is otherwise only reached with
+    /// `check_name_chars=false`, which would let a reserved name through.
     pub fn rename(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
         assert!(!self.unborn, "an unborn fixture cannot have renames");
-        self.renames.push((from.into(), to.into()));
+        let from = from.into();
+        let to = to.into();
+        for name in [&from, &to] {
+            if let Some(reason) = windows_path_problem(Path::new(name), true) {
+                panic!("rename path {name:?} is not Windows-portable: {reason}");
+            }
+        }
+        self.renames.push((from, to));
         self
     }
 

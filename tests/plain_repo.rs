@@ -1,21 +1,13 @@
 mod common;
 
 use common::stdio::TestServer;
+use common::{git, git_compatible_absolute};
 use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::presentation::resolve::{resolve, Resolution};
 use std::path::Path;
 
-fn git(path: &Path, args: &[&str]) {
-    std::fs::create_dir_all(path).unwrap();
-    let status = std::process::Command::new("git")
-        .args(args)
-        .current_dir(path)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?}");
-}
-
 fn repo(path: &Path) {
+    std::fs::create_dir_all(path).unwrap();
     git(path, &["init", "-q"]);
     git(
         path,
@@ -173,6 +165,6 @@ fn explicit_path_takes_precedence_and_ambiguous_candidates_are_not_resolved() {
     repo(&a);
     repo(&b);
     assert!(
-        matches!(resolve(Some(&a), &[b], None), Resolution::Resolved(repo) if repo.root == std::fs::canonicalize(a).unwrap())
+        matches!(resolve(Some(&a), &[b], None), Resolution::Resolved(repo) if repo.root == git_compatible_absolute(&a))
     );
 }

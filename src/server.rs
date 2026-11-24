@@ -2520,10 +2520,7 @@ mod commit_tests {
     #[test]
     fn closing_a_prompt_view_or_origin_delivers_resumed_sibling_refreshes() {
         let tmp = changed_repository();
-        let repo = tmp
-            .path()
-            .canonicalize()
-            .unwrap()
+        let repo = crate::path::canonical_or_raw(tmp.path())
             .to_string_lossy()
             .into_owned();
         for close_origin in [false, true] {

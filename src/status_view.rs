@@ -573,7 +573,10 @@ mod reuse_tests {
         let nested = dir.path().join("nested");
         std::fs::create_dir(&nested).unwrap();
         let discovered = GitRepo::open(&nested).unwrap();
-        let root = discovered.root().canonicalize().unwrap();
+        // Both the recorded cwd and the repository identity are our canonical
+        // form (`crate::path::canonical`), so compare like with like: a std
+        // canonicalize here would be verbatim on Windows and never match.
+        let root = discovered.root().to_path_buf();
         let before = crate::runner::global_log()
             .iter()
             .last()
@@ -588,7 +591,7 @@ mod reuse_tests {
         assert!(!new_records
             .iter()
             .any(|record| record.args.first().is_some_and(|arg| arg == "rev-parse")));
-        assert_eq!(view.repo.root().canonicalize().unwrap(), root);
+        assert_eq!(view.repo.root(), root.as_path());
         let first = view.render(&Ctx {
             viewport: Viewport::default(),
             pending: &[],
@@ -623,13 +626,13 @@ mod reuse_tests {
         );
         let repo = GitRepo::open(linked.path()).unwrap();
         assert_eq!(
-            repo.root().canonicalize().unwrap(),
-            linked.path().canonicalize().unwrap()
+            crate::path::canonical_or_raw(repo.root()),
+            crate::path::canonical_or_raw(linked.path())
         );
         let view = StatusView::open_repo(repo).unwrap();
         assert_eq!(
-            view.repo.root().canonicalize().unwrap(),
-            linked.path().canonicalize().unwrap()
+            crate::path::canonical_or_raw(view.repo.root()),
+            crate::path::canonical_or_raw(linked.path())
         );
     }
 }

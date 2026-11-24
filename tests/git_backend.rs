@@ -1899,3 +1899,11 @@ fn shared_write_rejects_windows_reserved_file_names() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     write(&dir.path().join("odd [x]*.txt"), "literal");
 }
+
+#[test]
+#[should_panic(expected = "windows-reserved filename character")]
+fn repo_fixture_rename_rejects_windows_reserved_file_names_before_git_runs() {
+    // Recorded builder paths are real filenames, so the guard runs when the
+    // rename is planned; `build` (and every git invocation) never happens.
+    let _ = RepoFixture::new().rename("f.txt", "bad*name.txt");
+}
