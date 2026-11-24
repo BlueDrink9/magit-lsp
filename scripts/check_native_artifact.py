@@ -253,8 +253,7 @@ def inspect_elf(binary, target, evidence):
 def inspect_macho(binary, target, evidence):
     arch = target[1]
     header = run_tool(['lipo', '-archs', str(binary)])
-    expected = 'arm64' if arch == 'arm64' else 'x86_64'
-    if header.split() != [expected]:
+    if header.split() != [arch]:
         raise InspectionError('Mach-O architecture does not match target')
     loads = run_tool(['otool', '-l', str(binary)])
     libs = run_tool(['otool', '-L', str(binary)])
@@ -275,14 +274,14 @@ def inspect_macho(binary, target, evidence):
         versions.append(version[1] if version else '')
     if len(versions) != 1 or not versions[0] or not re.fullmatch(r'\d+\.\d+(?:\.\d+)?', versions[0]):
         raise InspectionError('malformed or ambiguous Mach-O deployment version')
-    baseline = {'arm64': (11, 0), 'x86_64': (10, 12)}[expected]
+    baseline = (11, 0)
     deployed = tuple(map(int, versions[0].split('.')))
     if deployed + (0,) * (2 - len(deployed)) > baseline:
         raise InspectionError('Mach-O deployment version exceeds target baseline')
     dylibs = [line.strip().split(' (', 1)[0] for line in libs.splitlines()[1:] if line.strip()]
     if not dylibs:
         raise InspectionError('Mach-O linked libraries are missing')
-    evidence.update(architecture=expected, dylibs=dylibs, deployment=versions[0],
+    evidence.update(architecture=arch, dylibs=dylibs, deployment=versions[0],
                     rpaths=re.findall(r'path (\S+)', loads))
 
 
