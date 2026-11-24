@@ -75,7 +75,10 @@ impl FakeGit {
 /// test can never leak a child that blocks forever.
 const GATE_TIMEOUT_POLLS: u32 = 4000;
 /// How long [`GatedGit::wait_entered`] waits for the handshake's entered half.
-const ENTERED_TIMEOUT: Duration = Duration::from_secs(10);
+///
+/// This bounds a whole server spawn + initialize + view open + Git discovery
+/// chain on a loaded CI runner, so it matches the sibling server_async bounds.
+const ENTERED_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long [`GatedGit`]'s drop waits for a released child to leave the gate.
 const EXIT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Poll interval for every bounded wait in this fixture.
@@ -117,7 +120,7 @@ impl GatedGit {
                  # file exists, then run the real Git so the repository stays correct.\n\
                  subcommand=\"$1\"\n\
                  if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
-                 if [ \"$subcommand\" = '{command}' ]; then echo invocation >> '{invocations}'; fi\n\
+                 echo \"$subcommand\" >> '{invocations}'\n\
                  if [ \"$subcommand\" = '{command}' ] && [ ! -f '{claimed}' ]; then\n\
                    : > '{claimed}'\n\
                    echo \"$$\" > '{entered}'\n\
@@ -175,15 +178,46 @@ impl GatedGit {
     /// This is the handshake's entered half: after it returns, the server's
     /// command is verifiably blocked inside the fake Git.
     pub fn wait_entered(&self) {
-        let deadline = Instant::now() + ENTERED_TIMEOUT;
+        self.wait_entered_within(ENTERED_TIMEOUT);
+    }
+
+    /// [`Self::wait_entered`] with an explicit bound, for tests of the timeout.
+    pub fn wait_entered_within(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
         while !self.entered_path.exists() {
-            assert!(
-                Instant::now() < deadline,
-                "the gated `{}` never entered the gate",
-                self.command
-            );
+            if Instant::now() >= deadline {
+                panic!("{}", self.entered_timeout_message(timeout));
+            }
             thread::sleep(POLL);
         }
+    }
+
+    /// The timeout panic text: the absent enter marker plus the invocation log's
+    /// tail, so a failure shows whether Git ran at all and which subcommands.
+    fn entered_timeout_message(&self, timeout: Duration) -> String {
+        const TAIL_CHARS: usize = 2048;
+        let log = std::fs::read(&self.invocations_path)
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
+            .unwrap_or_default();
+        let tail: String = {
+            let chars: Vec<char> = log.chars().collect();
+            let start = chars.len().saturating_sub(TAIL_CHARS);
+            chars[start..].iter().collect()
+        };
+        let tail = if tail.is_empty() {
+            "(no Git invocations recorded)".to_string()
+        } else {
+            tail.trim_end().to_string()
+        };
+        format!(
+            "the gated `{}` never entered the gate within {:?}; enter marker `{}` is still absent; \
+             invocation log `{}` (tail):\n{}",
+            self.command,
+            timeout,
+            self.entered_path.display(),
+            self.invocations_path.display(),
+            tail
+        )
     }
 
     /// Let the blocked invocation proceed (idempotent).
@@ -200,9 +234,16 @@ impl GatedGit {
     }
 
     /// Number of matching Git invocations observed by this fixture.
+    ///
+    /// The log records every subcommand the fake saw; only the gated one counts.
     pub fn invocation_count(&self) -> usize {
         std::fs::read_to_string(&self.invocations_path)
-            .map(|calls| calls.lines().count())
+            .map(|lines| {
+                lines
+                    .lines()
+                    .filter(|line| line.trim() == self.command)
+                    .count()
+            })
             .unwrap_or(0)
     }
 
@@ -266,4 +307,45 @@ fn real_git_path() -> PathBuf {
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
     assert!(!path.is_empty(), "git is not on PATH");
     PathBuf::from(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_entered_timeout_names_absent_marker_and_invocation_log_tail() {
+        let gate = GatedGit::arm("add");
+        let path = gate
+            .child_env()
+            .into_iter()
+            .find_map(|(key, value)| (key == "PATH").then_some(value))
+            .expect("PATH override");
+        // A non-gated subcommand: it reaches the fake but never the gate.
+        let output = Command::new(&gate.script)
+            .arg("status")
+            .env("PATH", path)
+            .output()
+            .expect("run fake git");
+        assert!(
+            output.status.success(),
+            "fake git status failed: {output:?}"
+        );
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gate.wait_entered_within(Duration::from_millis(50));
+        }))
+        .expect_err("an unentered gate must panic");
+        let message = panic
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string()))
+            .expect("panic carries a message");
+        assert!(message.contains("never entered the gate"), "{message}");
+        assert!(message.contains("still absent"), "{message}");
+        assert!(
+            message.contains("status"),
+            "invocation log tail missing: {message}"
+        );
+    }
 }
