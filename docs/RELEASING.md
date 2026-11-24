@@ -160,7 +160,7 @@ the only executed release path until NREL-06 replaces it.
 | Rejected Linux alternatives | musl/static was not chosen: it changes libc, allocator and NSS behavior and the user rejected an assumed migration. Static glibc has NSS/dlopen limits. rustup on `ubuntu-22.04` is the second compiler policy being retired. Shipping the Nix store closure is not portable off Nix because interpreter/RPATH point into `/nix/store`. | Decision, not a measured comparison. |
 | Windows target | `x86_64-pc-windows-gnu`, cross-built with the locked compiler through `pkgsCross.mingwW64`. The locked rev has mingw-w64 14.0.0 headers and GCC 15. Rust's target spec links executables with `-lgcc_eh`/`-l:libpthread.a` when all crates are statically linked, so no MinGW runtime DLL is expected; expected imports are OS DLLs only (`msvcrt`, `kernel32`, `advapi32`, `bcrypt`, `ntdll`, `userenv`, `ws2_32`, `user32`). | Upstream minima (see evidence): GNU Binutils 2.44, GCC 14.2, mingw-w64 12.0.0. The exact import table and any bundled DLL allowlist are **UNRESOLVED** until NREL-03 inspects the produced `.exe`; if a DLL is needed, bundle an explicit allowlist or declare a supported-system requirement, never ship a silently broken executable. **Deferred 2026-11-20:** this row is retained research; informational only and not a release gate. |
 | Windows capability boundary | A Windows GNU server provides LSP, view rendering and Git status/actions only. Managed commit drafts, the editor bridge and askpass return "requires Unix"/"needs a Unix socket" on non-Unix builds, and the non-Unix owned-run fallback makes no cancellation guarantee. | VERIFIED source boundaries: `src/editor.rs:697-700,730-739,790-793,871,1260-1270,1276-1288`; `src/runner/owned.rs:45-53,67-94`. `tests/editor_bridge.rs:4` is `#![cfg(unix)]`, so that suite never counts as Windows coverage. A small explicit follow-up item is required; Windows helper support is not claimed. Git for Windows' MSYS2/BASH layer does not provide the existing bridge's Unix socket. **Deferred 2026-11-20:** informational only; Windows helper support is not a current gate. |
-| Darwin outputs | Native `x86_64-darwin` and `aarch64-darwin` builders in the same flake, using the locked compiler; distinct archive and executable identities per architecture. Contract: record `LC_BUILD_VERSION`/minos and `otool -L`; runtime dependencies must be system libraries only (no `/nix/store` install names or RPATH, rewritten with `install_name_tool` if needed). | Rust documents macOS 10.12+ for x86_64 and 11.0+ for arm64. NREL-04 must run on real matching builders; the Nix builder's own minimum macOS is not the artifact deployment baseline. Linux-to-Darwin cross output is not planned: nix.dev documents cross-Darwin only between the two Darwin hosts and barely tested. |
+| Darwin outputs | Native `aarch64-darwin` builder in the flake, using the locked compiler; distinct archive and executable identities per architecture. Contract: record `LC_BUILD_VERSION`/minos and `otool -L`; runtime dependencies must be system libraries only (no `/nix/store` install names or RPATH, rewritten with `install_name_tool` if needed). | Rust documents macOS 11.0+ for arm64. NREL-04 must run on real matching builders; the Nix builder's own minimum macOS is not the artifact deployment baseline. x86_64 macOS is not a release target. Linux-to-Darwin cross output is not planned: nix.dev documents cross-Darwin only between the two Darwin hosts and barely tested. |
 | Artifact identity | One `.tar.gz` plus `.sha256` per target (existing asset shape), with a `provenance.json` in the CI artifact. Required fields: `source_sha` (`git rev-parse HEAD`, equal to the workflow SHA), `target`, `archive_sha256`, `executable_sha256` (extracted `magit-lsp`/`magit-lsp.exe` before packaging), `cargo_lock_sha256`, `rustc -Vv`, nixpkgs rev, Linux sysroot rev/glibc, Windows mingw-w64/GCC/binutils, Darwin SDK/minos. Consumers verify both SHAs and execute the bytes unchanged; they never rebuild the server. | GitHub `upload-artifact` artifacts are immutable from v4 and expose `artifact-id`/`artifact-digest`, but zipped uploads do not preserve file modes and the artifact bytes are not the released archive bytes; the durable identity is the sidecar SHA over the uploaded `.tar.gz`. VERIFIED against the pinned action README. |
 
 ### Native assertion contract
@@ -176,7 +176,7 @@ compiled natively.
   status plus one mutation. Editor helper, askpass, managed drafts and
   cancellation are not supported and are reported as skipped; skipped Unix
   suites never count as Windows coverage.
-* **macOS x86_64 and arm64:** the full Unix Rust suite, `--version`, Git status
+* **macOS arm64:** the full Unix Rust suite, `--version`, Git status
   plus one mutation, and the Neovim scenarios on available hosts.
 
 ### Upstream evidence (reviewed 2026-11-20)
@@ -232,7 +232,7 @@ compiled natively.
 tags; only a version-aligned `vX.Y.Z` tag run can lead to publication, because
 the publisher requires the `push` event and a manual dispatch is a build-only
 rehearsal. Its required graph runs read-only source checks, builds and tests
-Ubuntu 22.04 GNU x86_64, macOS arm64 and macOS Intel, and packages one VSIX from
+Ubuntu 22.04 GNU x86_64 and macOS arm64, and packages one VSIX from
 Node 24 with frozen locked pnpm; a failed, skipped, cancelled or missing
 required job blocks the run, while Windows is informational and appears in no
 required matrix or gate. The Linux job installs Rust 1.94.1, builds the locked
@@ -247,7 +247,7 @@ Ubuntu 22.04/Rust 1.94.1 fallback. Its workflow wiring and local checker tests
 show implementation only, not experimental success or promotion eligibility.
 Promotion remains pending until hosted evidence records the source SHA, workflow
 run URL and attempt, immutable artifact IDs and SHA-256 hashes, and successful
-NREL-12 ABI/LSP/Git plus functional outcomes on all three hosts and the NREL-14
+NREL-12 ABI/LSP/Git plus functional outcomes on both hosts and the NREL-14
 installed-VSIX outcome for the same source/run/attempt/hash set. Missing evidence
 or any failed, skipped, or inconclusive mandatory gate cannot establish proof.
 The authoritative completion record is NREL-17 in `TASKS.md`; this document
@@ -276,7 +276,7 @@ Code Marketplace with `vsce publish --oidc` and to Open VSX with
 repackage, no manual rehearsal path and no crate lane. A failed GitHub Release
 blocks both registry lanes; a registry failure is reported as
 completed/pending destinations, never as atomic success. Hosted execution of
-this chain, the mandatory Ubuntu 22.04 GNU and both macOS jobs and the single
+this chain, the mandatory Ubuntu 22.04 GNU and macOS arm64 job and the single
 VSIX it would publish are all still pending.
 
 Three local targets guard this automation: `make workflows-check` (actionlint
@@ -293,7 +293,7 @@ In `.github/workflows/ci.yml`, the `native-test` matrix keeps the
 `windows-2025` (`x86_64-pc-windows-msvc`) lane explicitly informational: only
 that lane sets `informational: true`, and the job's
 `continue-on-error: ${{ matrix.informational }}` prevents a Windows failure from
-failing the workflow. Both macOS lanes set `informational: false` and stay
+failing the workflow. The macOS lane sets `informational: false` and stays
 required, and every Linux job remains required. No job declares
 `needs: native-test`, and `release.yml`/`publish.yml` do not consume CI, so the
 Windows lane gates neither releases nor other jobs. Branch protection and
@@ -392,7 +392,7 @@ shellcheck and `git diff --check` passed. That local evidence did not close
 hosted or publication gates, and it does not authorize the current chain.
 
 Hosted evidence and approval remain pending. No hosted tag run has produced the
-mandatory Ubuntu 22.04 GNU, macOS arm64 and macOS Intel outcomes or the single
+mandatory Ubuntu 22.04 GNU and macOS arm64 outcomes or the single
 VSIX, and no `release-publish` environment registration exists.
 
 Once those gates and an explicit human go/no-go exist, an authorized maintainer
@@ -412,10 +412,10 @@ maintainer must:
   Marketplace and Open VSX. Registration is human-owned and pending; no PAT is
   an input and none is configured.
 
-The tag run builds and tests the mandatory Ubuntu 22.04 GNU x86_64, macOS arm64
-and macOS Intel jobs, produces the single Node 24/frozen-pnpm VSIX once, and
+The tag run builds and tests the mandatory Ubuntu 22.04 GNU x86_64 and macOS arm64
+jobs, produces the single Node 24/frozen-pnpm VSIX once, and
 only a `release-readiness` aggregate that requires `source-checks`, that VSIX,
-all three mandatory platform jobs and every consumer gate lets the workflow
+both mandatory platform jobs and every consumer gate lets the workflow
 succeed. Windows is informational and gates nothing. A manual `release.yml`
 dispatch is a build-only rehearsal: its `workflow_run` event is not `push`, so
 `publish` never runs. Inspect logs and checksums, download the CI artifact,

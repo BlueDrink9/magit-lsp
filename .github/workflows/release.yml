@@ -1,6 +1,6 @@
 
 # Read-only, unprivileged producer of release candidates. Each required
-# platform (Ubuntu 22.04 GNU x86_64, macOS arm64, macOS Intel) runs its debug
+# platform (Ubuntu 22.04 GNU x86_64, macOS arm64) runs its debug
 # server tests, then its release build and release-server tests, in one job.
 # Windows is informational only and appears in no required matrix, readiness
 # condition or downstream gate.
@@ -181,7 +181,7 @@ jobs:
     # platforms. Labels stay "experimental" in this slice, but a failed or
     # cancelled row now fails the workflow; no continue-on-error masks it.
     # This is still not a production promotion: no hosted proof is recorded
-    # yet, and promotion needs NREL-12's three-host ABI/LSP/Git and functional
+    # yet, and promotion needs NREL-12's two-host ABI/LSP/Git and functional
     # gates plus NREL-14's installed-VSIX gate bound to one source, run,
     # attempt and immutable artifact/hash set. Each matrix row uses the same
     # shared pipeline to build and package its own explicitly named candidate.
@@ -196,9 +196,6 @@ jobs:
           - os: macos-26
             target: aarch64-apple-darwin
             artifact: native-macos-arm64-experimental
-          - os: macos-26-intel
-            target: x86_64-apple-darwin
-            artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -294,9 +291,6 @@ jobs:
           - os: macos-26
             target: aarch64-apple-darwin
             artifact: native-macos-arm64-experimental
-          - os: macos-26-intel
-            target: x86_64-apple-darwin
-            artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -359,9 +353,6 @@ jobs:
           - os: macos-26
             target: aarch64-apple-darwin
             artifact: native-macos-arm64-experimental
-          - os: macos-26-intel
-            target: x86_64-apple-darwin
-            artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -440,9 +431,6 @@ jobs:
           - os: macos-26
             target: aarch64-apple-darwin
             artifact: native-macos-arm64-experimental
-          - os: macos-26-intel
-            target: x86_64-apple-darwin
-            artifact: native-macos-intel-experimental
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

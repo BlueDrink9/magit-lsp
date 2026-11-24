@@ -5,7 +5,7 @@
 then runs the workflow's ``--release --locked --target`` build. There is no local
 compiler alias: the strict pin is the only release build. ``build-native`` is the
 experimental hosted native-linker lane: it accepts only the matching Linux
-x86_64, Darwin arm64 or Darwin x86_64 host and target. Linux points Cargo's
+x86_64 or Darwin arm64 host and target. Linux points Cargo's
 target linker explicitly at ``/usr/bin/cc``; Darwin resolves Apple Clang, ld and
 the Xcode macOS SDK through the system ``/usr/bin/xcrun`` and sets an explicit
 deployment target. Both record the exact locked argv plus compiler, linker,
@@ -71,11 +71,10 @@ NATIVE_XCRUN = '/usr/bin/xcrun'
 # not proof that an older runtime is supported or was tested.
 DARWIN_DEPLOYMENT_TARGETS = {
     'aarch64-apple-darwin': '11.0',
-    'x86_64-apple-darwin': '10.12',
 }
 DEPLOYMENT_TARGET_SOURCE = (
-    'Proposed build targets from Rust documented minima: macOS 10.12+ for '
-    'x86_64 and 11.0+ for arm64 (docs/RELEASING.md). These are not proof of the '
+    'Proposed build targets from Rust documented minima: macOS 11.0+ for '
+    'arm64 (docs/RELEASING.md). These are not proof of the '
     'final supported macOS versions; hosted inspection is pending NREL-17.')
 DEPLOYMENT_TARGET_STATUS = (
     'proposed build target, not a tested or final macOS support baseline; '
@@ -93,12 +92,6 @@ NATIVE_TARGETS = {
         'host_label': 'Darwin arm64',
         'linker_variable': 'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER',
         'deployment_target': DARWIN_DEPLOYMENT_TARGETS['aarch64-apple-darwin'],
-    },
-    'x86_64-apple-darwin': {
-        'host': ('darwin', 'x86_64'),
-        'host_label': 'Darwin x86_64',
-        'linker_variable': 'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER',
-        'deployment_target': DARWIN_DEPLOYMENT_TARGETS['x86_64-apple-darwin'],
     },
 }
 NATIVE_EVIDENCE_DIR = Path('build/release')

@@ -128,7 +128,6 @@ SOURCE_CHECK_TARGETS = ('format-check', 'hygiene', 'test-rust', 'test-lua')
 NATIVE_MATRIX = (
     ('ubuntu-22.04', 'x86_64-unknown-linux-gnu'),
     ('macos-26', 'aarch64-apple-darwin'),
-    ('macos-26-intel', 'x86_64-apple-darwin'),
 )
 # Each required build job runs exactly two server suites on one source, toolchain
 # and workspace cache: debug before the release build, release against the exact
@@ -754,11 +753,10 @@ def check_native_consumers(block):
         matrix[match.group(1)] = target
         artifacts[match.group(1)] = artifact
     if matrix != dict(NATIVE_MATRIX):
-        fail('build workflow: native consumer matrix must exactly match all three native hosts')
+        fail('build workflow: native consumer matrix must exactly match both native hosts')
     expected_artifacts = dict(zip((host for host, _ in NATIVE_MATRIX), (
         'native-linux-x86_64-gnu-experimental',
-        'native-macos-arm64-experimental',
-        'native-macos-intel-experimental')))
+        'native-macos-arm64-experimental')))
     if artifacts != expected_artifacts:
         fail('build workflow: native consumers must select each exact experimental candidate')
     if 'cachix/install-nix-action' in code or 'nix develop' in code:
@@ -806,7 +804,7 @@ def check_native_functional_consumers(block):
                 target = found.group(1)
         matrix[match.group(1)] = target
     if matrix != dict(NATIVE_MATRIX):
-        fail('build workflow: native functional matrix must exactly match all three native hosts')
+        fail('build workflow: native functional matrix must exactly match both native hosts')
     for forbidden in ('release-native-build', 'cargo build', 'cargo test --release', 'continue-on-error:'):
         if forbidden in code:
             fail(f'build workflow: functional consumers must not substitute a server build ({forbidden})')
@@ -857,7 +855,7 @@ def check_native_vscode_consumers(block):
                     target = found.group(1)
             matrix[match.group(1)] = target
     if matrix != dict(NATIVE_MATRIX):
-        fail('build workflow: native VSCode matrix must exactly match all three native hosts')
+        fail('build workflow: native VSCode matrix must exactly match both native hosts')
     required = ('python3 -m scripts.download_native_candidate',
                 'python3 -m scripts.download_vsix_candidate',
                 '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
@@ -1448,7 +1446,6 @@ def pipeline_violations(module, environment):
                         'and explicit /usr/bin/cc')
     for target, host, label in (
         ('aarch64-apple-darwin', ('darwin', 'arm64'), 'Darwin arm64'),
-        ('x86_64-apple-darwin', ('darwin', 'x86_64'), 'Darwin x86_64'),
     ):
         config = targets.get(target)
         if not config:
@@ -3239,8 +3236,6 @@ def run_pipeline_self_tests():
         for target, darwin_host, variable, deployment in (
             ('aarch64-apple-darwin', ('darwin', 'arm64'),
              'CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER', '11.0'),
-            ('x86_64-apple-darwin', ('darwin', 'x86_64'),
-             'CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER', '10.12'),
         ):
             calls = []
             plan = pipeline.native_plan(
@@ -3286,8 +3281,6 @@ def run_pipeline_self_tests():
         for label, target, darwin_host, expected in (
             ('Darwin arm64 target on an Intel host', 'aarch64-apple-darwin',
              ('darwin', 'x86_64'), 'Darwin arm64 host'),
-            ('Darwin x86_64 target on an arm64 host', 'x86_64-apple-darwin',
-             ('darwin', 'arm64'), 'Darwin x86_64 host'),
             ('Darwin arm64 target on a Linux host', 'aarch64-apple-darwin',
              ('linux', 'x86_64'), 'Darwin arm64 host'),
         ):
@@ -5055,9 +5048,9 @@ def run_self_tests():
              (("          python-version: '3.12'", "          python-version: '3.10'", 1),),
              'below the required'),
             ('build workflow with an incomplete native builder matrix',
-             (('          - os: macos-26-intel\n'
-               '            target: x86_64-apple-darwin\n'
-               '            artifact: native-macos-intel-experimental\n', '', 1),),
+             (('          - os: macos-26\n'
+               '            target: aarch64-apple-darwin\n'
+               '            artifact: native-macos-arm64-experimental\n', '', 1),),
              'native builder matrix'),
             ('build workflow packaging a native target for the wrong target',
              (('          RELEASE_BUILD_TARGET: ${{ matrix.target }}',

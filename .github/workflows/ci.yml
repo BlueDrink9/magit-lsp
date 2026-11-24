@@ -162,7 +162,7 @@ jobs:
   # runner's native toolchain: Nix has no native Windows support, and the lanes
   # exist to cover native OS behavior, so they are a deliberate exception to the
   # locked Linux shell rather than a claim of Nix coverage. Windows support is
-  # deferred, so only its lane is informational; the macOS lanes stay required.
+  # deferred, so only its lane is informational; the macOS lane stays required.
   # This workflow remains read-only source checks: no release job consumes this
   # matrix, and the required-platform debug-then-release server sequence and
   # artifact acceptance live only in release.yml.
@@ -178,9 +178,6 @@ jobs:
             informational: true
           - os: macos-26
             target: aarch64-apple-darwin
-            informational: false
-          - os: macos-26-intel
-            target: x86_64-apple-darwin
             informational: false
     # Only the Windows lane may fail without failing the workflow. No job
     # declares `needs: native-test`, so its result gates nothing else either.
