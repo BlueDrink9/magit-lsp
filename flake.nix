@@ -84,6 +84,7 @@
               rust-analyzer
               rustc
               rustfmt
+              clippy
               shellcheck
               stylua
               typescript-language-server
