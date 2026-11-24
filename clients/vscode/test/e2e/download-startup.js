@@ -115,7 +115,6 @@ async function prepareDownloadCache({
     const assetByHost = {
       "linux-x64": "x86_64-unknown-linux-gnu",
       "darwin-arm64": "aarch64-apple-darwin",
-      "darwin-x64": "x86_64-apple-darwin",
     };
     const asset = assetByHost[`${host.platform}-${host.arch}`];
     // Strip the runtime's exact asset suffix instead of splitting on the last

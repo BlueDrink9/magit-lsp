@@ -286,7 +286,7 @@ except OSError:
         # Provenance is mandatory and must agree with the requested identity.
         absent = self.directory / 'missing-provenance.json'
         self.assertNotEqual(self.package(self.binary, provenance=absent).returncode, 0)
-        for changes in ({'version': '0.0.1'}, {'target': 'x86_64-apple-darwin'},
+        for changes in ({'version': '0.0.1'}, {'target': DARWIN_TARGET},
                         {'digest': '0' * 64}):
             provenance = self.write_provenance(self.binary, **changes)
             with self.subTest(changes=changes):
@@ -301,7 +301,9 @@ except OSError:
                 self.assertNotEqual(self.package(self.binary, provenance=provenance).returncode, 0)
 
         # Unsupported or malicious target names are refused before any write.
-        for target in ('x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu/..',
+        # x86_64-apple-darwin is retired; it must keep being refused.
+        for target in ('x86_64-apple-darwin', 'x86_64-pc-windows-msvc',
+                       'x86_64-unknown-linux-gnu/..',
                        '../x86_64-unknown-linux-gnu', '', 'AMD64'):
             with self.subTest(target=target):
                 self.assertNotEqual(self.package(self.binary, target=target).returncode, 0)

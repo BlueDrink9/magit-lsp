@@ -19,7 +19,7 @@ import zipfile
 from scripts import check_native_artifact as native
 
 API = 'https://api.github.com'
-TARGETS = ('x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-apple-darwin')
+TARGETS = ('x86_64-unknown-linux-gnu', 'aarch64-apple-darwin')
 
 
 class DownloadError(Exception):

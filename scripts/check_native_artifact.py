@@ -19,7 +19,6 @@ import time
 TARGETS = {
     'x86_64-unknown-linux-gnu': ('linux', 'x86_64', 'readelf'),
     'aarch64-apple-darwin': ('darwin', 'arm64', 'otool'),
-    'x86_64-apple-darwin': ('darwin', 'x86_64', 'otool'),
 }
 MAX_GLIBC = (2, 35)
 

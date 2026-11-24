@@ -36,10 +36,6 @@ TARGETS = {
         'executable': 'magit-lsp',
         'install_notes': 'macOS arm64; Git required.',
     },
-    'x86_64-apple-darwin': {
-        'executable': 'magit-lsp',
-        'install_notes': 'macOS x86_64; Git required.',
-    },
 }
 LICENCES = (
     ('LICENCES/GPL-3.0', 'LICENSE'),

@@ -15,7 +15,6 @@ const REPOSITORY = "BlueDrink9/magit-lsp";
 const ASSETS = Object.freeze({
   "linux-x64": "x86_64-unknown-linux-gnu",
   "darwin-arm64": "aarch64-apple-darwin",
-  "darwin-x64": "x86_64-apple-darwin",
 });
 
 /** GNU libc version the released Linux binary requires. */

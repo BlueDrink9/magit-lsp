@@ -1091,7 +1091,6 @@ async function run() {
       const targets = [
         [{ platform: "linux", arch: "x64", glibc: "2.36" }, "x86_64-unknown-linux-gnu"],
         [{ platform: "darwin", arch: "arm64", glibc: null }, "aarch64-apple-darwin"],
-        [{ platform: "darwin", arch: "x64", glibc: null }, "x86_64-apple-darwin"],
       ];
       const root = temporaryRoot();
       try {
@@ -1137,7 +1136,9 @@ async function run() {
         // actually attempted, rather than reusing the warmed Darwin cache above.
         const uncachedRoot = temporaryRoot();
         try {
-          const wrongHost = releaseFixture({ asset: "x86_64-apple-darwin" });
+          // A supported-but-wrong asset: the arm64 host must never accept the
+          // Linux archive published under a different name.
+          const wrongHost = releaseFixture({ asset: "x86_64-unknown-linux-gnu" });
           await rejects(
             resolveServer({
               version: VERSION,
@@ -1209,6 +1210,7 @@ async function run() {
       const fixture = releaseFixture();
       const hosts = [
         [{ platform: "linux", arch: "arm64", glibc: "2.36" }, /linux-arm64/],
+        [{ platform: "darwin", arch: "x64", glibc: null }, /darwin-x64/],
         [{ platform: "win32", arch: "x64", glibc: null }, /win32-x64/],
         [{ platform: "linux", arch: "x64", glibc: "2.31" }, /glibc 2\.35/],
         [{ platform: "linux", arch: "x64", glibc: null }, /glibc 2\.35/],

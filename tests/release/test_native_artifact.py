@@ -93,14 +93,13 @@ class NativeArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(inspector.InspectionError, 'architecture'):
                 inspector.inspect_macho(Path('binary'), target, {})
         for selected_target, arch, accepted in [
-                (target, 'arm64', ('10.12', '11.0')),
-                (inspector.TARGETS['x86_64-apple-darwin'], 'x86_64', ('10.12',))]:
+                (target, 'arm64', ('10.12', '11.0'))]:
             for deployment in accepted:
                 with mock.patch.object(inspector, 'run_tool', side_effect=[
                         arch, f'cmd LC_BUILD_VERSION\n platform 1\n minos {deployment}',
                         'binary:\n /usr/lib/libSystem.B.dylib']):
                     inspector.inspect_macho(Path('binary'), selected_target, {})
-            later = '11.1' if arch == 'arm64' else '10.13'
+            later = '11.1'
             with mock.patch.object(inspector, 'run_tool', side_effect=[
                     arch, f'cmd LC_BUILD_VERSION\n platform 1\n minos {later}',
                     'binary:\n /usr/lib/libSystem.B.dylib']):
