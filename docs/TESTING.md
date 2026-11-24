@@ -213,11 +213,30 @@ baseline; `publish.yml` only validates artifacts that workflow already built.
 `cargo-llvm-cov`: it runs the ordinary Rust test suite with LLVM
 instrumentation, including the stdio tests that spawn the real server, and
 writes an LCOV report to `build/coverage/lcov.info` (ignored with `build/`).
-The invocation is `cargo llvm-cov --lcov --output-path build/coverage/lcov.info
---ignore-filename-regex=/tests/`. Workspace dependencies are excluded by
-default and the Rust test harnesses are filtered out, so the report describes
-server source rather than tests or the editor clients. There is no threshold:
-a coverage number never gates a change.
+The invocation is
+`LLVM_PROFILE_FILE_NAME=magit-lsp-%p.profraw cargo llvm-cov --no-report`
+followed by `cargo llvm-cov report --lcov --output-path
+build/coverage/lcov.info --ignore-filename-regex=/tests/`. Workspace
+dependencies are excluded by default and the Rust test harnesses are filtered
+out, so the report describes server source rather than tests or the editor
+clients. There is no threshold: a coverage number never gates a change.
+
+The run is split in two because cargo-llvm-cov's default profile name ends in
+`-%m`, an online-merge pool that every instrumented process appends to under
+one lock. The suite re-executes the instrumented binary as children and
+SIGKILLs some of them; a child killed while holding the merge lock corrupts
+that shared profile, and `llvm-profdata merge` then aborts the whole run with
+"file header is corrupt". The name override is the only supported knob
+(`LLVM_PROFILE_FILE` is overwritten by cargo-llvm-cov), so the script exports
+`LLVM_PROFILE_FILE_NAME=magit-lsp-%p.profraw`: one profile per process, with
+`%p` keeping test binaries and re-executed children apart, and no shared pool a
+killed child can corrupt. The test phase therefore stops after the suite
+(`--no-report`), and the script trial-merges every `*.profraw` before the report
+phase, dropping the ones llvm-profdata rejects. A killed child must not corrupt
+a shared profile, and it must not be able to fail the merge either; its partial
+counters are lost and the summary reports how many profiles were dropped
+(`coverage-rust: N of M profraw files kept, K unreadable dropped`) so the loss
+is visible rather than silent.
 
 Prerequisites are `cargo-llvm-cov` plus `llvm-cov`/`llvm-profdata` from the same
 LLVM release as the active `rustc`; `rustc -vV` prints that release, and the

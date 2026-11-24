@@ -63,8 +63,48 @@ rm -f target/llvm-cov-target/*.profraw target/llvm-cov-target/*.profdata
 # Test failures propagate: `make test-rust` owns the pass/fail gate, and this
 # target must not report coverage as if the suite were green.
 status=0
-cargo llvm-cov --lcov --output-path "$out" \
-    --ignore-filename-regex='/tests/' >"$log" 2>&1 || status=$?
+# cargo-llvm-cov's default profile name ends in `-%m`, the online-merge pool:
+# every instrumented process appends to one lock-protected file. The suite
+# re-executes the instrumented binary as children and SIGKILLs some of them, and
+# a child killed while holding the merge lock leaves that shared file corrupt,
+# which makes `llvm-profdata merge` abort with "file header is corrupt". The
+# supported override writes one profile per process instead (`%p` keeps test
+# binaries and re-executed children apart), so no shared pool is left for a
+# killed child to corrupt. LLVM_PROFILE_FILE itself cannot be used:
+# cargo-llvm-cov overwrites it unconditionally.
+export LLVM_PROFILE_FILE_NAME='magit-lsp-%p.profraw'
+cargo llvm-cov --no-report >"$log" 2>&1 || status=$?
+
+# A child killed mid-dump also leaves its own truncated profile, and
+# llvm-profdata aborts the whole merge on a single unreadable file. Trial-merge
+# each profile and drop the unreadable ones; the summary reports how many were
+# dropped so the lost counters stay visible instead of failing the whole run.
+kept=0
+dropped=0
+if [ "$status" -eq 0 ]; then
+    profdata=${LLVM_PROFDATA:-}
+    if [ -z "$profdata" ] || [ ! -x "$profdata" ]; then
+        if command -v llvm-profdata >/dev/null 2>&1; then
+            profdata=llvm-profdata
+        else
+            profdata="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-profdata"
+        fi
+    fi
+    if [ -x "$profdata" ] || command -v "$profdata" >/dev/null 2>&1; then
+        for profile in target/llvm-cov-target/*.profraw; do
+            [ -e "$profile" ] || continue
+            if "$profdata" merge -sparse -o /dev/null "$profile" >/dev/null 2>&1; then
+                kept=$((kept + 1))
+            else
+                printf 'coverage-rust: dropping unreadable profile %s\n' "$profile" >>"$log"
+                rm -f "$profile"
+                dropped=$((dropped + 1))
+            fi
+        done
+    fi
+    cargo llvm-cov report --lcov --output-path "$out" \
+        --ignore-filename-regex='/tests/' >>"$log" 2>&1 || status=$?
+fi
 
 if [ "$status" -ne 0 ]; then
     tail -n 40 "$log" >&2 || true
@@ -125,5 +165,7 @@ fi
                 printf "coverage-rust: src/server.rs %.1f%% of %d lines covered\n",
                     100 * server_lh / server_lf, server_lf
         }' "$out"
+    printf 'coverage-rust: %d of %d profraw files kept, %d unreadable dropped\n' \
+        "$kept" "$((kept + dropped))" "$dropped"
 } >build/coverage/summary.txt
 cat build/coverage/summary.txt
