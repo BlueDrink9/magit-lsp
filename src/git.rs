@@ -677,7 +677,7 @@ impl GitRepo {
         let listed = match self.run(&["notes", "list", &commit]) {
             Ok(listed) => listed,
             Err(error)
-                if error.git.as_ref().is_some_and(|failure| {
+                if error.git.as_deref().is_some_and(|failure| {
                     failure.args == ["notes", "list", commit.as_str()]
                         && failure.exit_code == 1
                         && failure.stderr == format!("error: no note found for object {commit}.")
@@ -1405,7 +1405,7 @@ impl GitRepo {
         ) {
             Ok(out) => out,
             Err(error)
-                if error.git.as_ref().is_some_and(|failure| {
+                if error.git.as_deref().is_some_and(|failure| {
                     failure
                         .stderr
                         .to_lowercase()

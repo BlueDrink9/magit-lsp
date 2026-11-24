@@ -137,7 +137,7 @@ impl Effect {
 
     /// The error effect for `err`, or `None` when it is an internal fault.
     pub fn from_error(err: &Error) -> Option<Effect> {
-        err.git.as_ref().map(Effect::from_git_failure)
+        err.git.as_deref().map(Effect::from_git_failure)
     }
 }
 

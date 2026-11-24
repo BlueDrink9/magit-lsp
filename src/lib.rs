@@ -58,7 +58,7 @@ pub enum ErrorKind {
 #[derive(Debug, Clone)]
 pub struct Error {
     pub message: String,
-    pub git: Option<git::GitFailure>,
+    pub git: Option<Box<git::GitFailure>>,
     pub kind: ErrorKind,
 }
 
@@ -76,7 +76,7 @@ impl Error {
     pub fn git(failure: git::GitFailure) -> Self {
         Self {
             message: failure.to_string(),
-            git: Some(failure),
+            git: Some(Box::new(failure)),
             kind: ErrorKind::Internal,
         }
     }
@@ -92,7 +92,7 @@ impl Error {
 
     /// The user-facing explanation, when this was a Git failure.
     pub fn user_error(&self) -> Option<errors::UserError> {
-        self.git.as_ref().map(git::GitFailure::user_error)
+        self.git.as_deref().map(git::GitFailure::user_error)
     }
 }
 
