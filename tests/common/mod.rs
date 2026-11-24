@@ -26,6 +26,19 @@ const FIXED_DATE: &str = "2000-01-01T00:00:00+0000";
 
 static DETERMINISM: Once = Once::new();
 
+/// An absolute path git accepts as an argument or environment value.
+///
+/// Unix canonicalization keeps paths clear of symlinked temp components (for
+/// example macOS `/var`). Git for Windows rejects the verbatim `\\?\` prefix
+/// that `canonicalize` returns, while temp dirs are already absolute there.
+pub fn git_compatible_absolute(path: &Path) -> PathBuf {
+    #[cfg(unix)]
+    let out = std::fs::canonicalize(path).expect("canonicalize absolute path");
+    #[cfg(not(unix))]
+    let out = path.to_path_buf();
+    out
+}
+
 /// Make spawned `git` deterministic: fixed identity and dates, no system
 /// config, an isolated `HOME`/`XDG_CONFIG_HOME` and `LC_ALL=C`.
 ///
@@ -34,11 +47,8 @@ static DETERMINISM: Once = Once::new();
 /// together) so recordings stay valid under any temporary-directory path.
 pub fn apply_determinism_env() {
     DETERMINISM.call_once(|| {
-        let home = TempDir::new()
-            .expect("tempdir for HOME")
-            .keep()
-            .canonicalize()
-            .expect("canonicalize tempdir for HOME");
+        let temp_home = TempDir::new().expect("tempdir for HOME").keep();
+        let home = git_compatible_absolute(&temp_home);
         std::fs::create_dir_all(home.join("config")).expect("create XDG config dir");
         std::env::set_var("HOME", &home);
         std::env::set_var("XDG_CONFIG_HOME", home.join("config"));

@@ -121,7 +121,7 @@ fn configured_user_excludes_and_linked_worktree_repository_scope_resolve_correct
     let (tmp, repo) = RepoFixture::new()
         .commit("initial", [("tracked.txt", TEN_LINES)])
         .build();
-    let root = tmp.path().canonicalize().unwrap();
+    let root = git_compatible_absolute(tmp.path());
     let configured = root.join("private/excludes");
     git(
         tmp.path(),

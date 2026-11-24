@@ -4843,10 +4843,7 @@ fn ignore_user_literal_requires_deliberate_confirmation() {
     // temp components (for example macOS `/var`), which the ignore destination
     // check rejects. Git for Windows instead rejects the verbatim `\\?\` prefix
     // that `canonicalize` returns, while the temp dir is already absolute.
-    #[cfg(unix)]
-    let private_path = std::fs::canonicalize(private.path()).unwrap();
-    #[cfg(not(unix))]
-    let private_path = private.path().to_path_buf();
+    let private_path = git_compatible_absolute(private.path());
     let user_ignore = private_path.join("user-ignore");
     std::fs::write(&user_ignore, "# retained\n").unwrap();
 
