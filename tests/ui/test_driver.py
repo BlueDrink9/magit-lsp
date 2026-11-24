@@ -1119,19 +1119,43 @@ class PaneGeometryTest(unittest.TestCase):
                 ("resize-window", "-t", driver.SESSION, "-x", "80", "-y", "24"),
             )
             self.assertLess(names.index("resize-window"), names.index("respawn-pane"))
+            config = (run_dir / "tmux.conf").read_text()
+            self.assertIn("set -g status off", config)
+            self.assertIn("set -g window-size manual", config)
+
+    def test_tmux_commands_use_a_private_socket_and_the_harness_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            driver._write_tmux_config(run)
+            config = Path(directory) / "tmux.conf"
+            with patch.object(driver.subprocess, "run") as spawn:
+                spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+                driver._tmux(run, "display-message", "-p")
+            self.assertEqual(
+                spawn.call_args.args[0],
+                ["tmux", "-L", run.tmux, "-f", str(config), "display-message", "-p"],
+            )
+            config.unlink()
+            with patch.object(driver.subprocess, "run") as spawn:
+                spawn.return_value = subprocess.CompletedProcess([], 0, "", "")
+                driver._tmux(run, "list-sessions", check=False)
+            self.assertEqual(spawn.call_args.args[0][4], "/dev/null")
 
     def test_short_pane_fails_loudly_instead_of_rendering_one_row_less(self) -> None:
         run = make_run("/tmp/test-run")
         run.cols, run.rows = 80, 24
         replies = [
             subprocess.CompletedProcess([], 0, "", ""),
-            subprocess.CompletedProcess([], 0, "80x23\n", ""),
+            subprocess.CompletedProcess(
+                [], 0, "80x23 status=on window-size=latest clients=1\n", ""
+            ),
         ]
         with patch.object(driver, "_tmux", side_effect=replies) as tmux:
-            with self.assertRaisesRegex(
-                driver.DriverError, "tmux pane is 80x23, expected 80x24"
-            ):
+            with self.assertRaises(driver.DriverError) as caught:
                 driver._enforce_geometry(run)
+        message = str(caught.exception)
+        self.assertIn("tmux pane is 80x23, expected 80x24", message)
+        self.assertIn("status=on window-size=latest clients=1", message)
         self.assertEqual(
             tmux.call_args_list[0].args[1:],
             ("resize-window", "-t", driver.SESSION, "-x", "80", "-y", "24"),
@@ -1141,7 +1165,9 @@ class PaneGeometryTest(unittest.TestCase):
         run = make_run("/tmp/test-run")
         replies = [
             subprocess.CompletedProcess([], 0, "", ""),
-            subprocess.CompletedProcess([], 0, "100x30\n", ""),
+            subprocess.CompletedProcess(
+                [], 0, "100x30 status=off window-size=manual clients=0\n", ""
+            ),
         ]
         with patch.object(driver, "_tmux", side_effect=replies):
             driver._enforce_geometry(run)

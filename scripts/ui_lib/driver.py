@@ -186,10 +186,36 @@ def _forget_last_run(run_id: str) -> None:
             LAST_RUN.unlink(missing_ok=True)
 
 
+def _tmux_config_path(run: Run) -> Path:
+    """The harness-owned tmux config, never the user's `~/.tmux.conf`."""
+    path = Path(run.dir) / "tmux.conf"
+    return path if path.is_file() else Path("/dev/null")
+
+
+def _write_tmux_config(run: Run) -> None:
+    """Write the harness tmux config that fixes geometry before any session exists.
+
+    The server reads it before the first window is created, so the requested
+    size is never derived from a status line or an attached client.
+    """
+    path = Path(run.dir) / "tmux.conf"
+    path.write_text(
+        "set -g status off\n"
+        "set -g window-size manual\n"
+        "set -g escape-time 0\n"
+        "set -g default-terminal xterm-256color\n",
+        encoding="utf-8",
+    )
+
+
 def _tmux(run: Run, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Run one tmux command with a finite timeout."""
+    """Run one tmux command with a finite timeout and the harness config.
+
+    `-f` isolates the run's private server from the user's tmux configuration;
+    `-L` already gives it its own socket, so no attached client can share it.
+    """
     result = subprocess.run(
-        ["tmux", "-L", run.tmux, *args],
+        ["tmux", "-L", run.tmux, "-f", str(_tmux_config_path(run)), *args],
         capture_output=True,
         text=True,
         timeout=TMUX_TIMEOUT,
@@ -209,13 +235,20 @@ def _enforce_geometry(run: Run) -> None:
     """
     expected = f"{run.cols}x{run.rows}"
     _tmux(run, "resize-window", "-t", SESSION, "-x", str(run.cols), "-y", str(run.rows))
-    actual = _tmux(
-        run, "display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}"
+    state = _tmux(
+        run,
+        "display-message",
+        "-p",
+        "-t",
+        SESSION,
+        "#{pane_width}x#{pane_height} status=#{status} "
+        "window-size=#{window-size} clients=#{session_attached}",
     ).stdout.strip()
+    actual = state.split(maxsplit=1)[0] if state else ""
     if actual != expected:
         raise DriverError(
-            f"tmux pane is {actual}, expected {expected}: the editor would render "
-            "at a different screen size than requested"
+            f"tmux pane is {actual}, expected {expected} ({state or 'no size reported'}): "
+            "the editor would render at a different screen size than requested"
         )
 
 
@@ -928,6 +961,7 @@ def start(
             raise DriverError(f"could not build fixture `{fixture}`: {error}") from error
         run.trace_path.touch()
         run.save()
+        _write_tmux_config(run)
 
         env = fixtures.determinism_env(run.home_path)
         env.update(
@@ -1054,6 +1088,7 @@ def native_session(
               str(directory / "trace.jsonl"), f"magit-ui-{run_id}")
     try:
         run.trace_path.touch()
+        _write_tmux_config(run)
         socket = startup.inspect_socket(run.socket_path)
         if socket.too_long:
             raise StartupError("native session socket path is too long")
