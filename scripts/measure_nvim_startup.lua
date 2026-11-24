@@ -68,15 +68,21 @@ record("initialized_server_reopen", warm)
 local focused = vim.uv.hrtime()
 vim.cmd("Magit " .. vim.fn.fnameescape(root))
 record("already_open_focus", focused)
--- The early render returns before the server acquires status, so let that
--- acquisition render before teardown stops the server and truncates its trace.
+-- The early render returns before the server acquires status, and two opens
+-- can acquire concurrently: the last completion render can arrive while an
+-- earlier open is still in Git, so a buffer-only wait truncates that trace.
+-- The server ends each status-open progress token only after its acquisition
+-- has written the phase events and enqueued the completion render, so client
+-- idle is the barrier that makes every correlated open traceable at teardown.
+local debug = vim.env.MAGIT_LSP_TRACE and require("magit-lsp.debug") or nil
 vim.wait(30000, function()
   if not vim.api.nvim_buf_is_valid(0) then
     return false
   end
-  return table
+  local loading_gone = table
     .concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     :find("Loading repository status", 1, true) == nil
+  return loading_gone and (not debug or debug.idle())
 end, 10)
 for _, client in ipairs(vim.lsp.get_clients()) do
   client.stop(true)
