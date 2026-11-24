@@ -1,4 +1,4 @@
-.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -76,6 +76,13 @@ format:
 
 format-check:
 	$(call run,format-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --working-tree)
+
+# Diagnostic lint sweep over the whole workspace and all targets. Findings are
+# reported, never escalated: `--cap-lints warn` keeps deny-by-default lints
+# (and crate-level `deny`s) from failing the sweep, so the digest and log stay
+# inspectable and no lint level is changed in the code or config.
+clippy:
+	$(call run,clippy,cargo clippy -q --workspace --all-targets -- --cap-lints warn)
 
 # Explicit opt-in whole-repository sweep for one formatter. `format-all-list`
 # prints the exact tracked eligible files and counts; use `format-all` only on a
