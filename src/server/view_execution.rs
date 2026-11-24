@@ -30,9 +30,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         "phase_repository_discovery",
         serde_json::json!({ "duration_ms": discovery.elapsed().as_secs_f64() * 1000.0 }),
     );
-    let repo = discovered_repo
-        .root()
-        .canonicalize()?
+    let repo = crate::path::canonical(discovered_repo.root())?
         .to_string_lossy()
         .into_owned();
     let id = shared.next_view_id();

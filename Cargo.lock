@@ -549,6 +549,7 @@ dependencies = [
  "libc",
  "lsp-server",
  "lsp-types",
+ "normpath",
  "notify",
  "proptest",
  "rstest",
@@ -589,6 +590,15 @@ dependencies = [
  "libc",
  "log",
  "wasi",
+ "windows-sys",
+]
+
+[[package]]
+name = "normpath"
+version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b11ce00d2594068e8a27c9146fdc5cf9f3ac38eb42c7cd34d05fea618873ac9f"
+dependencies = [
  "windows-sys",
 ]
 

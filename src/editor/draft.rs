@@ -94,7 +94,7 @@ impl Draft {
             .to_owned();
         Ok(Self {
             owner: owner.into(),
-            repository: std::fs::canonicalize(repo.root())?,
+            repository: crate::path::canonical(repo.root())?,
             uri,
             run_id,
             helper_token: opaque_id()?,
@@ -355,7 +355,7 @@ impl Target {
         // form is `/private/var/...`. Resolve only the supplied path and compare
         // it with the stored canonical expected identity; re-resolving the
         // trusted path would accept an ancestor substituted after allocation.
-        if std::fs::canonicalize(supplied)?.as_path() != expected {
+        if crate::path::canonical(supplied)?.as_path() != expected {
             return Err(Error::new(
                 "Helper target is not the expected Git draft file",
             ));
@@ -378,7 +378,7 @@ impl Target {
 
     fn current(&self, write: bool) -> Result<File> {
         let parent = self.path.parent().unwrap();
-        if std::fs::canonicalize(parent)? != parent
+        if crate::path::canonical(parent)? != parent
             || !same_file(&std::fs::metadata(parent)?, &self.directory.metadata()?)
         {
             return Err(Error::new(

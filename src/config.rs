@@ -667,7 +667,7 @@ fn load_file(
     layered: &mut Layered,
     visiting: &mut Vec<PathBuf>,
 ) -> Result<(), ConfigError> {
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical = crate::path::canonical_or_raw(path);
     if let Some(start) = visiting.iter().position(|seen| seen == &canonical) {
         let mut chain: Vec<String> = visiting[start..]
             .iter()

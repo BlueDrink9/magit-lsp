@@ -1390,14 +1390,15 @@ impl GitRepo {
                 "git rev-parse did not report the repository directories",
             ));
         }
-        let root = std::fs::canonicalize(root)?;
+        let root = crate::path::canonical(Path::new(root))?;
         let resolve_dir = |value: &str| {
             let path = Path::new(value);
-            std::fs::canonicalize(if path.is_absolute() {
+            let path = if path.is_absolute() {
                 path.to_path_buf()
             } else {
                 cwd.join(path)
-            })
+            };
+            crate::path::canonical(&path)
         };
         let git_dir = resolve_dir(git_dir)?;
         let common_dir = resolve_dir(common_dir)?;
@@ -1544,7 +1545,7 @@ impl GitRepo {
         if !path.is_absolute() {
             return Err(Error::new("Git returned a relative editor directory"));
         }
-        Ok(std::fs::canonicalize(path)?.join("COMMIT_EDITMSG"))
+        Ok(crate::path::canonical(path)?.join("COMMIT_EDITMSG"))
     }
 
     /// Resolve Git's worktree-specific interactive rebase todo path.
@@ -1593,7 +1594,7 @@ impl GitRepo {
         if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
-        let git_dir = std::fs::canonicalize(&self.git_dir)?;
+        let git_dir = crate::path::canonical(&self.git_dir)?;
         let merge = git_dir.join("rebase-merge");
         let merge_identity = std::sync::Arc::new(same_file::Handle::from_path(&merge)?);
         let mut metadata = Vec::new();
@@ -1603,7 +1604,7 @@ impl GitRepo {
         let path = self.rebase_todo_path()?;
         if path
             .parent()
-            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .and_then(|parent| crate::path::canonical(parent).ok())
             .as_deref()
             != Some(merge.as_path())
         {
@@ -1632,7 +1633,7 @@ impl GitRepo {
         if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
-        let git_dir = std::fs::canonicalize(&self.git_dir)?;
+        let git_dir = crate::path::canonical(&self.git_dir)?;
         let merge = git_dir.join("rebase-merge");
         let merge_identity = std::sync::Arc::new(same_file::Handle::from_path(&merge)?);
         let mut metadata = Vec::new();
@@ -1657,10 +1658,10 @@ impl GitRepo {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
         let path = self.rebase_todo_path()?;
-        let merge_dir = std::fs::canonicalize(self.git_dir.join("rebase-merge"))?;
+        let merge_dir = crate::path::canonical(&self.git_dir.join("rebase-merge"))?;
         if path
             .parent()
-            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .and_then(|parent| crate::path::canonical(parent).ok())
             .as_deref()
             != Some(merge_dir.as_path())
         {
@@ -1901,8 +1902,8 @@ impl GitRepo {
     pub fn repository_identity(&self) -> Result<String> {
         Ok(format!(
             "{}\0{}",
-            std::fs::canonicalize(&self.root)?.display(),
-            std::fs::canonicalize(&self.git_dir)?.display()
+            crate::path::canonical(&self.root)?.display(),
+            crate::path::canonical(&self.git_dir)?.display()
         ))
     }
 

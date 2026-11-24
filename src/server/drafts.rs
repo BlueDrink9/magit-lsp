@@ -146,7 +146,7 @@ fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
     let Some(dir) = path.parent() else {
         return false;
     };
-    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir = crate::path::canonical_or_raw(dir);
     shared
         .client
         .lock()

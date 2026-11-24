@@ -28,15 +28,11 @@ static DETERMINISM: Once = Once::new();
 
 /// An absolute path git accepts as an argument or environment value.
 ///
-/// Unix canonicalization keeps paths clear of symlinked temp components (for
-/// example macOS `/var`). Git for Windows rejects the verbatim `\\?\` prefix
-/// that `canonicalize` returns, while temp dirs are already absolute there.
+/// Canonicalization keeps paths clear of symlinked temp components (for example
+/// macOS `/var`), while the shared helper avoids the verbatim `\\?\` prefix Git
+/// for Windows rejects.
 pub fn git_compatible_absolute(path: &Path) -> PathBuf {
-    #[cfg(unix)]
-    let out = std::fs::canonicalize(path).expect("canonicalize absolute path");
-    #[cfg(not(unix))]
-    let out = path.to_path_buf();
-    out
+    magit_lsp::path::canonical_or_raw(path)
 }
 
 /// Why `path` would fail a Windows Git or filesystem operation, if it would.

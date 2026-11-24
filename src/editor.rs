@@ -1424,7 +1424,7 @@ fn absolute(file: &str) -> Result<PathBuf> {
             .map_err(|error| Error::new(format!("cannot resolve the edit path: {error}")))?
             .join(path)
     };
-    Ok(std::fs::canonicalize(&path).unwrap_or(path))
+    Ok(crate::path::canonical_or_raw(&path))
 }
 
 #[cfg(unix)]
