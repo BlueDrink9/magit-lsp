@@ -78,8 +78,11 @@ pub enum Refresh {
 /// [`RepoWatcher::join`] can wait for it (used on shutdown and in tests).
 pub struct RepoWatcher {
     /// Keeps the event source alive: dropping it closes the channel and ends
-    /// the thread.
+    /// the thread once the retained sender is gone too.
     watcher: Option<RecommendedWatcher>,
+    /// Injects synthetic rescan events into the watcher's own channel, so a
+    /// lost-event window is repaired through the normal debounce path.
+    rescan_tx: Option<mpsc::Sender<notify::Result<Event>>>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -106,6 +109,9 @@ impl RepoWatcher {
     {
         let repo = repo.to_path_buf();
         let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+        // Retained so the owner can queue a synthetic rescan through the same
+        // channel the backend events arrive on.
+        let rescan_tx = tx.clone();
         let mut watcher = notify::recommended_watcher(tx)?;
         watcher.watch(&repo, RecursiveMode::Recursive)?;
         let thread = std::thread::Builder::new()
@@ -113,8 +119,25 @@ impl RepoWatcher {
             .spawn(move || RepoWatcher::run(repo, config, presentation_files, rx, on_refresh))?;
         Ok(Self {
             watcher: Some(watcher),
+            rescan_tx: Some(rescan_tx),
             thread: Some(thread),
         })
+    }
+
+    /// Queue one synthetic rescan through the debounce path.
+    ///
+    /// Some lost-event windows leave no paths to refresh on: arming after the
+    /// recursive walk, a platform rescan notice, a channel error. This sends a
+    /// pathless [`notify::event::Flag::Rescan`] event on the watcher's own
+    /// channel, which the run loop turns into exactly one full-refresh burst.
+    /// It never calls the refresh action itself. Returns `false` once the
+    /// watcher thread has stopped.
+    pub fn rescan(&self) -> bool {
+        let event =
+            Event::new(notify::event::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        self.rescan_tx
+            .as_ref()
+            .is_some_and(|tx| tx.send(Ok(event)).is_ok())
     }
 
     /// The debounce-and-retry loop.
@@ -127,15 +150,27 @@ impl RepoWatcher {
     ) {
         let git_dir = repo.join(".git");
         let mut pending: Option<Vec<PathBuf>> = None;
+        // Whether the pending burst was prompted by a rescan (lost events)
+        // rather than paths that are known to be stale.
+        let mut rescan = false;
         let mut lock_reported = false;
         loop {
             match rx.recv_timeout(config.debounce) {
                 Ok(Ok(event)) => {
                     tracing::trace!(kind = ?event.kind, paths = ?event.paths, "watcher raw event");
-                    if !relevant_event_excluding(&event, &repo, &presentation_files) {
+                    // A rescan notice (inotify queue overflow, FSEvents
+                    // must-scan) may arrive pathless and means events were
+                    // lost, so it must outrank the relevance filter.
+                    let needed = event.need_rescan();
+                    if !needed && !relevant_event_excluding(&event, &repo, &presentation_files) {
                         continue;
                     }
-                    let paths: Vec<PathBuf> = event.paths.iter().cloned().collect();
+                    let paths: Vec<PathBuf> = if needed {
+                        rescan = true;
+                        vec![repo.clone()]
+                    } else {
+                        event.paths.iter().cloned().collect()
+                    };
                     match pending.as_mut() {
                         Some(batch) => batch.extend(paths),
                         None => pending = (!paths.is_empty()).then_some(paths),
@@ -143,6 +178,14 @@ impl RepoWatcher {
                 }
                 Ok(Err(error)) => {
                     tracing::debug!(%error, "watcher event failed");
+                    // notify reports some losses (an overflow it cannot
+                    // represent) only as a channel error: refresh everything
+                    // instead of dropping the only signal.
+                    rescan = true;
+                    match pending.as_mut() {
+                        Some(batch) => batch.push(repo.clone()),
+                        None => pending = Some(vec![repo.clone()]),
+                    }
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     let Some(batch) = pending.as_ref() else {
@@ -159,9 +202,14 @@ impl RepoWatcher {
                         continue;
                     }
                     lock_reported = false;
+                    let batch = dedup(batch.clone());
                     tracing::debug!(paths = ?batch, "watcher burst fired");
-                    on_refresh(Refresh::Changed(dedup(batch.clone())));
+                    on_refresh(Refresh::Changed(batch.clone()));
                     pending = None;
+                    // Logged after the refresh returned: owners that need to
+                    // know a rescan has been applied can key on this line.
+                    tracing::debug!(paths = ?batch, rescan, "watcher burst settled");
+                    rescan = false;
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -183,6 +231,9 @@ impl RepoWatcher {
     /// Stop the watcher and wait for its thread.
     pub fn join(&mut self) {
         self.watcher.take();
+        // The retained sender must go too, or the channel stays open and the
+        // thread never sees `Disconnected`.
+        self.rescan_tx.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -191,8 +242,10 @@ impl RepoWatcher {
 
 impl Drop for RepoWatcher {
     fn drop(&mut self) {
-        // Dropping the watcher closes the channel; the thread exits on its own.
+        // Dropping the watcher and the retained sender closes the channel; the
+        // thread exits on its own.
         self.watcher.take();
+        self.rescan_tx.take();
     }
 }
 
@@ -355,5 +408,66 @@ mod tests {
         .add_path(path(".git/objects/00/00"))
         .add_path(path("f.txt"));
         assert!(relevant_event(&event, Path::new("/repo")));
+    }
+
+    /// Drive the run loop directly with signals the real backend cannot produce
+    /// deterministically, and collect one burst per signal.
+    fn bursts_for(signals: Vec<notify::Result<Event>>) -> Vec<Refresh> {
+        let repo = PathBuf::from("/repo");
+        let config = WatcherConfig {
+            debounce: Duration::from_millis(10),
+            lock_retry_delay: Duration::from_millis(1),
+            lock_retries: 1,
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        let (refresh_tx, refresh_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            RepoWatcher::run(
+                repo,
+                config,
+                vec![".magit".to_owned()],
+                event_rx,
+                move |refresh| {
+                    refresh_tx.send(refresh).expect("send refresh");
+                },
+            )
+        });
+        let expected = signals.len();
+        for signal in signals {
+            event_tx.send(signal).expect("send signal");
+        }
+        let mut bursts = Vec::new();
+        for _ in 0..expected {
+            bursts.push(
+                refresh_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("one full-refresh burst per lost-event signal"),
+            );
+        }
+        assert!(
+            refresh_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "a lost-event signal burned more than once"
+        );
+        drop(event_tx);
+        handle
+            .join()
+            .expect("the run loop exits when its channel closes");
+        bursts
+    }
+
+    #[test]
+    fn pathless_rescan_and_channel_errors_schedule_one_full_refresh() {
+        let repo = PathBuf::from("/repo");
+        let notice =
+            Event::new(notify::event::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        let signals: Vec<notify::Result<Event>> =
+            vec![Ok(notice), Err(notify::Error::generic("queue overflow"))];
+        for signal in signals {
+            assert_eq!(
+                bursts_for(vec![signal]),
+                vec![Refresh::Changed(vec![repo.clone()])],
+                "a lost-event signal is one full-refresh burst, never dropped"
+            );
+        }
     }
 }

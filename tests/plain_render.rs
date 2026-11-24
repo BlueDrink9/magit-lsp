@@ -1186,6 +1186,55 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     assert!(server.finish(std::time::Duration::from_secs(10)).success());
 }
 
+/// Arming the watcher on an unchanged repository is exactly one silent rescan.
+///
+/// Arming repairs the lost-event window with a synthetic full refresh. On a tree
+/// the client already holds that refresh must burst exactly once and send no
+/// wire frames at all, or every open would cost a redundant edit.
+#[test]
+fn plain_unchanged_repo_arm_is_one_silent_rescan_burst() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+        .build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk sentinel\n");
+    let uri = uri_from_path(&path)
+        .expect("native path has a file URI")
+        .as_str()
+        .to_owned();
+    let mut server = plain_server(repo.path(), true, true, WATCH_DEBOUNCE);
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "stale"));
+    let initial = next_edit_after(&mut server, "opening the plain document");
+    assert_eq!(
+        editor.apply_edit(&initial["params"]["edit"])["applied"],
+        true
+    );
+    server.send(json!({"jsonrpc":"2.0","id":initial["id"],"result":{"applied":true}}));
+
+    // The arm burst names the repository root; an unchanged tree is
+    // wire-silent, so the settled log line is the only observable.
+    wait_for_log_line(
+        &mut server,
+        "the arming rescan burst",
+        &["watcher burst settled", "rescan=true"],
+    );
+    let log = server.stderr_text();
+    let bursts = log
+        .lines()
+        .filter(|line| line.contains("watcher burst settled"))
+        .count();
+    assert_eq!(bursts, 1, "arming ran exactly one burst:\n{log}");
+    let frames = server.drain_notifications();
+    assert!(
+        frames.is_empty(),
+        "the unchanged-repo rescan sent wire frames: {frames:?}"
+    );
+
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[test]
 fn binary_format_drift_warns_once_refuses_actions_and_recovers_on_reopen() {
     let (repo, _) = fixtures::RepoFixture::new()

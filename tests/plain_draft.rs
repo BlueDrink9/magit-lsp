@@ -2288,6 +2288,31 @@ fn drain_pending(server: &mut stdio::TestServer, editor: &mut FakeEditor) {
     }
 }
 
+/// Wait until the watcher's arming rescan has applied (bounded).
+///
+/// Arming queues one synthetic full refresh. It is wire-silent on an unchanged
+/// tree, so the server log is the only observable; waiting here keeps the
+/// [`StatusGate`] for the burst the test deliberately schedules instead of the
+/// rescan's own status read.
+#[cfg(unix)]
+fn wait_for_arm_rescan(server: &mut stdio::TestServer) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let log = server.stderr_text();
+        if log
+            .lines()
+            .any(|line| line.contains("watcher burst settled") && line.contains("rescan=true"))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the arming rescan never settled:\n{log}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// A `git` PATH wrapper that parks the first `status` read after arming.
 ///
 /// Unlike the single-use `GatedGit` fixture, arming happens after the server has
@@ -2467,6 +2492,11 @@ fn a_watcher_refresh_inside_a_commit_window_does_not_publish_a_status_edit() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     let (mut server, mut editor, uri) = open_plain_with_env(&repo, caps(true), &env);
+    // The watcher's arming rescan reads status too; it must finish before the
+    // gate is armed or it claims that read instead of the deliberate burst.
+    // Settle it before writing anything else, while the log is small enough
+    // that the settled marker cannot have been rotated away.
+    wait_for_arm_rescan(&mut server);
     let mut seen = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
     server.send(editor.edit(&draft_uri, "Gated publication\n"));
@@ -2597,6 +2627,10 @@ fn a_settled_watcher_read_inside_a_commit_window_publishes_before_the_outcome() 
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     let (mut server, mut editor, uri) = open_plain_with_env(&repo, caps(true), &env);
+    // The arming rescan must settle before the gate is armed, or it claims
+    // that read instead of the burst this test parks. Waiting here keeps the
+    // settled marker inside the log, before the draft flow floods it.
+    wait_for_arm_rescan(&mut server);
     let mut seen = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
     server.send(editor.edit(&draft_uri, "Settled publication\n"));

@@ -107,6 +107,37 @@ fn debounce_collapses_a_burst_into_one_refresh() {
 }
 
 #[test]
+fn a_rescan_request_is_one_full_refresh_burst_without_a_loop() {
+    let (fixture, _repo) = init_repo();
+    let repo = fixture.path().to_path_buf();
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = RepoWatcher::start(&repo, test_config(), move |refresh| {
+        tx.send(refresh).expect("send refresh");
+    })
+    .expect("start watcher");
+
+    // Arming leaves lost-event windows (the recursive walk is not atomic, a
+    // platform may report a pathless rescan); the owner repairs them with one
+    // synthetic full refresh through the debounce path.
+    assert!(watcher.rescan(), "the watcher thread is running");
+
+    let refresh = wait_for(&rx, "the rescan burst", |refresh| {
+        matches!(refresh, Refresh::Changed(_))
+    });
+    assert_eq!(
+        refresh,
+        Refresh::Changed(vec![repo.clone()]),
+        "the rescan burst names the repository root"
+    );
+    assert!(
+        nothing_within(&rx, Duration::from_millis(100)),
+        "the rescan looped instead of settling on a quiet repository"
+    );
+
+    watcher.join();
+}
+
+#[test]
 fn git_internals_do_not_trigger_a_refresh() {
     let (fixture, _repo) = init_repo();
     let repo = fixture.path().to_path_buf();

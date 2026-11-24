@@ -726,6 +726,12 @@ impl Shared {
                     emit_phase("already_armed");
                     return;
                 }
+                // The recursive walk is not atomic: an event that fired while
+                // the tree was being registered was never delivered, and an
+                // unchanged tree would then stay stale forever. Queue one
+                // rescan through the watcher's debounce path, never a direct
+                // refresh, so it cannot race a real event's burst.
+                watcher.rescan();
                 watchers.insert(repo_key, watcher);
                 tracing::debug!(repo, "repository watcher armed");
                 drop(watchers);
