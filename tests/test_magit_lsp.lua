@@ -350,6 +350,26 @@ local function assert_no_line(needle)
   MiniTest.expect.equality(has, false, needle)
 end
 
+--- Open the closed section named `header` through the real fold key: place the
+--- cursor on its rendered row, press Tab, then wait for the server's render.
+local function open_section(header)
+  local line = child.lua_get(string.format("HELPERS.line_of(%q)", header))
+  MiniTest.expect.equality(type(line), "number", "section header rendered: " .. header)
+  child.lua(string.format("vim.api.nvim_win_set_cursor(0, {%d, 0})", line))
+  child.type_keys(50, "<Tab>")
+  child.lua_get("HELPERS.wait_idle()")
+end
+
+--- Reveal every hunk body under the rendered `file` row with the recursive
+--- Show fold key, then wait for the server's render.
+local function open_body(file)
+  local line = child.lua_get(string.format("HELPERS.line_of(%q)", file))
+  MiniTest.expect.equality(type(line), "number", "file row rendered: " .. file)
+  child.lua(string.format("vim.api.nvim_win_set_cursor(0, {%d, 0})", line))
+  child.type_keys(50, "zO")
+  child.lua_get("HELPERS.wait_idle()")
+end
+
 --- Place the cursor on the first matching rendered line and invoke a command.
 local function invoke_at(line, command, opts)
   local call = string.format(
@@ -650,10 +670,17 @@ T["bare :Magit starts a session for the current directory without setup"] = func
     true,
     "the server rendered the repository status"
   )
+  -- The opening render is closed: section headers and counts only, no file
+  -- row and no hunk body.
+  MiniTest.expect.equality(
+    vim.tbl_contains(state.lines, "  M f.txt"),
+    false,
+    "the closed render has no file row"
+  )
   MiniTest.expect.equality(
     vim.tbl_contains(state.lines, "    +NEW line"),
-    true,
-    "the server rendered the diff"
+    false,
+    "the closed render has no hunk body"
   )
 end
 
@@ -702,7 +729,8 @@ T["bare :Magit reopens a wiped status without a second server"] = function()
     "the session's configured fold key survived the reopen"
   )
   assert_line("Unstaged changes (1)")
-  assert_line("    +NEW line")
+  -- Sections start closed, so the reopened view has no hunk body to show.
+  assert_no_line("    +NEW line")
 end
 
 T[":Magit starts an explicit repository directory"] = function()
@@ -738,7 +766,7 @@ T[":Magit starts an explicit repository directory"] = function()
   MiniTest.expect.equality(state.clients, 1, "exactly one server started")
   MiniTest.expect.equality(state.focused, true, "the status view is focused")
   MiniTest.expect.equality(
-    vim.tbl_contains(state.lines, "  ? other.txt"),
+    vim.tbl_contains(state.lines, "Untracked files (1)"),
     true,
     "the server rendered the explicit repository's status"
   )
@@ -1052,11 +1080,31 @@ end
 
 T["staging a visual line range stages only those lines"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, "V", "s")
 
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)"),
+    true,
+    "the staged change rendered"
+  )
+  -- The visual-mode `s` mapping stages through the server but does not leave
+  -- visual mode itself; Escape replays natively so the fold keys below are the
+  -- normal-mode mappings again.
+  child.type_keys(50, "<Esc>")
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.wait_for(function() return vim.fn.mode() == 'n' end)"),
+    true,
+    "Escape left visual mode"
+  )
+  -- The mutation's sections start closed: open the staged section and its body
+  -- before looking for the staged change line.
+  open_section("Staged changes (1)")
+  open_body("  M f.txt")
   local staged = child.lua_get(
     "HELPERS.wait_for(function() return HELPERS.find_line('+', 'NEW line', 'staged') ~= nil end)"
   )
@@ -1100,6 +1148,8 @@ end
 
 T["semantic tokens highlight sections, files, hunks and diff lines"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('filetype', { buf = STATUS.buf })"),
     "magit-lsp"
@@ -1210,6 +1260,9 @@ T["tokens are refreshed after a mutation"] = function()
     true,
     "the mutation rendered"
   )
+  -- New hunks start collapsed; open the staged section after the change so the
+  -- staged file row exists for the token poll.
+  open_section("Staged changes (1)")
 
   local token = child.lua_get([[
     (function()
@@ -1337,37 +1390,50 @@ T["tokens are not requested for an unacknowledged render"] = function()
       local requested = HELPERS.wait_for(function()
         return #mutated() == 1
       end)
-      local staged = HELPERS.wait_for(function()
-        for i, line in ipairs(STATUS.lines) do
-          if line == '  M f.txt' then
-            local token = HELPERS.token_at(i - 1, 2)
-            if token and token.modifiers and token.modifiers.staged then
-              return true
-            end
-          end
-        end
-        return false
-      end)
       local refreshes = mutated()
       local first = refreshes[1]
       return {
         requested = requested,
         refreshes = #refreshes,
         ack_held = first and first.ack_held,
-        staged = staged,
       }
     end)()
   ]])
   MiniTest.expect.equality(flushed.requested, true, "the deferred refresh runs once")
   MiniTest.expect.equality(flushed.refreshes, 1, "exactly one token refresh follows the flush")
   MiniTest.expect.equality(flushed.ack_held, false, "the refresh follows the acknowledged version")
-  MiniTest.expect.equality(flushed.staged, true, "the staged token arrives after the flush")
+
+  -- The mutated section starts closed, so opening it is a fresh render after
+  -- the counting snapshot above; the staged token is asserted separately.
+  open_section("Staged changes (1)")
+  local staged = child.lua_get([[
+    (function()
+      local found = false
+      vim.wait(5000, function()
+        for i, line in ipairs(STATUS.lines) do
+          if line == '  M f.txt' then
+            local token = HELPERS.token_at(i - 1, 2)
+            if token and token.modifiers and token.modifiers.staged then
+              found = true
+              return true
+            end
+          end
+        end
+        return false
+      end, 20)
+      return found
+    end)()
+  ]])
+  MiniTest.expect.equality(staged, true, "the staged token arrives after the flush")
 end
 
 T["uses manual folding and serves fold ranges from the server"] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get("vim.wo.foldmethod"), "manual")
   MiniTest.expect.equality(child.lua_get("vim.wo.foldenable"), false)
+  -- Fold ranges come from the rendered tree, which is closed until the section
+  -- opens.
+  open_section("Unstaged changes (1)")
 
   local count = child.lua_get([[
     (function()
@@ -1463,6 +1529,10 @@ T["refresh and mutations still work after blocked edits"] = function()
 
   child.lua("M.refresh()")
   MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
+  -- The refreshed hunks start collapsed: open the section, then the file, so
+  -- both new hunks render their bodies.
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   assert_line("    +line11")
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
@@ -1538,6 +1608,10 @@ T["navigation jumps use server-owned structured headers"] = function()
   ]])
   MiniTest.expect.equality(#symbols > 0, true, "documentSymbol returns items")
 
+  -- The closed render has only section headers; open the section so the file
+  -- and hunk header rows are present to scan.
+  open_section("Unstaged changes (1)")
+
   local staged_line, unstaged_section_line, unstaged_line, hunk_line
   for i, line in ipairs(child.lua_get("STATUS.lines")) do
     if line == "Staged changes (0)" then
@@ -1594,6 +1668,8 @@ end
 
 T["<CR> on a change line opens the real file at the new-side line"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
@@ -1688,6 +1764,8 @@ end
 
 T["pressing s stages the change under the cursor"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
@@ -1710,13 +1788,31 @@ T["the g r chord refreshes the view"] = function()
   vim.fn.writefile(lines, path)
 
   child.type_keys(50, "g", "r")
-  local refreshed =
-    child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +line11') end)")
-  MiniTest.expect.equality(refreshed, true)
+  MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
+  -- The refreshed view starts closed; the new hunk is only reachable after the
+  -- point-to-section and file opens, so its presence still proves the refresh.
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
+  assert_line("    +line11")
 end
 
 T["Tab toggles a file section through the server"] = function()
   setup_child()
+  -- Sections start closed: open this one first, then show the hunk body so the
+  -- file-row toggle below has something to collapse.
+  local section_before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
+  open_section("Unstaged changes (1)")
+  local opened = child.lua_get(
+    string.format(
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) > %d end)",
+      section_before
+    )
+  )
+  MiniTest.expect.equality(opened, true, "the file section opened")
+  assert_line("  M f.txt")
+  open_body("  M f.txt")
+  assert_line("    +NEW line")
+
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "file line index")
   local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
@@ -1742,10 +1838,24 @@ end
 
 T["Escape with a selection passes through and leaves visual mode"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, "V", "<Esc>")
+  -- The server answers Escape with a `passThrough` replay the client feeds
+  -- natively; poll across RPC turns (a blocking `vim.wait` would not run the
+  -- fed typeahead) until the replay has left visual mode.
+  local left = false
+  for _ = 1, 50 do
+    if child.lua_get("vim.fn.mode()") == "n" then
+      left = true
+      break
+    end
+    vim.wait(50)
+  end
+  MiniTest.expect.equality(left, true, "Escape passed through and left visual mode")
   MiniTest.expect.equality(child.lua_get("vim.fn.mode()"), "n")
 end
 
@@ -1754,53 +1864,59 @@ T["mirrors a user mapping whose rhs is a fold command"] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F2>'] ~= nil"), true)
 
-  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local target = child.lua_get("HELPERS.find_first('section', 'unstaged')")
+  MiniTest.expect.equality(type(target), "number", "section line index")
   local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, "<F2>")
 
-  local collapsed = child.lua_get(
+  local expanded = child.lua_get(
     string.format(
-      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) > %d end)",
       before
     )
   )
-  MiniTest.expect.equality(collapsed, true, "the mirrored fold key collapsed the file")
+  MiniTest.expect.equality(expanded, true, "the mirrored fold key opened the section")
+  assert_line("  M f.txt")
 end
 
 T["a user Tab fold mapping toggles the section"] = function()
   child.cmd("nnoremap <Tab> za")
   setup_child()
-  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local target = child.lua_get("HELPERS.find_first('section', 'unstaged')")
+  MiniTest.expect.equality(type(target), "number", "section line index")
   local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, "<Tab>")
 
-  local collapsed = child.lua_get(
+  local expanded = child.lua_get(
     string.format(
-      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) > %d end)",
       before
     )
   )
-  MiniTest.expect.equality(collapsed, true, "the user Tab mapping toggled the file")
+  MiniTest.expect.equality(expanded, true, "the user Tab mapping opened the section")
+  assert_line("  M f.txt")
 end
 
 T["fold_keys mirrors a Lua-function fold mapping"] = function()
   setup_child({ fold_keys = { ["<F3>"] = "common.toggle-section" } })
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F3>'] ~= nil"), true)
 
-  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local target = child.lua_get("HELPERS.find_first('section', 'unstaged')")
+  MiniTest.expect.equality(type(target), "number", "section line index")
   local before = child.lua_get("vim.api.nvim_buf_line_count(STATUS.buf)")
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, "<F3>")
 
-  local collapsed = child.lua_get(
+  local expanded = child.lua_get(
     string.format(
-      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+      "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) > %d end)",
       before
     )
   )
-  MiniTest.expect.equality(collapsed, true, "the configured fold key collapsed the file")
+  MiniTest.expect.equality(expanded, true, "the configured fold key opened the section")
+  assert_line("  M f.txt")
 end
 
 T["capture mode forwards printable keys and shows the server hint"] = function()
@@ -1853,6 +1969,8 @@ end
 
 T["Enter visits the file and new-side line from the server effect"] = function()
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
   local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
   MiniTest.expect.equality(type(target), "number", "change line index")
   child.api.nvim_win_set_cursor(0, { target, 0 })
@@ -1947,6 +2065,8 @@ T["y y copies the value at point to the clipboard"] = function()
     }
   ]])
   setup_child()
+  open_section("Unstaged changes (1)")
+  open_body("  M f.txt")
 
   local function clear()
     child.lua([[vim.fn.setreg('+', ''); vim.fn.setreg('"', '')]])
@@ -2078,10 +2198,11 @@ T["buffers renders that beat the view/open response"] = function()
     "the render beat the view/open response"
   )
 
+  -- The buffered render is the closed opening render: headers only.
   assert_line("Head: main")
   assert_line("Unstaged changes (1)")
-  assert_line("  M f.txt")
-  assert_line("    +NEW line")
+  assert_no_line("  M f.txt")
+  assert_no_line("    +NEW line")
 
   local diff = child.lua_get("HELPERS.keymap_diff()")
   MiniTest.expect.equality(diff.missing, {}, "the early keymap was applied")
@@ -2189,6 +2310,44 @@ T["two repositories get independent status views"] = function()
       other
     )
   )
+  -- Both views start closed. Open each section through the real fold key so the
+  -- member rows render; the first view's unstaged section also makes the row-8
+  -- cursor used below valid.
+  local view_keys = child.lua_get([==[(function()
+    local v = require('magit-lsp.view')
+    local out = {}
+    for _, id in ipairs(v.order) do
+      if v.views[id].kind == 'status' then
+        out[#out + 1] = v.views[id].key
+      end
+    end
+    return out
+  end)()]==])
+  local function open_view_section(key, header)
+    child.lua(string.format(
+      [[
+      (function()
+        local v = require('magit-lsp.view')
+        local record = v.views[%q]
+        v.focus(record.key)
+        for i, line in ipairs(vim.api.nvim_buf_get_lines(record.buf, 0, -1, false)) do
+          if line == %q then
+            vim.api.nvim_win_set_cursor(0, { i, 0 })
+            return
+          end
+        end
+        error('section header rendered: ' .. %q)
+      end)()
+    ]],
+      key,
+      header,
+      header
+    ))
+    child.type_keys(50, "<Tab>")
+    child.lua_get("HELPERS.wait_idle()")
+  end
+  open_view_section(view_keys[1], "Unstaged changes (1)")
+  open_view_section(view_keys[2], "Untracked files (1)")
   local state = child.lua_get([==[(function()
     local v = require('magit-lsp.view')
     local out = {}
