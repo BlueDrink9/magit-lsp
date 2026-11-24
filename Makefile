@@ -1,4 +1,4 @@
-.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour neovim native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build build-timings test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-timings test-lua test-file ui-unit ui-test ui-file ui-tour neovim native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -30,6 +30,19 @@ endef
 
 build:
 	$(call run,build,cargo build -q)
+
+# Diagnostic build profile: does a from-scratch build in a separate target dir
+# (so an incremental target/ is untouched) with Cargo's unit timings, then
+# prints the slowest units. `--all-targets` is the default so dev-dependency
+# and test-binary compile/link costs appear too; pass `BUILD_TIMINGS_ARGS=` to
+# profile only the server build. Cargo 1.94+ has no `--timings=<fmt>`, so the
+# HTML report under target/timings/cargo-timings/ is parsed. The separate dir
+# is deleted and rebuilt on each run and left in place afterwards (~2G).
+BUILD_TIMINGS_ARGS ?= --all-targets
+BUILD_TIMINGS_TOP ?= 15
+build-timings:
+	$(call run,build-timings,rm -rf target/timings && CARGO_TARGET_DIR=target/timings cargo build --timings $(BUILD_TIMINGS_ARGS))
+	@python3 -c 'import glob,json,re;p=sorted(glob.glob("target/timings/cargo-timings/*.html"))[-1];h=open(p).read();m=re.search(r"UNIT_DATA\s*=\s*(\[.*?\])\s*;",h,re.S);u=json.loads(m.group(1));r=sorted(u,key=lambda x:x["duration"],reverse=True)[:$(BUILD_TIMINGS_TOP)];print("build-timings: %d units compiled, %.1fs unit time total, %.1fs build span"%(len(u),sum(x["duration"] for x in u),max(x["start"]+x["duration"] for x in u)));print("build-timings: slowest %d units (seconds, package, unit)"%len(r));[print("%7.2f  %-26s %s"%(x["duration"],x["name"],x["target"].strip())) for x in r];print("build-timings: report %s"%p)'
 
 release:
 	$(call run,release,cargo build --release -q)
@@ -165,6 +178,16 @@ vscode-semantic-test:
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
+
+# Diagnostic test-time profile: runs test-rust's exact Cargo command (without
+# -q, so each test binary's `Running ...` label survives next to libtest's own
+# `finished in` line), records the total wall clock and prints the slowest test
+# binaries first. Filtered runs (FILTER) profile the same subset. The digest is
+# left in build/test-logs/test-rust-timings.txt with the full log beside it.
+TEST_TIMINGS_TOP ?= 20
+test-timings:
+	$(call run,test-timings,(mkdir -p build/test-logs; log=build/test-logs/test-rust-timings.log; start=$$(date +%s); cargo test $(FILTER) >"$$log" 2>&1; status=$$?; cat "$$log"; end=$$(date +%s); awk '/^[[:space:]]*Running |^[[:space:]]*Doc-tests /{if ($$1=="Doc-tests") n="docs:"$$2; else if ($$2=="unittests" || $$2=="tests") n=$$3; else n=$$2} /^test result: .*finished in /{t=$$0; sub(/.*finished in /,"",t); print t"  "n}' "$$log" | sort -rn >build/test-logs/test-rust-timings.durations; { printf 'test-timings: test-rust wall %ss\n' "$$((end-start))"; printf 'test-timings: per-binary durations, slowest first (top %s of %s)\n' $(TEST_TIMINGS_TOP) "$$(wc -l <build/test-logs/test-rust-timings.durations)"; head -n $(TEST_TIMINGS_TOP) build/test-logs/test-rust-timings.durations; } >build/test-logs/test-rust-timings.txt; exit $$status))
+	@cat build/test-logs/test-rust-timings.txt
 
 # Real-pipe Rust suites against one explicitly supplied server executable. The
 # native harness may be compiled here, but the server under test must be the
