@@ -75,7 +75,7 @@ Two processes talking over LSP (JSON-RPC on stdio):
 - **`magit-lsp` server (Rust).** Owns all VCS work by shelling out to the `git`
   CLI (like Magit/Neogit), and exposes it as custom requests plus standard LSP
   features (folding).
-- **Neovim client (`lua/magit-lsp`).** Starts the server, opens a status view,
+- **Neovim client (`clients/neovim/lua/magit-lsp`).** Starts the server, opens a status view,
   renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
   buffer, and forwards keys as `view/key` steps against the server's keymap.
 - **VSCode client (`clients/vscode`).** Launches an external server and displays
@@ -115,19 +115,50 @@ cargo build --release --locked
 
 ### Neovim (0.11+)
 
-Run Neovim inside a Git repository and start the client from the same checkout;
-server discovery finds `target/release/magit-lsp`:
+The Neovim client is the `clients/neovim` subdirectory of this checkout; the
+repository root is not a Neovim runtime. Add that client directory to
+`'runtimepath'`, run Neovim inside a Git repository, and start the client;
+server discovery finds `target/release/magit-lsp` in the checkout:
 
 ```vim
+:set runtimepath+=/path/to/magit-lsp/clients/neovim
 :lua require('magit-lsp').setup()
 ```
 
 `status` opens in place and `g r` refreshes it in the default `vim` profile.
 For a native package or lazy.nvim install (a clone under your Neovim data
 directory, with `cmd` pointing at the installed binary), copy the tested snippets
-in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages).
-Once the plugin is installed, `:h magit` documents `:Magit [directory]`,
-setup/server discovery and protocol-version troubleshooting.
+in [client installation](docs/CLIENT_INSTALL.md#neovim-native-packages): a
+native package adds `clients/neovim` from `init.lua`, and a lazy spec appends
+`plugin.dir .. '/clients/neovim'` and sources its `plugin/magit-lsp.lua` entry
+point in the `config(plugin)` hook, registering `:Magit` without opening status
+eagerly. Once the client is loaded, `:h magit` documents
+`:Magit [directory]`, setup/server discovery and protocol-version
+troubleshooting; run `:helptags ALL` if your installation does not generate
+help tags for the client's `doc` directory.
+
+To try the client from a full checkout without changing your own Neovim
+configuration, the `make neovim` launcher builds the debug server and starts an
+interactive Neovim that loads only this checkout, pointing `$MAGIT_LSP_BIN` at
+`target/debug/magit-lsp`:
+
+```sh
+make neovim                      # open the current working directory
+make neovim REPO=/path/to/repo   # open a chosen repository
+```
+
+It does not load user configuration, plugin managers or the test initializer.
+Neovim's config/data/state/cache directories, plus shada, swap, backup, undo
+and view files, live in a temporary directory removed when Neovim exits. HOME
+is preserved, so Git and external helpers keep the caller's normal global
+configuration (identity, signing and includes) and repository-local settings
+still take precedence; a temporary include-only global Git config keeps the
+original XDG `git/config` and `~/.gitconfig` visible while editor paths are
+isolated. PATH and terminal variables are inherited; credential-helper or SSH
+integration is not asserted beyond that inherited environment. The automated
+targets below (`make test-lua` via `scripts/minimal_init.lua`, and
+tmux-driven `make ui-test`/`make ui-file`) are test harnesses, not interactive
+launchers.
 
 ### VS Code (1.85+)
 
@@ -429,7 +460,7 @@ sends atomically: it deletes exactly the maps it applied last time, sets the
 new buffer-local maps and records them in one synchronous call. Keys are
 translated from the canonical notation in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#38-key-notation) (`ctrl+c`, `g r`,
-`shift+Tab`, …) by `lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
+`shift+Tab`, …) by `clients/neovim/lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
 binding comes from the server.
 
 Folding is server-owned. The view window uses `foldmethod=manual` with

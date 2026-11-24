@@ -28,7 +28,7 @@ records that ack as the base for the next incremental update.
 - `src/git.rs`: the Git boundary. `src/patch.rs`: patch/hunk operations. Keep
   VCS work behind these.
 - `src/server.rs`: LSP/transport to sessions and notifications.
-  `src/protocol.rs`: wire payloads. The Neovim adapter is `lua/magit-lsp/`,
+  `src/protocol.rs`: wire payloads. The Neovim adapter is `clients/neovim/lua/magit-lsp/`,
   a thin display/input client.
 
 The list is a starting point, not exhaustive.

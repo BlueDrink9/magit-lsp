@@ -14,14 +14,20 @@ M.PLACEMENTS = { "replace", "vsplit", "split", "tab" }
 --- The rich protocol session version this client selects and requires.
 M.PROTOCOL_VERSION = 1
 
---- The project root containing this module, used for `target/` lookups.
+--- The repository root containing this module, used for `target/` lookups.
+---
+--- The client runtime sits at `clients/neovim/lua/magit-lsp/`, so discovery
+--- walks three levels above the client directory. An installed client has no
+--- `target/` tree and falls through to the normal `$PATH` lookup.
 ---@return string
 function M.project_root()
   local source = debug.getinfo(1, "S").source
   local path = source:sub(2)
   path = vim.fn.fnamemodify(path, ":h") -- lua/magit-lsp
   path = vim.fn.fnamemodify(path, ":h") -- lua
-  return vim.fn.fnamemodify(path, ":h") -- project root
+  path = vim.fn.fnamemodify(path, ":h") -- clients/neovim
+  path = vim.fn.fnamemodify(path, ":h") -- clients
+  return vim.fn.fnamemodify(path, ":h") -- repository root
 end
 
 --- Validate the client-only `status.placement` option.

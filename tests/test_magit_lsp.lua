@@ -551,7 +551,7 @@ T[":h magit resolves the shipped help file"] = function()
     local function make_help_root(dir)
       vim.fn.delete(dir, 'rf')
       vim.fn.mkdir(dir .. '/doc', 'p')
-      assert(vim.uv.fs_copyfile(project .. '/doc/magit.txt', dir .. '/doc/magit.txt'))
+      assert(vim.uv.fs_copyfile(project .. '/clients/neovim/doc/magit.txt', dir .. '/doc/magit.txt'))
       vim.cmd('helptags ' .. vim.fn.fnameescape(dir .. '/doc'))
     end
     -- Two independent identical copies, each with its own tag index. The
@@ -565,7 +565,7 @@ T[":h magit resolves the shipped help file"] = function()
     local stack = vim.fn.gettagstack(0).items
     local last = stack[#stack]
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-    local shipped = vim.fn.readfile(project .. '/doc/magit.txt')
+    local shipped = vim.fn.readfile(project .. '/clients/neovim/doc/magit.txt')
     local function same_text(a)
       if #a ~= #shipped then return false end
       for i, line in ipairs(shipped) do
@@ -868,7 +868,7 @@ T["declares exact bundled Neovim capabilities"] = function()
 end
 
 T["the rich protocol declaration and a matching advertisement open rich traffic"] = function()
-  -- anchor: lua/magit-lsp/config.lua client_capabilities; real startup below.
+  -- anchor: clients/neovim/lua/magit-lsp/config.lua client_capabilities; real startup below.
   child.lua([[
     DECLARED = nil
     REQUESTS = {}
@@ -930,8 +930,8 @@ T["the rich protocol declaration and a matching advertisement open rich traffic"
 end
 
 T["a missing, malformed or different protocol advertisement is a readable rejection"] = function()
-  -- anchor: lua/magit-lsp/version.lua protocol_error; the real initialize wrapper
-  -- in lua/magit-lsp/init.lua is exercised below. External containers are
+  -- anchor: clients/neovim/lua/magit-lsp/version.lua protocol_error; the real initialize wrapper
+  -- in clients/neovim/lua/magit-lsp/init.lua is exercised below. External containers are
   -- arbitrary JSON, so a malformed one must take this same readable path
   -- instead of throwing out of the initialize callback.
   local function reject(result_expression, expected, label)
@@ -2184,7 +2184,7 @@ T["a normal setup never loads the debug module"] = function()
       return v ~= nil and v.version ~= nil
     end, 10)
   ]],
-    project,
+    project .. "/clients/neovim",
     repo
   ))
 

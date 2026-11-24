@@ -31,7 +31,10 @@ LAZY_COMMIT = "85c7ff3711b730b4030d03144f6db6375044ae82"
 SPEC_MARKER = "-- lazy.nvim plugin spec"
 SPEC_SOURCE = "  'BlueDrink9/magit-lsp',"
 FIXTURE = "lazy-install.txt"
-PLUGIN_SOURCE = ROOT / "lua/magit-lsp/init.lua"
+RUNTIME_SUBDIR = "clients/neovim"
+PLUGIN_SOURCE = ROOT / RUNTIME_SUBDIR / "lua/magit-lsp/init.lua"
+RUNTIME_HOOK = "vim.opt.rtp:append(plugin.dir .. '/clients/neovim')"
+PLUGIN_HOOK = "vim.cmd.source(plugin.dir .. '/clients/neovim/plugin/magit-lsp.lua')"
 
 
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -49,7 +52,7 @@ def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
 def spec_violations(snippet: str) -> list[str]:
     """Return documented lazy-spec contract violations for one snippet."""
     violations = []
-    for key in ("opts", "config", "build"):
+    for key in ("opts", "build"):
         if re.search(rf"\b{key}\s*=", snippet):
             violations.append(f"documented lazy spec must not set {key}")
     for needle, label in (
@@ -62,6 +65,18 @@ def spec_violations(snippet: str) -> list[str]:
             violations.append(f"documented lazy spec missing {label}")
     if snippet.count(SPEC_SOURCE) != 1:
         violations.append(f"documented lazy spec must contain exactly one {SPEC_SOURCE!r}")
+    hook = re.search(
+        r"\bconfig\s*=\s*function\(plugin\)\n(.*?)\n  end,", snippet, re.S)
+    if not hook:
+        violations.append("documented lazy spec must add the client runtime in config(plugin)")
+    else:
+        statements = [
+            line.strip() for line in hook.group(1).splitlines()
+            if line.strip() and not line.strip().startswith("--")]
+        if statements != [RUNTIME_HOOK, PLUGIN_HOOK]:
+            violations.append(
+                "documented lazy config(plugin) must append clients/neovim to "
+                f"runtimepath and source its plugin entry point, found {statements!r}")
     return violations
 
 
@@ -80,8 +95,14 @@ def documented_spec() -> tuple[str, list[str]]:
 
 
 def adapt_spec(snippet: str, checkout: Path) -> tuple[str, list[str], list[str]]:
-    """Replace only the documented source with this checkout and prove it."""
-    adapted = snippet.replace(SPEC_SOURCE, f"  dir = {json.dumps(str(checkout))},", 1)
+    """Replace only the documented source with this checkout and prove it.
+
+    The documented URL names the plugin `magit-lsp`; a local `dir` source keeps
+    that name explicitly so the manager registers the same plugin identity.
+    """
+    adapted = snippet.replace(
+        SPEC_SOURCE,
+        f"  dir = {json.dumps(str(checkout))}, name = 'magit-lsp',", 1)
     diff = list(difflib.unified_diff(
         snippet.splitlines(), adapted.splitlines(),
         fromfile="documented", tofile="adapted", lineterm=""))
@@ -222,12 +243,15 @@ def validate_positive(positive: dict[str, object]) -> None:
         "pre-key did not preload the plugin": pre["plugin_loaded"] is False,
         "pre-key started no LSP client": pre["lsp_clients"] == 0,
         "pre-key lazy state is unloaded": pre["lazy_loaded"] is False,
-        "pre-key checkout is absent from runtimepath": pre["checkout_on_runtimepath"] is False,
+        "pre-key client runtime is absent from runtimepath": pre["runtime_on_runtimepath"] is False,
+        "checkout root ships no Neovim runtime": pre["root_runtime_present"] is False,
+        "pre-key :Magit is unavailable": pre["magit_command_available"] is False,
         "lazy.nvim owns the documented key": pre["lazy_key_owner"] == "magit-lsp",
         "post-key lazy state is loaded": post["plugin_loaded"] is True,
         "plugin dir is this checkout": post["plugin_dir"] == str(ROOT),
         "module loaded from this checkout": post["plugin_source"] == str(PLUGIN_SOURCE),
-        "checkout is on runtimepath after loading": post["checkout_on_runtimepath"] is True,
+        "client runtime is on runtimepath after loading": post["runtime_on_runtimepath"] is True,
+        "post-key :Magit is registered": post["magit_command_available"] is True,
         "status buffer has the magit filetype": post["filetype"] == "magit-lsp",
         "status rendered the fixture": FIXTURE in str(post["text"]),
         "status rendered the head": "Head:" in str(post["text"]),

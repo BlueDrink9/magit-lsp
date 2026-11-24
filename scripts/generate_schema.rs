@@ -289,7 +289,7 @@ pub struct ClientListFile {
 }
 
 /// Repository-relative path of the generated Lua shared-list module.
-pub const LUA_SHARED_PATH: &str = "lua/magit-lsp/shared.lua";
+pub const LUA_SHARED_PATH: &str = "clients/neovim/lua/magit-lsp/shared.lua";
 /// Repository-relative path of the generated VSCode shared-list module.
 pub const VSCODE_SHARED_PATH: &str = "clients/vscode/types/shared-lists.js";
 

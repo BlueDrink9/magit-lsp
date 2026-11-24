@@ -7,7 +7,58 @@ commands.  The server is an external executable: the Neovim client never
 downloads or builds it.
 
 Requires Neovim 0.11+ and an installed `magit-lsp` server.  Client
-installation is documented in ../docs/CLIENT_INSTALL.md
+installation is documented in ../../../docs/CLIENT_INSTALL.md
+
+==============================================================================
+INSTALLATION                                                *magit-install*
+
+The Neovim client is the `clients/neovim` subdirectory of the magit-lsp
+checkout; the repository root is not a Neovim runtime.  Add that subdirectory
+to 'runtimepath', not the checkout root.
+
+Native package, from |init.lua| before plugins load:
+
+>lua
+  vim.opt.rtp:append(vim.fn.stdpath('data')
+    .. '/site/pack/magit/start/magit-lsp/clients/neovim')
+<
+
+lazy.nvim appends only the plugin directory, so append the client runtime and
+source this plugin's entry point in the plugin spec's `config(plugin)` hook; it
+runs when the plugin loads, not during startup:
+
+>lua
+  config = function(plugin)
+    vim.opt.rtp:append(plugin.dir .. '/clients/neovim')
+    vim.cmd.source(plugin.dir .. '/clients/neovim/plugin/magit-lsp.lua')
+  end,
+<
+
+The hook registers |:Magit| without starting a session; the key callback opens
+status.  Run `:helptags ALL` if help tags are not generated for the client
+`doc` directory.
+
+==============================================================================
+CHECKOUT LAUNCHER                                        *magit-checkout*
+
+From a full checkout, `make neovim` builds the debug server and starts an
+interactive Neovim that loads only the in-tree client:
+
+    make neovim                      " open the current directory
+    make neovim REPO=/path/to/repo   " open a chosen repository
+
+It loads `scripts/neovim_init.lua` instead of your user configuration, sources
+the plugin entry point explicitly and uses the checkout's debug server.
+Neovim's config/data/state/cache directories and its shada, swap, backup,
+undo and view files are temporary and removed when Neovim exits.  HOME is
+preserved so Git and external helpers keep the caller's normal global
+configuration (identity, signing and includes) and repository-local
+precedence; a temporary include-only global Git config keeps the original XDG
+`git/config` and `~/.gitconfig` visible while editor paths are isolated.
+PATH and terminal variables are inherited.  Credential-helper or SSH
+integration is not asserted beyond that environment.  The automated targets
+(`make test-lua`, `make ui-test`) are test harnesses, not interactive
+launchers.
 
 ==============================================================================
 COMMANDS                                                     *magit-commands*
@@ -71,7 +122,7 @@ The default profile is `vim`; select `standard` with
     `ctrl+t`           Toggle plain editable text mode
     `q`                Close the view
 
-Full tables: ../docs/KEYMAPS.md
+Full tables: ../../../docs/KEYMAPS.md
 
 ==============================================================================
 DOCUMENTATION                                                *magit-docs*
@@ -82,13 +133,13 @@ paths are relative to the directory of this help file, so no browser or
 network access is involved.
 
     Overview:
-        ../README.md
+        ../../../README.md
     Client installation and tested snippets:
-        ../docs/CLIENT_INSTALL.md
+        ../../../docs/CLIENT_INSTALL.md
     Keymaps and profiles:
-        ../docs/KEYMAPS.md
+        ../../../docs/KEYMAPS.md
     Protocol and capabilities:
-        ../docs/PROTOCOL.md
+        ../../../docs/PROTOCOL.md
 
 Upstream repository (not shipped locally):
     https://github.com/BlueDrink9/magit-lsp

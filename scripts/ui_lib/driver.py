@@ -141,6 +141,14 @@ def parse_startup_mode(value: str) -> str:
         expected = " or ".join(STARTUP_MODES)
         raise DriverError(f"unknown startup mode `{value}`; expected {expected}")
     return value
+def workspace_root(init: Path = MINIMAL_INIT) -> Path:
+    """The checkout root that owns harness output such as `build/ui`.
+
+    Derived from the harness initializer under `scripts/`, not from the loaded
+    runtime: the Neovim runtime lives in the nested `clients/neovim` directory,
+    so a runtime path would select the wrong root.
+    """
+    return init.resolve().parents[1]
 
 
 def new_run_id() -> str:
@@ -974,6 +982,7 @@ def start(
                 "MAGIT_LSP_BIN": server_binary,
                 "MAGIT_LSP_TRACE": str(run.trace_path),
                 "MAGIT_LSP_UI_ROOT": str(run.repo_path),
+                "MAGIT_LSP_WORKSPACE_ROOT": str(workspace_root()),
             }
         )
         if extra_env:

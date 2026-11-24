@@ -55,8 +55,8 @@ The sweep selects every tracked regular file the dispatcher owns and skips
 fixtures and untracked files.
 
 Four generated client references are also excluded by exact path, in every
-source-formatting mode and in the hook: `lua/magit-lsp/types.lua`,
-`lua/magit-lsp/shared.lua`, `clients/vscode/types/protocol.d.ts` and
+source-formatting mode and in the hook: `clients/neovim/lua/magit-lsp/types.lua`,
+`clients/neovim/lua/magit-lsp/shared.lua`, `clients/vscode/types/protocol.d.ts` and
 `clients/vscode/types/shared-lists.js`. `scripts/generate_schema.rs` owns their
 bytes and `make schema-check` compares fresh generator output with them exactly,
 so formatting them would only make the generator look stale. Handwritten Lua,

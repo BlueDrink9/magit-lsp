@@ -1,4 +1,4 @@
-.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour neovim native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -210,6 +210,14 @@ test-file: build
 
 ui-unit:
 	$(call run,ui-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py')
+
+# Interactive only: a real terminal must stay attached, so this target
+# deliberately bypasses the log-capturing `run` helper. `make test-lua`,
+# `make test-file` and `make ui-test` are automated harnesses, not interactive
+# launchers. `scripts/neovim` isolates editor state and removes it on exit.
+REPO ?= $(CURDIR)
+neovim: build
+	"$(CURDIR)/scripts/neovim" --repo "$(REPO)"
 
 PLAIN_ARGS ?=
 plain-neovim: build
@@ -471,8 +479,9 @@ docs-artifacts-check: schema-check registry-docs-check
 # plugin-free Neovim so the index depends only on the shipped help file, and
 # fails when no index is produced. The help-tags name is fixed by the
 # NVIM-HELP-DISCOVERY ticket rather than the usual update-*/*-generate pattern.
+# The help file ships in the Neovim client runtime, not at the repository root.
 help-tags:
-	$(call run,help-tags,rm -f doc/tags && nvim --headless -u NONE --noplugin -c "lua local gen = function() return vim.cmd('helptags ' .. vim.fn.fnameescape('doc')) end; if not pcall(gen) or vim.fn.filereadable('doc/tags') == 0 then vim.api.nvim_err_writeln('help-tags: helptags failed or doc/tags was not generated'); vim.cmd('cquit 1') end" -c "qa!")
+	$(call run,help-tags,rm -f clients/neovim/doc/tags && nvim --headless -u NONE --noplugin -c "lua local gen = function() return vim.cmd('helptags ' .. vim.fn.fnameescape('clients/neovim/doc')) end; if not pcall(gen) or vim.fn.filereadable('clients/neovim/doc/tags') == 0 then vim.api.nvim_err_writeln('help-tags: helptags failed or clients/neovim/doc/tags was not generated'); vim.cmd('cquit 1') end" -c "qa!")
 
 ui-tour: build
 	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)

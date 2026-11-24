@@ -39,7 +39,7 @@ fn lua_adapter_version(source: &str) -> Option<&str> {
 #[test]
 fn bundled_adapter_versions_match_cargo_package_version() {
     let cargo = include_str!("../Cargo.toml");
-    let lua = include_str!("../lua/magit-lsp/version.lua");
+    let lua = include_str!("../clients/neovim/lua/magit-lsp/version.lua");
     let vscode = include_str!("../clients/vscode/package.json");
     let cargo_version = cargo
         .lines()
@@ -47,7 +47,10 @@ fn bundled_adapter_versions_match_cargo_package_version() {
         .and_then(|line| line.strip_suffix('\"'))
         .expect("Cargo package version");
     let lua_version = lua_adapter_version(lua).expect("bundled Lua adapter version");
-    assert_eq!(lua_version, cargo_version, "lua/magit-lsp/version.lua");
+    assert_eq!(
+        lua_version, cargo_version,
+        "clients/neovim/lua/magit-lsp/version.lua"
+    );
     let vscode_package: serde_json::Value =
         serde_json::from_str(vscode).expect("clients/vscode/package.json");
     let vscode_version = vscode_package
@@ -107,6 +110,6 @@ fn lua_adapter_version_mismatch_fails_version_comparison() {
     assert_ne!(
         parsed,
         env!("CARGO_PKG_VERSION"),
-        "lua/magit-lsp/version.lua"
+        "clients/neovim/lua/magit-lsp/version.lua"
     );
 }
