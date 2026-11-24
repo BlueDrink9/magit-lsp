@@ -56,7 +56,11 @@ release-artifact-check: release-locked
 release-native-build:
 	$(call run,release-native-build,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_release_pipeline.py build-native --target "$(RELEASE_TARGET)")
 
+# Runs the report-only hygiene report plus the diagnostic clippy sweep (same
+# invocation as `make clippy`, so findings stay warnings and the digest/log are
+# inspectable).
 hygiene:
+	$(call run,clippy,cargo clippy -q --workspace --all-targets -- --cap-lints warn)
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
 
 DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md docs/parity.md docs/plain-support.md docs/PLAIN_KEYS.md docs/known-client-behaviors.md docs/schema/payload-tables.md docs/schema/worked-exchanges.md docs/schema/worked-exchanges-01.md docs/schema/worked-exchanges-02.md docs/schema/worked-exchanges-03.md docs/schema/capability-levels.md
