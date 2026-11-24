@@ -1,0 +1,12 @@
+:Magit	magit.txt	/*:Magit*
+magit	magit.txt	/*magit*
+magit-checkout	magit.txt	/*magit-checkout*
+magit-commands	magit.txt	/*magit-commands*
+magit-docs	magit.txt	/*magit-docs*
+magit-install	magit.txt	/*magit-install*
+magit-keys	magit.txt	/*magit-keys*
+magit-lsp	magit.txt	/*magit-lsp*
+magit-server	magit.txt	/*magit-server*
+magit-setup	magit.txt	/*magit-setup*
+magit-troubleshooting	magit.txt	/*magit-troubleshooting*
+magit.txt	magit.txt	/*magit.txt*
