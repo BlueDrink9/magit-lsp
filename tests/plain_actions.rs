@@ -42,12 +42,21 @@ fn next_apply(server: &mut stdio::TestServer) -> Value {
 
 /// Open the repository's `.magit` status document as a Plain client.
 fn open_plain(repo: &fixtures::RepoFixture) -> (stdio::TestServer, FakeEditor, String) {
-    open_plain_with_capabilities(
+    open_plain_with_env(repo, &[])
+}
+
+/// Open as a Plain client (see [`open_plain`]) with extra server env vars.
+fn open_plain_with_env(
+    repo: &fixtures::RepoFixture,
+    env: &[(&str, &str)],
+) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_with_capabilities_and_env(
         repo,
         json!({
             "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
             "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
         }),
+        env,
     )
 }
 
@@ -522,6 +531,18 @@ fn assert_refused(response: &Value) {
             && effect["level"] == "warn"
             && effect["text"] == STALE_VIEW),
         "expected readable refusal: {response}"
+    );
+}
+
+/// Assert a successful Plain command reported no `message` effect, so a silent
+/// refusal or Git failure cannot pass as a no-op.
+fn assert_no_message_effect(response: &Value) {
+    let effects = response["result"]["effects"]
+        .as_array()
+        .unwrap_or_else(|| panic!("command effects: {response}"));
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "message"),
+        "command reported a message effect: {response}"
     );
 }
 
@@ -1412,13 +1433,17 @@ fn section_untracked_stage_and_staged_unstage_are_fresh_bulk() {
         .commit("initial", [("f.txt", "base\n")])
         .build();
     fixtures::write(&repo.path().join("new.txt"), "first\n");
-    let (mut server, mut editor, uri) = open_plain(&repo);
+    // Pin the watcher debounce past the test's lifetime so out-of-band fixture
+    // writes cannot land a refresh (and bump the plain generation) mid-window.
+    let (mut server, mut editor, uri) =
+        open_plain_with_env(&repo, &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000")]);
     let args = offered_section(&mut server, &editor, &uri, "Untracked", "status.stage", 611);
     assert!(!args.is_null());
     let head = repo.git(&["rev-parse", "HEAD"]);
     fixtures::write(&repo.path().join("later.txt"), "later\n");
     let result = execute_offered(&mut server, &mut editor, args, 612);
     assert!(result["error"].is_null(), "{result}");
+    assert_no_message_effect(&result);
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["show", ":new.txt"]), "first\n");
     assert_eq!(repo.git(&["show", ":later.txt"]), "later\n");
@@ -1431,6 +1456,7 @@ fn section_untracked_stage_and_staged_unstage_are_fresh_bulk() {
     repo.git(&["add", "f.txt"]);
     let result = execute_offered(&mut server, &mut editor, staged, 614);
     assert!(result["error"].is_null(), "{result}");
+    assert_no_message_effect(&result);
     assert_eq!(repo.git(&["ls-files"]), "f.txt\n");
     assert_eq!(repo.git(&["show", ":f.txt"]), "base\n");
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
