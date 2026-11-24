@@ -26,11 +26,20 @@ fn next_apply(server: &mut stdio::TestServer) -> Value {
 
 /// Open the repository's `.magit` status document as a Plain client.
 fn open_plain(repo: &RepoFixture) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_with_env(repo, &[])
+}
+
+/// Open the repository's `.magit` status document as a Plain client, spawning
+/// the server with `env` overrides.
+fn open_plain_with_env(
+    repo: &RepoFixture,
+    env: &[(&str, &str)],
+) -> (stdio::TestServer, FakeEditor, String) {
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
         .as_str()
         .to_owned();
-    let mut server = stdio::TestServer::spawn(&[]);
+    let mut server = stdio::TestServer::spawn(env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({
         "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
@@ -857,7 +866,11 @@ fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
         .commit("second", [("f.txt", "two\n")])
         .commit("third", [("f.txt", "three\n")])
         .build();
-    let (mut server, mut editor, uri) = open_plain(&repo);
+    // Pin the watcher debounce past the test's lifetime so the arm-time rescan
+    // burst cannot land a refresh (and bump the version) inside the
+    // offer-to-execute window.
+    let (mut server, mut editor, uri) =
+        open_plain_with_env(&repo, &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000")]);
     let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
     let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
 
