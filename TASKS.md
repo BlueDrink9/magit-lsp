@@ -2713,3 +2713,7 @@ Historical source-only records retain that classification; no source SHA below i
 ## 9. Open questions
 
 [Maintained questions](docs/OPEN_QUESTIONS.md#9-open-questions); this audit does not resolve policy questions.
+
+## Feature
+
+- [ ] **NeoGit parity comparison via tmux** — Install NeoGit in the Neovim environment and use tmux to run NeoGit and magit-lsp side by side on the same repository, systematically comparing views (status, log, diff, blame, stash, reflog, etc.) to identify features and behaviors present in NeoGit but missing from magit-lsp. Record gaps as candidate queue items. Follow the real-UI test rules in `ui-test-plan.md`; evidence is text/structured state only (no vision).
