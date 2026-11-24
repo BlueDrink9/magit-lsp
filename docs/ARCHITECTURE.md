@@ -42,7 +42,7 @@ Use these words exactly. Do not invent synonyms.
 | --- | --- |
 | **Client** | An editor-side program (Neovim plugin, VSCode extension, TUI). It forwards input to the server and displays what the server sends. It contains no Git logic and no layout logic |
 | **Server** | The Rust `magit-lsp` process. Owns all state, rendering, key handling and Git calls |
-| **View** | One screen the server can show: status, log, a commit, a menu, a rebase todo, … Each view is a virtual document with a URI like `magit://status/<repo>` |
+| **View** | One screen the server can show: status, log, a commit, a menu, a rebase todo, … Each view is a virtual document with a URI like `magit://status/<repo>`, whose root is percent-encoded so the URI is valid RFC 3986 on every platform |
 | **View kind** | The type of a view (`status`, `log`, `revision`, `menu.commit`, …) |
 | **Document** | The text of a view as the client displays it, plus structure metadata |
 | **Node** | One element in a view's tree: a section, file, hunk, diff line, commit, ref, menu item, … A node knows which text lines it covers |

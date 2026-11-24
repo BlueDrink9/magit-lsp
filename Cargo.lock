@@ -551,6 +551,7 @@ dependencies = [
  "lsp-types",
  "normpath",
  "notify",
+ "percent-encoding",
  "proptest",
  "rstest",
  "same-file",

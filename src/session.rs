@@ -91,9 +91,28 @@ fn preflight_command(
     }
 }
 
+/// The path-safe set a status URI's root is encoded with: every byte outside
+/// RFC 3986's unreserved characters and the `/` separator is percent-encoded.
+const STATUS_PATH_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~')
+    .remove(b'/');
+
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
+///
+/// The root is percent-encoded so the URI is valid RFC 3986 on every platform:
+/// a Windows root's backslashes and `\\?\` verbatim prefix are outside the path
+/// grammar and `lsp_types::Uri` rejects them while deserializing request
+/// params. Encoding is the identity for unreserved characters and `/`, so the
+/// POSIX form is unchanged.
 pub fn status_uri(repo_path: &str) -> String {
-    format!("magit://status/{}", repo_path.trim_start_matches('/'))
+    let root = repo_path.trim_start_matches('/');
+    format!(
+        "magit://status/{}",
+        percent_encoding::utf8_percent_encode(root, STATUS_PATH_ENCODE_SET)
+    )
 }
 
 /// The immutable state of one view as last published by its session.

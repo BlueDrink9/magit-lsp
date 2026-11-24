@@ -39,6 +39,7 @@ use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 
 /// Directory holding the committed example exchanges.
@@ -1720,8 +1721,10 @@ const STATUS_URI_PREFIX: &str = "magit://status/";
 /// filesystem-path occurrence keeps the native form.
 ///
 /// A status view's URI is reduced as a whole and never by substring: after
-/// [`STATUS_URI_PREFIX`] the remainder must equal one spelling with its leading
-/// separators trimmed, exactly as the server writes it, and the value becomes
+/// [`STATUS_URI_PREFIX`] the remainder must be one spelling with its leading
+/// separators trimmed, exactly as the server writes it — or that spelling's
+/// own [`magit_lsp::session::status_uri`] form, since the server
+/// percent-encodes the root — and the value becomes
 /// [`RECORDED_STATUS_URI`]. Otherwise the live URI is left intact so the strict
 /// frame comparison fails loudly; substring replacement there would turn a
 /// merely partial match — a harness spelling that is a suffix of a
@@ -1730,9 +1733,10 @@ const STATUS_URI_PREFIX: &str = "magit://status/";
 fn canonical_root(text: &str, roots: &RootNormalizer) -> String {
     let spellings = root_spellings(&roots.root, &roots.aliases);
     if let Some(remainder) = text.strip_prefix(STATUS_URI_PREFIX) {
-        let reduces = spellings
-            .iter()
-            .any(|spelling| spelling.trim_start_matches('/') == remainder);
+        let reduces = spellings.iter().any(|spelling| {
+            spelling.trim_start_matches('/') == remainder
+                || magit_lsp::session::status_uri(spelling) == text
+        });
         return if reduces {
             RECORDED_STATUS_URI.to_owned()
         } else {
@@ -2938,6 +2942,38 @@ fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
     reduces(short, verbatim, &[verbatim.to_owned()]);
 }
 
+/// A status URI is a valid RFC 3986 URI for every platform's root spelling.
+///
+/// A raw Windows root carries backslashes and a verbatim prefix, both outside
+/// the URI path grammar, so `lsp_types::Uri` rejected the status URI while
+/// `from_params` deserialized a request's `textDocument.uri` (`-32603`). The
+/// construction percent-encodes the root and keeps `/` as the separator, so
+/// every spelling parses and round-trips — checked here on Linux, where a
+/// Windows-shaped root only arises synthetically.
+#[test]
+fn status_uri_is_valid_for_every_platform_root() {
+    for root in [
+        "/tmp/fixture-root",
+        r"C:\Users\me\repo",
+        r"C:/Users/me/repo",
+        r"\\?\C:\Users\me\repo",
+        r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpDKfPnZ",
+        r"\\?\C:\Users\runneradmin\AppData\Local\Temp\.tmpDKfPnZ",
+    ] {
+        let live = magit_lsp::session::status_uri(root);
+        assert!(
+            lsp_types::Uri::from_str(&live).is_ok(),
+            "{root}: {live} must be a valid RFC 3986 URI"
+        );
+        let uri = lsp_types::Uri::from_str(&live).expect("validated above");
+        assert_eq!(
+            uri.as_str(),
+            live,
+            "{root}: the URI round-trips byte for byte"
+        );
+    }
+}
+
 /// An unmatched status remainder is left whole, never partially consumed.
 ///
 /// When no spelling equals the remainder after `magit://status/` the reduction
@@ -2965,7 +3001,9 @@ fn unmatched_status_remainders_are_not_reduced_to_fragments() {
     ] {
         let live = magit_lsp::session::status_uri(server);
         assert!(
-            live.contains(root),
+            live.contains(
+                magit_lsp::session::status_uri(root).trim_start_matches(STATUS_URI_PREFIX)
+            ),
             "{server}: the harness spelling is only a partial match inside the live URI"
         );
         let canonical = canonical_frame(

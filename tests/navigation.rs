@@ -666,6 +666,7 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
     };
     server.send(definition_request(5));
     let def_v1 = server.response_with_id(5);
+    assert!(def_v1["error"].is_null(), "{def_v1}");
     assert_eq!(
         def_v1["result"],
         Value::Null,
@@ -673,6 +674,7 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
     );
     server.send(symbols_request(6));
     let symbols_v1 = server.response_with_id(6);
+    assert!(symbols_v1["error"].is_null(), "{symbols_v1}");
     assert_eq!(
         symbols_v1["result"],
         json!(v1_symbols),
