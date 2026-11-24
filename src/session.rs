@@ -829,10 +829,49 @@ mod loading_action_tests {
 
 impl Session {
     /// Install a status acquisition only into its still-live view generation.
+    ///
+    /// The background fetch request (if this is a deferred opening) is returned
+    /// so the caller can run it off the session lock after publishing the render.
     pub fn install_fresh_status(
         &mut self,
         view_id: &str,
         fresh: crate::status_view::FreshStatus,
+    ) -> Result<(Option<ViewRender>, Option<crate::status_view::TimedFetch>)> {
+        let Some(view) = self.views.get_mut(view_id) else {
+            return Ok((None, None));
+        };
+        let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        else {
+            return Ok((None, None));
+        };
+        if !status.install_fresh_state(fresh) {
+            return Ok((None, None));
+        }
+        let fetch = status.timed_fetch();
+        // Text mode owns the buffer: keep the installed result unpublished and
+        // unversioned until leaving text mode renders it as a full replace.
+        if view.mode() == ViewMode::Text {
+            view.pending_completion = true;
+            return Ok((None, fetch));
+        }
+        let tree = view.render_tree();
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        self.publish();
+        Ok((Some(render), fetch))
+    }
+
+    /// Install a completed background hunk fetch into its deferred opening.
+    ///
+    /// Mirrors [`Self::install_fresh_status`]'s text-mode and publication
+    /// handling; the view discards a superseded generation silently.
+    pub fn install_timed_hunks(
+        &mut self,
+        view_id: &str,
+        hunks: crate::status_view::TimedHunks,
     ) -> Result<Option<ViewRender>> {
         let Some(view) = self.views.get_mut(view_id) else {
             return Ok(None);
@@ -844,16 +883,23 @@ impl Session {
         else {
             return Ok(None);
         };
-        if !status.install_fresh_state(fresh) {
+        if !status.install_timed_hunks(hunks) {
             return Ok(None);
         }
-        // Text mode owns the buffer: keep the installed result unpublished and
-        // unversioned until leaving text mode renders it as a full replace.
+        // Text mode owns the buffer: keep the expansion unpublished until
+        // leaving text mode renders it as a full replace.
         if view.mode() == ViewMode::Text {
             view.pending_completion = true;
             return Ok(None);
         }
-        let tree = view.render_tree();
+        let mut tree = view.render_tree();
+        // A clean repository renders identically whether the sections are open
+        // or closed. Do not bump a version (and invalidate in-flight keys) for a
+        // tree the client already holds.
+        tree.version = view.version;
+        if tree == view.tree {
+            return Ok(None);
+        }
         let render =
             view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
         self.publish();

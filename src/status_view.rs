@@ -25,6 +25,21 @@ const LEVEL_DEFAULT: u8 = LEVEL_MAX;
 /// per-file hunks are then loaded on demand at render time.
 const LEVEL_OPENING: u8 = LEVEL_MIN;
 
+/// How long a deferred opening's background hunk fetch may take after the
+/// closed render is published before the sections stay closed on demand.
+///
+/// The deadline is user-directed (TASKS.md `UI-STATUS-DIFFS-LAZY`): a fetch
+/// that completes within this window opens the diffs by default, exactly like
+/// the synchronous fully-expanded render; a later completion is discarded.
+pub const OPEN_PROMISE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Whether a fetch completed inside the open promise that started at `published`.
+///
+/// The comparison is inclusive so the boundary itself still opens the diffs.
+pub fn open_within_promise(published: std::time::Instant, completed: std::time::Instant) -> bool {
+    completed.saturating_duration_since(published) <= OPEN_PROMISE
+}
+
 /// A live status view: the repository root plus the last read status.
 pub struct StatusView {
     repo: GitRepo,
@@ -39,6 +54,11 @@ pub struct StatusView {
     visibility: Visibility,
     /// The last visibility level set by `more-detail`/`less-detail`.
     level: u8,
+    /// Whether a deferred opening still awaits its background hunk fetch.
+    ///
+    /// Cleared by the first visibility command (or by the fetch installing), so
+    /// the fast-path expansion never overrides a user-opened section.
+    auto_expand: bool,
     /// Optional maximum rendered line count for a section.
     section_line_limit: Option<usize>,
 }
@@ -61,6 +81,19 @@ pub struct FreshStatus {
     status: Status,
     rebase: Option<RebaseState>,
     /// Rename origins for this status read, scanned once per side.
+    renames: RenameMaps,
+}
+
+/// A background hunk fetch requested by a deferred opening's closed render.
+pub struct TimedFetch {
+    generation: u64,
+    files: Vec<(String, bool)>,
+}
+
+/// Hunks fetched in the background for one still-current deferred generation.
+pub struct TimedHunks {
+    generation: u64,
+    hunks: HashMap<(String, bool), Vec<Hunk>>,
     renames: RenameMaps,
 }
 
@@ -132,6 +165,7 @@ impl StatusView {
             renames: RenameMaps::default(),
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
+            auto_expand: false,
             section_line_limit: None,
         }
     }
@@ -147,6 +181,7 @@ impl StatusView {
         };
         view.level = LEVEL_OPENING;
         view.visibility = default_visibility();
+        view.auto_expand = true;
         view
     }
 
@@ -190,6 +225,77 @@ impl StatusView {
         // Git state so the next render reloads them from the current one.
         self.hunks.clear();
         self.renames = fresh.renames;
+        true
+    }
+
+    /// The files a deferred opening still needs for its background fetch.
+    ///
+    /// Returns `None` once the opening default has been consumed or overridden,
+    /// so a user-opened section is never expanded on the fetch's behalf.
+    pub fn timed_fetch(&self) -> Option<TimedFetch> {
+        if !self.auto_expand || !matches!(self.state, StatusState::Ready { .. }) {
+            return None;
+        }
+        let files = self
+            .file_keys()
+            .into_iter()
+            .filter(|(section, _)| section != "untracked")
+            .map(|(section, path)| (path, section == "staged"))
+            .collect();
+        Some(TimedFetch {
+            generation: self.generation,
+            files,
+        })
+    }
+
+    /// Fetch the hunks for a deferred opening off the session lock.
+    ///
+    /// Failures stay per file (an empty body) exactly like the on-demand fetch,
+    /// so one unreadable diff cannot cancel the whole fast path.
+    pub fn fetch_timed_hunks(repo: &GitRepo, fetch: TimedFetch) -> TimedHunks {
+        let mut renames = RenameMaps::default();
+        let mut hunks = HashMap::with_capacity(fetch.files.len());
+        for (path, staged) in fetch.files {
+            let loaded = match renames
+                .origins(repo, staged)
+                .and_then(|origins| repo.file_hunks_with_origins(&path, staged, origins))
+            {
+                Ok(hunks) => hunks,
+                Err(error) => {
+                    tracing::warn!(path = %path, %error, "failed to load background file body");
+                    Vec::new()
+                }
+            };
+            hunks.insert((path, staged), loaded);
+        }
+        TimedHunks {
+            generation: fetch.generation,
+            hunks,
+            renames,
+        }
+    }
+
+    /// Install a background fetch only into its still-current deferred opening.
+    ///
+    /// The fetch beat the promise, so this reproduces the synchronous
+    /// fully-expanded render (level `LEVEL_MAX`) and opens the three sections
+    /// that still carried the opening Collapsed default. A superseded
+    /// generation or a user visibility command discards it silently.
+    pub fn install_timed_hunks(&mut self, timed: TimedHunks) -> bool {
+        if timed.generation != self.generation
+            || !self.auto_expand
+            || !matches!(self.state, StatusState::Ready { .. })
+        {
+            return false;
+        }
+        self.hunks = timed.hunks;
+        self.renames = timed.renames;
+        self.level = LEVEL_MAX;
+        for section in ["staged", "unstaged", "untracked"] {
+            self.visibility
+                .set(format!("section:{section}"), VisibilityState::Expanded);
+        }
+        self.auto_expand = false;
         true
     }
 
@@ -642,6 +748,17 @@ mod reuse_tests {
     }
 
     #[test]
+    fn open_promise_boundary_opens_within_and_rejects_late_completions() {
+        let published = std::time::Instant::now();
+        assert!(open_within_promise(published, published));
+        assert!(open_within_promise(published, published + OPEN_PROMISE));
+        assert!(!open_within_promise(
+            published,
+            published + OPEN_PROMISE + std::time::Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
     fn default_visibility_expands_rebase_section() {
         let visibility = default_visibility();
         assert_eq!(
@@ -786,6 +903,9 @@ impl View for StatusView {
         line: Option<usize>,
         command: VisibilityCommand,
     ) -> bool {
+        // Any explicit visibility action takes ownership of the fold state, so
+        // the deferred opening's background fetch must not expand it later.
+        self.auto_expand = false;
         match command {
             VisibilityCommand::ShowAll => {
                 self.visibility.show_all();

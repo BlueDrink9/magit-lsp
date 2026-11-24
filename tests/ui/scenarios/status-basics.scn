@@ -1,5 +1,11 @@
 # R-1.x/R-2.4 staging, folding, visual stage and a refused native edit.
 #
+# The status view opens with its sections closed while the background diff fetch
+# runs; when that fetch beats the open promise (the normal fast path here) the
+# sections expand before the client is idle, so this scenario starts from the
+# fully-expanded render. The slow path (closed sections on open) is covered by
+# the server_async status_open tests.
+#
 # The vim profile uses a real visual selection (`V j s`). The standard profile
 # binds `V` to `open.revert` and `v` to `status.reverse` (§5) and R4 forbids
 # visual-mode keys there, so it stages the same hunk with a normal `s`; both
@@ -12,10 +18,6 @@ wait
 keys: j j j j
 wait
 expect cursor on "Unstaged changes"
-# Sections start closed, so the first Tab opens this one; the second folds it.
-keys: Tab
-wait
-expect screen contains "M f.txt"
 keys: Tab
 wait
 expect screen not-contains "M f.txt"
@@ -30,21 +32,14 @@ keys: s
 wait
 expect screen contains "Staged changes (1)"
 snapshot: staged-file
-# The staged section is closed by default, so open it and move onto the staged file before unstaging.
-goto "Staged changes (1)"
-keys: Tab
-wait
-goto "M f.txt"
 keys: u
 wait
 expect screen contains "Staged changes (0)"
 expect screen contains "Unstaged changes (2)"
 snapshot: unstaged-file
-# Hunk bodies start closed at the opening level; one toggle shows this one.
-goto "@@ -1,10 +1,10 @@"
-keys: Tab
-wait
-goto "+line3 CHANGED"
+keys: k k k k k k k k k k k k k k k k k k k k
+keys: j j j j j j j j j j
+keys: Right Right Right Right
 wait
 expect cursor on "+line3 CHANGED"
 document: before-edit

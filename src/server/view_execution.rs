@@ -169,8 +169,12 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 
 /// What one acquisition produced once it reached its publication turn.
 enum InstallStatus {
-    /// The live generation's render, if the view still exists interactive.
-    Installed(Option<ViewRender>),
+    /// The live generation's render, if the view still exists interactive, plus
+    /// the deferred opening's background fetch request when there is one.
+    Installed {
+        render: Option<ViewRender>,
+        fetch: Option<crate::status_view::TimedFetch>,
+    },
     /// The completed generation was superseded by a coalesced refresh.
     Coalesced(u64),
 }
@@ -287,11 +291,24 @@ pub(super) async fn finish_status_acquisition(
             );
             None
         }
-        Ok(InstallStatus::Installed(render)) => {
+        Ok(InstallStatus::Installed { render, fetch }) => {
             if let Some(render) = render {
                 if let Some(message) = super::plain::deliver_render(&shared, render) {
                     let _ = shared.sender.send(message);
                 }
+            }
+            // The closed render is the section publish; the promise runs from here.
+            let published = std::time::Instant::now();
+            if let Some(fetch) = fetch {
+                spawn_timed_hunks(
+                    shared.clone(),
+                    repository,
+                    repo_path.clone(),
+                    view_id.clone(),
+                    trace_id,
+                    published,
+                    fetch,
+                );
             }
             token
         }
@@ -329,13 +346,16 @@ fn install_status_acquisition(
     >,
 ) -> InstallStatus {
     let Some(handle) = shared.session(&repo_path) else {
-        return InstallStatus::Installed(None);
+        return InstallStatus::Installed {
+            render: None,
+            fetch: None,
+        };
     };
     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(next_generation) = session.take_pending_status_refresh(&view_id, generation) {
         return InstallStatus::Coalesced(next_generation);
     }
-    let render = match acquired {
+    let installed = match acquired {
         Ok(Ok(fresh)) => session.install_fresh_status(&view_id, fresh),
         Ok(Err(error)) => {
             // A terminal acquisition failure still completes this lifecycle: the
@@ -348,11 +368,13 @@ fn install_status_acquisition(
                 generation,
                 "status acquisition failed"
             );
-            session.fail_fresh_status(
-                &view_id,
-                generation,
-                format!("Unable to load repository status: {error}"),
-            )
+            session
+                .fail_fresh_status(
+                    &view_id,
+                    generation,
+                    format!("Unable to load repository status: {error}"),
+                )
+                .map(|render| (render, None))
         }
         Err(error) => {
             tracing::warn!(
@@ -362,20 +384,97 @@ fn install_status_acquisition(
                 generation,
                 "status acquisition task failed"
             );
-            session.fail_fresh_status(
-                &view_id,
-                generation,
-                format!("Unable to load repository status: {error}"),
-            )
+            session
+                .fail_fresh_status(
+                    &view_id,
+                    generation,
+                    format!("Unable to load repository status: {error}"),
+                )
+                .map(|render| (render, None))
         }
     };
-    match render {
-        Ok(render) => InstallStatus::Installed(render),
+    match installed {
+        Ok((render, fetch)) => InstallStatus::Installed { render, fetch },
         // Installation failures still complete this acquisition; a later
         // request sees the installed loading/error state, not a stale retry.
         Err(error) => {
             tracing::warn!(%error, "status completion install failed");
-            InstallStatus::Installed(None)
+            InstallStatus::Installed {
+                render: None,
+                fetch: None,
+            }
+        }
+    }
+}
+
+/// Fetch a deferred opening's hunks in the background, then publish the
+/// expanded render through its repository's turn only if the fetch beat the
+/// promise deadline. Past the deadline the sections stay closed for on-demand
+/// loading; a superseded generation is discarded by the install.
+fn spawn_timed_hunks(
+    shared: Shared,
+    repository: crate::git::GitRepo,
+    repo_path: String,
+    view_id: String,
+    trace_id: u64,
+    published: std::time::Instant,
+    fetch: crate::status_view::TimedFetch,
+) {
+    tokio::spawn(async move {
+        let fetch_repo = repository.clone();
+        let fetched = tokio::task::spawn_blocking(move || {
+            crate::runner::with_trace_id(trace_id, || {
+                crate::status_view::StatusView::fetch_timed_hunks(&fetch_repo, fetch)
+            })
+        });
+        // Bound the wait by the promise itself: a fetch still running at the
+        // deadline is abandoned so the closed render stands.
+        let remaining = crate::status_view::OPEN_PROMISE.saturating_sub(published.elapsed());
+        let hunks = match tokio::time::timeout(remaining, fetched).await {
+            Ok(Ok(hunks)) => hunks,
+            _ => return,
+        };
+        if !crate::status_view::open_within_promise(published, std::time::Instant::now()) {
+            return;
+        }
+        let turn = shared.reserve_mutation(repo_path.clone());
+        turn.wait().await;
+        let lock = repository_lock(&shared.repo_locks, &repo_path).await;
+        let _guard = lock.lock().await;
+        let install_shared = shared.clone();
+        let install_repo = repo_path.clone();
+        let install_view = view_id.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            install_timed_hunks(install_shared, install_repo, install_view, hunks)
+        })
+        .await;
+        match outcome {
+            Ok(Some(render)) => {
+                if let Some(message) = super::plain::deliver_render(&shared, render) {
+                    let _ = shared.sender.send(message);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "background hunk install failed"),
+        }
+        drop(turn);
+    });
+}
+
+/// Install a background hunk fetch into its still-current deferred view.
+fn install_timed_hunks(
+    shared: Shared,
+    repo_path: String,
+    view_id: String,
+    hunks: crate::status_view::TimedHunks,
+) -> Option<ViewRender> {
+    let handle = shared.session(&repo_path)?;
+    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+    match session.install_timed_hunks(&view_id, hunks) {
+        Ok(render) => render,
+        Err(error) => {
+            tracing::warn!(%error, "background hunk install failed");
+            None
         }
     }
 }

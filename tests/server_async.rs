@@ -12,6 +12,8 @@ use repository::keymap_keys;
 use common::fake_git::GatedGit;
 use common::stdio::*;
 use common::*;
+use magit_lsp::status_view::StatusView;
+use magit_lsp::view::{Ctx, View, Viewport};
 use serde_json::{json, Value};
 use std::process::Command;
 use std::thread;
@@ -138,6 +140,135 @@ fn status_open_progress_spans_deferred_acquisition() {
             break;
         }
     }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_fast_background_fetch_expands_like_the_sync_render() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("untracked.txt"), "untracked\n");
+    let mut server = TestServer::spawn(&[]);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    // The completion publish is the closed render; the background fetch then
+    // opens the default sections before the promise expires.
+    server.recv_timeout = Duration::from_secs(10);
+    let closed = server.wait_for_view_render_after(&view, loading_version);
+    let closed_lines: Vec<String> =
+        serde_json::from_value(closed["params"]["text"].clone()).unwrap();
+    assert!(
+        !closed_lines.iter().any(|line| line.contains("f.txt")),
+        "{closed_lines:?}"
+    );
+    let closed_version = closed["params"]["version"].as_u64().unwrap();
+    let expanded = server.wait_for_view_render_after(&view, closed_version);
+    let lines: Vec<String> = serde_json::from_value(expanded["params"]["text"].clone()).unwrap();
+    assert!(
+        lines.iter().any(|line| line.contains("M f.txt")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|line| line.contains("@@")), "{lines:?}");
+    assert!(
+        lines.iter().any(|line| line.contains("+line3 CHANGED")),
+        "{lines:?}"
+    );
+
+    // The fast path must reproduce the synchronous fully-expanded render.
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    assert_eq!(lines, expected.lines);
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("diff");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    server.recv_timeout = Duration::from_secs(10);
+    let closed = server.wait_for_view_render_after(&view, loading_version);
+    let closed_lines: Vec<String> =
+        serde_json::from_value(closed["params"]["text"].clone()).unwrap();
+    assert!(
+        !closed_lines.iter().any(|line| line.contains("f.txt")),
+        "{closed_lines:?}"
+    );
+    let closed_version = closed["params"]["version"].as_u64().unwrap();
+    // The background fetch is held inside Git, so it cannot beat the promise.
+    gate.wait_entered();
+    thread::sleep(Duration::from_millis(700));
+    gate.release();
+
+    // No expansion render followed: the closed view is still current.
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(3);
+    assert_eq!(resync["result"]["version"], closed_version, "{resync}");
+    let still_closed: Vec<String> =
+        serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+    assert!(
+        !still_closed.iter().any(|line| line.contains("f.txt")),
+        "{still_closed:?}"
+    );
+
+    // A later visibility open still fetches the hunks on demand.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.show-all"}}));
+    assert!(server.response_with_id(4)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let opened_text: Vec<String> =
+        serde_json::from_value(server.response_with_id(5)["result"]["text"].clone()).unwrap();
+    assert!(
+        opened_text.iter().any(|line| line.contains("M f.txt")),
+        "{opened_text:?}"
+    );
+    assert!(
+        opened_text
+            .iter()
+            .any(|line| line.contains("+line3 CHANGED")),
+        "{opened_text:?}"
+    );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -1036,9 +1167,8 @@ fn status_open_refreshes_while_loading_are_coalesced() {
             )
         })
         .collect();
-    assert_eq!(
-        published.len(),
-        1,
+    assert!(
+        published.len() <= 2,
         "completion published a stale or duplicate render after loading: {published:?}"
     );
     assert_eq!(
@@ -1046,6 +1176,23 @@ fn status_open_refreshes_while_loading_are_coalesced() {
         loading_version + 1,
         "the fresh render must directly follow the loading version: {published:?}"
     );
+    assert!(
+        !published[0].1.contains("overlap-fresh.txt"),
+        "the fresh render must start closed: {published:?}"
+    );
+    // The fast-path fetch may then expand the same generation: at most one
+    // further render, directly after the closed one, now showing the file row.
+    if let Some((version, text)) = published.get(1) {
+        assert_eq!(
+            *version,
+            loading_version + 2,
+            "a fast-path expansion must directly follow the closed render: {published:?}"
+        );
+        assert!(
+            text.contains("overlap-fresh.txt"),
+            "a render after the closed one must be the expansion: {published:?}"
+        );
+    }
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
