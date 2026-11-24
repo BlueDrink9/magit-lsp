@@ -3,25 +3,69 @@
 //! Every production canonicalization goes through these helpers so the
 //! resolution rules live in one place and stay consistent across platforms.
 //!
-//! Canonical form is a spelling, not an identity: on Windows one directory can
-//! be reached through both an 8.3 short name and a long name, and these helpers
-//! preserve whichever spelling they were given. Compare paths that originate
-//! from different sources (Git output, a client-supplied path) with
-//! [`same_object`], never as strings.
+//! [`canonical`] resolves an existing path to a stable long-form spelling: on
+//! Windows the same directory reached through an 8.3 short name (`RUNNER~1`)
+//! and its long name (`runneradmin`) yields the same string, so paths from
+//! different sources can be compared as strings. On Unix the result is exactly
+//! [`std::fs::canonicalize`]. A path that does not exist cannot be resolved
+//! that way; it falls back to a lexical normalize, and [`canonical_or_raw`]
+//! returns it verbatim. Inputs that were never canonicalized are compared with
+//! [`same_object`].
 
 use normpath::PathExt;
 use std::path::{Path, PathBuf};
 
 /// Resolve `path` to its canonical absolute form.
 ///
-/// On Unix this is equivalent to [`std::fs::canonicalize`]. On Windows it
-/// avoids the verbatim `\\?\` prefix that canonicalization would introduce;
-/// because it resolves through `GetFullPathNameW` it also does not expand 8.3
-/// short-name components (for example a `RUNNER~1` directory). Windows results
-/// can therefore retain a short name while [`std::fs::canonicalize`] returns
-/// the long one, so never string-compare the two there.
+/// The result is a stable long-form spelling, so two sources that name the
+/// same existing filesystem object produce the same string. On Windows that is
+/// what [`std::fs::canonicalize`] returns with the verbatim `\\?\` prefix
+/// removed from the two normal forms (`\\?\C:\…` becomes `C:\…`,
+/// `\\?\UNC\server\share` becomes `\\server\share`; any other verbatim path
+/// keeps its prefix), which also expands 8.3 short-name components. On Unix it
+/// is exactly [`std::fs::canonicalize`].
+///
+/// A path that cannot be resolved (it does not exist, or it is otherwise
+/// unreachable) falls back to a lexical normalize of the input, which keeps its
+/// spelling. Callers that can legitimately see nonexistent paths should use
+/// [`canonical_or_raw`] instead.
 pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
-    Ok(path.normalize()?.into_path_buf())
+    match std::fs::canonicalize(path) {
+        Ok(resolved) => Ok(strip_verbatim(resolved)),
+        Err(_) => Ok(path.normalize()?.into_path_buf()),
+    }
+}
+
+/// Remove the verbatim prefix from a canonical Windows path.
+///
+/// `\\?\C:\…` becomes `C:\…` and `\\?\UNC\server\share` becomes
+/// `\\server\share`. Any other verbatim path keeps its prefix.
+#[cfg(windows)]
+fn strip_verbatim(path: PathBuf) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    const VERBATIM: [u16; 4] = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const UNC: [u16; 4] = [b'U' as u16, b'N' as u16, b'C' as u16, b'\\' as u16];
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if wide.len() >= 7 && wide.starts_with(&VERBATIM) {
+        if wide.len() > 8 && wide[4..].starts_with(&UNC) {
+            let mut stripped = vec![b'\\' as u16, b'\\' as u16];
+            stripped.extend_from_slice(&wide[8..]);
+            return PathBuf::from(OsString::from_wide(&stripped));
+        }
+        if wide[5] == b':' as u16 && wide[6] == b'\\' as u16 {
+            return PathBuf::from(OsString::from_wide(&wide[4..]));
+        }
+    }
+    path
+}
+
+/// On Unix canonicalization already yields the normal spelling.
+#[cfg(not(windows))]
+fn strip_verbatim(path: PathBuf) -> PathBuf {
+    path
 }
 
 /// Canonicalize `path`, falling back to the input when it cannot be resolved.
@@ -34,11 +78,13 @@ pub fn canonical_or_raw(path: &Path) -> PathBuf {
 
 /// Report whether `left` and `right` name the same filesystem object.
 ///
-/// String comparison of our-form paths is not sufficient on Windows: the same
-/// directory can be spelled with an 8.3 short name (`RUNNER~1`) or its long
-/// form (`runneradmin`), and [`canonical`] deliberately preserves whichever
-/// spelling it is given. Use this identity check whenever the two sides come
-/// from different sources, such as Git output versus a client-supplied path.
+/// Use this for inputs that have not been through [`canonical`], such as raw
+/// Git output or a path supplied by a client. String comparison is not
+/// sufficient there: a path may be spelled with an 8.3 short name
+/// (`RUNNER~1`) or its long form (`runneradmin`), or through a symlink, and
+/// only the filesystem can establish identity. Paths that have both been
+/// canonicalized already share a stable spelling, so comparing them as strings
+/// is valid.
 pub fn same_object(left: &Path, right: &Path) -> std::io::Result<bool> {
     Ok(same_file::Handle::from_path(left)? == same_file::Handle::from_path(right)?)
 }
@@ -81,10 +127,29 @@ mod tests {
     }
 
     #[test]
+    fn canonical_resolves_to_a_verbatim_free_stable_spelling() {
+        // The permanent guard for path identity across sources: resolving an
+        // existing directory drops any verbatim prefix and is idempotent, so
+        // short-name and long-name sources converge on the same string.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let resolved = canonical(dir.path()).expect("canonical");
+        assert!(
+            !resolved.to_string_lossy().starts_with(r"\\?"),
+            "canonical kept a verbatim prefix: {}",
+            resolved.display()
+        );
+        assert_eq!(
+            canonical(&resolved).expect("canonical again"),
+            resolved,
+            "canonical is not idempotent"
+        );
+    }
+
+    #[test]
     fn same_object_compares_identity_not_spelling() {
-        // The same directory under an 8.3 short name and its long name: our
-        // canonical form keeps each spelling, so string equality cannot
-        // establish identity across sources.
+        // Two synthetic verbatim paths that cannot be resolved, so the
+        // fallback preserves each input's spelling: the short name and the
+        // long name stay distinct strings.
         let short = Path::new(r"\\?\C:\Users\RUNNER~1\tmp\missing");
         let long = Path::new(r"\\?\C:\Users\runneradmin\tmp\missing");
         assert_ne!(canonical_or_raw(short), canonical_or_raw(long));
