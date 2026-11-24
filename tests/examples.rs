@@ -1571,6 +1571,10 @@ fn for_each_range(
 struct RootNormalizer {
     /// This side's root, as it appears in frames before canonicalization.
     root: String,
+    /// Further spellings of the same root that [`root_spellings`] cannot
+    /// derive on this machine, such as the server's Windows long form of an
+    /// 8.3 short name when running on Linux.
+    aliases: Vec<String>,
     /// Canonical-URI-keyed client documents whose ranges may cross the root.
     documents: HashMap<String, String>,
 }
@@ -1580,14 +1584,21 @@ impl RootNormalizer {
     fn new(root: &str) -> Self {
         Self {
             root: root.to_owned(),
+            aliases: Vec::new(),
             documents: HashMap::new(),
         }
+    }
+
+    /// Also reduce `spelling`, an alias of this side's root.
+    fn with_alias(mut self, spelling: &str) -> Self {
+        self.aliases.push(spelling.to_owned());
+        self
     }
 
     /// Remember the full text a client document holds on this side.
     fn note_document(&mut self, uri: &str, text: &str) {
         self.documents
-            .insert(canonical_root(uri, &self.root), text.to_owned());
+            .insert(canonical_root(uri, self), text.to_owned());
     }
 
     /// Shift range endpoints whose addressed text canonicalizes shorter.
@@ -1600,7 +1611,7 @@ impl RootNormalizer {
     fn normalize_ranges(&self, value: &mut Value) {
         for_each_range(value, None, &mut |range, uri| {
             let Some(uri) = uri else { return };
-            let Some(text) = self.documents.get(&canonical_root(uri, &self.root)) else {
+            let Some(text) = self.documents.get(&canonical_root(uri, self)) else {
                 return;
             };
             let lines: Vec<&str> = text.split('\n').collect();
@@ -1618,8 +1629,8 @@ impl RootNormalizer {
                     continue;
                 };
                 let prefix = utf16_prefix(line_text, character as usize);
-                let delta = utf16_len(prefix) as i64
-                    - utf16_len(&canonical_root(prefix, &self.root)) as i64;
+                let delta =
+                    utf16_len(prefix) as i64 - utf16_len(&canonical_root(prefix, self)) as i64;
                 if delta == 0 {
                     continue;
                 }
@@ -1655,18 +1666,19 @@ fn utf16_prefix(text: &str, units: usize) -> &str {
 /// the spelling Git discovery reports — the long, resolved form on Windows —
 /// and Git spells Windows paths with forward separators. Reducing a root
 /// therefore means reducing each of its spellings: as given, its
-/// [`std::fs::canonicalize`] form (without the verbatim prefix Windows adds and
-/// neither Git nor the server uses) and its separator variants.
-fn root_spellings(root: &str) -> Vec<String> {
+/// [`std::fs::canonicalize`] form both verbatim and with the `\\?\` prefix
+/// Windows adds (Git discovery can report either), every `aliases` entry the
+/// caller supplies because this machine cannot derive it, and the separator
+/// variants of each.
+fn root_spellings(root: &str, aliases: &[String]) -> Vec<String> {
     let mut spellings = vec![root.to_owned()];
+    spellings.extend(aliases.iter().cloned());
     if let Ok(resolved) = fs::canonicalize(root) {
         let resolved = resolved.to_string_lossy();
-        spellings.push(
-            resolved
-                .strip_prefix(r"\\?\")
-                .unwrap_or(&resolved)
-                .to_owned(),
-        );
+        spellings.push(resolved.to_string());
+        if let Some(stripped) = resolved.strip_prefix(r"\\?\") {
+            spellings.push(stripped.to_owned());
+        }
     }
     for spelling in spellings.clone() {
         if spelling.contains('\\') {
@@ -1695,6 +1707,10 @@ fn windows_shaped(path: &str) -> bool {
             && path.as_bytes().get(1) == Some(&b':'))
 }
 
+/// The status view URI's scope prefix; the server writes the root after it
+/// with its leading separators trimmed.
+const STATUS_URI_PREFIX: &str = "magit://status/";
+
 /// Replace one side's repository root with the recording's placeholder.
 ///
 /// Operates on plain string values (URIs, document text), never on serialized
@@ -1702,23 +1718,36 @@ fn windows_shaped(path: &str) -> bool {
 /// match. Each [`root_spellings`] form is replaced — its native text and its
 /// URI form, encoded by the shared native-path encoder — so a live encoded URI
 /// root reduces to the recorded `file:///repo` placeholder while a
-/// filesystem-path occurrence keeps the native form. A status view's URI embeds
-/// the native root after exactly one separator, and the server trims the root's
-/// leading separators: a root without one (Windows drive or verbatim-prefixed)
-/// leaves the recorded form's separator doubled, so that artifact is repaired
-/// to [`RECORDED_STATUS_URI`].
-fn canonical_root(text: &str, root: &str) -> String {
+/// filesystem-path occurrence keeps the native form.
+///
+/// A status view's URI is reduced as a whole and never by substring: after
+/// [`STATUS_URI_PREFIX`] the remainder must equal one spelling with its leading
+/// separators trimmed, exactly as the server writes it, and the value becomes
+/// [`RECORDED_STATUS_URI`]. Otherwise the live URI is left intact so the strict
+/// frame comparison fails loudly; substring replacement there would turn a
+/// merely partial match — a harness spelling that is a suffix of a
+/// symlink-resolved root, or a Windows long form missing its verbatim prefix —
+/// into a `private/` or `\\?\` residue that no recording contains.
+fn canonical_root(text: &str, roots: &RootNormalizer) -> String {
+    let spellings = root_spellings(&roots.root, &roots.aliases);
+    if let Some(remainder) = text.strip_prefix(STATUS_URI_PREFIX) {
+        let reduces = spellings
+            .iter()
+            .any(|spelling| spelling.trim_start_matches('/') == remainder);
+        return if reduces {
+            RECORDED_STATUS_URI.to_owned()
+        } else {
+            text.to_owned()
+        };
+    }
     let mut canonical = text.to_owned();
-    for spelling in root_spellings(root) {
+    for spelling in spellings {
         if let Some(uri) = uri_from_path(Path::new(&spelling)) {
             canonical = canonical.replace(uri.as_str(), &format!("file://{RECORDED_ROOT}"));
         }
         canonical = canonical.replace(&spelling, RECORDED_ROOT);
     }
-    canonical.replace(
-        &format!("magit://status/{RECORDED_ROOT}"),
-        RECORDED_STATUS_URI,
-    )
+    canonical
 }
 
 /// Replace this run's repository root and binary path with the recording's
@@ -1731,8 +1760,8 @@ fn canonical_root(text: &str, root: &str) -> String {
 /// live root can contain backslashes (Windows), which never match the
 /// serialized form's escapes. Replaying a recorded frame expands them back to
 /// the live values.
-fn canonical_paths(text: &str, root: &str, binary: &str) -> String {
-    canonical_root(text, root).replace(binary, RECORDED_BINARY)
+fn canonical_paths(text: &str, roots: &RootNormalizer, binary: &str) -> String {
+    canonical_root(text, roots).replace(binary, RECORDED_BINARY)
 }
 
 /// The recorded comparison form of a frame.
@@ -1768,7 +1797,7 @@ fn canonical_frame(
     // live root can contain backslashes (Windows), which never match — or
     // corrupt — the serialized JSON form.
     for_each_string(&mut value, &mut |text| {
-        *text = canonical_paths(text, &roots.root, binary);
+        *text = canonical_paths(text, roots, binary);
     });
     value
 }
@@ -2148,8 +2177,9 @@ fn replay_example_env(
                                 // the recording's placeholders like every captured
                                 // server frame; strict replay expands them again.
                                 let mut persisted = message.clone();
-                                persisted["params"]["contentChanges"][0]["text"] =
-                                    Value::String(canonical_paths(refreshed, &root, binary));
+                                persisted["params"]["contentChanges"][0]["text"] = Value::String(
+                                    canonical_paths(refreshed, &observed_roots, binary),
+                                );
                                 regenerated[index + inserted - skipped] =
                                     captured_line(line, &persisted)
                                         .map_err(|error| format!("{where_}: {error}"))?;
@@ -2810,7 +2840,9 @@ fn root_normalization_is_invariant_to_root_encoding_and_length() {
 /// (`rich-lifecycle.jsonl:8`) without moving a POSIX reduction. The harness and
 /// the server reach one directory through different spellings — a Windows 8.3
 /// short name vs its long form, a symlinked component vs its target, or Git's
-/// forward separators vs the native form — and every such pair must reduce.
+/// forward separators vs the native form — and every such pair must reduce,
+/// because the reduction matches the whole remainder against every spelling
+/// the fixture root and its canonicalization yield.
 #[test]
 fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
     let recorded_uri = "magit://status/repo";
@@ -2820,6 +2852,31 @@ fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
         RECORDED_BINARY,
         &mut HashNormalizer::new(),
     );
+    let reduces = |root: &str, server: &str, aliases: &[String]| {
+        let live = magit_lsp::session::status_uri(server);
+        assert!(
+            live.starts_with("magit://status/"),
+            "{server}: the construction keeps one separator after the scope"
+        );
+        assert_ne!(
+            live, recorded_uri,
+            "{server}: the live URI names this run's root"
+        );
+        let mut roots = RootNormalizer::new(root);
+        for alias in aliases {
+            roots = roots.with_alias(alias);
+        }
+        let canonical = canonical_frame(
+            &json!({"id": 2, "result": {"id": "v1", "kind": "status", "uri": live}}),
+            &roots,
+            RECORDED_BINARY,
+            &mut HashNormalizer::new(),
+        );
+        assert_eq!(
+            canonical, recorded_frame,
+            "{root} vs {server}: the status URI must reduce to the recorded form"
+        );
+    };
     // Synthetic roots only: on Linux a Windows root has no file URI, which
     // `canonical_root` already tolerates, and the status URI embeds the native
     // root rather than its encoded form on either platform. Each pair is the
@@ -2849,28 +2906,89 @@ fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
     {
         let link = dir.path().join("spelling");
         std::os::unix::fs::symlink(dir.path(), &link).expect("symlink");
-        cases.push((link.to_string_lossy().into_owned(), resolved));
+        cases.push((link.to_string_lossy().into_owned(), resolved.clone()));
+        // The macOS shape: the logical root is a suffix of the resolved one,
+        // as `/var/...` is of `/private/var/...`. A link whose target is a
+        // vault path concatenated with the link's own path reproduces exactly
+        // that relation, so the logical spelling is only a partial match
+        // inside the server's URI and the whole resolved spelling must win.
+        let vault = dir.path().join("vault");
+        let logical = dir.path().join("logical");
+        let target = vault.join(logical.strip_prefix("/").expect("absolute link path"));
+        fs::create_dir_all(target.join("repo")).expect("symlink target");
+        std::os::unix::fs::symlink(&target, &logical).expect("nested symlink");
+        let logical_root = logical.join("repo");
+        let resolved_root = fs::canonicalize(&logical_root).expect("canonical logical root");
+        cases.push((
+            logical_root.to_string_lossy().into_owned(),
+            resolved_root.to_string_lossy().into_owned(),
+        ));
     }
 
     for (root, server) in cases {
-        let live = magit_lsp::session::status_uri(&server);
+        reduces(&root, &server, &[]);
+    }
+
+    // Windows: the fixture keeps the 8.3 short name while the server adopts
+    // the verbatim long form Git discovery reports. On Linux canonicalization
+    // cannot derive the long form from the short one, so this pair supplies
+    // the server spelling as an extra reduction key; a real Windows run
+    // derives it from `fs::canonicalize` instead.
+    let short = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpDKfPnZ";
+    let verbatim = r"\\?\C:\Users\runneradmin\AppData\Local\Temp\.tmpDKfPnZ";
+    reduces(short, verbatim, &[verbatim.to_owned()]);
+}
+
+/// An unmatched status remainder is left whole, never partially consumed.
+///
+/// When no spelling equals the remainder after `magit://status/` the reduction
+/// must not fall back to substring replacement: a harness spelling that is
+/// only a suffix of the server's root (macOS's logical `/var/...` inside the
+/// resolved `/private/var/...`) or a Windows long form missing its verbatim
+/// prefix would then leave `magit://status/private/repo` or
+/// `magit://status/\\?\/repo` behind — a fragment no recording contains, which
+/// would masquerade as a matching frame. Leaving the live URI intact makes the
+/// strict comparison diverge loudly instead.
+#[test]
+fn unmatched_status_remainders_are_not_reduced_to_fragments() {
+    let recorded_uri = "magit://status/repo";
+    for (root, server, residue) in [
+        (
+            "/var/folders/q2/abc/T/.tmpnUCB0A",
+            "/private/var/folders/q2/abc/T/.tmpnUCB0A",
+            "magit://status/private/repo",
+        ),
+        (
+            r"C:\Users\runneradmin\AppData\Local\Temp\.tmpDKfPnZ",
+            r"\\?\C:\Users\runneradmin\AppData\Local\Temp\.tmpDKfPnZ",
+            r"magit://status/\\?\/repo",
+        ),
+    ] {
+        let live = magit_lsp::session::status_uri(server);
         assert!(
-            live.starts_with("magit://status/"),
-            "{server}: the construction keeps one separator after the scope"
-        );
-        assert_ne!(
-            live, recorded_uri,
-            "{server}: the live URI names this run's root"
+            live.contains(root),
+            "{server}: the harness spelling is only a partial match inside the live URI"
         );
         let canonical = canonical_frame(
             &json!({"id": 2, "result": {"id": "v1", "kind": "status", "uri": live}}),
-            &RootNormalizer::new(&root),
+            &RootNormalizer::new(root),
             RECORDED_BINARY,
             &mut HashNormalizer::new(),
         );
+        let uri = canonical["result"]["uri"]
+            .as_str()
+            .expect("the reduced status URI is a string");
         assert_eq!(
-            canonical, recorded_frame,
-            "{root} vs {server}: the status URI must reduce to the recorded form"
+            uri, live,
+            "{root} vs {server}: an unmatched root leaves the live URI whole"
+        );
+        assert_ne!(
+            uri, recorded_uri,
+            "{root} vs {server}: a partial match must not pass as the recorded form"
+        );
+        assert!(
+            !uri.contains(residue),
+            "{root} vs {server}: reduced to a residue: {uri}"
         );
     }
 }
