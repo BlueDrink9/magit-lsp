@@ -5,7 +5,6 @@
   "version": "0.2.0",
   "publisher": "magit-lsp",
   "private": true,
-  "packageManager": "pnpm@10.13.1",
   "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.85.0"
