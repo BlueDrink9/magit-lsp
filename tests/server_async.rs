@@ -593,6 +593,7 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    env.push(("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000"));
     let mut server = TestServer::spawn(&env);
     server.initialize_rich(json!({}));
     let mut open = open_view_message(2, &repo_param(tmp.path()));
@@ -701,6 +702,7 @@ fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
+    env.push(("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000"));
     let mut server = TestServer::spawn(&env);
     server.initialize_rich(json!({}));
     let mut open = open_view_message(2, &repo_param(tmp.path()));
