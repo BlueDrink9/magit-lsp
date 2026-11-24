@@ -93,11 +93,16 @@ impl CustomRender {
                 if let Some(required) = required.filter(|required| !caps.supports_effect(required))
                 {
                     #[cfg(test)]
-                    assert!(false, "undeclared optional effect emitted: {required}");
-                    *effect = Effect::message(
-                        MessageLevel::Warn,
-                        format!("Client does not support {required}"),
-                    );
+                    {
+                        panic!("undeclared optional effect emitted: {required}");
+                    }
+                    #[cfg(not(test))]
+                    {
+                        *effect = Effect::message(
+                            MessageLevel::Warn,
+                            format!("Client does not support {required}"),
+                        );
+                    }
                 }
             }
         }

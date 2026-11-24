@@ -484,7 +484,6 @@ fn invoke_plain(
 /// The real status view ID and displayed generation from an offered action.
 fn offered_status_view(
     server: &mut stdio::TestServer,
-    editor: &FakeEditor,
     uri: &str,
     row: u32,
     id: i64,
@@ -543,20 +542,6 @@ fn assert_no_message_effect(response: &Value) {
         !effects.iter().any(|effect| effect["type"] == "message"),
         "command reported a message effect: {response}"
     );
-}
-
-fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) -> Vec<String> {
-    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}}));
-    server.response_with_id(id)["result"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|a| {
-            a["command"]["arguments"][0]["target"]["nodeId"]
-                .as_str()
-                .map(str::to_owned)
-        })
-        .collect()
 }
 
 #[derive(Debug)]
@@ -1813,7 +1798,7 @@ fn plain_ignore_topdir_uses_a_choice_document_and_submits_literal_id() {
         .lines()
         .position(|line| line.contains("a[b]b.txt"))
         .expect("file row") as u32;
-    let (view_id, version) = offered_status_view(&mut server, &editor, &uri, row, 139);
+    let (view_id, version) = offered_status_view(&mut server, &uri, row, 139);
     let invoked = invoke_plain(
         &mut server,
         &mut editor,
@@ -1895,7 +1880,7 @@ fn plain_choice_item_row_answers_the_ignore_kind_pick() {
         .lines()
         .position(|line| line.contains("f.txt"))
         .expect("file row") as u32;
-    let (view_id, version) = offered_status_view(&mut server, &editor, &uri, row, 149);
+    let (view_id, version) = offered_status_view(&mut server, &uri, row, 149);
     let invoked = invoke_plain(
         &mut server,
         &mut editor,

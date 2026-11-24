@@ -390,23 +390,22 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
     write(&tmp.path().join("a.txt"), "unstaged\n");
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     let line = test.goto_file("untracked", "a.txt");
+    let handled = test.view_id().to_string();
     let cursor = Cursor { line, column: 0 };
     for ack in [false, true] {
         if ack {
             let version = test
                 .session
                 .views()
-                .get(&test.view_id().to_string())
+                .get(&handled)
                 .expect("status view")
                 .version();
-            test.session
-                .ack(&test.view_id().to_string(), version)
-                .unwrap();
+            test.session.ack(&handled, version).unwrap();
         }
         let current_version = test
             .session
             .views()
-            .get(&test.view_id().to_string())
+            .get(&handled)
             .expect("status view")
             .version();
         for version in [0, current_version + 1, u64::MAX] {

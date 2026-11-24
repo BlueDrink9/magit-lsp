@@ -577,7 +577,7 @@ fn templates() -> &'static Mutex<HashMap<String, Template>> {
 thread_local! {
     /// Set while a [`fork_in`] builder runs with the registry lock held, where
     /// consulting the automatic cache would re-enter that lock.
-    static IN_TEMPLATE_BUILD: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static IN_TEMPLATE_BUILD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Whether this thread is currently inside a [`fork_in`] builder.

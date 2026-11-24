@@ -145,7 +145,7 @@ impl Keymap {
                         owners.insert(
                             key.clone(),
                             KeyOwner {
-                                command: *command,
+                                command,
                                 level: decl.level,
                                 origin: decl.origin.clone(),
                             },
@@ -168,7 +168,7 @@ impl Keymap {
                         owners.insert(
                             key.clone(),
                             KeyOwner {
-                                command: *command,
+                                command,
                                 level: decl.level,
                                 origin: decl.origin.clone(),
                             },

@@ -545,11 +545,12 @@ impl Session {
 
                 let mut effects = Vec::new();
                 let mut keymap = None;
-                loop {
-                    let top = match self.views.iter().last() {
-                        Some(view) => view.descriptor().id.clone(),
-                        None => break,
-                    };
+                let mut next_top = self
+                    .views
+                    .iter()
+                    .last()
+                    .map(|view| view.descriptor().id.clone());
+                while let Some(top) = next_top.take() {
                     if top == target {
                         break;
                     }
@@ -558,6 +559,11 @@ impl Session {
                     if popped.keymap.is_some() {
                         keymap = popped.keymap;
                     }
+                    next_top = self
+                        .views
+                        .iter()
+                        .last()
+                        .map(|view| view.descriptor().id.clone());
                 }
                 // The explicitly context-free commit.create command carries
                 // no retained coordinates or version.

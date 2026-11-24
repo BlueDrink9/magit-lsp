@@ -212,9 +212,9 @@ fn bootstrap_plain_view(
     let trace = crate::runner::current_trace_id();
     let shared_clone = shared.clone();
     let repo_clone = repo.clone();
-    let _ = tokio::task::spawn_blocking(move || {
+    drop(tokio::task::spawn_blocking(move || {
         crate::runner::with_trace_id(trace, move || shared_clone.ensure_watcher(&repo_clone))
-    });
+    }));
     if let Some(edit) = first {
         send_plain_edit(shared, uri, incarnation, edit);
     }

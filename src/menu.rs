@@ -795,7 +795,7 @@ impl Block {
 }
 
 /// Greedily place blocks left to right, wrapping at `cols`.
-fn wrap<'a>(blocks: &'a [Block], cols: usize) -> Vec<Vec<&'a Block>> {
+fn wrap(blocks: &[Block], cols: usize) -> Vec<Vec<&Block>> {
     let mut rows: Vec<Vec<&Block>> = Vec::new();
     let mut current: Vec<&Block> = Vec::new();
     let mut used = 0;

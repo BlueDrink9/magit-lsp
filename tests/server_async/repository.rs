@@ -393,8 +393,20 @@ fn blocked_repository_does_not_serialize_unrelated_repository_operations() {
     );
 
     // Positional reads must not scan and lock A's session before reaching B.
+    // The acquired render has closed sections, so its outline contains the
+    // section headers rather than a hunk to resolve.
     let uri_b = magit_lsp::session::status_uri(&repo_b_tmp.path().to_string_lossy());
-    let _ = first_hunk_line(&mut server, &uri_b);
+    server.send(
+        json!({"jsonrpc":"2.0","id":90,"method":"textDocument/documentSymbol",
+        "params":{"textDocument":{"uri":uri_b}}}),
+    );
+    let symbols_b = server.response_with_id(90);
+    assert!(
+        symbols_b["result"]
+            .as_array()
+            .is_some_and(|symbols| !symbols.is_empty()),
+        "{symbols_b}"
+    );
     server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke",
         "params":{"viewId":b,"command":"status.unstage-all"}}));
     let staged_b = server.response_with_id(6);
@@ -844,6 +856,9 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     let ready = server.wait_for_view_render_after(&view_id, loading_version);
     let version = ready["params"]["version"].as_u64().unwrap();
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
+    // The acquired render is closed; open its sections before resolving the
+    // hunk position the stage command addresses.
+    let version = show_all_and_ack(&mut server, 4, &view_id, version);
     let line = first_hunk_line(&mut server, &uri);
 
     server.send(json!({
@@ -1151,6 +1166,9 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
 
     assert!(render["params"]["text"].is_array());
+    // Open the closed sections so the outline exposes the hunk the key
+    // addresses; cite the expanded version in the positional request.
+    let version = show_all_and_ack(&mut server, 4, &view_id, version);
     let line = first_hunk_line(&mut server, &uri);
 
     server.send(json!({
@@ -1333,10 +1351,10 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
         match message["id"].as_i64() {
             Some(5) => key_response = Some(message),
             Some(6) => respond_response = Some(message),
-            _ if message["method"] == json!("view/render") => {
-                if message["params"]["viewId"] == json!(menu_id) {
-                    option_render = Some(message);
-                }
+            _ if message["method"] == json!("view/render")
+                && message["params"]["viewId"] == json!(menu_id) =>
+            {
+                option_render = Some(message);
             }
             _ => {}
         }
@@ -1566,6 +1584,7 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
         let version = ready["params"]["version"].as_u64().unwrap();
         server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
             "params":{"viewId":view,"version":version}}));
+        let version = show_all_and_ack(&mut server, 5, &view, version);
         let line = first_hunk_line(&mut server, &uri);
         server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
             "params":{"viewId":view,"command":"status.discard","version":version,"cursor":{"line":line,"column":0}}}));
@@ -1692,6 +1711,9 @@ fn a12_selection_stage_reports_index_lock_as_successful_error_effect() {
     let ready = server.wait_for_view_render_after(&view, loading_version);
     let version = ready["params"]["version"].as_u64().expect("ready version");
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
+    // The acquired sections are closed; opening them puts the changed line in
+    // the acknowledged outline from which the range is resolved.
+    let version = show_all_and_ack(&mut server, 5, &view, version);
     // The changed-line symbol range comes from the server's structured outline,
     // not by interpreting rendered text.
     let (start_line, end_line) = first_hunk_range(&mut server, &uri);

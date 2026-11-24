@@ -169,7 +169,7 @@ impl RepoWatcher {
                         rescan = true;
                         vec![repo.clone()]
                     } else {
-                        event.paths.iter().cloned().collect()
+                        event.paths.to_vec()
                     };
                     match pending.as_mut() {
                         Some(batch) => batch.extend(paths),

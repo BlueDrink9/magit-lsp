@@ -400,10 +400,7 @@ fn notes_git_write_failure_is_readable_and_preserves_existing_note() {
         panic!("expected completion");
     };
     let messages = message_texts(&result.effects);
-    assert!(
-        messages.iter().any(|text| *text == "`git notes` failed."),
-        "{messages:?}"
-    );
+    assert!(messages.contains(&"`git notes` failed."), "{messages:?}");
     assert!(!messages.iter().any(|text| text.contains("Note updated")));
     assert_eq!(
         tmp.git(&["notes", "--ref=refs/notes/custom", "show", &target])
@@ -940,9 +937,7 @@ fn branch_create_tracks_local_branch_startpoint_without_switching() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Created branch feature"),
+        message_texts(&result.effects).contains(&"Created branch feature"),
         "{:?}",
         result.effects
     );
@@ -1011,9 +1006,7 @@ fn branch_create_from_revision_startpoint_does_not_track() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Created branch feature"),
+        message_texts(&result.effects).contains(&"Created branch feature"),
         "{:?}",
         result.effects
     );
@@ -1608,9 +1601,7 @@ fn tag_create_prompts_and_creates_tag_at_head() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Created tag v1"),
+        message_texts(&result.effects).contains(&"Created tag v1"),
         "{:?}",
         result.effects
     );
@@ -1712,9 +1703,7 @@ fn tag_delete_removes_an_existing_tag() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Deleted tag v1"),
+        message_texts(&result.effects).contains(&"Deleted tag v1"),
         "{:?}",
         result.effects
     );
@@ -1802,9 +1791,7 @@ fn branch_rename_prompts_twice_and_moves_the_ref() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Renamed branch main to renamed"),
+        message_texts(&result.effects).contains(&"Renamed branch main to renamed"),
         "{:?}",
         result.effects
     );
@@ -1852,9 +1839,7 @@ fn branch_delete_removes_a_side_branch_without_switching() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Deleted branch feature"),
+        message_texts(&result.effects).contains(&"Deleted branch feature"),
         "{:?}",
         result.effects
     );
@@ -1957,9 +1942,7 @@ fn branch_description_prompts_twice_and_writes_config() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Set description for main"),
+        message_texts(&result.effects).contains(&"Set description for main"),
         "{:?}",
         result.effects
     );
@@ -2001,9 +1984,7 @@ fn branch_description_prompts_twice_and_writes_config() {
         else {
             panic!("expected completion");
         };
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Set description for main")
+        message_texts(&result.effects).contains(&"Set description for main")
     };
     for answer in ["--unset", "--get"] {
         assert!(describe(answer), "{answer} must report success");
@@ -2664,9 +2645,7 @@ fn branch_description_targets_a_side_branch() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Set description for feature"),
+        message_texts(&result.effects).contains(&"Set description for feature"),
         "{:?}",
         result.effects
     );
@@ -2718,9 +2697,7 @@ fn remote_add_prompts_for_name_and_url() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Added remote origin"),
+        message_texts(&result.effects).contains(&"Added remote origin"),
         "{:?}",
         result.effects
     );
@@ -2817,9 +2794,7 @@ fn remote_remove_drops_an_existing_remote() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Removed remote origin"),
+        message_texts(&result.effects).contains(&"Removed remote origin"),
         "{:?}",
         result.effects
     );
@@ -2918,9 +2893,7 @@ fn remote_rename_prompts_for_old_and_new_names() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Renamed remote origin to upstream"),
+        message_texts(&result.effects).contains(&"Renamed remote origin to upstream"),
         "{:?}",
         result.effects
     );
@@ -2974,9 +2947,7 @@ fn remote_prune_drops_stale_tracking_refs_but_keeps_live_ones() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Pruned remote origin"),
+        message_texts(&result.effects).contains(&"Pruned remote origin"),
         "{:?}",
         result.effects
     );
@@ -3084,9 +3055,7 @@ fn branch_reset_moves_a_side_branch_to_a_revision_without_switching() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Reset branch feature to HEAD"),
+        message_texts(&result.effects).contains(&"Reset branch feature to HEAD"),
         "{:?}",
         result.effects
     );
@@ -3482,9 +3451,7 @@ fn branch_reset_answers_cannot_select_a_delete_operation() {
         panic!("expected completion");
     };
     assert!(
-        message_texts(&result.effects)
-            .iter()
-            .any(|text| *text == "Reset branch feature to HEAD"),
+        message_texts(&result.effects).contains(&"Reset branch feature to HEAD"),
         "{:?}",
         result.effects
     );
@@ -5871,7 +5838,7 @@ fn ignore_root_stale_origin_is_refused_without_redirecting() {
 }
 
 /// Read one file's index flag from `git ls-files -v -z` output (`S`/`h`/`H`).
-fn skip_worktree_flag<'a>(listing: &'a str, target: &str) -> Option<char> {
+fn skip_worktree_flag(listing: &str, target: &str) -> Option<char> {
     listing.split('\0').find_map(|entry| {
         let tag = entry.chars().next()?;
         let path = entry[tag.len_utf8()..].strip_prefix(' ')?;

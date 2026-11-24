@@ -608,36 +608,6 @@ fn plain_action_title(
     }
 }
 
-#[cfg(test)]
-mod plain_action_title_tests {
-    use super::plain_action_title;
-    use crate::config::TitleStyle;
-
-    #[test]
-    fn title_styles_omit_missing_components() {
-        assert_eq!(
-            plain_action_title(TitleStyle::Plain, "Stage", None, None),
-            "Stage"
-        );
-        assert_eq!(
-            plain_action_title(TitleStyle::Mnemonic, "Stage", None, None),
-            "Stage"
-        );
-        assert_eq!(
-            plain_action_title(TitleStyle::Path, "Stage", None, Some("src/a")),
-            "src/a: Stage"
-        );
-        assert_eq!(
-            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), None),
-            "s Stage"
-        );
-        assert_eq!(
-            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), Some("src/a")),
-            "s src/a: Stage"
-        );
-    }
-}
-
 /// Validate a Plain document position in the negotiated encoding.
 pub(super) fn plain_position_valid(
     text: &str,
@@ -1089,4 +1059,34 @@ fn toggle_plain_keys(
     Ok(Dispatched::value(serde_json::to_value(
         ViewInvokeResponse { effects: vec![] },
     )?))
+}
+
+#[cfg(test)]
+mod plain_action_title_tests {
+    use super::plain_action_title;
+    use crate::config::TitleStyle;
+
+    #[test]
+    fn title_styles_omit_missing_components() {
+        assert_eq!(
+            plain_action_title(TitleStyle::Plain, "Stage", None, None),
+            "Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::Mnemonic, "Stage", None, None),
+            "Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::Path, "Stage", None, Some("src/a")),
+            "src/a: Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), None),
+            "s Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), Some("src/a")),
+            "s src/a: Stage"
+        );
+    }
 }

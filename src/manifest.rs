@@ -254,7 +254,7 @@ fn same_binding(left: &Binding, right: &Binding) -> bool {
 ///
 /// The synthetic `common` scope is the base of the view scopes and no view
 /// reports it, so it takes no part in the comparison.
-fn shared_bindings<'a>(scopes: &'a [ScopeManifest]) -> Vec<&'a Binding> {
+fn shared_bindings(scopes: &[ScopeManifest]) -> Vec<&Binding> {
     let mut concrete = scopes.iter().filter(|scope| scope.scope != "common");
     let Some(first) = concrete.next() else {
         return Vec::new();

@@ -134,7 +134,7 @@ pub const REGISTRY: &[Quirk] = &[
 /// Resolve automatic evidence matches, then apply validated user on/off overrides.
 pub fn resolve(client: Client<'_>, overrides: Option<&Value>) -> Result<Resolution, String> {
     let user = parse_overrides(overrides)?;
-    Ok(resolve_validated(client, user.into_iter()))
+    Ok(resolve_validated(client, user))
 }
 
 /// Resolve quirks using already-validated configuration overrides.

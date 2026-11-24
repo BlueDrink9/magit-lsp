@@ -392,7 +392,7 @@ fn key_audit_validator_rejects_missing_orphan_and_duplicate_rows() {
         magit_command: "magit-update-default-branch".into(),
         local_command: "remote.update-default".into(),
     };
-    assert!(validate_audit(&[action.clone()], &[])
+    assert!(validate_audit(std::slice::from_ref(&action), &[])
         .unwrap_err()
         .contains("missing"));
     let orphan = AuditAction {
@@ -402,7 +402,8 @@ fn key_audit_validator_rejects_missing_orphan_and_duplicate_rows() {
     assert!(validate_audit(&[], &[orphan])
         .unwrap_err()
         .contains("orphan"));
-    assert!(validate_audit(&[action.clone()], &[action.clone(), action])
+    let duplicate = [action.clone(), action.clone()];
+    assert!(validate_audit(std::slice::from_ref(&action), &duplicate)
         .unwrap_err()
         .contains("duplicate"));
 }

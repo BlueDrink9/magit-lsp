@@ -515,7 +515,6 @@ fn plain_section_limit_defaults_and_obeys_configuration_layers() {
         config_path: Some(global.clone()),
         repo_path: Some(repo.path().to_path_buf()),
         initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})),
-        ..Default::default()
     })
     .unwrap();
     assert_eq!(config.plain.max_section_lines, 100);
@@ -731,7 +730,6 @@ fn trusted_repo_config_applies_keys_and_display_but_not_profile_or_trust() {
             "trust_repo_config": true,
             "keys": {"status": {"stage": ["i"]}}
         })),
-        ..Default::default()
     })
     .unwrap();
     assert_eq!(config.profile, Profile::Standard);

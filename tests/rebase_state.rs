@@ -50,7 +50,7 @@ fn real_operations_distinguish_rebase_cherry_pick_revert_and_am() {
 
     git(dir.path(), &["checkout", "topic"]);
     failed_git(dir.path(), &["rebase", "main"]);
-    assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, true);
+    assert!(repo.rebase_state().unwrap().unwrap().conflicted);
     git(dir.path(), &["rebase", "--abort"]);
 
     git(dir.path(), &["checkout", "main"]);
@@ -100,7 +100,7 @@ fn apply_rebase_detected_and_linked_worktree_state_isolated() {
 
     git(dir.path(), &["checkout", "topic"]);
     failed_git(dir.path(), &["rebase", "--apply", "main"]);
-    assert_eq!(main_repo.rebase_state().unwrap().unwrap().conflicted, true);
+    assert!(main_repo.rebase_state().unwrap().unwrap().conflicted);
     assert_eq!(linked_repo.rebase_state().unwrap(), None);
     git(dir.path(), &["rebase", "--abort"]);
 }

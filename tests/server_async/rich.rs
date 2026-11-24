@@ -35,9 +35,7 @@ fn rich_acknowledged_edits_reflow_real_menu() {
     assert_eq!(initial["method"], "view/render");
     assert_eq!(server.recv()["method"], "view/keymap");
     let mut text: Vec<String> = serde_json::from_value(initial["params"]["text"].clone()).unwrap();
-    let mut version = 1;
-    // Acknowledged versions are the base for subsequent edits.
-    for cols in [60, 140] {
+    for (version, cols) in (1..).zip([60, 140]) {
         server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
                 "params":{"viewId":menu,"version":version}}));
         server.send(json!({"jsonrpc":"2.0","method":"view/resize",
@@ -57,7 +55,6 @@ fn rich_acknowledged_edits_reflow_real_menu() {
             include_str!("../snapshots/menu-140.txt")
         };
         assert_eq!(text.join("\n"), expected.trim_end());
-        version += 1;
     }
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -91,9 +88,16 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
         &view,
         initial_loading["params"]["version"].as_u64().unwrap(),
     );
-    let mut version = initial["params"]["version"].as_u64().unwrap();
-    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
-    let initial_text = initial["params"]["text"].clone();
+    let base_version = initial["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":base_version}}));
+    // The acquired render has closed sections. Open them so the visibility
+    // baseline below is the full tree the fold assertions describe.
+    let expanded_version = super::show_all_and_ack(&mut server, 9, &view, base_version);
+    server.send(json!({"jsonrpc":"2.0","id":13,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let expanded = server.response_with_id(13);
+    assert_eq!(expanded["result"]["version"], expanded_version);
+    let initial_text = expanded["result"]["text"].clone();
     let mut text: Vec<String> = serde_json::from_value(initial_text.clone()).unwrap();
     assert!(initial_text
         .as_array()
@@ -122,6 +126,7 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
     .into_iter()
     .enumerate()
     {
+        let version = expanded_version + index as u64;
         server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
                 "params":{"viewId":view,"version":version}}));
         if index == 0 {
@@ -193,7 +198,6 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
                 );
             }
         }
-        version += 1;
     }
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -825,17 +829,18 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
         .build();
     let mut server = TestServer::spawn(&[]);
     server.initialize_rich(json!({}));
-    let view = super::open_view(&mut server, 2, &repo_param(tmp.path()));
+    let (view, acquired) = super::open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     let uri = format!(
         "magit://status/{}",
         tmp.path().to_string_lossy().trim_start_matches('/')
     );
-    let version = 2;
+    // The hunk is only in the outline once the closed section is opened.
+    let version = super::show_all_and_ack(&mut server, 3, &view, acquired);
     // Resolve the request position from the server's structured outline.
     let line = first_hunk_line(&mut server, &uri);
     for (id, command, effect) in [
-        (3, "common.copy-value", "clipboard"),
-        (4, "common.visit", "visitFile"),
+        (4, "common.copy-value", "clipboard"),
+        (5, "common.visit", "visitFile"),
     ] {
         server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
             "params":{"viewId":view,"version":version,"command":command,"cursor":{"line":line,"column":0}}}));

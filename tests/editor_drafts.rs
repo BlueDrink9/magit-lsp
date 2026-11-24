@@ -172,11 +172,10 @@ fn first_open_requires_exact_initial_version_and_text() {
     let fixture = Fixture::new();
     let (mut draft, access) = fixture.joined();
     let before = snapshots(&draft);
-    for version in [-1] {
-        assert!(draft
-            .did_open(access.context(), version, TEMPLATE.as_bytes())
-            .is_err());
-    }
+    let version = -1;
+    assert!(draft
+        .did_open(access.context(), version, TEMPLATE.as_bytes())
+        .is_err());
     assert!(draft
         .did_open(access.context(), 1, b"different template")
         .is_err());

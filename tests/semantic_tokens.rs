@@ -187,7 +187,7 @@ fn decode(data: &[Value], token_types: &[String], token_modifiers: &[String]) ->
     let mut line = 0;
     let mut start = 0;
     let mut tokens = Vec::new();
-    for chunk in numbers.chunks_exact(5) {
+    for chunk in numbers.as_chunks::<5>().0 {
         line += chunk[0];
         start = if chunk[0] == 0 {
             start + chunk[1]
@@ -475,6 +475,13 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
         }
         resync_id += 1;
     }
+
+    // The acquired status opens with its sections closed; open them so the
+    // token stream covers the full tree built below.
+    server.send(json!({"jsonrpc":"2.0","id":1000,"method":"view/invoke",
+        "params":{"viewId":view_id,"command":"common.show-all"}}));
+    let opened_all = server.response_with_id(1000);
+    assert!(opened_all["error"].is_null(), "{opened_all}");
 
     server.send(json!({
         "jsonrpc": "2.0",

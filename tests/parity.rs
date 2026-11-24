@@ -2,17 +2,12 @@
 //! block. The README block is the only parity snapshot; the CLI output is
 //! compared against the generators directly.
 
-use expect_test::expect_file;
 use magit_lsp::commands::{registry, CommandStatus, Scope};
 use magit_lsp::menu::MenuStatus;
 use magit_lsp::menus::{self, ItemDef};
 use magit_lsp::parity;
 use std::path::PathBuf;
 use std::process::Command;
-
-fn readme_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md")
-}
 
 /// The Magit menu prefix §5 puts in front of each action key.
 fn magit_prefix(menu: &str) -> &'static str {

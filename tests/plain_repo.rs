@@ -29,7 +29,10 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
     let temp = tempfile::tempdir().unwrap();
     let plain = temp.path().join("plain");
     std::fs::create_dir(&plain).unwrap();
-    assert_eq!(resolve(None, &[plain.clone()], None), Resolution::None);
+    assert_eq!(
+        resolve(None, std::slice::from_ref(&plain), None),
+        Resolution::None
+    );
 
     let a = temp.path().join("a");
     let b = temp.path().join("b");

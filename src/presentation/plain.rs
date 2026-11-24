@@ -498,6 +498,98 @@ fn format_equivalent(expected: &str, observed: &str) -> bool {
     expected != observed && logical(expected) == logical(observed)
 }
 
+fn splits_crlf(text: &str, offset: usize) -> bool {
+    offset > 0
+        && offset < text.len()
+        && text.as_bytes()[offset - 1] == b'\r'
+        && text.as_bytes()[offset] == b'\n'
+}
+
+fn position(text: &str, offset: usize, encoding: Encoding) -> Value {
+    let before = &text[..offset];
+    let line = before.bytes().filter(|b| *b == b'\n').count();
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let segment = &before[line_start..];
+    let segment = segment.strip_suffix('\r').unwrap_or(segment);
+    let character = match encoding {
+        Encoding::Utf8 => segment.len(),
+        Encoding::Utf16 => segment.encode_utf16().count(),
+        Encoding::Utf32 => segment.chars().count(),
+    };
+    json!({"line":line,"character":character})
+}
+
+/// Hash exact UTF-8 text for collision-resistant snapshot matching.
+pub fn hash_text(text: &str) -> [u8; 32] {
+    Sha256::digest(text.as_bytes()).into()
+}
+
+/// Build a versioned `WorkspaceEdit` that replaces a whole document.
+///
+/// `version` is the document's currently synchronized version and `current`
+/// supplies the end position of the existing text. The caller sends the result
+/// as the `edit` parameter of `workspace/applyEdit`.
+pub fn whole_document_edit(
+    uri: &str,
+    version: i32,
+    current: &str,
+    text: &str,
+    encoding: Encoding,
+) -> Value {
+    let end = position(current, current.len(), encoding);
+    json!({"documentChanges":[{
+        "textDocument":{"uri":uri,"version":version},
+        "edits":[{"range":{"start":{"line":0,"character":0},"end":end},"newText":text}]
+    }]})
+}
+
+/// Produce one valid edit using negotiated LSP position units. When both
+/// strings end in LF, preserve their shared terminal newline in the suffix so
+/// the edit does not insert at virtual EOF.
+pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
+    if old == new {
+        return Vec::new();
+    }
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    // Keep a shared final newline in the suffix, rather than inserting at
+    // virtual EOF. Native editors may expose an intermediate extra line while
+    // applying an EOF edit, then echo its removal after the applyEdit result.
+    if old.ends_with('\n') && new.ends_with('\n') {
+        prefix = prefix.min(old.len() - 1).min(new.len() - 1);
+    }
+    while splits_crlf(old, prefix) || splits_crlf(new, prefix) {
+        prefix -= 1;
+    }
+    let mut suffix = 0;
+    let max_suffix = old
+        .len()
+        .saturating_sub(prefix)
+        .min(new.len().saturating_sub(prefix));
+    while suffix < max_suffix
+        && old.as_bytes()[old.len() - 1 - suffix] == new.as_bytes()[new.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    while splits_crlf(old, old.len() - suffix) || splits_crlf(new, new.len() - suffix) {
+        suffix -= 1;
+    }
+    let old_end = old.len() - suffix;
+    let new_end = new.len() - suffix;
+    let start = position(old, prefix, encoding);
+    let end = position(old, old_end, encoding);
+    vec![json!({"range":{"start":start,"end":end},"newText":&new[prefix..new_end]})]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,96 +725,4 @@ mod tests {
         let (_, _, generation, _, _) = document.action_snapshot("render-6").unwrap();
         assert_eq!(generation, 6);
     }
-}
-
-/// Hash exact UTF-8 text for collision-resistant snapshot matching.
-pub fn hash_text(text: &str) -> [u8; 32] {
-    Sha256::digest(text.as_bytes()).into()
-}
-
-/// Build a versioned `WorkspaceEdit` that replaces a whole document.
-///
-/// `version` is the document's currently synchronized version and `current`
-/// supplies the end position of the existing text. The caller sends the result
-/// as the `edit` parameter of `workspace/applyEdit`.
-pub fn whole_document_edit(
-    uri: &str,
-    version: i32,
-    current: &str,
-    text: &str,
-    encoding: Encoding,
-) -> Value {
-    let end = position(current, current.len(), encoding);
-    json!({"documentChanges":[{
-        "textDocument":{"uri":uri,"version":version},
-        "edits":[{"range":{"start":{"line":0,"character":0},"end":end},"newText":text}]
-    }]})
-}
-
-/// Produce one valid edit using negotiated LSP position units. When both
-/// strings end in LF, preserve their shared terminal newline in the suffix so
-/// the edit does not insert at virtual EOF.
-pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
-    if old == new {
-        return Vec::new();
-    }
-    let mut prefix = old
-        .bytes()
-        .zip(new.bytes())
-        .take_while(|(a, b)| a == b)
-        .count();
-    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
-        prefix -= 1;
-    }
-    // Keep a shared final newline in the suffix, rather than inserting at
-    // virtual EOF. Native editors may expose an intermediate extra line while
-    // applying an EOF edit, then echo its removal after the applyEdit result.
-    if old.ends_with('\n') && new.ends_with('\n') {
-        prefix = prefix.min(old.len() - 1).min(new.len() - 1);
-    }
-    while splits_crlf(old, prefix) || splits_crlf(new, prefix) {
-        prefix -= 1;
-    }
-    let mut suffix = 0;
-    let max_suffix = old
-        .len()
-        .saturating_sub(prefix)
-        .min(new.len().saturating_sub(prefix));
-    while suffix < max_suffix
-        && old.as_bytes()[old.len() - 1 - suffix] == new.as_bytes()[new.len() - 1 - suffix]
-    {
-        suffix += 1;
-    }
-    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
-        suffix -= 1;
-    }
-    while splits_crlf(old, old.len() - suffix) || splits_crlf(new, new.len() - suffix) {
-        suffix -= 1;
-    }
-    let old_end = old.len() - suffix;
-    let new_end = new.len() - suffix;
-    let start = position(old, prefix, encoding);
-    let end = position(old, old_end, encoding);
-    vec![json!({"range":{"start":start,"end":end},"newText":&new[prefix..new_end]})]
-}
-
-fn splits_crlf(text: &str, offset: usize) -> bool {
-    offset > 0
-        && offset < text.len()
-        && text.as_bytes()[offset - 1] == b'\r'
-        && text.as_bytes()[offset] == b'\n'
-}
-
-fn position(text: &str, offset: usize, encoding: Encoding) -> Value {
-    let before = &text[..offset];
-    let line = before.bytes().filter(|b| *b == b'\n').count();
-    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    let segment = &before[line_start..];
-    let segment = segment.strip_suffix('\r').unwrap_or(segment);
-    let character = match encoding {
-        Encoding::Utf8 => segment.len(),
-        Encoding::Utf16 => segment.encode_utf16().count(),
-        Encoding::Utf32 => segment.chars().count(),
-    };
-    json!({"line":line,"character":character})
 }

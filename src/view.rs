@@ -77,33 +77,27 @@ impl<'de> Deserialize<'de> for ViewKind {
 }
 
 /// Where the server suggests the client put a view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Placement {
+    #[default]
     Main,
     Side,
     Bottom,
     Float,
 }
 
-impl Default for Placement {
-    fn default() -> Self {
-        Placement::Main
-    }
-}
-
 /// Whether the client may edit the view or only display it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewMode {
+    #[default]
     Interactive,
     Text,
-}
-
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode::Interactive
-    }
 }
 
 /// A named group of key bindings, e.g. `common` or `status`.

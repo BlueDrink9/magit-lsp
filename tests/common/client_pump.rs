@@ -57,7 +57,7 @@ impl ClientPump {
         }
     }
     /// Start a client with custom initialize capabilities.
-    pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
+    pub fn new(server: TestServer, profile: Profile, capabilities: Value) -> Self {
         Self::initialized(server, capabilities, FakeEditor::new(profile))
     }
     /// Start a client using declarations composed from an editor model.

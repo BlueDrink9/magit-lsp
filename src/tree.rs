@@ -481,9 +481,7 @@ impl Tree {
         }
         let new_line = match line.kind {
             NodeKind::File => 0,
-            NodeKind::Hunk | NodeKind::Line => {
-                u32::from(line.new_line.unwrap_or(1).saturating_sub(1))
-            }
+            NodeKind::Hunk | NodeKind::Line => line.new_line.unwrap_or(1).saturating_sub(1),
             _ => return None,
         };
         Some(Location {

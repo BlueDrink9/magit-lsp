@@ -14,9 +14,7 @@ use serde_json::{json, Value};
 
 fn declared(capabilities: &Value, path: &str) -> bool {
     path.split('.')
-        .fold(Some(capabilities), |value, key| {
-            value.and_then(|v| v.get(key))
-        })
+        .try_fold(capabilities, |value, key| value.get(key))
         .is_some_and(|value| value == true || value.is_object())
 }
 

@@ -136,11 +136,11 @@ impl DeferredStatus {
         let trace = self.trace_id;
         // `ensure_watcher` emits its own phase, so the trace id has to be
         // installed on this blocking thread, not around the spawn call.
-        let _ = tokio::task::spawn_blocking(move || {
+        drop(tokio::task::spawn_blocking(move || {
             crate::runner::with_trace_id(trace, move || {
                 shared_clone.ensure_watcher(&repo_clone);
             });
-        });
+        }));
         super::view_execution::acquire_status(
             shared,
             self.repository,

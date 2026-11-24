@@ -612,11 +612,10 @@ fn the_registry_lists_every_named_command_once() {
     .sum();
     assert_eq!(by_scope, seen.len());
 
-    for id in ["log.load-more"] {
-        let command = registry().get(id).expect("registered");
-        assert_eq!(command.scope, Scope::Log, "{id}");
-        assert_eq!(command.status, CommandStatus::Implemented, "{id}");
-    }
+    let id = "log.load-more";
+    let command = registry().get(id).expect("registered");
+    assert_eq!(command.scope, Scope::Log, "{id}");
+    assert_eq!(command.status, CommandStatus::Implemented, "{id}");
     for id in ["log.current", "log.select-and-copy"] {
         let command = registry().get(id).expect("registered");
         assert_eq!(command.scope, Scope::MenuAction, "{id}");

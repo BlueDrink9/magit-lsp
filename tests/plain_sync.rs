@@ -214,7 +214,9 @@ fn invalid_unicode_crlf_and_reversed_ranges_require_authoritative_repair() {
             end: None,
             text: "fixed\r\n".into(),
         };
-        assert!(docs.change("u", 6, &[full.clone()], encoding).is_err());
+        assert!(docs
+            .change("u", 6, std::slice::from_ref(&full), encoding)
+            .is_err());
         docs.change(
             "u",
             9,

@@ -326,7 +326,7 @@ fn edited_plan_conflict_survives_resolution_and_continue() {
     );
     let conflicted = String::from_utf8(std::fs::read(dir.path().join("file")).unwrap()).unwrap();
     assert!(conflicted.starts_with("<<<<<<< HEAD\nbase\n=======\nsecond\n>>>>>>> "));
-    assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, true);
+    assert!(repo.rebase_state().unwrap().unwrap().conflicted);
     while repo.rebase_state().unwrap().is_some() {
         write(&dir.path().join("file"), "resolved\n");
         git(dir.path(), &["add", "file"]);
@@ -369,7 +369,7 @@ fn intentional_edit_pause_abort_restores_original_repository() {
     let before = state(dir.path());
     plan.launch(&repo, server_binary().as_path()).unwrap();
     assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
-    assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, false);
+    assert!(!repo.rebase_state().unwrap().unwrap().conflicted);
     repo.rebase_abort().unwrap();
     assert_eq!(state(dir.path()), before);
     assert_eq!(repo.rebase_state().unwrap(), None);

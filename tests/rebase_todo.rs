@@ -542,7 +542,6 @@ fn todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable() {
 fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     let (dir, repo) = paused_repo();
     let todo_path = repo.rebase_todo_path().unwrap();
-    let original = RebaseTodo::load(&repo).unwrap().entries;
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let index = git(dir.path(), &["write-tree"]);
     let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);

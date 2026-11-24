@@ -751,7 +751,7 @@ fn plain_stale_key_edit_reports_and_changes_nothing() {
     let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", true);
     let stale_text = editor.text(&uri).to_owned();
     let stale_line = line_of(&editor, &uri, "f.txt");
-    let mut written = actions(&mut server, &uri, 10);
+    let written = actions(&mut server, &uri, 10);
     let open_commit = plain_args(&written, "open.commit");
     server.send(json!({"jsonrpc":"2.0","id":11,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[open_commit]}}));
     let mut menu_text = None;

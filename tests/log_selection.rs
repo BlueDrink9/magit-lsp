@@ -22,7 +22,7 @@ fn select_and_copy_uses_structured_commit_identity_and_cancel_is_read_only() {
         test.ack();
         let log = test.session().views().get(&log_id).unwrap();
         assert!(test.text_of(&log_id).join("\n").contains("copy commits"));
-        assert!(log.descriptor().capture == false);
+        assert!(!log.descriptor().capture);
         let old = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_string();
         let node = log
             .tree()

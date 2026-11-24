@@ -1688,7 +1688,7 @@ fn standalone_payload_tables_detect_tamper_and_missing_file() {
         .is_empty());
 
     let doc = generate_schema::schema_markdown::DOC_PATH;
-    let path = dir.path().join(&doc);
+    let path = dir.path().join(doc);
     let text = std::fs::read_to_string(&path).expect("read generated payload tables");
     std::fs::write(&path, text.replace("Unconstrained JSON", "Anything goes"))
         .expect("tamper payload tables");
@@ -1903,7 +1903,7 @@ fn capability_levels_pin_the_plain_capability_fields() {
         .iter()
         .map(|row| row.field)
         .collect();
-    let mut implemented = plain_capability_fields();
+    let implemented = plain_capability_fields();
     // Runtime state, not a client declaration; the table documents declarations.
     assert_eq!(
         implemented, documented,
@@ -1982,12 +1982,10 @@ fn plain_classification_follows_negotiate_and_recorded_traces() {
     );
 
     assert!(
-        matches!(
-            negotiate(&serde_json::json!({
-                "capabilities": { "experimental": { "magit": {} } }
-            })),
-            Err(_)
-        ),
+        negotiate(&serde_json::json!({
+            "capabilities": { "experimental": { "magit": {} } }
+        }))
+        .is_err(),
         "an invalid rich declaration is rejected, never downgraded to Plain"
     );
     let neovim_declaration = current_client_magit("Neovim");

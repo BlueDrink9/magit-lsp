@@ -396,8 +396,7 @@ fn numbered_large_recording_fragments_load_as_the_original_logical_recording() {
         );
         let expected = fragments
             .iter()
-            .map(|name| fs::read(dir.join(name)).unwrap())
-            .flatten()
+            .flat_map(|name| fs::read(dir.join(name)).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(
             matches[0].1.as_slice(),
@@ -807,7 +806,7 @@ fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let index = |predicate: &dyn Fn(&Line) -> bool| {
         lines
             .iter()
-            .position(|line| predicate(line))
+            .position(predicate)
             .unwrap_or_else(|| panic!("no matching line in rich-lifecycle.jsonl"))
     };
 

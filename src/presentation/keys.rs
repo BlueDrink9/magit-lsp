@@ -26,16 +26,15 @@ pub struct NetEdit {
 }
 
 /// State of a plain key edit classifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum State {
+    #[default]
     Ready,
-    PendingDeletion { edit: NetEdit, since_ms: u64 },
+    PendingDeletion {
+        edit: NetEdit,
+        since_ms: u64,
+    },
     Executing,
-}
-impl Default for State {
-    fn default() -> Self {
-        Self::Ready
-    }
 }
 
 /// URI-owned classifier state and repair latch for one Plain document lifetime.

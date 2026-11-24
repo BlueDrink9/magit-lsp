@@ -218,7 +218,7 @@ fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invali
         let mut token_line = 0u64;
         let mut token_start = 0u64;
         let mut filename_token_length = None;
-        for group in data.chunks_exact(5) {
+        for group in data.as_chunks::<5>().0 {
             let delta_line = group[0].as_u64().unwrap();
             token_line += delta_line;
             token_start = if delta_line == 0 {
@@ -571,11 +571,6 @@ fn retained_overflow_action_expands_section_and_keeps_providers_bounded() {
 #[test]
 fn plain_visibility_local_global_detail_and_forgery_matrix() {
     let (repo, mut server, mut editor, uri, text) = setup_large(Some(20), WATCH_DEBOUNCE);
-    let mut git = (
-        repo.git(&["rev-parse", "HEAD"]),
-        repo.git(&["write-tree"]),
-        repo.git(&["diff", "--binary"]),
-    );
     let overflow = text
         .lines()
         .position(|line| line.contains("more lines: expand"))
@@ -612,7 +607,7 @@ fn plain_visibility_local_global_detail_and_forgery_matrix() {
         !text.contains("changed-line1"),
         "explicit file hide was lost on watcher refresh"
     );
-    git = (
+    let git = (
         repo.git(&["rev-parse", "HEAD"]),
         repo.git(&["write-tree"]),
         repo.git(&["diff", "--binary"]),
