@@ -625,14 +625,18 @@ mod reuse_tests {
             ],
         );
         let repo = GitRepo::open(linked.path()).unwrap();
-        assert_eq!(
-            crate::path::canonical_or_raw(repo.root()),
-            crate::path::canonical_or_raw(linked.path())
+        assert!(
+            crate::path::same_object(repo.root(), linked.path()).unwrap(),
+            "discovered root {:?} is not the linked worktree {:?}",
+            repo.root(),
+            linked.path()
         );
         let view = StatusView::open_repo(repo).unwrap();
-        assert_eq!(
-            crate::path::canonical_or_raw(view.repo.root()),
-            crate::path::canonical_or_raw(linked.path())
+        assert!(
+            crate::path::same_object(view.repo.root(), linked.path()).unwrap(),
+            "view root {:?} is not the linked worktree {:?}",
+            view.repo.root(),
+            linked.path()
         );
     }
 }

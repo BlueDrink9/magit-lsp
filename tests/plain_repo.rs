@@ -1,7 +1,7 @@
 mod common;
 
+use common::git;
 use common::stdio::TestServer;
-use common::{git, git_compatible_absolute};
 use magit_lsp::file_uri::uri_from_path;
 use magit_lsp::presentation::resolve::{resolve, Resolution};
 use std::path::Path;
@@ -164,7 +164,8 @@ fn explicit_path_takes_precedence_and_ambiguous_candidates_are_not_resolved() {
     let b = temp.path().join("b");
     repo(&a);
     repo(&b);
-    assert!(
-        matches!(resolve(Some(&a), &[b], None), Resolution::Resolved(repo) if repo.root == git_compatible_absolute(&a))
-    );
+    assert!(matches!(
+        resolve(Some(&a), &[b], None),
+        Resolution::Resolved(repo) if magit_lsp::path::same_object(&repo.root, &a).unwrap()
+    ));
 }
