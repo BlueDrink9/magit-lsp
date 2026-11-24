@@ -727,6 +727,7 @@ impl Shared {
                     return;
                 }
                 watchers.insert(repo_key, watcher);
+                tracing::debug!(repo, "repository watcher armed");
                 drop(watchers);
                 emit_phase("armed");
             }

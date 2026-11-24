@@ -131,6 +131,7 @@ impl RepoWatcher {
         loop {
             match rx.recv_timeout(config.debounce) {
                 Ok(Ok(event)) => {
+                    tracing::trace!(kind = ?event.kind, paths = ?event.paths, "watcher raw event");
                     if !relevant_event_excluding(&event, &repo, &presentation_files) {
                         continue;
                     }
@@ -158,6 +159,7 @@ impl RepoWatcher {
                         continue;
                     }
                     lock_reported = false;
+                    tracing::debug!(paths = ?batch, "watcher burst fired");
                     on_refresh(Refresh::Changed(dedup(batch.clone())));
                     pending = None;
                 }

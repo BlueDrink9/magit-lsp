@@ -11,6 +11,7 @@ use magit_lsp::presentation::plain::{
     hash_text, text_edits, DocumentFormat, DocumentState, PlainDocument,
 };
 use serde_json::{json, Value};
+use std::time::{Duration, Instant};
 
 #[path = "common/mod.rs"]
 mod fixtures;
@@ -124,13 +125,48 @@ fn controller_serializes_unicode_last_line_growth_and_shrink_without_eof_retry()
     }
 }
 
+/// Await the next `workspace/applyEdit`, recording the caller as the awaited step.
+///
+/// A timeout panic names the caller rather than this helper body; tests that
+/// need semantic wording use [`next_edit_after`].
+#[track_caller]
 fn next_edit(server: &mut stdio::TestServer) -> Value {
+    let caller = std::panic::Location::caller();
+    next_edit_after(server, &format!("the call at {caller}"))
+}
+
+/// Await the next `workspace/applyEdit`, naming `step` in a timeout panic.
+fn next_edit_after(server: &mut stdio::TestServer, step: &str) -> Value {
+    let awaited = format!("workspace/applyEdit after {step}");
     loop {
+        server.await_step = Some(awaited.clone());
         let frame = server.recv_raw();
         assert_ne!(frame["method"], "view/render");
         if frame["method"] == "workspace/applyEdit" {
             return frame;
         }
+    }
+}
+
+/// Poll the server's captured stderr until one line contains every `needle`.
+///
+/// The server logs asynchronously, so a single check races the drain thread; a
+/// timeout fails with the whole captured log and the missing marker named.
+fn wait_for_log_line(server: &mut stdio::TestServer, what: &str, needles: &[&str]) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let log = server.stderr_text();
+        if log
+            .lines()
+            .any(|line| needles.iter().all(|needle| line.contains(needle)))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the server log never showed {what}:\n{log}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -982,6 +1018,35 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
 }
 
 #[test]
+fn timeout_panic_names_awaited_step_wait_and_received_frames() {
+    let mut server = stdio::TestServer::spawn(&[]);
+    server.send(stdio::initialize_message());
+    assert!(server.response_with_id(1)["result"].is_object());
+    // Nothing opens a view on this server, so a quiet window after initialize
+    // means the next bounded receive must time out.
+    let quiet = server.drain_notifications();
+    assert!(quiet.is_empty(), "server is not silent: {quiet:?}");
+    server.recv_timeout = Duration::from_millis(200);
+    server.await_step = Some("workspace/applyEdit after writing watcher-recovery.txt".to_string());
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv_raw()))
+        .expect_err("a silent server must time out");
+    let payload = panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_string()))
+        .expect("the timeout panic carries a text payload");
+    assert!(
+        payload.contains("awaited step: workspace/applyEdit after writing watcher-recovery.txt"),
+        "{payload}"
+    );
+    assert!(payload.contains("within 200ms"), "{payload}");
+    assert!(
+        payload.contains("received frames (oldest first): response id=1"),
+        "{payload}"
+    );
+}
+
+#[test]
 fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", fixtures::TEN_LINES)])
@@ -1032,15 +1097,34 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
         .iter()
         .any(|frame| frame["method"] == "textDocument/didChange"));
     server.send(response[0].clone());
+    // The watcher arms on a deferred blocking task after didOpen; a write
+    // issued before the arm is never delivered, and one lost event means
+    // permanent silence because an unchanged tree emits no refresh. Order the
+    // trigger after the arm marker, mirroring `editor_bridge`'s socket poll.
+    wait_for_log_line(
+        &mut server,
+        "the watcher arm marker",
+        &["repository watcher armed"],
+    );
     let watcher = repo.path().join("watcher-recovery.txt");
     fixtures::write(&watcher, "recovery bytes\n");
-    let repair = next_edit(&mut server);
+    let repair = next_edit_after(&mut server, "writing watcher-recovery.txt");
     assert_eq!(
         repair["params"]["edit"]["documentChanges"]
             .as_array()
             .unwrap()
             .len(),
         1
+    );
+    wait_for_log_line(
+        &mut server,
+        "the raw watcher event for watcher-recovery.txt",
+        &["watcher raw event", "watcher-recovery.txt"],
+    );
+    wait_for_log_line(
+        &mut server,
+        "the fired watcher burst for watcher-recovery.txt",
+        &["watcher burst fired", "watcher-recovery.txt"],
     );
     let repair_response = editor.dispatch(&repair);
     assert_eq!(repair_response[0]["result"]["applied"], true);
@@ -1058,7 +1142,7 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
         .unwrap()
         .is_empty());
     server.send(newer_snapshot);
-    let current_repair = next_edit(&mut server);
+    let current_repair = next_edit_after(&mut server, "sending the newer client snapshot");
     assert_eq!(
         current_repair["params"]["edit"]["documentChanges"]
             .as_array()
@@ -1078,7 +1162,7 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     }
     let second_watcher = repo.path().join("watcher-ready.txt");
     fixtures::write(&second_watcher, "ready watcher bytes\n");
-    let ready_update = next_edit(&mut server);
+    let ready_update = next_edit_after(&mut server, "writing watcher-ready.txt");
     assert_eq!(
         ready_update["params"]["edit"]["documentChanges"]
             .as_array()

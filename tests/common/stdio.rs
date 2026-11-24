@@ -76,7 +76,17 @@ pub struct TestServer {
     pub recv_timeout: Duration,
     /// Automatically answer progress-create requests when explicitly enabled.
     pub auto_respond_progress_create: bool,
+    /// Step the current bounded receive awaits, reported by a timeout panic.
+    ///
+    /// A caller sets this before [`TestServer::recv_raw`]; a completed receive
+    /// clears it, so the label always describes the wait that timed out.
+    pub await_step: Option<String>,
+    /// Recently received frames (method and id), oldest first and bounded.
+    received: Vec<String>,
 }
+
+/// How many received frames a timeout panic reports.
+const RECEIVED_FRAME_HISTORY: usize = 8;
 
 impl TestServer {
     /// Request shutdown, assert its null result, and send exit.
@@ -123,6 +133,8 @@ impl TestServer {
             sent: Vec::new(),
             recv_timeout: Duration::from_secs(10),
             auto_respond_progress_create: false,
+            await_step: None,
+            received: Vec::new(),
             stderr: log,
             stderr_reader: Some(stderr_reader),
         }
@@ -185,27 +197,65 @@ impl TestServer {
     }
 
     /// Receive a frame without replying, even when automatic replies are enabled.
+    ///
+    /// A timeout panic reports the awaited step ([`TestServer::await_step`]),
+    /// the configured `recv_timeout` and the most recent received frames, so a
+    /// silent server names its wait instead of only the helper that timed out.
     #[track_caller]
     pub fn recv_raw(&mut self) -> Value {
         let message = match self.responses.recv_timeout(self.recv_timeout) {
-            Ok(Ok(message)) => message,
+            Ok(Ok(message)) => {
+                self.record_received(&message);
+                self.await_step = None;
+                message
+            }
             Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
             Err(error) => {
-                let log = self
-                    .stderr
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let tail: Vec<&str> = log.lines().rev().take(40).collect();
+                let tail = {
+                    let log = self
+                        .stderr
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    log.lines()
+                        .rev()
+                        .take(40)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
                 let status = self.child.try_wait();
+                let step = self.await_step.as_deref().unwrap_or("<unlabelled receive>");
+                let received = if self.received.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    self.received.join(", ")
+                };
                 panic!(
-                    "no response from server: {error}\nlast sent: {:?}\nlast observed notifications: {:?}\nserver exit: {status:?}\nserver stderr:\n{}",
+                    "no response from server within {:?}: {error}\nawaited step: {step}\nlast sent: {:?}\nreceived frames (oldest first): {received}\nlast observed notifications: {:?}\nserver exit: {status:?}\nserver stderr:\n{tail}",
+                    self.recv_timeout,
                     self.sent.last(),
                     &self.notifications[self.notifications.len().saturating_sub(4)..],
-                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
                 )
             }
         };
         message
+    }
+
+    /// Remember one received frame for timeout diagnostics, bounded to
+    /// [`RECEIVED_FRAME_HISTORY`] entries.
+    fn record_received(&mut self, message: &Value) {
+        if self.received.len() == RECEIVED_FRAME_HISTORY {
+            self.received.remove(0);
+        }
+        self.received.push(match message["method"].as_str() {
+            Some(method) => match message.get("id") {
+                Some(id) => format!("{method} id={id}"),
+                None => method.to_string(),
+            },
+            None => format!("response id={}", message["id"]),
+        });
     }
 
     /// Read until the response carrying `id`, failing if the stream ends.
