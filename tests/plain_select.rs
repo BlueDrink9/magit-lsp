@@ -866,11 +866,7 @@ fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
         .commit("second", [("f.txt", "two\n")])
         .commit("third", [("f.txt", "three\n")])
         .build();
-    // Pin the watcher debounce past the test's lifetime so the arm-time rescan
-    // burst cannot land a refresh (and bump the version) inside the
-    // offer-to-execute window.
-    let (mut server, mut editor, uri) =
-        open_plain_with_env(&repo, &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000")]);
+    let (mut server, mut editor, uri) = open_plain(&repo);
     let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
     let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
 

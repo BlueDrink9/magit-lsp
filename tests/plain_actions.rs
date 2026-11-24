@@ -1433,10 +1433,7 @@ fn section_untracked_stage_and_staged_unstage_are_fresh_bulk() {
         .commit("initial", [("f.txt", "base\n")])
         .build();
     fixtures::write(&repo.path().join("new.txt"), "first\n");
-    // Pin the watcher debounce past the test's lifetime so out-of-band fixture
-    // writes cannot land a refresh (and bump the plain generation) mid-window.
-    let (mut server, mut editor, uri) =
-        open_plain_with_env(&repo, &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "60000")]);
+    let (mut server, mut editor, uri) = open_plain(&repo);
     let args = offered_section(&mut server, &editor, &uri, "Untracked", "status.stage", 611);
     assert!(!args.is_null());
     let head = repo.git(&["rev-parse", "HEAD"]);

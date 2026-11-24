@@ -1658,7 +1658,7 @@ fn is_manual_commit_instructions(message: &Value, uri: &str) -> bool {
             .is_some_and(|message| message.contains(uri) && message.contains("Confirm commit"))
 }
 
-fn plain_gate_open(repo: &fixtures::RepoFixture) -> (ClientPump, String) {
+fn plain_gate_open(repo: &fixtures::RepoFixture, env: &[(&str, &str)]) -> (ClientPump, String) {
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
         .as_str()
@@ -1667,7 +1667,7 @@ fn plain_gate_open(repo: &fixtures::RepoFixture) -> (ClientPump, String) {
     // interaction must still use standard LSP, not custom requests/notices.
     let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
     let mut client =
-        ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
+        ClientPump::with_model(stdio::TestServer::spawn(env), Profile::Standard, &model);
     let open = client.editor.open(&uri, "");
     client.send(open);
     client.until(|c| !c.editor.text(&uri).is_empty());
@@ -1756,7 +1756,9 @@ fn plain_gate_background_refresh_preserves_todo_offer_without_rich_notifications
         .commit("drop replay", [("drop", "drop\n")])
         .build();
     let base = repo.git(&["rev-parse", "HEAD~2"]);
-    let (mut client, uri) = plain_gate_open(&repo);
+    // The marker-file refresh below is watcher-driven, so keep its debounce short
+    // instead of the harness's default parked value.
+    let (mut client, uri) = plain_gate_open(&repo, &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")]);
     let open = plain_gate_action(&mut client, &uri, "", "open.rebase", None);
     let status = open["target"]["viewId"].as_str().unwrap().to_owned();
     assert!(execute_plain_action(&mut client, open)["error"].is_null());
@@ -1983,7 +1985,7 @@ fn plain_gate_fixup_selected_target_cancel_confirm_and_readable_failure() {
         .staged_file("f.txt", "fixup content\n")
         .build();
     let before = plain_gate_state(&repo);
-    let (mut client, uri) = plain_gate_open(&repo);
+    let (mut client, uri) = plain_gate_open(&repo, &[]);
     let status = client.editor.text(&uri).to_owned();
     plain_gate_run(&mut client, &uri, "", "open.commit", None);
     plain_gate_run(&mut client, &uri, "Commit", "menu.run-action", Some("f"));
@@ -2048,7 +2050,7 @@ fn plain_gate_rebase_selected_base_edited_todo_continue_and_cancel() {
     let before = plain_gate_state(&repo);
     let base = repo.git(&["rev-parse", "HEAD~3"]);
     let first = repo.git(&["rev-parse", "HEAD~2"]);
-    let (mut client, uri) = plain_gate_open(&repo);
+    let (mut client, uri) = plain_gate_open(&repo, &[]);
     // Both selection cancellation and edited-plan cancellation are read-only.
     plain_gate_run(&mut client, &uri, "", "open.rebase", None);
     plain_gate_run(&mut client, &uri, "Rebase", "menu.run-action", Some("i"));
@@ -2124,7 +2126,7 @@ fn plain_gate_rebase_conflict_is_readable_and_abort_restores_exact_state() {
     let before = plain_gate_state(&repo);
     let base = repo.git(&["rev-parse", "HEAD~2"]);
     let second = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
-    let (mut client, uri) = plain_gate_open(&repo);
+    let (mut client, uri) = plain_gate_open(&repo, &[]);
     plain_gate_plan(&mut client, &uri, "conflict base");
     plain_gate_run(&mut client, &uri, "second change", "rebase.todo-up", None);
     let result = plain_gate_run(
@@ -2405,7 +2407,13 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         if declared {
             capabilities["window"]["showDocument"] = json!({"support":true});
         }
-        let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), profile, capabilities);
+        // The external COMMIT_EDITMSG edit is picked up by the watcher, so keep
+        // its debounce short instead of the harness's default parked value.
+        let mut client = ClientPump::new(
+            stdio::TestServer::spawn(&[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")]),
+            profile,
+            capabilities,
+        );
         let open = client.editor.open(&uri, "stale\n");
         client.send(open);
         client.until(|c| c.editor.text(&uri).contains("f.txt"));

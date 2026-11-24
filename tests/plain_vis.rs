@@ -78,8 +78,12 @@ fn setup_with_encoding(
     (repo, server, editor, uri, text, legend)
 }
 
+/// A short watcher debounce for tests that wait on a real watcher refresh.
+const WATCH_DEBOUNCE: &[(&str, &str)] = &[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")];
+
 fn setup_large(
     limit: Option<u32>,
+    extra_env: &[(&str, &str)],
 ) -> (
     fixtures::RepoFixture,
     stdio::TestServer,
@@ -121,6 +125,8 @@ fn setup_large(
     } else {
         Vec::new()
     };
+    let mut env = env;
+    env.extend_from_slice(extra_env);
     let mut server = stdio::TestServer::spawn(&env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
@@ -347,7 +353,7 @@ fn execute_args(
 #[test]
 fn bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots() {
     for (limit, summarized) in [(None, true), (Some(2000), false), (Some(20), true)] {
-        let (_repo, mut server, mut editor, uri, text) = setup_large(limit);
+        let (_repo, mut server, mut editor, uri, text) = setup_large(limit, WATCH_DEBOUNCE);
         let overflow = text
             .lines()
             .position(|line| line.contains("more lines: expand"));
@@ -498,7 +504,7 @@ fn bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots() 
 
 #[test]
 fn retained_overflow_action_expands_section_and_keeps_providers_bounded() {
-    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20));
+    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20), &[]);
     let git = (
         repo.git(&["rev-parse", "HEAD"]),
         repo.git(&["write-tree"]),
@@ -565,7 +571,7 @@ fn retained_overflow_action_expands_section_and_keeps_providers_bounded() {
 
 #[test]
 fn plain_visibility_local_global_detail_and_forgery_matrix() {
-    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20));
+    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20), WATCH_DEBOUNCE);
     let mut git = (
         repo.git(&["rev-parse", "HEAD"]),
         repo.git(&["write-tree"]),

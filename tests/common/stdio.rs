@@ -88,6 +88,15 @@ pub struct TestServer {
 /// How many received frames a timeout panic reports.
 const RECEIVED_FRAME_HISTORY: usize = 8;
 
+/// Watcher debounce, in milliseconds, every spawned test server gets unless
+/// `extra_env` names `MAGIT_LSP_WATCH_DEBOUNCE_MS` (explicit values always win).
+///
+/// The production default is short enough that an arm-time rescan can fire a
+/// refresh inside a test's offer-to-execute window; pinning it past the test's
+/// lifetime makes plain-server tests deterministic. Tests that exercise watcher
+/// timing pass their own small value, and opt-outs pass one too.
+const DEFAULT_WATCH_DEBOUNCE_MS: &str = "60000";
+
 impl TestServer {
     /// Request shutdown, assert its null result, and send exit.
     pub fn shutdown_and_exit(&mut self) {
@@ -98,6 +107,9 @@ impl TestServer {
     }
     /// Spawn the real binary (see [`server_binary`]) with logging on stderr and
     /// optional extra env vars.
+    ///
+    /// The watcher debounce defaults to [`DEFAULT_WATCH_DEBOUNCE_MS`]; any entry
+    /// for `MAGIT_LSP_WATCH_DEBOUNCE_MS` in `extra_env` takes precedence.
     pub fn spawn(extra_env: &[(&str, &str)]) -> Self {
         Self::from_command(Command::new(server_binary()), extra_env)
     }
@@ -109,7 +121,13 @@ impl TestServer {
             .stderr(Stdio::piped())
             .env(magit_lsp::logging::LEVEL_ENV, "trace")
             .env_remove(magit_lsp::logging::FILE_ENV)
-            .env_remove(SERVER_BINARY_ENV);
+            .env_remove(SERVER_BINARY_ENV)
+            // Pin the watcher debounce past any test's lifetime so an arm-time
+            // rescan cannot land a refresh inside an offer-to-execute window
+            // (docs/evidence/plain-fresh-bulk-macos-flake.md). An explicit value
+            // in `extra_env` below overrides this, so watcher-semantics tests
+            // keep their own small debounce and opt-outs still win.
+            .env("MAGIT_LSP_WATCH_DEBOUNCE_MS", DEFAULT_WATCH_DEBOUNCE_MS);
         for (key, value) in extra_env {
             command.env(key, value);
         }
