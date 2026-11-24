@@ -1277,6 +1277,46 @@ The overlapping P0 operand-protection item above is reopened for the remaining d
   - **Done when:** test: `make format-test` passes with the remaining four hook regressions and unchanged workflow-policy tests. check: `make format-all-list` includes all four former exceptions; `make format-all-check-worktree FORMATTER=stylua`, `make format-all-check-worktree FORMATTER=prettier`, `make schema-check`, and `make docs-check DOC_FILES=docs/FORMATTING.md` pass. Do not reformat unrelated files to hide a pre-existing full-sweep failure; report it separately.
   - **Constraints:** Keep `FormatSweepTest`, its fake formatter/repository harness, and `make format-test`; they are not dead while the four Git-policy tests remain. Keep matching-copy coverage (`:325-335`: regression leaves the index formatted but worktree dirty), divergent-copy coverage (`:337-359`: regression overwrites unstaged content or skips divergent files whose staged blob is already formatted), unwritable-copy coverage (`:361-384`: regression fails the hook after a successful index update), and sweep coverage (`:386-403`: regression checks only changed paths and admits an incomplete sweep). These are repo-owned Git/exit/scope invariants, not formatter output specifications. The read-only test's root skip is explicit; do not claim it covers every possible write/formatter failure. Do not add replacement tests, remove the workflow-policy class, or broaden scope into registry/Markdown formatting.
 
+## Review findings (2026-11-24)
+
+Scope/evidence (2026-11-24): review of the ad hoc batch `3bb25aa..b0aa6ef` (offer-gate semantics `249702d`, harness debounce default `ee4f276`, Windows test-premise fixes `cd1ae66`/`b13c532`, premise checker `be43a6c`, oracle fix `b0aa6ef`). The production gate change was traced end-to-end and found sound (no P0/P1): the gate re-derivation consults the current retained render and content commands still re-check fresh Git (`target_is_current`, src/session/commands.rs:144-161; Plain wire re-check src/server/plain_actions.rs:789); the version rebind lands only on the pre-existing validated-offer arm for non-acking plain clients (src/session/commands.rs:76); all remaining HUNK_CHANGED consumers are genuine content checks. Findings below are from the harness default sweep and the checker script.
+
+- [x] **[P1] RV-08 — Pin the watcher-dependent stale-resync test to an explicit debounce** (`tests/plain_harness.rs:729-803`, `rich_server_render_ack_and_stale_resync_preserve_caller_reply`)
+  - **Problem:** ee4f276 defaulted TestServer children to `MAGIT_LSP_WATCH_DEBOUNCE_MS=60000`, but this test spawns unpinned (`tests/plain_harness.rs:735`), writes `new-file.txt` (`:780-781`), and waits for the view to contain it (`:797-803`) — the watcher-driven refresh is the only trigger, and `ClientPump::until` times out at 15 s (`tests/common/client_pump.rs:273-281`) < 60 s. It passed in the landing runs only because the write raced the arm-time initial walk; on slower hosts it is a deterministic failure.
+  - **Why it matters:** Latent suite breakage from the harness default; the six watcher-dependent tests fixed in ee4f276 established the pattern this one missed.
+  - **Change:** Add `("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")` to the spawn at `tests/plain_harness.rs:735` (or route it through the pinned helper), matching the ee4f276 precedents; no assertion changes.
+  - **Done when:** **test:** `make test-rust FILTER="--test plain_harness"` passes and the test's spawn is explicitly pinned.
+  - **Constraints:** Test-side only.
+  - Verified note: the sweep cleared the remaining server_async/plain_render/plain_harness write sites as pre-open, explicit-refresh, or non-waiting (evidence in the review narrative; see also RV-13 remainder).
+  - Done: 8daca47
+
+- [x] **[P2] RV-09 — Fix the inverted `cfg(not(unix))` classification in the premise checker** (`scripts/check_test_premises.py:168-172`, `cfg_is_unix_only`)
+  - **Problem:** `cfg_is_unix_only` matches `\bunix\b` without excluding `not(unix)`, so `#[cfg(not(unix))]` is classified as Unix-gated and Windows-compiling items would be exempted from rule 1.
+  - **Change:** Treat `cfg(not(unix))` (and negated unix predicates generally) as NOT Unix-gated; add self-test probe cases for the negated form.
+  - **Done when:** **test:** `scripts/check_test_premises.py --self-test` asserts the negated form is not exempted and `make check-test-premises` stays green on the tree.
+  - **Constraints:** Checker-script only; keep the existing suppression contract.
+  - Done: 33a1094
+
+- [x] **[P2] RV-10 — Enforce trailing dot/space on single-segment literals in the premise checker** (`scripts/check_test_premises.py:345`, `name_problem`)
+  - **Problem:** Trailing dot/space is only applied when the literal contains `.`/`/`/`\`, so single-segment literals like `.join("foo ")` or `rename("a.txt", "b ")` pass the static check although the runtime guard rejects them (`tests/common/mod.rs:98-99`).
+  - **Change:** Apply the trailing dot/space rule to all name-shaped literals; keep the display-separator exemption (literals with no alphanumerics).
+  - **Done when:** **test:** `--self-test` gains a single-segment trailing-space violation case; `make check-test-premises` green.
+  - **Constraints:** No new false positives on gated code.
+  - Done: 33a1094
+
+- [x] **[P2] RV-11 — Restrict crate-root detection in the premise checker's module resolution** (`scripts/check_test_premises.py:260-276`, `resolve_module`/`crates_roots`)
+  - **Problem:** Any file whose parent dir is `tests/` or `src/` is treated as a crate root, so `mod additional;` (tests/commands.rs) and `mod commands;` (src/session.rs) resolve to wrong files — module-gate propagation can misfire on future `#[cfg(unix)] mod x;` declarations.
+  - **Change:** Identify crate roots by the presence of a `main`/`test` target marker (e.g. files containing `fn main`, `#[test]`-bearing roots, or an explicit allowlist of known test harness files) rather than directory name alone.
+  - **Done when:** **test:** `--self-test` covers a nested `mod` resolution case; `make check-test-premises` green on the current tree.
+  - **Constraints:** Must not regress the existing `#[path]`-child gate propagation.
+  - Done: 33a1094
+
+- [ ] **[P3] RV-13 — Complete the deferred review remainder** (recorded, not blocking)
+  - Two review areas were not completed before the step cap: the final spot-check of remaining unpinned spawn sites (plain_harness spawns at 276/454/1442/1477/1512/1855/2232; plain_actions.rs 697-1095/1415-1478; plain_select.rs, plain_vis.rs:55, text_mode.rs, semantic_tokens.rs, wirelog.rs, navigation.rs:581, examples.rs non-pinned replays, server_async.rs:1267, repository.rs 1601/1698 — most looked unlikely: writes there drive staleness refusals or explicit refreshes), and the cd1ae66 review (src/status_view.rs root identity must not change POSIX display behavior; tests/plain_repo.rs same-behavior check). b13c532's `#[cfg(unix)]` placement is already confirmed Linux-runnable (4 tests pass, build/test-logs/rust.zebh5n).
+  - Done when: **check:** the sweep is completed and any finding is queued; a one-line disposition recorded here.
+
+- P3 notes (recorded, not queued): `windows-ok:` suppresses up to 6 following lines (scripts/check_test_premises.py:318) — acceptable breadth for now; `use`-imports of `canonicalize` would be falsely flagged by the regex at :427 (no current occurrence); the self-test (:536-567) proves both rules and all three suppressions but not gate propagation or trailing dot/space (RV-09/10/11 add the gaps); the gate's version rebind binds `MenuOrigin.version` to a version a plain client never saw — traced benign (src/session/commands.rs:183-189).
+
 ## Ready independent work
 
 Readiness means no known missing Make entry point, not completion or permission to execute during this documentation-only session. Phase 7 does not gate 0.2. T024's spike decision still gates its dependents.
