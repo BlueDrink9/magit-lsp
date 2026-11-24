@@ -1840,9 +1840,38 @@ fn windows_path_portability_rejects_verbatim_prefixes_and_reserved_names() {
         reason.contains("windows-reserved filename character"),
         "{reason}"
     );
+    // Device names match the segment's stem, ASCII-case-insensitively.
+    for device in [
+        "/repo/CON/x",
+        "/repo/nul.txt",
+        "/repo/COM3/.gitignore",
+        "/repo/dir/com9.tar.gz",
+        "/repo/CONIN$",
+        "/repo/CONOUT$.txt",
+    ] {
+        let reason = windows_path_problem(Path::new(device), true)
+            .unwrap_or_else(|| panic!("{device}: device name rejected"));
+        assert!(
+            reason.contains("windows-reserved device name"),
+            "{device}: {reason}"
+        );
+    }
+    // A segment may not end with a dot or a space.
+    for trailing in ["/repo/a.", "/repo/a "] {
+        let reason = windows_path_problem(Path::new(trailing), true)
+            .unwrap_or_else(|| panic!("{trailing}: trailing dot/space rejected"));
+        assert!(
+            reason.contains("windows-reserved trailing dot or space"),
+            "{trailing}: {reason}"
+        );
+    }
     let reason = windows_path_problem(Path::new(r"\\?\C:\repo\a*b.txt"), false)
         .expect("argument rule still rejects a verbatim prefix");
     assert!(reason.contains("verbatim"), "{reason}");
+    // The new checks only apply to names, not to git arguments.
+    for argument in ["/repo/CON/x", "/repo/nul.txt", "/repo/a.", "/repo/a "] {
+        assert_eq!(windows_path_problem(Path::new(argument), false), None);
+    }
 
     assert_eq!(
         windows_path_problem(Path::new("/tmp/magit-lsp-fixture"), true),
@@ -1853,6 +1882,10 @@ fn windows_path_portability_rejects_verbatim_prefixes_and_reserved_names() {
         windows_path_problem(Path::new(r"C:\repo\a b.txt"), true),
         None
     );
+    // Device-like stems that are not reserved names stay accepted.
+    for accepted in ["/repo/console.txt", "/repo/contact.txt"] {
+        assert_eq!(windows_path_problem(Path::new(accepted), true), None);
+    }
     // Git arguments are names only sometimes, so reserved characters are fine.
     assert_eq!(
         windows_path_problem(Path::new("*.configured-private"), false),

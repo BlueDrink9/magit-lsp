@@ -35,6 +35,13 @@ pub fn git_compatible_absolute(path: &Path) -> PathBuf {
     magit_lsp::path::canonical_or_raw(path)
 }
 
+/// Names Windows reserves for devices, compared against a segment's stem.
+const WINDOWS_DEVICE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4",
+    "COM5", "COM6", "COM7", "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+    "LPT7", "LPT8", "LPT9",
+];
+
 /// Why `path` would fail a Windows Git or filesystem operation, if it would.
 ///
 /// Windows reserves the filename characters `< > : " | ? *`, and Git for
@@ -43,7 +50,10 @@ pub fn git_compatible_absolute(path: &Path) -> PathBuf {
 /// root — empty on Unix (`/tmp/x`) or a drive (`C:`) on Windows, where the
 /// colon is not a name character — and is exempt from the name check.
 ///
-/// `check_name_chars` also rejects reserved characters in every path segment.
+/// `check_name_chars` also rejects reserved characters in every path segment,
+/// reserved device names (stem-matched, ASCII-case-insensitively, so `nul.txt`
+/// and `COM3` are rejected while `console.txt` is not) and a segment ending in
+/// a dot or a space.
 /// Callers pass `false` for values that are not filenames (git arguments such
 /// as commit messages or ignore patterns) so only the verbatim prefix is
 /// rejected there.
@@ -75,6 +85,18 @@ pub fn windows_path_problem(path: &Path, check_name_chars: bool) -> Option<&'sta
             .any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
         {
             return Some("windows-reserved filename character in path segment (`< > : \" | ? *`)");
+        }
+        let stem = segment.split('.').next().unwrap_or(segment);
+        if WINDOWS_DEVICE_NAMES
+            .iter()
+            .any(|device| device.eq_ignore_ascii_case(stem))
+        {
+            return Some(
+                "windows-reserved device name in path segment (`CON`, `NUL`, `COM1`, `LPT1`, ...)",
+            );
+        }
+        if segment.ends_with('.') || segment.ends_with(' ') {
+            return Some("windows-reserved trailing dot or space in path segment");
         }
     }
     None
