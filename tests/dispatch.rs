@@ -657,14 +657,13 @@ fn session_dispatch_returns_fresh_status_with_hunk_changed_message() {
 fn an_identical_offer_executes_after_an_unrelated_version_bump() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes())
         .build();
-    write(
-        &tmp.path().join("f.txt"),
-        &lines(40).with(35, "line35 CHANGED").to_string(),
-    );
     // No acknowledgement: a Plain client binds its offer to the render only.
     let (mut test, initial) = TestSession::open_status(&tmp, magit_lsp::config::Profile::Vim);
-    let line = test.goto_marker("f.txt", '+');
+    // The offer is taken at the second hunk so a hunk-scoped stage is
+    // distinguishable from staging the whole file.
+    let line = test.goto_text("f.txt", "line35 CHANGED");
     let node_id = test.tree().line_nodes[line].node.clone();
     let offered = dispatch::offer_target(test.tree(), "status.stage", &node_id)
         .expect("stage offer at the displayed hunk");
@@ -682,8 +681,14 @@ fn an_identical_offer_executes_after_an_unrelated_version_bump() {
         outcome.effects
     );
     let cached = cached_diff(tmp.path());
+    assert_eq!(hunk_count(&cached), 1, "got: {cached}");
     assert!(cached.contains("+line35 CHANGED"), "got: {cached}");
     assert!(!cached.contains("line5 CHANGED"), "got: {cached}");
+    let unstaged = tmp.git(&["diff", "-U3", "--", "f.txt"]);
+    assert!(
+        unstaged.contains("line5 CHANGED"),
+        "the sibling hunk must stay unstaged, got: {unstaged}"
+    );
     assert!(tmp.git(&["status", "--short"]).contains("?? g.txt"));
 }
 
