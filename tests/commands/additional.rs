@@ -178,21 +178,26 @@ fn typed_target_rejects_forged_hash_and_cross_render_retargeting() {
         .unwrap();
     let request = offered_request(&test, "status.stage", &node.id);
     let before = target_state(&tmp);
-    for invalid in ["hash", "node", "version", "command"] {
+    // A forged version (`u64::MAX`) is not refused: a version miss re-derives
+    // the offer against the current tree and accepts it when it is still
+    // current. That acceptance is covered by the identical-offer test in
+    // tests/dispatch.rs.
+    for invalid in ["hash", "node", "command"] {
         let mut forged = request.clone();
         match invalid {
             "hash" => forged.action_target.as_mut().unwrap().mutation_hash = "wrong".into(),
             "node" => forged.action_target.as_mut().unwrap().node_id = "missing".into(),
-            "version" => forged.target.version = Some(u64::MAX),
             _ => forged.command = "status.unstage".into(),
         }
         let result = test
             .session
             .dispatch(forged, &magit_lsp::ui::NullUi)
             .unwrap();
-        assert!(message_texts(&result.effects)
-            .iter()
-            .any(|text| text.contains("changed")));
+        assert_eq!(
+            message_texts(&result.effects),
+            vec![magit_lsp::errors::STALE_OFFER],
+            "{invalid} offer is refused with the stale-offer message"
+        );
         assert!(result.render.is_some());
         assert_eq!(target_state(&tmp), before);
     }
