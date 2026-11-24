@@ -133,6 +133,13 @@ exchanges separately.
 - **VERIFIED — observed outputs:** Captured declaration values, exact rendered golden text and Git-produced hashes/state are observations, not universal constants; tests compare generated manifests to goldens, capture baseline HEAD/tree/index, and compare independently built UI fixtures for determinism ([tests/common/editor_model/presets.rs:18–35](../tests/common/editor_model/presets.rs#L18), [tests/manifest.rs:43–45](../tests/manifest.rs#L43), [tests/ui/scenarios/commit-head-operations.scn:7,23](../tests/ui/scenarios/commit-head-operations.scn#L7), [tests/ui/test_fixtures.py:73–86](../tests/ui/test_fixtures.py#L73)).
 - **VERIFIED:** A `40`-character assertion is fixture-specific, whereas production accepts 40/64; exact hunk-header strings are Git-output expectations for the chosen fixture, not wire contracts ([tests/instant_rebase.rs:243–252](../tests/instant_rebase.rs#L243), [src/git.rs:1855](../src/git.rs#L1855), [tests/ui/test_fixtures.py:106–117](../tests/ui/test_fixtures.py#L106)).
 
+#### Windows-portable test premises
+
+- **Never string-compare our canonical output against `std::fs::canonicalize` cross-API:** Windows may retain an 8.3 short component where `canonicalize` returns the long name, so gate the assertion `#[cfg(unix)]` or compare our form to our form ([src/path.rs:9–16](../src/path.rs#L9)).
+- **Never feed `std::fs::canonicalize` output to Git or session state:** use the shared `git_compatible_absolute` / `canonical_or_raw` helpers instead, so production and fixtures agree on the non-verbatim form Git for Windows accepts ([tests/common/mod.rs:34](../tests/common/mod.rs#L34), [src/path.rs:25](../src/path.rs#L25)).
+- **Fixture names must pass `windows_path_problem`:** the runtime guard rejects reserved characters, device names and trailing dots or spaces in every segment at the point a name is recorded; `make check-test-premises` additionally scans `tests/**/*.rs` and `src/**/*.rs` for ungated `canonicalize` calls and reserved literals in `join`/`with_file_name`/`rename`/`prefix` positions, using the same tables parsed from the guard ([tests/common/mod.rs:65](../tests/common/mod.rs#L65), [scripts/check_test_premises.py](../scripts/check_test_premises.py)).
+- **Test Windows-only behavior on Linux with synthetic Windows-shaped inputs** (`src/path.rs:67`, `src/file_uri.rs`, [tests/git_backend.rs:1830](../tests/git_backend.rs#L1830)); real Windows behavior is verified only by the CI native-test lanes ([§8.7](#87-ci)).
+
 ### 8.3 Other Rust layers
 
 - **Patch engine:** `proptest` — random file pairs and random selections;

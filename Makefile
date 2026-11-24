@@ -1,4 +1,4 @@
-.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
+.PHONY: build test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-lua test-file ui-unit ui-test ui-file ui-tour native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -63,6 +63,13 @@ DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md LICENSING.md docs/ARCH
 
 docs-check:
 	$(call run,docs-check,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/docs -p 'test_*.py' && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py $(DOC_FILES))
+
+# Windows-portable test premises: canonicalize calls must be Unix-gated (or
+# carry `windows-ok:`), and fixture names in join/with_file_name/rename/prefix
+# positions must pass the tables parsed from `windows_path_problem`. The
+# self-test plants one violation per rule before the real audit runs.
+check-test-premises:
+	$(call run,check-test-premises,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_test_premises.py --self-test && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_test_premises.py)
 
 format:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/format.py --working-tree --write
