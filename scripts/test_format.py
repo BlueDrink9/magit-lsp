@@ -34,10 +34,9 @@ LINUX_JOB_COMMANDS = {
         f'{NIX_DEVELOP} python3 scripts/format.py --base "$base"',
     ),
     "release-contract": (f"{NIX_DEVELOP} make release-contract-check",),
-    "test": (
-        f"{NIX_DEVELOP} make vscode-test",
-        f"{NIX_DEVELOP} make test-rust test-lua",
-    ),
+    "test-rust": (f"{NIX_DEVELOP} make test-rust",),
+    "test-lua": (f"{NIX_DEVELOP} make test-lua",),
+    "vscode-test": (f"{NIX_DEVELOP} make vscode-test",),
     "coverage": (f"{NIX_DEVELOP} make coverage-rust",),
     "documentation": (f"{NIX_DEVELOP} make docs-artifacts-check docs-check",),
     "ui-test": (
@@ -440,20 +439,20 @@ class CIWorkflowEnvironmentTest(unittest.TestCase):
     def test_optional_linux_job_is_rejected(self) -> None:
         """A Linux job made non-gating is reported."""
         workflow = self.workflow().replace(
-            "  test:\n    runs-on: ubuntu-24.04",
-            "  test:\n    continue-on-error: true\n    runs-on: ubuntu-24.04",
+            "  test-rust:\n    runs-on: ubuntu-24.04",
+            "  test-rust:\n    continue-on-error: true\n    runs-on: ubuntu-24.04",
         )
         violations = native_test_policy_violations(workflow)
-        self.assertTrue(any("test: must remain a gating job" in v for v in violations), violations)
+        self.assertTrue(any("test-rust: must remain a gating job" in v for v in violations), violations)
 
     def test_native_test_dependency_is_rejected(self) -> None:
         """A job depending on the native matrix is reported."""
         workflow = self.workflow().replace(
-            "  test:\n    runs-on: ubuntu-24.04",
-            "  test:\n    needs: native-test\n    runs-on: ubuntu-24.04",
+            "  test-rust:\n    runs-on: ubuntu-24.04",
+            "  test-rust:\n    needs: native-test\n    runs-on: ubuntu-24.04",
         )
         violations = native_test_policy_violations(workflow)
-        self.assertTrue(any("test: must not depend on native-test" in v for v in violations), violations)
+        self.assertTrue(any("test-rust: must not depend on native-test" in v for v in violations), violations)
 
     def test_broad_native_continue_on_error_is_rejected(self) -> None:
         """A blanket continue-on-error replaces the per-lane policy."""

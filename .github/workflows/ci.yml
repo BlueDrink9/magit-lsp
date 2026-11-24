@@ -52,7 +52,7 @@ jobs:
       - name: Test download and packaging contracts (no Rust release build)
         run: nix develop --no-update-lock-file -c make release-contract-check V=1
 
-  test:
+  test-rust:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,13 +63,37 @@ jobs:
 
       # TODO: cache the Nix store once CI time matters.
 
-      # The vscode Make target installs locked dependencies when needed.
+      - name: make test-rust
+        run: nix develop --no-update-lock-file -c make test-rust V=1
+
+  # Runs in parallel with test-rust: each job builds the server it drives, so
+  # no artifacts pass between jobs.
+  test-lua:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+
+      - name: make test-lua
+        run: nix develop --no-update-lock-file -c make test-lua V=1
+
+  # Sequenced after the Rust suite, which also builds the server this target
+  # drives. The vscode Make target installs locked dependencies when needed.
+  vscode-test:
+    needs: test-rust
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
 
       - name: make vscode-test
         run: nix develop --no-update-lock-file -c make vscode-test V=1
-
-      - name: make test-rust test-lua
-        run: nix develop --no-update-lock-file -c make test-rust test-lua V=1
 
 
   coverage:
