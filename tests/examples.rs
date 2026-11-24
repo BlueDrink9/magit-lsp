@@ -1047,6 +1047,9 @@ fn corrupted_example_lines_fail_validation() {
 /// The placeholder the recordings use for the temporary repository root.
 const RECORDED_ROOT: &str = "/repo";
 
+/// The recorded form of a status view's URI: one separator after the scope.
+const RECORDED_STATUS_URI: &str = "magit://status/repo";
+
 /// The placeholder the recordings use for the running server binary.
 const RECORDED_BINARY: &str = "/magit-lsp/target/debug/magit-lsp";
 
@@ -1649,13 +1652,21 @@ fn utf16_prefix(text: &str, units: usize) -> &str {
 /// JSON text: a Windows root's backslashes are escaped there and would never
 /// match. The root's URI form is encoded by the shared native-path encoder, so
 /// a live encoded URI root reduces to the recorded `file:///repo` placeholder,
-/// while a filesystem-path occurrence keeps the native form.
+/// while a filesystem-path occurrence keeps the native form. A status view's
+/// URI embeds the native root after exactly one separator, and the server trims
+/// the root's leading separators: a root without one (Windows drive or
+/// verbatim-prefixed) leaves the recorded form's separator doubled, so that
+/// artifact is repaired to [`RECORDED_STATUS_URI`].
 fn canonical_root(text: &str, root: &str) -> String {
     let mut canonical = text.to_owned();
     if let Some(uri) = uri_from_path(Path::new(root)) {
         canonical = canonical.replace(uri.as_str(), &format!("file://{RECORDED_ROOT}"));
     }
-    canonical.replace(root, RECORDED_ROOT)
+    let canonical = canonical.replace(root, RECORDED_ROOT);
+    canonical.replace(
+        &format!("magit://status/{RECORDED_ROOT}"),
+        RECORDED_STATUS_URI,
+    )
 }
 
 /// Replace this run's repository root and binary path with the recording's
@@ -2515,6 +2526,13 @@ fn regeneration_keeps_fragment_mapping_and_rejects_unrelated_names() {
 fn plain_examples_replay_against_the_real_binary() {
     let mut fragments = Vec::new();
     for name in MAINTAINED_RECORDINGS {
+        // Managed commit drafts need Unix-only primitives (`openat`,
+        // `O_NOFOLLOW`, `nlink` and effective-uid checks), so the server
+        // refuses the draft elsewhere and the two commit-edit recordings
+        // cannot replay there.
+        if !cfg!(unix) && name.starts_with("commit-edit-") {
+            continue;
+        }
         let lines = example_lines(name);
         let captured = replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
         if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
@@ -2695,6 +2713,52 @@ fn root_normalization_is_invariant_to_root_encoding_and_length() {
     assert_ne!(short, divergent);
 }
 
+/// A status URI reduces to the recorded single-separator form for any root.
+///
+/// `status_uri` writes one separator after the scope and then the root with
+/// its leading separators trimmed, which a POSIX root supplies and a Windows
+/// drive or verbatim-prefixed root does not. Replacing the live root with the
+/// recording's placeholder must restore the form the recorded exchange pins
+/// (`rich-lifecycle.jsonl:8`) without moving a POSIX reduction.
+#[test]
+fn status_uri_reduces_to_the_recorded_form_for_any_platform_root() {
+    let recorded_uri = "magit://status/repo";
+    let recorded_frame = canonical_frame(
+        &json!({"id": 2, "result": {"id": "v1", "kind": "status", "uri": recorded_uri}}),
+        &RootNormalizer::new(RECORDED_ROOT),
+        RECORDED_BINARY,
+        &mut HashNormalizer::new(),
+    );
+    // Synthetic roots only: on Linux a Windows root has no file URI, which
+    // `canonical_root` already tolerates, and the status URI embeds the native
+    // root rather than its encoded form on either platform.
+    for root in [
+        "/tmp/fixture-root",
+        r"C:\Users\me\repo",
+        r"\\?\C:\Users\me\repo",
+    ] {
+        let live = magit_lsp::session::status_uri(root);
+        assert!(
+            live.starts_with("magit://status/"),
+            "{root}: the construction keeps one separator after the scope"
+        );
+        assert_ne!(
+            live, recorded_uri,
+            "{root}: the live URI names this run's root"
+        );
+        let canonical = canonical_frame(
+            &json!({"id": 2, "result": {"id": "v1", "kind": "status", "uri": live}}),
+            &RootNormalizer::new(root),
+            RECORDED_BINARY,
+            &mut HashNormalizer::new(),
+        );
+        assert_eq!(
+            canonical, recorded_frame,
+            "{root}: the status URI must reduce to the recorded form"
+        );
+    }
+}
+
 /// Expanding a recorded client frame encodes live file URIs with the shared
 /// native-path encoder and keeps filesystem-path substitutions native.
 ///
@@ -2831,6 +2895,11 @@ fn regeneration_captures_a_changed_render_and_strict_replay_rejects_it() {
 
 /// Regeneration captures the current code-action registry and the capture
 /// replays strictly; normal replay still rejects a changed action.
+///
+/// Unix only: the recorded commit draft runs through the managed-draft
+/// boundary, which needs Unix-only primitives (`openat`, `O_NOFOLLOW`, `nlink`
+/// and effective-uid checks), so the server refuses the draft elsewhere.
+#[cfg(unix)]
 #[test]
 fn regeneration_captures_registry_changes_and_strict_replay_rejects_them() {
     // Same rule as the render case: build the stale registry here so the test
@@ -3051,6 +3120,11 @@ fn regeneration_echo_refreshes_a_bound_client_echo_from_the_observed_edit() {
 
 /// Regeneration never rewrites authored client edits: a commit message the
 /// client typed itself stays exactly as recorded.
+///
+/// Unix only: the recorded commit draft runs through the managed-draft
+/// boundary, which needs Unix-only primitives (`openat`, `O_NOFOLLOW`, `nlink`
+/// and effective-uid checks), so the server refuses the draft elsewhere.
+#[cfg(unix)]
 #[test]
 fn regeneration_echo_leaves_authored_client_edits_unchanged() {
     let name = "commit-edit-confirm.jsonl";
@@ -3695,6 +3769,11 @@ fn commit_start_publishes_pending_draft_row_before_any_refresh() {
 /// through the fix: with git's own writes scheduling watcher bursts against
 /// the commit's publication window, strict replay requires each burst to
 /// coalesce into the identical-tree no-op refresh.
+///
+/// Unix only: the recorded commit draft runs through the managed-draft
+/// boundary, which needs Unix-only primitives (`openat`, `O_NOFOLLOW`, `nlink`
+/// and effective-uid checks), so the server refuses the draft elsewhere.
+#[cfg(unix)]
 #[test]
 fn commit_edit_confirm_replays_with_an_eager_watcher() {
     let name = "commit-edit-confirm.jsonl";
