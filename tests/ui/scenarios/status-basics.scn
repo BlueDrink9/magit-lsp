@@ -40,9 +40,9 @@ wait
 expect screen contains "Staged changes (0)"
 expect screen contains "Unstaged changes (2)"
 snapshot: unstaged-file
-# Hunk bodies are collapsed by default now, so raise detail before targeting its body line.
+# Hunk bodies start closed at the opening level; one toggle shows this one.
 goto "@@ -1,10 +1,10 @@"
-keys: z r z r z r z r
+keys: Tab
 wait
 goto "+line3 CHANGED"
 wait

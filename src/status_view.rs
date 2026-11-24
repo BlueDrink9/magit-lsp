@@ -60,7 +60,6 @@ pub struct FreshStatus {
     generation: u64,
     status: Status,
     rebase: Option<RebaseState>,
-    hunks: HashMap<(String, bool), Vec<Hunk>>,
     /// Rename origins for this status read, scanned once per side.
     renames: RenameMaps,
 }
@@ -102,6 +101,8 @@ fn default_visibility() -> Visibility {
     for section in ["staged", "unstaged", "untracked"] {
         visibility.set(format!("section:{section}"), VisibilityState::Collapsed);
     }
+    // The rebase section has no files to load, so it opens with the view.
+    visibility.set("section:rebase", VisibilityState::Expanded);
     visibility
 }
 
@@ -172,34 +173,8 @@ impl StatusView {
             generation,
             status,
             rebase,
-            hunks: HashMap::new(),
             renames: RenameMaps::default(),
         })
-    }
-
-    /// Acquire every file body eagerly, for the background open-or-cancel path.
-    pub fn acquire_opening_state(repo: &GitRepo, generation: u64) -> Result<FreshStatus> {
-        let mut fresh = Self::acquire_for_generation(repo, generation)?;
-        for (staged, files) in [
-            (true, &fresh.status.staged),
-            (false, &fresh.status.unstaged),
-        ] {
-            for file in files {
-                let loaded = fresh
-                    .renames
-                    .origins(repo, staged)
-                    .and_then(|origins| repo.file_hunks_with_origins(&file.path, staged, origins));
-                let hunks = match loaded {
-                    Ok(hunks) => hunks,
-                    Err(error) => {
-                        tracing::warn!(path = %file.path, %error, "failed to load file body");
-                        Vec::new()
-                    }
-                };
-                fresh.hunks.insert((file.path.clone(), staged), hunks);
-            }
-        }
-        Ok(fresh)
     }
 
     /// Install acquired state only if no refresh has superseded its generation.
@@ -211,7 +186,9 @@ impl StatusView {
             status: fresh.status,
             rebase: fresh.rebase,
         };
-        self.hunks = fresh.hunks;
+        // Each install starts a new snapshot: drop hunks loaded for the old
+        // Git state so the next render reloads them from the current one.
+        self.hunks.clear();
         self.renames = fresh.renames;
         true
     }
@@ -332,10 +309,12 @@ impl StatusView {
             }
             if self.level < 4 {
                 for hunk in self.hunks.get(&key).into_iter().flatten() {
-                    self.visibility.set(
-                        format!("{section}/{path}/hunk:{}", hunk.id),
-                        VisibilityState::Collapsed,
-                    );
+                    let id = format!("{section}/{path}/hunk:{}", hunk.id);
+                    // The level only supplies a default for hunks whose body
+                    // the user has not explicitly shown or hidden.
+                    if self.visibility.explicit_state(&id).is_none() {
+                        self.visibility.set(id, VisibilityState::Collapsed);
+                    }
                 }
             }
         }
@@ -610,6 +589,65 @@ mod reuse_tests {
             .lines
             .iter()
             .any(|line| line.contains("later.txt")));
+    }
+
+    #[test]
+    fn recursive_show_reveals_lazy_hunk_body_at_opening_level() {
+        let dir = committed_repo();
+        std::fs::write(dir.path().join("tracked.txt"), "changed\n").unwrap();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let mut view = StatusView::loading_with_branch(repo, "main");
+        let fresh = view.acquire_fresh_state().unwrap();
+        assert!(view.install_fresh_state(fresh));
+
+        let ctx = Ctx {
+            viewport: Viewport::default(),
+            pending: &[],
+        };
+        let closed = view.render(&ctx);
+        let section_line = closed.node("section:unstaged").unwrap().start_line;
+        assert!(view.set_visibility(
+            &closed,
+            Some(section_line),
+            VisibilityCommand::Show { recursive: false }
+        ));
+        // Rendering once loads the file's hunks; at the opening level their
+        // bodies are still closed.
+        let files = view.render(&ctx);
+        assert!(files.lines.iter().any(|line| line.contains("tracked.txt")));
+        assert!(!files.nodes.iter().any(|node| node.kind == NodeKind::Line));
+
+        // The hunks are known now, so a recursive Show reaches them.
+        let file_line = files.node("unstaged/tracked.txt").unwrap().start_line;
+        assert!(view.set_visibility(
+            &files,
+            Some(file_line),
+            VisibilityCommand::Show { recursive: true }
+        ));
+        let revealed = view.render(&ctx);
+        assert!(
+            revealed
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::Line),
+            "hunk body not revealed: {:?}",
+            revealed.lines
+        );
+        let again = view.render(&ctx);
+        assert!(
+            again.nodes.iter().any(|node| node.kind == NodeKind::Line),
+            "hunk body did not persist: {:?}",
+            again.lines
+        );
+    }
+
+    #[test]
+    fn default_visibility_expands_rebase_section() {
+        let visibility = default_visibility();
+        assert_eq!(
+            visibility.explicit_state("section:rebase"),
+            Some(VisibilityState::Expanded)
+        );
     }
 
     #[test]
