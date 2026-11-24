@@ -102,9 +102,11 @@ FORBIDDEN_SECRETS = ('VSCE_PAT', 'OVSX_PAT')
 OIDC_PUBLISH_ARGS = {'vsce publish': '--oidc',
                      'ovsx publish': '--trusted-publishing'}
 PUBLISH_COMMANDS = ('vsce publish', 'ovsx publish', 'cargo publish --locked')
-# The publish job resolves vsce/ovsx from the extension's locked dev
-# dependencies, so the frozen install must precede every publishing step.
-DEPENDENCY_INSTALL = 'make vscode-deps'
+# Node and pnpm come from the flake's locked dev shell, and the publish job
+# resolves vsce/ovsx from the extension's locked dev dependencies, so the frozen
+# install inside that shell must precede every publishing step.
+NIX_DEVELOP = 'nix develop --no-update-lock-file -c'
+DEPENDENCY_INSTALL = NIX_DEVELOP + ' make vscode-deps'
 PUBLISHING_STEPS = ('gh release create',) + PUBLISH_COMMANDS
 # The release checker imports tomllib, so the build workflow must select a
 # supported interpreter instead of trusting the Ubuntu 22.04 default python3.
@@ -316,16 +318,16 @@ def check_workflow(path=WORKFLOW):
         fail('workflow: publish job must require release-publish environment')
     # The read-only validate job uploads only the runtime's own handoff directory
     # and exposes its immutable upload id; the protected publisher downloads that
-    # exact id, installs the frozen locked tooling and calls the declared make
-    # interface. A candidate by name, an inline registry command, a rebuild or a
-    # PAT never satisfies this contract.
+    # exact id, installs the frozen locked tooling inside the flake's dev shell
+    # and calls the declared make interface. A candidate by name, an inline
+    # registry command, a rebuild or a PAT never satisfies this contract.
     for required in (
             '        name: publication-handoff',
             "      handoff_artifact_id: ${{ steps.handoff-upload.outputs.artifact-id }}",
             '        uses: actions/download-artifact@',
             '          artifact-ids: ${{ needs.validate.outputs.handoff_artifact_id }}',
             "          node-version: '24'",
-            '        run: make vscode-deps',
+            f'        run: {DEPENDENCY_INSTALL}',
             '        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
     ):
         if required not in text:
@@ -339,7 +341,7 @@ def check_workflow(path=WORKFLOW):
     if '          path: build/release/publication-handoff' not in publish_text:
         fail('workflow: the handoff download must target the declared handoff path')
     deps_line = next((index for index, line in enumerate(publish)
-                      if line.strip() == 'run: make vscode-deps'), None)
+                      if line.strip() == f'run: {DEPENDENCY_INSTALL}'), None)
     publish_line = next((index for index, line in enumerate(publish)
                          if line.strip().startswith('run: make release-publish')),
                         None)
@@ -718,6 +720,9 @@ def check_native_candidates(block):
     if 'make release-native-build RELEASE_TARGET=${{ matrix.target }}' not in code:
         fail('build workflow: native candidates must run the shared native build for '
              'their matrix target')
+    if 'env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS make release-native-build' not in code:
+        fail('build workflow: native candidates must clear the dev shell Nix flag '
+             'variables before the native build')
     if PIPELINE_ARTIFACTS not in code:
         fail('build workflow: native candidates must package through the shared pipeline')
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
@@ -1273,8 +1278,11 @@ def check_vsix_producer(block):
         fail('build workflow: VSIX producer must be platform-independent')
     if 'needs: source-checks' not in code:
         fail('build workflow: VSIX producer must need source-checks')
-    if "node-version: '24'" not in code or 'pnpm@10.13.1' not in code:
-        fail('build workflow: VSIX producer must use Node 24 and pinned pnpm')
+    if NIX_DEVELOP not in code:
+        fail('build workflow: VSIX producer must package inside the flake dev shell')
+    if 'uses: actions/setup-node@' in code or 'pnpm@' in code:
+        fail('build workflow: VSIX producer must take Node and pnpm from the '
+             'flake dev shell, not runner-provided tooling')
     makefile = '\n'.join(read_lines(MAKEFILE))
     if 'make vscode-package' not in code or 'vscode-package:' not in makefile \
             or '--frozen-lockfile' not in makefile:
@@ -4869,7 +4877,7 @@ def run_self_tests():
                '      - run: make vscode-package\n', 1),),
              'forbidden legacy/bypass path'),
             ('publisher without the frozen tooling',
-             (('        run: make vscode-deps\n', '', 1),),
+             ((f'        run: {DEPENDENCY_INSTALL}\n', '', 1),),
              'missing immutable handoff/publication contract'),
             ('publisher without the declared make interface',
              (('        run: make release-publish HANDOFF=build/release/publication-handoff/publication-handoff.json',
@@ -4891,9 +4899,19 @@ def run_self_tests():
                 '  vsix:\n    needs: source-checks\n    runs-on: ubuntu-24.04\n'
                 '    strategy:\n      matrix:\n        os: [ubuntu-24.04, macos-26]\n', 1),),
               'platform-independent'),
-             ('VSIX producer without Node 24',
-              (("          node-version: '24'", "          node-version: '20'", 1),),
-              'Node 24'),
+             ('VSIX producer taking runner-provided Node and pnpm',
+              (('      - name: Validate version and package the VSIX\n',
+                '      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0\n'
+                '        with:\n          node-version: \'24\'\n'
+                '      - name: Validate version and package the VSIX\n', 1),),
+              'flake dev shell'),
+             ('VSIX producer packaging outside the flake dev shell',
+              (("        run: nix develop --no-update-lock-file -c sh -c 'python3 "
+                "scripts/check_release_automation.py --validate-release-ref && "
+                "make vscode-package'",
+                "        run: sh -c 'python3 scripts/check_release_automation.py "
+                "--validate-release-ref && make vscode-package'", 1),),
+              'flake dev shell'),
              ('VSIX producer rebuilding native binary',
               (('      - name: Validate version and package the VSIX\n',
                 '      - run: cargo build\n      - name: Validate version and package the VSIX\n', 1),),
@@ -5056,6 +5074,9 @@ def run_self_tests():
             ('build workflow building a native candidate outside its locked shell',
              (('.#release-native', '.#release-naive', None),),
              '.#release-native'),
+             ('build workflow native candidate inheriting the dev shell Nix flags',
+              (('env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS ', '', 1),),
+              'clear the dev shell Nix flag'),
              ('build workflow native candidate skipping the shared pipeline',
               (('nix develop --no-update-lock-file .#release-native -c python3 '
                 'scripts/check_release_pipeline.py artifacts',

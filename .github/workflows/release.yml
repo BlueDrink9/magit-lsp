@@ -218,8 +218,11 @@ jobs:
       - name: Debug server tests
         run: nix develop --no-update-lock-file .#release-native -c make test-rust FILTER="--locked --test server_async"
 
+      # The mkShellNoCC dev shell exports NIX_CFLAGS_COMPILE/NIX_LDFLAGS from
+      # its packages' setup hooks. The native lane refuses inherited flags and
+      # sets its own host compiler/linker explicitly, so clear them here.
       - name: Experimental native-linker build
-        run: nix develop --no-update-lock-file .#release-native -c make release-native-build RELEASE_TARGET=${{ matrix.target }}
+        run: nix develop --no-update-lock-file .#release-native -c env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS make release-native-build RELEASE_TARGET=${{ matrix.target }}
 
       - name: Package the experimental candidate
         env:
