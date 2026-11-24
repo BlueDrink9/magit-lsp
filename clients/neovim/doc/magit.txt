@@ -35,8 +35,8 @@ runs when the plugin loads, not during startup:
 <
 
 The hook registers |:Magit| without starting a session; the key callback opens
-status.  Run `:helptags ALL` if help tags are not generated for the client
-`doc` directory.
+status.  The client ships its help tag index, so |:help| resolves `:help magit`
+without a `:helptags` run.
 
 ==============================================================================
 CHECKOUT LAUNCHER                                        *magit-checkout*

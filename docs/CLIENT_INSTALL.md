@@ -96,10 +96,9 @@ Start Neovim inside the Git repository you want to inspect, then run
 Do **not** call `setup()` unconditionally during startup: it starts the server
 and opens status immediately, rather than merely storing configuration.
 
-The client ships `clients/neovim/doc/magit.txt`: `:h magit` documents
-`:Magit [directory]`, minimal setup, server discovery and protocol-version
-troubleshooting. Run `:helptags ALL` if your package manager does not generate
-help tags for the client directory.
+The client ships `clients/neovim/doc/magit.txt` and its help tag index:
+`:h magit` documents `:Magit [directory]`, minimal setup, server discovery and
+protocol-version troubleshooting, with no `:helptags` run required.
 
 ## Interactive checkout launcher (development only)
 

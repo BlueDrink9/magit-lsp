@@ -134,8 +134,8 @@ native package adds `clients/neovim` from `init.lua`, and a lazy spec appends
 point in the `config(plugin)` hook, registering `:Magit` without opening status
 eagerly. Once the client is loaded, `:h magit` documents
 `:Magit [directory]`, setup/server discovery and protocol-version
-troubleshooting; run `:helptags ALL` if your installation does not generate
-help tags for the client's `doc` directory.
+troubleshooting; the client ships its help tag index, so `:h magit` needs no
+`:helptags` run.
 
 To try the client from a full checkout without changing your own Neovim
 configuration, the `make neovim` launcher builds the debug server and starts an
