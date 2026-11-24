@@ -165,11 +165,36 @@ def mask_strings(text):
     return ''.join(out)
 
 
+NEGATION = re.compile(r'(?<![\w])not\s*\(')
+
+
+def strip_negations(expression):
+    """Blank every `not(…)` group so only affirmative terms remain."""
+    out = list(expression)
+    index = 0
+    while True:
+        match = NEGATION.search(expression, index)
+        if match is None:
+            return ''.join(out)
+        depth = 1
+        end = match.end()
+        while end < len(expression) and depth:
+            if expression[end] == '(':
+                depth += 1
+            elif expression[end] == ')':
+                depth -= 1
+            end += 1
+        for position in range(match.start(), end):
+            out[position] = ' '
+        index = end
+
+
 def cfg_is_unix_only(expression):
     """Whether a `cfg(...)` expression only compiles off Windows."""
     if re.search(r'\bnot\s*\(\s*windows\s*\)', expression):
         return True
-    return bool(re.search(r'\bunix\b', expression)) and 'windows' not in expression
+    affirmative = strip_negations(expression)
+    return bool(re.search(r'\bunix\b', affirmative)) and 'windows' not in affirmative
 
 
 def item_attributes(line):
@@ -272,7 +297,8 @@ def crates_roots(files):
     return {
         path.resolve()
         for path in files
-        if path.parent in SCAN_ROOTS or path.name in ('lib.rs', 'main.rs')
+        if path.parent.name == 'tests'
+        or (path.parent.name == 'src' and path.name in ('lib.rs', 'main.rs'))
     }
 
 
@@ -331,7 +357,6 @@ def name_problem(text, rules):
     if not any(character.isalnum() for character in text):
         # A punctuation-only literal is a display/join separator, not a name.
         return None
-    pathlike = any(separator in text for separator in ('.', '/', '\\'))
     for index, segment in enumerate(re.split(r'[/\\]', text)):
         if index == 0:
             drive = re.fullmatch(r'[A-Za-z]:', segment)
@@ -342,7 +367,7 @@ def name_problem(text, rules):
         stem = segment.split('.')[0]
         if any(device.lower() == stem.lower() for device in rules.devices):
             return 'windows-reserved device name in path segment'
-        if pathlike and (
+        if (
             (rules.trailing_dot and segment.endswith('.'))
             or (rules.trailing_space and segment.endswith(' '))
         ):
@@ -530,6 +555,32 @@ fn reserved_rename(fixture: Fixture) {
 fn guard_self_test(fixture: Fixture) {
     let _ = fixture.rename("from.txt", "bad*name.txt");
 }
+
+#[cfg(not(unix))]
+fn negated_gate() {
+    let _ = std::fs::canonicalize("probe");
+}
+
+fn trailing_segment(dir: std::path::PathBuf) {
+    let _ = dir.join("trailing ");
+}
+'''
+
+SELF_TEST_MODULE_SOURCE = '''
+#[cfg(unix)]
+mod menu;
+'''
+
+SELF_TEST_DECOY = '''
+pub fn decoy() {
+    let _ = std::fs::canonicalize("decoy");
+}
+'''
+
+SELF_TEST_REAL_CHILD = '''
+pub fn real() {
+    let _ = std::fs::canonicalize("real");
+}
 '''
 
 
@@ -541,9 +592,25 @@ def self_test():
         common.mkdir(parents=True)
         (common / 'mod.rs').write_text(SELF_TEST_SOURCE, encoding='utf-8')
         (root / 'tests' / 'probe.rs').write_text(SELF_TEST_PROBE, encoding='utf-8')
+        source = root / 'src'
+        source.mkdir()
+        (source / 'session.rs').write_text(SELF_TEST_MODULE_SOURCE, encoding='utf-8')
+        (source / 'menu.rs').write_text(SELF_TEST_DECOY, encoding='utf-8')
+        (source / 'session').mkdir()
+        (source / 'session' / 'menu.rs').write_text(SELF_TEST_REAL_CHILD, encoding='utf-8')
         violations = audit(root)
-        found = {(violation.rule, violation.line) for violation in violations}
-        expected = {(1, 3), (2, 17), (2, 21)}
+        found = {
+            (violation.path.relative_to(root).as_posix(), violation.rule, violation.line)
+            for violation in violations
+        }
+        expected = {
+            ('tests/probe.rs', 1, 3),
+            ('tests/probe.rs', 2, 17),
+            ('tests/probe.rs', 2, 21),
+            ('tests/probe.rs', 1, 31),
+            ('tests/probe.rs', 2, 35),
+            ('src/menu.rs', 1, 3),
+        }
         if found != expected:
             for violation in violations:
                 print(violation, file=sys.stderr)
@@ -556,7 +623,13 @@ def self_test():
         suppressed = [
             violation
             for violation in violations
-            if violation.line in (8, 13, 26)
+            if (violation.path.relative_to(root).as_posix(), violation.line)
+            in {
+                ('tests/probe.rs', 8),
+                ('tests/probe.rs', 13),
+                ('tests/probe.rs', 26),
+                ('src/session/menu.rs', 3),
+            }
         ]
         if suppressed:
             for violation in suppressed:
