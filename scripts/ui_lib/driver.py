@@ -201,6 +201,24 @@ def _tmux(run: Run, *args: str, check: bool = True) -> subprocess.CompletedProce
     return result
 
 
+def _enforce_geometry(run: Run) -> None:
+    """Force the session's pane to the requested size and fail loudly otherwise.
+
+    tmux derives a detached session's window from the status line and any
+    attached client, so `new-session -x/-y` alone can leave the pane a row short.
+    """
+    expected = f"{run.cols}x{run.rows}"
+    _tmux(run, "resize-window", "-t", SESSION, "-x", str(run.cols), "-y", str(run.rows))
+    actual = _tmux(
+        run, "display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}"
+    ).stdout.strip()
+    if actual != expected:
+        raise DriverError(
+            f"tmux pane is {actual}, expected {expected}: the editor would render "
+            "at a different screen size than requested"
+        )
+
+
 def _nvim(run: Run, *args: str, timeout: float = 5.0) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["nvim", "--headless", "--server", run.socket, *args],
@@ -981,6 +999,7 @@ def start(
         _tmux(run, "set", "-g", "escape-time", "0")
         _tmux(run, "set", "-g", "status", "off")
         _tmux(run, "set", "-g", "default-terminal", "xterm-256color")
+        _enforce_geometry(run)
         # The options above must exist before Neovim starts, so the initial
         # shell is replaced once the server is configured.
         _tmux(
@@ -1047,6 +1066,7 @@ def native_session(
         _tmux(run, "set", "-g", "escape-time", "0")
         _tmux(run, "set", "-g", "status", "off")
         _tmux(run, "set", "-g", "default-terminal", "xterm-256color")
+        _enforce_geometry(run)
         _tmux(run, "respawn-pane", "-k", "-t", SESSION, "-c", str(repo), _launcher_command(run))
         _wait_for_socket(run, readiness_probe=_rpc_probe)
         yield run

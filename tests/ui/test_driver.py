@@ -905,6 +905,7 @@ class StartPathTest(unittest.TestCase):
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build", side_effect=build),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket"),
                 patch.object(driver, "_wait_for_view"),
                 patch.object(driver, "_update_last_run"),
@@ -936,6 +937,7 @@ class StartPathTest(unittest.TestCase):
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build", side_effect=build),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket") as wait_socket,
                 patch.object(driver, "_wait_for_view") as wait_view,
                 patch.object(driver, "_update_last_run"),
@@ -964,6 +966,7 @@ class StartPathTest(unittest.TestCase):
                 patch.object(driver, "run_dir", return_value=run_dir),
                 patch.object(driver.fixtures, "build", side_effect=build),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket") as wait_socket,
                 patch.object(driver, "_wait_for_view") as wait_view,
                 patch.object(driver, "_update_last_run"),
@@ -1082,6 +1085,66 @@ class StartPathTest(unittest.TestCase):
             run = captured["run"]
             self.assertEqual(run.socket_path, driver.run_socket_path(run.id))
             self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
+
+
+class PaneGeometryTest(unittest.TestCase):
+    def test_start_resizes_the_pane_before_spawning_neovim(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            calls: list[tuple[str, ...]] = []
+
+            def fake_tmux(_run, *args, check=True):
+                calls.append(args)
+                output = "80x24" if args[0] == "display-message" else ""
+                return subprocess.CompletedProcess([], 0, output + "\n", "")
+
+            def build(_fixture, repo, home):
+                repo.mkdir()
+                (repo / ".git/info").mkdir(parents=True)
+                home.mkdir()
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build", side_effect=build),
+                patch.object(driver, "_tmux", side_effect=fake_tmux),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "_wait_for_view"),
+                patch.object(driver, "_update_last_run"),
+            ):
+                driver.start("clean", size="80x24")
+            names = [call[0] for call in calls]
+            self.assertEqual(
+                calls[names.index("resize-window")],
+                ("resize-window", "-t", driver.SESSION, "-x", "80", "-y", "24"),
+            )
+            self.assertLess(names.index("resize-window"), names.index("respawn-pane"))
+
+    def test_short_pane_fails_loudly_instead_of_rendering_one_row_less(self) -> None:
+        run = make_run("/tmp/test-run")
+        run.cols, run.rows = 80, 24
+        replies = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "80x23\n", ""),
+        ]
+        with patch.object(driver, "_tmux", side_effect=replies) as tmux:
+            with self.assertRaisesRegex(
+                driver.DriverError, "tmux pane is 80x23, expected 80x24"
+            ):
+                driver._enforce_geometry(run)
+        self.assertEqual(
+            tmux.call_args_list[0].args[1:],
+            ("resize-window", "-t", driver.SESSION, "-x", "80", "-y", "24"),
+        )
+
+    def test_requested_size_is_accepted(self) -> None:
+        run = make_run("/tmp/test-run")
+        replies = [
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "100x30\n", ""),
+        ]
+        with patch.object(driver, "_tmux", side_effect=replies):
+            driver._enforce_geometry(run)
 
 
 class NativeArtifactMakeTargetTest(unittest.TestCase):
@@ -1225,6 +1288,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket"),
                 patch.object(driver, "stop", return_value=report),
             ):
@@ -1254,6 +1318,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket"),
                 patch.object(driver, "_stop_roles", return_value={
                     "ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": []}),
@@ -1282,6 +1347,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket"),
                 patch.object(driver, "stop", side_effect=RuntimeError("teardown failed")),
             ):
@@ -1298,6 +1364,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
                 patch.object(driver, "_tmux"),
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket"),
                 patch.object(driver, "stop", side_effect=RuntimeError("teardown failed")),
             ):
@@ -1449,6 +1516,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
                 patch.object(driver, "_tmux") as tmux,
+                patch.object(driver, "_enforce_geometry"),
                 patch.object(driver, "_wait_for_socket", side_effect=driver.StartupError("not ready")),
                 patch.object(driver, "stop") as stop,
             ):

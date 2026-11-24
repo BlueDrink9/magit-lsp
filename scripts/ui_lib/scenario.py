@@ -893,10 +893,16 @@ def classify(xfail: str | None, results: list[ComboResult]) -> str:
     return "PASS" if all(result.ok for result in results) else "FAIL"
 
 
+def _variant_dir(scenario: Scenario, profile: str, size: str) -> Path:
+    """The artifact directory for one scenario combination, created on demand."""
+    variant = BUILD_UI / scenario.name / f"{profile}-{size}"
+    variant.mkdir(parents=True, exist_ok=True)
+    return variant
+
+
 def _snapshot_paths(scenario: Scenario, profile: str, size: str, name: str) -> tuple[Path, Path]:
     base = BUILD_UI / scenario.name
-    variant = base / f"{profile}-{size}"
-    variant.mkdir(parents=True, exist_ok=True)
+    variant = _variant_dir(scenario, profile, size)
     base.mkdir(parents=True, exist_ok=True)
     return variant / name, base / name
 
@@ -990,9 +996,11 @@ def _run_combo(
     snapshots: list[tuple[str, str, str, str, str]],
     verbose: bool = False,
 ) -> ComboResult:
+    extra_env = dict(scenario.env)
+    extra_env["MAGIT_LSP_UI_ARTIFACTS"] = str(_variant_dir(scenario, profile, size))
     try:
         run = driver.start(
-            scenario.fixture, size=size, profile=profile, extra_env=scenario.env,
+            scenario.fixture, size=size, profile=profile, extra_env=extra_env,
             client=scenario.client, startup_mode=scenario.startup,
         )
     except driver.StartupError as error:
