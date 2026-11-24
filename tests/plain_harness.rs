@@ -731,8 +731,13 @@ fn rich_server_render_ack_and_stale_resync_preserve_caller_reply() {
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
         .build();
     let model = editor_model::EditorModel::new(editor_model::RICH_MIN).strict();
-    let mut client =
-        ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
+    // The resync below is watcher-driven, so keep the debounce short instead of
+    // the harness's default parked value.
+    let mut client = ClientPump::with_model(
+        stdio::TestServer::spawn(&[("MAGIT_LSP_WATCH_DEBOUNCE_MS", "25")]),
+        Profile::Standard,
+        &model,
+    );
     let open = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/open","params":{"kind":"status","args":{"repo_path":repo.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
     let opened = client.until_response(open);
     let descriptor = &opened["result"];
