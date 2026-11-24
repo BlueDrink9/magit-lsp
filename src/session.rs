@@ -1365,11 +1365,17 @@ impl Session {
                 .views
                 .get(&target.view_id)
                 .ok_or_else(|| Error::new(format!("unknown view: {}", target.view_id)))?;
-            let source = match target.version {
+            let versioned = match target.version {
                 Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
                 Some(version) if version == view.version => Some(&view.tree),
                 _ => None,
             };
+            // A version miss only means the client's render moved on. Re-derive
+            // the offer against the current tree and accept it on identity and
+            // mutation-hash equality, so an unrelated refresh never refuses an
+            // action whose data is exactly what was offered.
+            let rederived = versioned.is_none();
+            let source = versioned.or(Some(&view.tree));
             let valid = source.is_some_and(|tree| {
                 if let Some(selection) = offered.selection {
                     crate::dispatch::offer_selection_target(
@@ -1387,6 +1393,11 @@ impl Session {
             });
             let node = source.and_then(|tree| tree.node(&offered.node_id));
             if valid {
+                if rederived {
+                    // Coordinates were re-derived against the current tree, so
+                    // bind the command to it rather than the vanished render.
+                    target.version = Some(view.version);
+                }
                 if let Some(selection) = offered.selection {
                     target.selection = Some(Selection {
                         start_line: selection.start_line as usize,
@@ -1402,7 +1413,7 @@ impl Session {
                 return Ok(InvokeResult {
                     effects: vec![Effect::message(
                         MessageLevel::Warn,
-                        crate::errors::HUNK_CHANGED,
+                        crate::errors::STALE_OFFER,
                     )],
                     render: Some(
                         self.views

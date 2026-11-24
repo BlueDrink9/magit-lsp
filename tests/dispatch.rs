@@ -654,6 +654,111 @@ fn session_dispatch_returns_fresh_status_with_hunk_changed_message() {
 }
 
 #[test]
+fn an_identical_offer_executes_after_an_unrelated_version_bump() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .build();
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 CHANGED").to_string(),
+    );
+    // No acknowledgement: a Plain client binds its offer to the render only.
+    let (mut test, initial) = TestSession::open_status(&tmp, magit_lsp::config::Profile::Vim);
+    let line = test.goto_marker("f.txt", '+');
+    let node_id = test.tree().line_nodes[line].node.clone();
+    let offered = dispatch::offer_target(test.tree(), "status.stage", &node_id)
+        .expect("stage offer at the displayed hunk");
+
+    // An unrelated file bumps the render version; the offered hunk is unchanged.
+    write(&tmp.path().join("g.txt"), "unrelated\n");
+    test.refresh().expect("refresh after unrelated change");
+    assert_ne!(test.version(), initial.version);
+    assert_eq!(test.acked_version(), None);
+
+    let outcome = dispatch_offer(&mut test, initial.version, &offered);
+    assert!(
+        message_texts(&outcome.effects).is_empty(),
+        "{:?}",
+        outcome.effects
+    );
+    let cached = cached_diff(tmp.path());
+    assert!(cached.contains("+line35 CHANGED"), "got: {cached}");
+    assert!(!cached.contains("line5 CHANGED"), "got: {cached}");
+    assert!(tmp.git(&["status", "--short"]).contains("?? g.txt"));
+}
+
+#[test]
+fn a_changed_offer_is_refused_with_the_stale_offer_message() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .build();
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 CHANGED").to_string(),
+    );
+    let (mut test, initial) = TestSession::open_status(&tmp, magit_lsp::config::Profile::Vim);
+    let line = test.goto_marker("f.txt", '+');
+    let node_id = test.tree().line_nodes[line].node.clone();
+    let offered = dispatch::offer_target(test.tree(), "status.stage", &node_id)
+        .expect("stage offer at the displayed hunk");
+
+    // The offered hunk itself changes and the view refreshes, so the offer
+    // cannot be re-derived from the current tree.
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 DIFFERENT").to_string(),
+    );
+    test.refresh().expect("refresh after hunk change");
+    assert_ne!(test.version(), initial.version);
+
+    let outcome = dispatch_offer(&mut test, initial.version, &offered);
+    assert_eq!(
+        outcome.effects,
+        vec![Effect::message(MessageLevel::Warn, errors::STALE_OFFER)],
+        "an outdated offer is refused with the offered-action message"
+    );
+    assert!(
+        outcome.render.is_some(),
+        "a refusal still refreshes the view"
+    );
+    assert!(
+        cached_diff(tmp.path()).is_empty(),
+        "the index must stay untouched"
+    );
+}
+
+/// Dispatch an offered content target the way a Plain client executes it.
+fn dispatch_offer(
+    test: &mut TestSession,
+    version: u64,
+    offered: &ActionTarget,
+) -> magit_lsp::session::InvokeResult {
+    let view_id = test.view_id().to_string();
+    test.session_mut()
+        .dispatch(
+            magit_lsp::dispatch::DispatchRequest {
+                command: "status.stage".to_string(),
+                target: magit_lsp::dispatch::DispatchTarget {
+                    view_id,
+                    version: Some(version),
+                    cursor: Some(magit_lsp::protocol::Cursor { line: 0, column: 0 }),
+                    selection: offered
+                        .selection
+                        .map(|selection| magit_lsp::protocol::Selection {
+                            start_line: selection.start_line as usize,
+                            end_line: selection.end_line as usize,
+                        }),
+                    key: None,
+                },
+                action_target: Some(offered.clone()),
+                args: None,
+            },
+            &magit_lsp::ui::NullUi,
+        )
+        .expect("dispatch offered action")
+}
+
+#[test]
 fn execute_stage_all_unstaged_stages_tracked_changes() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

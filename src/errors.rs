@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 pub const HUNK_CHANGED: &str =
     "That hunk changed since it was displayed. The view has been refreshed.";
 
+/// Shown when an offered action no longer matches the current view tree.
+pub const STALE_OFFER: &str =
+    "That action was offered against an outdated view. The view has been refreshed; try again.";
+
 /// Shown when positional input refers to a render the server no longer retains.
 pub const STALE_VIEW: &str = "This view is stale; please retry on the current view.";
 
