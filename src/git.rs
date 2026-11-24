@@ -3344,15 +3344,9 @@ fn warn_if_git_is_below_recommendation(
         return None;
     };
     let installed = String::from_utf8_lossy(&bytes);
-    let Some(version) = installed.trim().strip_prefix("git version ") else {
-        return None;
-    };
-    let Some(installed_version) = parse_git_version(version) else {
-        return None;
-    };
-    let Some(recommended_version) = parse_git_version(RECOMMENDED_GIT_VERSION) else {
-        return None;
-    };
+    let version = installed.trim().strip_prefix("git version ")?;
+    let installed_version = parse_git_version(version)?;
+    let recommended_version = parse_git_version(RECOMMENDED_GIT_VERSION)?;
     if compare_versions(&installed_version, &recommended_version).is_lt() {
         let warning = format!(
             "Git {version} is older than the recommended version {}. Upgrade Git to at least {}.",
@@ -3565,6 +3559,12 @@ mod tests {
         assert_eq!(permission_encoding(&permissions), [b'1', executable, 0]);
 
         let mut writable = permissions.clone();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            writable.set_mode(writable.mode() | 0o200);
+        }
+        #[cfg(not(unix))]
         writable.set_readonly(false);
         std::fs::set_permissions(&path, writable).expect("chmod back");
         let permissions = std::fs::metadata(&path).expect("metadata").permissions();
