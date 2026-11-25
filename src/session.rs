@@ -468,27 +468,31 @@ impl OpenView {
         self.render_with_delivery(cursor, None, RenderDelivery::Acknowledged)
     }
 
-    /// Remember a deferred hunk fetch whose generation was renewed by a refresh.
+    /// Remember a background hunk fetch whose generation was renewed by a refresh.
     ///
     /// A refresh past the original opening promise cannot renew it; inside the
-    /// window the new deadline starts at this render's publish instant.
+    /// window the new deadline starts at this render's publish instant. A
+    /// seeded-open view's batch has no cutoff, so it re-arms at any distance
+    /// from the opening: streaming is its contract, not a short window.
     fn arm_refresh_fetch(&mut self, render: &ViewRender) {
         let now = std::time::Instant::now();
-        if !self
-            .open_promise_start
-            .is_some_and(|start| crate::status_view::open_within_promise(start, now))
-        {
-            return;
-        }
         let fetch = self
             .view
             .as_any()
             .and_then(|state| state.downcast_ref::<StatusView>())
             .and_then(StatusView::timed_fetch);
-        if let Some(fetch) = fetch {
-            self.open_promise_start = Some(now);
-            self.pending_timed_fetch = Some((render.version, now, fetch));
+        let Some(fetch) = fetch else {
+            return;
+        };
+        if !fetch.unbounded()
+            && !self
+                .open_promise_start
+                .is_some_and(|start| crate::status_view::open_within_promise(start, now))
+        {
+            return;
         }
+        self.open_promise_start = Some(now);
+        self.pending_timed_fetch = Some((render.version, now, fetch));
     }
 
     /// Take the deferred fetch armed by this exact refresh render.
@@ -2731,6 +2735,16 @@ impl Session {
         let menu = view.view.menu();
         view.view.on_refresh()?;
         let mut tree = view.render_tree();
+        // This path is the watcher/mutation refresh, which never re-arms the
+        // streaming batch; keep this render rows-only, then let the next render
+        // load hunks on demand again (a user re-expansion).
+        if let Some(status) = view
+            .view
+            .as_any_mut()
+            .and_then(|state| state.downcast_mut::<StatusView>())
+        {
+            status.settle_open_refresh();
+        }
         tree.version = view.version;
         // A watcher burst may change another open view without changing this
         // one's text or action metadata. Do not invalidate outstanding offers

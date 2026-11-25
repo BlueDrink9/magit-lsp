@@ -279,10 +279,10 @@ fn deferred_install_renders_only_head_and_closed_section_headers() {
     );
 }
 
-/// A1: the configured opening seeds the deferred view. `open` reproduces the
-/// synchronous fully-expanded render on the first ready render and arms no
-/// background fetch; `collapsed` stays closed and arms none; `auto` keeps the
-/// closed render plus its fetch.
+/// A1: the configured opening seeds the deferred view. `open` publishes the
+/// expanded seed as file rows first and streams the hunks from an unbounded
+/// batch; `collapsed` stays closed and arms none; `auto` keeps the closed render
+/// plus its promise-bound fetch.
 #[test]
 fn configured_opening_seeds_expanded_closed_or_auto() {
     let (tmp, repo) = RepoFixture::new()
@@ -309,10 +309,33 @@ fn configured_opening_seeds_expanded_closed_or_auto() {
         StatusView::loading_with_branch_opening(repo.clone(), "main", StatusOpening::Open);
     let fresh = expanded.acquire_fresh_state().unwrap();
     assert!(expanded.install_fresh_state(fresh));
+    let fetch = expanded
+        .timed_fetch()
+        .expect("the expanded opening must stream a background fetch");
     assert!(
-        expanded.timed_fetch().is_none(),
-        "the expanded opening must not arm a background fetch"
+        fetch.unbounded(),
+        "the expanded opening's batch completes without the promise cutoff"
     );
+    let changed = tmp.path().join("f.txt");
+    let before = diff_invocation_count(&changed);
+    let rows = expanded.render(&ctx);
+    assert!(
+        rows.lines.iter().any(|line| line.contains("M f.txt")),
+        "the seeded-open render shows the file rows: {:?}",
+        rows.lines
+    );
+    assert!(
+        !rows.lines.iter().any(|line| line.contains("@@")),
+        "the hunks belong to the batch, not the render: {:?}",
+        rows.lines
+    );
+    assert_eq!(
+        diff_invocation_count(&changed),
+        before,
+        "the seeded-open render must not fetch expanded files inline"
+    );
+    let hunks = StatusView::fetch_timed_hunks(&repo, fetch);
+    assert!(expanded.install_timed_hunks(hunks));
     assert_eq!(expanded.render(&ctx).lines, oracle.lines);
 
     let mut collapsed =
@@ -336,11 +359,51 @@ fn configured_opening_seeds_expanded_closed_or_auto() {
     let mut auto = StatusView::loading_with_branch(repo, "main");
     let fresh = auto.acquire_fresh_state().unwrap();
     assert!(auto.install_fresh_state(fresh));
-    assert!(
-        auto.timed_fetch().is_some(),
-        "auto keeps the closed render plus its background fetch"
-    );
+    let fetch = auto
+        .timed_fetch()
+        .expect("auto keeps the closed render plus its background fetch");
+    assert!(!fetch.unbounded(), "auto keeps the promise-bounded batch");
     assert_eq!(auto.render(&ctx).lines, closed);
+}
+
+/// A refresh supersedes the in-flight batch, so its late install is discarded;
+/// the refreshed render stays rows-only until the renewed batch installs the
+/// hunks.
+#[test]
+fn open_seed_drops_a_superseded_batch_and_rearms() {
+    let (_tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
+    let oracle = StatusView::open_repo(repo.clone()).unwrap().render(&ctx);
+    let mut view =
+        StatusView::loading_with_branch_opening(repo.clone(), "main", StatusOpening::Open);
+    let fresh = view.acquire_fresh_state().unwrap();
+    assert!(view.install_fresh_state(fresh));
+    let stale = StatusView::fetch_timed_hunks(&repo, view.timed_fetch().unwrap());
+
+    // A refresh bumps the generation and republishes the rows-only seed.
+    view.on_refresh().unwrap();
+    let rows = view.render(&ctx);
+    assert!(
+        !rows.lines.iter().any(|line| line.contains("@@")),
+        "{:?}",
+        rows.lines
+    );
+    assert!(
+        !view.install_timed_hunks(stale),
+        "an install from the superseded generation must be discarded"
+    );
+    let renewed = view
+        .timed_fetch()
+        .expect("the refreshed opening arms its own batch");
+    assert!(renewed.unbounded());
+    assert!(view.install_timed_hunks(StatusView::fetch_timed_hunks(&repo, renewed)));
+    assert_eq!(view.render(&ctx).lines, oracle.lines);
 }
 
 /// A2: opening a section renders its files and fetches their hunks on demand

@@ -410,9 +410,12 @@ fn install_status_acquisition(
 }
 
 /// Fetch a deferred opening's hunks in the background, then publish the
-/// expanded render through its repository's turn only if the fetch beat the
-/// promise deadline. Past the deadline the sections stay closed for on-demand
-/// loading; a superseded generation is discarded by the install.
+/// expanded render through its repository's turn.
+///
+/// An `auto` fetch is bound by the promise: past the deadline the sections stay
+/// closed for on-demand loading. A seeded-open fetch has no cutoff, because
+/// streaming its hunks is that opening's contract, and it bypasses both promise
+/// gates. A superseded generation is discarded by the install in either mode.
 pub(super) fn spawn_timed_hunks(
     shared: Shared,
     repository: crate::git::GitRepo,
@@ -424,6 +427,7 @@ pub(super) fn spawn_timed_hunks(
     fetch: crate::status_view::TimedFetch,
 ) {
     tokio::spawn(async move {
+        let unbounded = fetch.unbounded();
         let fetch_repo = repository.clone();
         let fetched = tokio::task::spawn_blocking(move || {
             crate::runner::with_trace_id(trace_id, || {
@@ -432,12 +436,21 @@ pub(super) fn spawn_timed_hunks(
         });
         // Bound the wait by the promise itself: a fetch still running at the
         // deadline is abandoned so the closed render stands.
-        let remaining = promise.saturating_sub(published.elapsed());
-        let hunks = match tokio::time::timeout(remaining, fetched).await {
-            Ok(Ok(hunks)) => hunks,
-            _ => return,
+        let hunks = if unbounded {
+            match fetched.await {
+                Ok(hunks) => hunks,
+                Err(_) => return,
+            }
+        } else {
+            let remaining = promise.saturating_sub(published.elapsed());
+            match tokio::time::timeout(remaining, fetched).await {
+                Ok(Ok(hunks)) => hunks,
+                _ => return,
+            }
         };
-        if !crate::status_view::open_within(promise, published, std::time::Instant::now()) {
+        if !unbounded
+            && !crate::status_view::open_within(promise, published, std::time::Instant::now())
+        {
             return;
         }
         let turn = shared.reserve_mutation(repo_path.clone());

@@ -199,11 +199,12 @@ fn status_open_fast_background_fetch_expands_like_the_sync_render() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
-/// A2: `sections.default_visibility = "open"` over the real server publishes
-/// the synchronous fully-expanded render as the first ready render; the same
-/// fixture under the default (`auto`) still publishes the closed render first.
+/// A4: `sections.default_visibility = "open"` over the real server publishes
+/// the expanded seed as rows first, and its batch streams the hunks into the
+/// synchronous fully-expanded buffer; the same fixture under the default
+/// (`auto`) still publishes the closed render first.
 #[test]
-fn status_open_config_open_publishes_the_sync_render_first() {
+fn status_open_config_open_streams_to_the_complete_buffer() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -228,15 +229,38 @@ fn status_open_config_open_publishes_the_sync_render_first() {
     assert_eq!(server.recv()["method"], "view/keymap");
     server.recv_timeout = Duration::from_secs(10);
     let ready = server.wait_for_view_render_after(&view, loading_version);
-    let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    let mut lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        lines.iter().any(|line| line == "  M f.txt"),
+        "the open seed publishes the expanded file rows first: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("@@")),
+        "the hunks arrive by batch, not on the seed render: {lines:?}"
+    );
+
+    // The batch streams the hunks into the complete synchronous render.
     let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
     let expected = authoritative.render(&Ctx {
         viewport: Viewport::default(),
         pending: &[],
     });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut id = 3;
+    while lines != expected.lines && Instant::now() < deadline {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync",
+            "params":{"viewId":view}}));
+        let resync = server.response_with_id(id);
+        id += 1;
+        lines = serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+        if lines == expected.lines {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
     assert_eq!(
         lines, expected.lines,
-        "the open seed must publish the sync render as the first ready render"
+        "the open batch must stream into the synchronous fully-expanded buffer"
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -458,6 +482,318 @@ fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {
             .iter()
             .any(|line| line.contains("+line3 CHANGED")),
         "{opened_text:?}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+/// A temporary config file seeding the interactive status opening as expanded.
+#[cfg(unix)]
+fn open_seed_config() -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("open.toml");
+    write(&path, "[sections]\ndefault_visibility = \"open\"\n");
+    (dir, path.to_string_lossy().into_owned())
+}
+
+/// Receive frames until `id` answers, returning the first render of `view` that
+/// follows `version`, plus that response.
+///
+/// The render and the response can arrive in either order, so both are
+/// collected without assuming which comes first.
+#[cfg(unix)]
+fn render_and_response(
+    server: &mut TestServer,
+    view: &str,
+    version: u64,
+    id: i64,
+) -> (Value, Value) {
+    let mut render = None;
+    let mut response = None;
+    while response.is_none() || render.is_none() {
+        let message = server.recv();
+        if message["id"] == json!(id) {
+            response = Some(message);
+        } else if render.is_none()
+            && message["method"] == "view/render"
+            && message["params"]["viewId"] == json!(view)
+            && message["params"]["version"]
+                .as_u64()
+                .is_some_and(|next| next > version)
+        {
+            render = Some(message);
+        }
+    }
+    (
+        render.expect("render after the base version"),
+        response.expect("answering response"),
+    )
+}
+
+/// A1: the seeded-open slow path publishes the expanded file rows while the
+/// batch is still held in Git, then streams its hunks in one incremental render
+/// that reproduces the synchronous fully-expanded oracle.
+#[cfg(unix)]
+#[test]
+fn status_open_slow_batch_streams_hunks_by_incremental_edit() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (_config, config_arg) = open_seed_config();
+    let gate = GatedGit::arm("diff");
+    let gate_env = gate.child_env();
+    let env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn_with_args(&["--config", &config_arg], &env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+
+    // The first ready render is the expanded seed with file rows and no hunks.
+    // It cannot have fetched inline: the gate claimant below is the batch.
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let ready_version = ready["params"]["version"].as_u64().unwrap();
+    let ready_lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        ready_lines.iter().any(|line| line == "  M f.txt"),
+        "the seed render shows the expanded file row: {ready_lines:?}"
+    );
+    assert!(
+        !ready_lines.iter().any(|line| line.contains("@@")),
+        "the hunks belong to the batch, not the seed render: {ready_lines:?}"
+    );
+    gate.wait_entered();
+    assert!(!gate.is_released(), "the batch is still held inside Git");
+
+    // Acknowledging the rows makes the streamed install one incremental edit.
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":view,"version":ready_version}}));
+    // A neutral request orders the ack before the install can be published.
+    server.send(
+        json!({"jsonrpc":"2.0","id":3,"method":"textDocument/foldingRange",
+        "params":{"textDocument":{"uri":opened["result"]["uri"]}}}),
+    );
+    server.response_with_id(3);
+
+    gate.release();
+    let installed = server.wait_for_view_render_after(&view, ready_version);
+    assert_eq!(
+        installed["params"]["baseVersion"],
+        json!(ready_version),
+        "the install must diff against the acknowledged rows: {installed}"
+    );
+    let edits: Vec<magit_lsp::protocol::LineEdit> =
+        serde_json::from_value(installed["params"]["edits"].clone()).unwrap();
+    let streamed = magit_lsp::diff_text::apply_edits(&ready_lines, &edits);
+
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    assert!(
+        expected
+            .lines
+            .iter()
+            .any(|line| line.contains("+line3 CHANGED")),
+        "the oracle itself carries the hunk body"
+    );
+    assert_eq!(
+        streamed, expected.lines,
+        "the streamed hunks reproduce the synchronous fully-expanded render"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+/// A2: a `common.refresh` during the in-flight batch supersedes it: the
+/// refreshed render stays rows-only (no inline refetch under the lock) and its
+/// renewed no-cutoff batch restores the hunks.
+#[cfg(unix)]
+#[test]
+fn status_open_refresh_during_batch_rearms_rows_only_then_hunks() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (_config, config_arg) = open_seed_config();
+    let gate = GatedGit::arm("diff");
+    let gate_env = gate.child_env();
+    let env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn_with_args(&["--config", &config_arg], &env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let ready_version = ready["params"]["version"].as_u64().unwrap();
+    gate.wait_entered();
+
+    // The refresh supersedes the held generation; it must answer with a
+    // rows-only render rather than fetching the diffs inline.
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.refresh"}}));
+    let (refreshed, response) = render_and_response(&mut server, &view, ready_version, 3);
+    assert!(response["error"].is_null(), "{response}");
+    assert!(
+        !gate.is_released(),
+        "the refresh answered without waiting on the held diff"
+    );
+    assert!(
+        refreshed["params"]["version"].as_u64().unwrap() > ready_version,
+        "{refreshed}"
+    );
+    let refreshed_lines: Vec<String> =
+        serde_json::from_value(refreshed["params"]["text"].clone()).unwrap();
+    assert!(
+        refreshed_lines.iter().any(|line| line.contains("M f.txt")),
+        "the refreshed render keeps the expanded rows: {refreshed_lines:?}"
+    );
+    assert!(
+        !refreshed_lines.iter().any(|line| line.contains("@@")),
+        "the refreshed render must stay rows-only: {refreshed_lines:?}"
+    );
+
+    gate.release();
+    // The renewed batch has no cutoff and restores the hunks.
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut lines = refreshed_lines;
+    let mut id = 4;
+    while lines != expected.lines && Instant::now() < deadline {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync",
+            "params":{"viewId":view}}));
+        let resync = server.response_with_id(id);
+        id += 1;
+        lines = serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+        if lines == expected.lines {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        lines, expected.lines,
+        "the re-armed batch must restore the fully-expanded hunks"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+/// A3: a user collapse of one section while the batch is in flight wins — the
+/// post-install render respects it, proving the install never rewrote
+/// visibility.
+#[cfg(unix)]
+#[test]
+fn status_open_user_collapse_during_batch_wins_over_the_install() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .staged_file("s.txt", "staged\n")
+        .modify_standard()
+        .build();
+    let (_config, config_arg) = open_seed_config();
+    let gate = GatedGit::arm("diff");
+    let gate_env = gate.child_env();
+    let env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn_with_args(&["--config", &config_arg], &env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let ready_version = ready["params"]["version"].as_u64().unwrap();
+    let ready_lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    assert!(
+        ready_lines.iter().any(|line| line.contains("s.txt")),
+        "the seed render shows the staged file row: {ready_lines:?}"
+    );
+    let staged_line = ready_lines
+        .iter()
+        .position(|line| line == "Staged changes (1)")
+        .expect("the staged section header");
+    gate.wait_entered();
+
+    // Collapse the staged section while the batch is held: the user decision
+    // must survive the install.
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.toggle-section","version":ready_version,
+        "cursor":{"line":staged_line,"column":0}}}));
+    let (collapsed, response) = render_and_response(&mut server, &view, ready_version, 3);
+    assert!(response["error"].is_null(), "{response}");
+    assert!(
+        !gate.is_released(),
+        "the collapse must not fetch the other section inline"
+    );
+    let collapsed_lines: Vec<String> =
+        serde_json::from_value(collapsed["params"]["text"].clone()).unwrap();
+    assert!(
+        !collapsed_lines.iter().any(|line| line.contains("s.txt")),
+        "the collapsed section hides its file row: {collapsed_lines:?}"
+    );
+    assert!(
+        !collapsed_lines.iter().any(|line| line.contains("@@")),
+        "no hunk arrives inline while the batch is held: {collapsed_lines:?}"
+    );
+
+    gate.release();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut lines = collapsed_lines;
+    let mut id = 4;
+    while !lines.iter().any(|line| line.contains("@@")) && Instant::now() < deadline {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync",
+            "params":{"viewId":view}}));
+        let resync = server.response_with_id(id);
+        id += 1;
+        lines = serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+        if lines.iter().any(|line| line.contains("@@")) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        lines.iter().any(|line| line.contains("+line3 CHANGED")),
+        "the batch must install the unstaged hunks: {lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("s.txt")),
+        "the install must respect the user's collapse: {lines:?}"
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());

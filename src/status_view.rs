@@ -93,6 +93,17 @@ pub struct StatusView {
     /// Cleared by the first visibility command (or by the fetch installing), so
     /// the fast-path expansion never overrides a user-opened section.
     auto_expand: bool,
+    /// The opening configuration this view was seeded with.
+    opening: StatusOpening,
+    /// Whether uncached hunks belong to a background batch rather than render.
+    ///
+    /// Seeded-open views publish expanded sections and file rows before their
+    /// hunks arrive, so their first ready render and every refresh render must
+    /// not synchronously fetch the diffs (which would hold the session and
+    /// repository locks across the whole batch). Cleared when the batch installs
+    /// or when a refresh that arms no batch settles the view back to on-demand
+    /// loading.
+    awaiting_batch: bool,
     /// Optional maximum rendered line count for a section.
     section_line_limit: Option<usize>,
 }
@@ -118,10 +129,22 @@ pub struct FreshStatus {
     renames: RenameMaps,
 }
 
-/// A background hunk fetch requested by a deferred opening's closed render.
+/// A background hunk fetch requested by an opening's published render.
 pub struct TimedFetch {
     generation: u64,
     files: Vec<(String, bool)>,
+    /// Whether this batch completes without the open-promise cutoff.
+    ///
+    /// Seeded-open views stream their hunks regardless of how long the fetch
+    /// takes; `auto` keeps the promise so a slow fetch leaves sections closed.
+    unbounded: bool,
+}
+
+impl TimedFetch {
+    /// Whether this batch completes without the open-promise cutoff.
+    pub fn unbounded(&self) -> bool {
+        self.unbounded
+    }
 }
 
 /// Hunks fetched in the background for one still-current deferred generation.
@@ -200,6 +223,8 @@ impl StatusView {
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
             auto_expand: false,
+            opening: StatusOpening::Auto,
+            awaiting_batch: false,
             section_line_limit: None,
         }
     }
@@ -226,9 +251,11 @@ impl StatusView {
         view.state = StatusState::Loading {
             branch: Some(branch.into()),
         };
+        view.opening = opening;
         match opening {
-            // The sync seed: unknown nodes expanded, deepest level, no fetch.
-            StatusOpening::Open => {}
+            // The sync seed: unknown nodes expanded, deepest level. The hunks
+            // arrive from the no-cutoff background batch, never from the render.
+            StatusOpening::Open => view.awaiting_batch = true,
             StatusOpening::Auto => {
                 view.level = LEVEL_OPENING;
                 view.visibility = default_visibility();
@@ -287,17 +314,24 @@ impl StatusView {
         // Git state so the next render reloads them from the current one.
         self.hunks.clear();
         self.renames = fresh.renames;
+        // A seeded-open view republishes expanded sections and file rows; its
+        // hunks arrive from a fresh background batch, so this render must not
+        // fetch them inline.
+        self.awaiting_batch = self.opening == StatusOpening::Open;
         true
     }
 
-    /// The files a deferred opening still needs for its background fetch.
+    /// The files a background fetch still needs for this opening's snapshot.
     ///
     /// A refresh renews the generation and exposes a new fetch here, whose
-    /// promise starts at the refresh render's publish instant. Returns `None`
-    /// once the opening default has been consumed or overridden, so a
-    /// user-opened section is never expanded on the fetch's behalf.
+    /// deadline starts at the refresh render's publish instant. A seeded-open
+    /// view always exposes one and its batch completes without the promise
+    /// cutoff; `auto` exposes one only until the opening default is consumed or
+    /// overridden, so a user-opened section is never expanded on the fetch's
+    /// behalf.
     pub fn timed_fetch(&self) -> Option<TimedFetch> {
-        if !self.auto_expand || !matches!(self.state, StatusState::Ready { .. }) {
+        let streams = self.opening == StatusOpening::Open;
+        if (!self.auto_expand && !streams) || !matches!(self.state, StatusState::Ready { .. }) {
             return None;
         }
         let files = self
@@ -309,6 +343,7 @@ impl StatusView {
         Some(TimedFetch {
             generation: self.generation,
             files,
+            unbounded: streams,
         })
     }
 
@@ -339,17 +374,26 @@ impl StatusView {
         }
     }
 
-    /// Install a background fetch only into its still-current deferred opening.
+    /// Install a background fetch only into its still-current opening.
     ///
-    /// The fetch beat the promise, so this reproduces the synchronous
-    /// fully-expanded render (level `LEVEL_MAX`) and opens the three sections
-    /// that still carried the opening Collapsed default. A superseded
-    /// generation or a user visibility command discards it silently.
+    /// `auto` installs only when the fetch beat the promise: it reproduces the
+    /// synchronous fully-expanded render (level `LEVEL_MAX`) and opens the three
+    /// sections that still carried the opening Collapsed default. A seeded-open
+    /// view installs whenever its generation is current, because that batch has
+    /// no cutoff; it keeps the seeded visibility and level untouched so a user
+    /// collapse during streaming still wins. A superseded generation is
+    /// discarded silently in both modes.
     pub fn install_timed_hunks(&mut self, timed: TimedHunks) -> bool {
-        if timed.generation != self.generation
-            || !self.auto_expand
-            || !matches!(self.state, StatusState::Ready { .. })
-        {
+        if timed.generation != self.generation || !matches!(self.state, StatusState::Ready { .. }) {
+            return false;
+        }
+        if self.opening == StatusOpening::Open {
+            self.hunks = timed.hunks;
+            self.renames = timed.renames;
+            self.awaiting_batch = false;
+            return true;
+        }
+        if !self.auto_expand {
             return false;
         }
         self.hunks = timed.hunks;
@@ -361,6 +405,19 @@ impl StatusView {
         }
         self.auto_expand = false;
         true
+    }
+
+    /// Return a seeded-open view to on-demand rendering after a refresh that
+    /// armed no background batch.
+    ///
+    /// Watcher, mutation and key-bound refreshes never re-arm the streaming
+    /// batch (only a command `common.refresh` does), so their rows-only render
+    /// is final for that snapshot. Clearing the gate lets a user re-expansion
+    /// load that section's hunks inline through the normal lazy path.
+    pub fn settle_open_refresh(&mut self) {
+        if self.opening == StatusOpening::Open {
+            self.awaiting_batch = false;
+        }
     }
 
     /// End loading with a readable error if this acquisition is still current.
@@ -451,18 +508,18 @@ impl StatusView {
             ));
             return tree;
         };
-        for (section, path) in self.file_keys() {
-            if section == "untracked"
-                || !self.visibility.is_expanded(&format!("section:{section}"))
-                || !self.visibility.is_expanded(&format!("{section}/{path}"))
-            {
-                continue;
-            }
-            let key = (path.clone(), section == "staged");
-            if !self.hunks.contains_key(&key) {
-                let hunk_started = std::time::Instant::now();
-                let loaded =
-                    match self.renames.origins(&self.repo, key.1).and_then(|origins| {
+        if !self.awaiting_batch {
+            for (section, path) in self.file_keys() {
+                if section == "untracked"
+                    || !self.visibility.is_expanded(&format!("section:{section}"))
+                    || !self.visibility.is_expanded(&format!("{section}/{path}"))
+                {
+                    continue;
+                }
+                let key = (path.clone(), section == "staged");
+                if !self.hunks.contains_key(&key) {
+                    let hunk_started = std::time::Instant::now();
+                    let loaded = match self.renames.origins(&self.repo, key.1).and_then(|origins| {
                         self.repo.file_hunks_with_origins(&path, key.1, origins)
                     }) {
                         Ok(hunks) => hunks,
@@ -471,19 +528,20 @@ impl StatusView {
                             Vec::new()
                         }
                     };
-                crate::runner::trace_current(
-                    "phase_hunk_acquisition",
-                    serde_json::json!({ "duration_ms": hunk_started.elapsed().as_secs_f64() * 1000.0, "path": path, "staged": key.1 }),
-                );
-                self.hunks.insert(key.clone(), loaded);
-            }
-            if self.level < 4 {
-                for hunk in self.hunks.get(&key).into_iter().flatten() {
-                    let id = format!("{section}/{path}/hunk:{}", hunk.id);
-                    // The level only supplies a default for hunks whose body
-                    // the user has not explicitly shown or hidden.
-                    if self.visibility.explicit_state(&id).is_none() {
-                        self.visibility.set(id, VisibilityState::Collapsed);
+                    crate::runner::trace_current(
+                        "phase_hunk_acquisition",
+                        serde_json::json!({ "duration_ms": hunk_started.elapsed().as_secs_f64() * 1000.0, "path": path, "staged": key.1 }),
+                    );
+                    self.hunks.insert(key.clone(), loaded);
+                }
+                if self.level < 4 {
+                    for hunk in self.hunks.get(&key).into_iter().flatten() {
+                        let id = format!("{section}/{path}/hunk:{}", hunk.id);
+                        // The level only supplies a default for hunks whose body
+                        // the user has not explicitly shown or hidden.
+                        if self.visibility.explicit_state(&id).is_none() {
+                            self.visibility.set(id, VisibilityState::Collapsed);
+                        }
                     }
                 }
             }
