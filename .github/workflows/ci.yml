@@ -149,8 +149,16 @@ jobs:
       # ui-unit runs tests/ui/test_driver.py, whose artifact check needs a
       # VSCode-compatible editor on PATH; the default `test` shell omits it, so
       # develop the opt-in `vscode` shell (which inherits `test` via inputsFrom).
-      - name: make ui-unit ui-test
-        run: nix develop .#vscode --no-update-lock-file -c env CI=1 make ui-unit ui-test V=1
+      - name: make ui-unit
+        run: nix develop .#vscode --no-update-lock-file -c env CI=1 make ui-unit V=1
+
+      # Cheap one-scenario run proving the default `test` shell can drive the UI
+      # harness before the full suite runs there.
+      - name: make ui-file FILE=tests/ui/smoke.scn
+        run: nix develop --no-update-lock-file -c env CI=1 make ui-file FILE=tests/ui/smoke.scn V=1
+
+      - name: make ui-test
+        run: nix develop --no-update-lock-file -c env CI=1 make ui-test V=1
 
       - name: Upload UI artefacts
         if: failure()

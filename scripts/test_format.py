@@ -43,7 +43,9 @@ LINUX_JOB_COMMANDS = {
     "documentation": (f"{NIX_DEVELOP} make docs-artifacts-check docs-check",),
     "ui-test": (
         f"{NIX_DEVELOP} make build",
-        "nix develop .#vscode --no-update-lock-file -c env CI=1 make ui-unit ui-test",
+        "nix develop .#vscode --no-update-lock-file -c env CI=1 make ui-unit",
+        f"{NIX_DEVELOP} env CI=1 make ui-file FILE=tests/ui/smoke.scn",
+        f"{NIX_DEVELOP} env CI=1 make ui-test",
     ),
 }
 
