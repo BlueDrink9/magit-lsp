@@ -1256,7 +1256,9 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
-    let mut server = TestServer::spawn(&env);
+    // Zero discards the deferred open's background fetch deterministically, so
+    // the exit render below can never observe an installed hunk body.
+    let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "0"], &env);
     server.initialize_rich(json!({}));
     let mut open = open_view_message(2, &repo_param(tmp.path()));
     open["params"]["traceId"] = json!(7);
