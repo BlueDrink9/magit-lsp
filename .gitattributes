@@ -1,3 +1,8 @@
+# Check every tracked text file out with LF ending on every platform: the
+# committed schema artifacts are read and byte-compared with raw "\n" (see
+# tests/schema.rs and make schema-check), so a CRLF checkout breaks them.
+* text=auto eol=lf
+
 # Recorded example artifacts are compared byte-for-byte by the replay tests, so
 # they must be checked out with LF endings on every platform (Windows runners
 # default to core.autocrlf=true).
