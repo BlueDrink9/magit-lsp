@@ -560,7 +560,7 @@ fn an_unknown_uri_returns_no_tokens() {
         "params": {"textDocument": {"uri": "file:///nope/status"}},
     }));
     let response = server.response_with_id(2);
-    assert_eq!(response["result"]["data"], json!([]), "{response}");
+    assert_eq!(response["result"], serde_json::Value::Null, "{response}");
     server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
     server.response_with_id(99);
     server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
