@@ -2,7 +2,7 @@
 
 use magit_lsp::config::{
     default_config_path, load_config, resolve_config_path_from, ConfigError, ConfigService,
-    LoadOptions, Profile, TitleStyle,
+    LoadOptions, Profile, StatusOpen, TitleStyle,
 };
 use magit_lsp::keymap::Keymap;
 use std::ffi::OsStr;
@@ -716,11 +716,11 @@ fn trusted_repo_config_applies_keys_and_display_but_not_profile_or_trust() {
     let global = dir.path().join("global.toml");
     write(
         &global,
-        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"u\"]\n[diff]\ncontext = 7\n[sections]\ndefault_visibility = \"hunks\"\n",
+        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"u\"]\n[diff]\ncontext = 7\n[sections]\ndefault_visibility = \"open\"\n",
     );
     write(
         &repo.path().join(".magit-lsp.toml"),
-        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"z\"]\n[sections]\ndefault_visibility = \"files\"\n[diff]\ncontext = 11\n",
+        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"z\"]\n[sections]\ndefault_visibility = \"collapsed\"\n[diff]\ncontext = 11\n",
     );
     let config = load_config(&LoadOptions {
         config_path: Some(global),
@@ -735,8 +735,29 @@ fn trusted_repo_config_applies_keys_and_display_but_not_profile_or_trust() {
     assert_eq!(config.profile, Profile::Standard);
     assert!(config.trust_repo_config);
     assert_eq!(status_keymap(&config, "status.stage"), vec!["z"]);
-    assert_eq!(config.sections.default_visibility.as_deref(), Some("files"));
+    assert_eq!(
+        config.sections.default_visibility,
+        Some(StatusOpen::Collapsed)
+    );
     assert_eq!(config.diff.context, 11);
+}
+
+#[test]
+fn status_open_visibility_defaults_to_auto_and_rejects_unknown_values() {
+    let dir = TempDir::new().unwrap();
+    let defaults = dir.path().join("auto.toml");
+    write(&defaults, "profile = \"vim\"\n");
+    assert_eq!(load(&defaults).unwrap().status_open(), StatusOpen::Auto);
+
+    let named = dir.path().join("named.toml");
+    write(&named, "[sections]\ndefault_visibility = \"collapsed\"\n");
+    assert_eq!(load(&named).unwrap().status_open(), StatusOpen::Collapsed);
+
+    let bad = dir.path().join("bad.toml");
+    write(&bad, "[sections]\ndefault_visibility = \"hunks\"\n");
+    let error = load(&bad).unwrap_err();
+    assert!(error.to_string().contains("default_visibility"), "{error}");
+    assert!(error.to_string().contains("bad.toml:2"), "{error}");
 }
 
 #[test]

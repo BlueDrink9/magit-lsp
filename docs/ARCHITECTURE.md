@@ -758,7 +758,8 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
 - **Quirks:** `[quirks]` maps known registry ids to booleans; the same object
   may be supplied in `initializationOptions`. Overrides merge by id across layers.
 - Other settings (non-exhaustive): `[diff] context, whitespace`, `[sections]
-  order, default_visibility`, `[log] default_args, margin`, `[ui]
+  order, default_visibility = auto|open|collapsed` (seed the interactive status
+  opening), `[log] default_args, margin`, `[ui]
   confirm_discard = true`, `[pick] max_items, clients`. Menu argument persistence
   semantics must be reviewed before adding any persistence setting.
 - Hot reload on file change or `workspace/didChangeConfiguration`; invalid

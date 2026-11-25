@@ -1409,6 +1409,7 @@ fn deliver_refresh_fetch(shared: &Shared, view_id: &str, version: u64) {
         return;
     };
     let shared = shared.clone();
+    let promise = shared.open_promise;
     let view = view_id.to_owned();
     runtime.spawn(async move {
         super::view_execution::spawn_timed_hunks(
@@ -1417,6 +1418,7 @@ fn deliver_refresh_fetch(shared: &Shared, view_id: &str, version: u64) {
             repo,
             view,
             crate::runner::current_trace_id(),
+            promise,
             published,
             fetch,
         );

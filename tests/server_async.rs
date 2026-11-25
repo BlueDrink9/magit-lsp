@@ -199,6 +199,122 @@ fn status_open_fast_background_fetch_expands_like_the_sync_render() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+/// A2: `sections.default_visibility = "open"` over the real server publishes
+/// the synchronous fully-expanded render as the first ready render; the same
+/// fixture under the default (`auto`) still publishes the closed render first.
+#[test]
+fn status_open_config_open_publishes_the_sync_render_first() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("untracked.txt"), "untracked\n");
+    let config = tempfile::tempdir().unwrap();
+    let config_path = config.path().join("open.toml");
+    write(&config_path, "[sections]\ndefault_visibility = \"open\"\n");
+    let config_arg = config_path.to_string_lossy().into_owned();
+
+    let mut server = TestServer::spawn_with_args(&["--config", &config_arg], &[]);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+    let ready = server.wait_for_view_render_after(&view, loading_version);
+    let lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    assert_eq!(
+        lines, expected.lines,
+        "the open seed must publish the sync render as the first ready render"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+
+    let mut server = TestServer::spawn(&[]);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(3, &repo_param(tmp.path())));
+    let opened = server.response_with_id(3);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+    let closed = server.wait_for_view_render_after(&view, loading_version);
+    let closed_lines: Vec<String> =
+        serde_json::from_value(closed["params"]["text"].clone()).unwrap();
+    assert!(
+        !closed_lines.iter().any(|line| line.contains("f.txt")),
+        "the default auto seed must publish the closed render first: {closed_lines:?}"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+/// A3: a large `--open-promise-ms` keeps the auto fast path inside the promise,
+/// so the expanded render installs. The zero case is covered by the text-mode
+/// test, whose `@@` assertion can then never observe hunks.
+#[test]
+fn status_open_large_promise_observes_expanded_install() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("untracked.txt"), "untracked\n");
+    let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "30000"], &[]);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let _ = server.recv();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut lines: Vec<String> = Vec::new();
+    let mut id = 3;
+    while Instant::now() < deadline {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync",
+            "params":{"viewId":view}}));
+        let resync = server.response_with_id(id);
+        id += 1;
+        lines = serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+        if lines == expected.lines {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        lines, expected.lines,
+        "the long promise must install the fully-expanded render"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 /// A refresh inside the open promise re-arms the deferred fetch with the
 /// refresh render's own deadline, so the sections still expand like the
 /// synchronous render even though the original fetch was superseded.
@@ -918,7 +1034,9 @@ fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
     env.push(("MAGIT_LSP_TRACE", trace_env.as_str()));
-    let mut server = TestServer::spawn(&env);
+    // Zero discards the background fetch deterministically, so the exit render
+    // below can never observe an installed hunk body.
+    let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "0"], &env);
     server.initialize_rich(json!({}));
     let mut open = open_view_message(2, &repo_param(tmp.path()));
     open["params"]["traceId"] = json!(7);

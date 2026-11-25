@@ -95,6 +95,7 @@ pub(super) fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
                 p.viewport,
                 discovered_repo,
                 branch,
+                config.config().status_open().into(),
             )?
         } else {
             session.open_with_discovered_repo(
@@ -306,6 +307,7 @@ pub(super) async fn finish_status_acquisition(
                     repo_path.clone(),
                     view_id.clone(),
                     trace_id,
+                    shared.open_promise,
                     published,
                     fetch,
                 );
@@ -417,6 +419,7 @@ pub(super) fn spawn_timed_hunks(
     repo_path: String,
     view_id: String,
     trace_id: u64,
+    promise: std::time::Duration,
     published: std::time::Instant,
     fetch: crate::status_view::TimedFetch,
 ) {
@@ -429,12 +432,12 @@ pub(super) fn spawn_timed_hunks(
         });
         // Bound the wait by the promise itself: a fetch still running at the
         // deadline is abandoned so the closed render stands.
-        let remaining = crate::status_view::OPEN_PROMISE.saturating_sub(published.elapsed());
+        let remaining = promise.saturating_sub(published.elapsed());
         let hunks = match tokio::time::timeout(remaining, fetched).await {
             Ok(Ok(hunks)) => hunks,
             _ => return,
         };
-        if !crate::status_view::open_within_promise(published, std::time::Instant::now()) {
+        if !crate::status_view::open_within(promise, published, std::time::Instant::now()) {
             return;
         }
         let turn = shared.reserve_mutation(repo_path.clone());

@@ -140,6 +140,8 @@ impl Drop for PublicationGuard {
 pub struct ServerOptions {
     /// Explicit `--config <path>`; wins over `MAGIT_LSP_CONFIG`.
     pub config_path: Option<std::path::PathBuf>,
+    /// `--open-promise-ms <ms>`; overrides [`crate::status_view::OPEN_PROMISE`].
+    pub open_promise_ms: Option<u64>,
 }
 
 /// Client capabilities that affect key delivery (§3.9).
@@ -209,6 +211,8 @@ struct Shared {
     next_plain_incarnation: Arc<AtomicU64>,
     /// Why the initial configuration load failed, if it did.
     startup_error: Option<String>,
+    /// How long a deferred opening's background fetch may take to install.
+    open_promise: std::time::Duration,
     /// The writer channel, so a blocking command can send `view/prompt`.
     sender: mpsc::UnboundedSender<Message>,
     /// Requests sent to the client, keyed by their JSON-RPC ID.
@@ -301,6 +305,7 @@ impl Shared {
     fn new(
         config: Arc<ConfigService>,
         startup_error: Option<String>,
+        open_promise: std::time::Duration,
         sender: mpsc::UnboundedSender<Message>,
     ) -> Self {
         static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
@@ -325,6 +330,7 @@ impl Shared {
             plain_incarnations: Arc::new(Mutex::new(HashMap::new())),
             next_plain_incarnation: Arc::new(AtomicU64::new(0)),
             startup_error,
+            open_promise,
             sender: sender.clone(),
             outbound: Arc::new(Mutex::new(HashMap::new())),
             next_outbound: Arc::new(AtomicU64::new(0)),
@@ -1328,7 +1334,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
             )
         }
     };
-    let shared = Shared::new(config, startup_error, sender.clone());
+    let open_promise = options
+        .open_promise_ms
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(crate::status_view::OPEN_PROMISE);
+    let shared = Shared::new(config, startup_error, open_promise, sender.clone());
     let listener_owner = Arc::new(shared.clone());
     if let Some(path) = editor::start_listener(
         {
@@ -2202,7 +2212,15 @@ mod commit_tests {
         })
         .unwrap();
         let (sender, receiver) = mpsc::unbounded_channel();
-        (Shared::new(Arc::new(config), None, sender), receiver)
+        (
+            Shared::new(
+                Arc::new(config),
+                None,
+                crate::status_view::OPEN_PROMISE,
+                sender,
+            ),
+            receiver,
+        )
     }
 
     async fn poll_pending<F: std::future::Future>(mut future: std::pin::Pin<&mut F>) {

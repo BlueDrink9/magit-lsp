@@ -141,13 +141,38 @@ pub struct DiffSettings {
     pub whitespace: Option<String>,
 }
 
+/// How the interactive status view's deferred opening is seeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusOpen {
+    /// Closed first render, expanded by a background fetch that beats the open
+    /// promise. The product default.
+    #[default]
+    Auto,
+    /// Fully expanded from the first ready render, like the synchronous open.
+    Open,
+    /// Closed, with no background fetch.
+    Collapsed,
+}
+
+impl StatusOpen {
+    /// Parse a `sections.default_visibility` value.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(Self::Auto),
+            "open" => Some(Self::Open),
+            "collapsed" => Some(Self::Collapsed),
+            _ => None,
+        }
+    }
+}
+
 /// Section ordering and initial visibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionSettings {
     /// keep-for: TASKS §3.18 typed layering decision; currently inactive.
     pub order: Option<Vec<String>>,
-    /// keep-for: TASKS §3.18 typed layering decision; currently inactive.
-    pub default_visibility: Option<String>,
+    /// The interactive status opening's seeded state; `None` is [`StatusOpen::Auto`].
+    pub default_visibility: Option<StatusOpen>,
 }
 
 /// UI behaviour settings.
@@ -361,6 +386,13 @@ impl Default for Config {
             presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
+    }
+}
+
+impl Config {
+    /// The interactive status opening's seeded state.
+    pub fn status_open(&self) -> StatusOpen {
+        self.sections.default_visibility.unwrap_or_default()
     }
 }
 
@@ -590,7 +622,7 @@ struct Layered {
     diff_context: Option<u32>,
     diff_whitespace: Option<String>,
     sections_order: Option<Vec<String>>,
-    sections_default_visibility: Option<String>,
+    sections_default_visibility: Option<StatusOpen>,
     ui_confirm_discard: Option<bool>,
     log_default_args: Option<Vec<String>>,
     log_margin: Option<u32>,
@@ -815,8 +847,14 @@ fn apply_document(
                                 Some(string_array(value, "sections.order", file, source)?)
                         }
                         "default_visibility" => {
-                            layered.sections_default_visibility =
-                                Some(string(value, "sections.default_visibility", file, line)?)
+                            let value = string(value, "sections.default_visibility", file, line)?;
+                            let parsed = StatusOpen::parse(&value).ok_or_else(|| {
+                                ConfigError::new(
+                                    "`sections.default_visibility` must be `auto`, `open` or `collapsed`",
+                                )
+                                .at_file_line(file, line)
+                            })?;
+                            layered.sections_default_visibility = Some(parsed);
                         }
                         other => return Err(unknown_key(file, line, "sections", other)),
                     }

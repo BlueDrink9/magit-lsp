@@ -8,7 +8,7 @@ use expect_test::expect;
 use lsp_types::{Position, SymbolKind};
 use magit_lsp::git::{diff_invocation_count, FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
-use magit_lsp::status_view::{self, StatusView};
+use magit_lsp::status_view::{self, StatusOpening, StatusView};
 use magit_lsp::tree::{NodeKind, Token, Tree, Visibility, VisibilityState};
 use magit_lsp::view::{Ctx, View, Viewport, VisibilityCommand};
 
@@ -277,6 +277,70 @@ fn deferred_install_renders_only_head_and_closed_section_headers() {
         before,
         "the closed render must not diff any file"
     );
+}
+
+/// A1: the configured opening seeds the deferred view. `open` reproduces the
+/// synchronous fully-expanded render on the first ready render and arms no
+/// background fetch; `collapsed` stays closed and arms none; `auto` keeps the
+/// closed render plus its fetch.
+#[test]
+fn configured_opening_seeds_expanded_closed_or_auto() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
+    let oracle = StatusView::open_repo(repo.clone()).unwrap().render(&ctx);
+    let closed = [
+        "Head: main",
+        "",
+        "Staged changes (0)",
+        "",
+        "Unstaged changes (1)",
+        "",
+        "Untracked files (1)",
+    ];
+
+    let mut expanded =
+        StatusView::loading_with_branch_opening(repo.clone(), "main", StatusOpening::Open);
+    let fresh = expanded.acquire_fresh_state().unwrap();
+    assert!(expanded.install_fresh_state(fresh));
+    assert!(
+        expanded.timed_fetch().is_none(),
+        "the expanded opening must not arm a background fetch"
+    );
+    assert_eq!(expanded.render(&ctx).lines, oracle.lines);
+
+    let mut collapsed =
+        StatusView::loading_with_branch_opening(repo.clone(), "main", StatusOpening::Collapsed);
+    let fresh = collapsed.acquire_fresh_state().unwrap();
+    assert!(collapsed.install_fresh_state(fresh));
+    assert!(
+        collapsed.timed_fetch().is_none(),
+        "the collapsed opening must not arm a background fetch"
+    );
+    let tree = collapsed.render(&ctx);
+    assert_eq!(tree.lines, closed);
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .filter(|node| matches!(node.kind, NodeKind::File | NodeKind::Hunk | NodeKind::Line))
+            .count(),
+        0
+    );
+
+    let mut auto = StatusView::loading_with_branch(repo, "main");
+    let fresh = auto.acquire_fresh_state().unwrap();
+    assert!(auto.install_fresh_state(fresh));
+    assert!(
+        auto.timed_fetch().is_some(),
+        "auto keeps the closed render plus its background fetch"
+    );
+    assert_eq!(auto.render(&ctx).lines, closed);
 }
 
 /// A2: opening a section renders its files and fetches their hunks on demand

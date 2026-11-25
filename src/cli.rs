@@ -18,7 +18,7 @@ pub enum Outcome {
 }
 
 const USAGE: &str = "\
-Usage: magit-lsp [--config <path>]
+Usage: magit-lsp [--config <path>] [--open-promise-ms <ms>]
        magit-lsp keymap [--format json|vscode|neovim|markdown] [--profile standard|vim] [--config <path>] [--check]
        magit-lsp parity [--format markdown|json]
        magit-lsp --editor-helper <path>
@@ -89,7 +89,8 @@ fn dispatch(args: Vec<String>, out: &mut impl Write, err: &mut impl Write) -> Ou
     }
 }
 
-/// The server accepts only `--config`; anything else is a usage error.
+/// The server accepts `--config` and `--open-promise-ms`; anything else is a
+/// usage error.
 fn parse_server_args(args: &[String]) -> Result<ServerOptions, String> {
     let mut options = ServerOptions::default();
     let mut iter = args.iter();
@@ -99,11 +100,22 @@ fn parse_server_args(args: &[String]) -> Result<ServerOptions, String> {
             options.config_path = Some(PathBuf::from(value));
         } else if let Some(value) = arg.strip_prefix("--config=") {
             options.config_path = Some(PathBuf::from(value));
+        } else if arg == "--open-promise-ms" {
+            let value = iter.next().ok_or("`--open-promise-ms` needs a value")?;
+            options.open_promise_ms = Some(parse_promise_ms(value)?);
+        } else if let Some(value) = arg.strip_prefix("--open-promise-ms=") {
+            options.open_promise_ms = Some(parse_promise_ms(value)?);
         } else {
             return Err(format!("unknown option `{arg}`"));
         }
     }
     Ok(options)
+}
+
+fn parse_promise_ms(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|_| format!("`--open-promise-ms` needs a non-negative integer, got `{value}`"))
 }
 
 struct KeymapArgs {

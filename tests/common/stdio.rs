@@ -114,6 +114,14 @@ impl TestServer {
         Self::from_command(Command::new(server_binary()), extra_env)
     }
 
+    /// Spawn the real binary with explicit server arguments, such as
+    /// `--config <path>` or `--open-promise-ms <ms>`.
+    pub fn spawn_with_args(args: &[&str], extra_env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(server_binary());
+        command.args(args);
+        Self::from_command(command, extra_env)
+    }
+
     fn from_command(mut command: Command, extra_env: &[(&str, &str)]) -> Self {
         command
             .stdin(Stdio::piped())

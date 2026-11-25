@@ -37,7 +37,41 @@ pub const OPEN_PROMISE: std::time::Duration = std::time::Duration::from_millis(5
 ///
 /// The comparison is inclusive so the boundary itself still opens the diffs.
 pub fn open_within_promise(published: std::time::Instant, completed: std::time::Instant) -> bool {
-    completed.saturating_duration_since(published) <= OPEN_PROMISE
+    open_within(OPEN_PROMISE, published, completed)
+}
+
+/// Whether a fetch completed inside `promise` of `published`.
+///
+/// The comparison is inclusive so the boundary itself still opens the diffs.
+pub fn open_within(
+    promise: std::time::Duration,
+    published: std::time::Instant,
+    completed: std::time::Instant,
+) -> bool {
+    completed.saturating_duration_since(published) <= promise
+}
+
+/// The state a deferred interactive status opening starts from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusOpening {
+    /// Closed first render, expanded by a background fetch that beats the open
+    /// promise. The product default.
+    #[default]
+    Auto,
+    /// The synchronous fully-expanded state, published on the first ready render.
+    Open,
+    /// Closed, with no background fetch.
+    Collapsed,
+}
+
+impl From<crate::config::StatusOpen> for StatusOpening {
+    fn from(value: crate::config::StatusOpen) -> Self {
+        match value {
+            crate::config::StatusOpen::Auto => Self::Auto,
+            crate::config::StatusOpen::Open => Self::Open,
+            crate::config::StatusOpen::Collapsed => Self::Collapsed,
+        }
+    }
 }
 
 /// A live status view: the repository root plus the last read status.
@@ -175,14 +209,42 @@ impl StatusView {
     /// This is the deferred interactive opening: when the acquisition installs,
     /// the first full render shows only the closed section headers.
     pub fn loading_with_branch(repo: GitRepo, branch: impl Into<String>) -> Self {
+        Self::loading_with_branch_opening(repo, branch, StatusOpening::Auto)
+    }
+
+    /// Create a loading status view seeded from an opening configuration.
+    ///
+    /// `Open` starts from the synchronous fully-expanded state (no background
+    /// fetch); `Collapsed` starts closed and never arms one; `Auto` is
+    /// [`Self::loading_with_branch`].
+    pub fn loading_with_branch_opening(
+        repo: GitRepo,
+        branch: impl Into<String>,
+        opening: StatusOpening,
+    ) -> Self {
         let mut view = Self::loading(repo);
         view.state = StatusState::Loading {
             branch: Some(branch.into()),
         };
-        view.level = LEVEL_OPENING;
-        view.visibility = default_visibility();
-        view.auto_expand = true;
+        match opening {
+            // The sync seed: unknown nodes expanded, deepest level, no fetch.
+            StatusOpening::Open => {}
+            StatusOpening::Auto => {
+                view.level = LEVEL_OPENING;
+                view.visibility = default_visibility();
+                view.auto_expand = true;
+            }
+            StatusOpening::Collapsed => {
+                view.level = LEVEL_OPENING;
+                view.visibility = default_visibility();
+            }
+        }
         view
+    }
+
+    /// The visibility level the view will render at, or was last set to.
+    pub fn level(&self) -> u8 {
+        self.level
     }
 
     /// Acquire current Git state tagged with this view's lifecycle generation.

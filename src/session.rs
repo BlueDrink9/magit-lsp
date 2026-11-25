@@ -1187,17 +1187,15 @@ impl Session {
         viewport: Viewport,
         repo: GitRepo,
         branch: String,
+        opening: crate::status_view::StatusOpening,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        let opened = self.open_provider_view(
-            id,
-            placement,
-            viewport,
-            Box::new(StatusView::loading_with_branch(repo, branch)),
-        )?;
-        // The deferred opening starts with its sections closed, so keep the
-        // cycle tracker on that level instead of the default full one.
+        let view = StatusView::loading_with_branch_opening(repo, branch, opening);
+        let level = view.level();
+        let opened = self.open_provider_view(id, placement, viewport, Box::new(view))?;
+        // Track the seeded level so key/cycle detail starts where the seeding put
+        // it (the closed openings start at section headers only).
         if let Some(view) = self.views.get_mut(&opened.0.id) {
-            view.visibility_level = 1;
+            view.visibility_level = level;
         }
         Ok(opened)
     }
