@@ -1,6 +1,7 @@
 # Early T042: creating a tag from the status tag menu stays on HEAD.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: t
 wait
 expect screen contains "git tag"

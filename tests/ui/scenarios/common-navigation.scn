@@ -4,6 +4,7 @@ profile: vim
 profile-only: true
 ---
 wait
+wait screen contains "+line3 CHANGED"
 goto "M f.txt"
 keys: g j
 wait
@@ -22,15 +23,19 @@ keys: g u
 wait
 expect cursor on "Unstaged changes (2)"
 snapshot: hierarchy
-keys: shift+Tab
-wait
-expect screen not-contains "M f.txt"
-expect cursor on "Unstaged changes (2)"
-snapshot: sections-only
+# The timed fetch leaves one extra fold level open: the first back-tab shows
+# file rows only, the second adds hunk headers but still hides their bodies.
 keys: shift+Tab
 wait
 expect screen contains "M f.txt"
 expect screen not-contains "@@"
+expect cursor on "Unstaged changes (2)"
+snapshot: sections-only
+keys: shift+Tab
+wait
+expect screen contains "@@"
+expect screen not-contains "+line3 CHANGED"
+snapshot: hunk-headers
 goto "M f.txt"
 keys: g j
 wait
@@ -41,10 +46,10 @@ expect cursor on "  M f.txt"
 snapshot: folded-siblings
 keys: shift+Tab
 wait
-expect screen contains "@@"
-expect screen not-contains "+line3 CHANGED"
-snapshot: hunk-headers
-keys: shift+Tab
-wait
 expect screen contains "+line3 CHANGED"
 snapshot: expanded
+keys: shift+Tab
+wait
+expect screen not-contains "M f.txt"
+expect screen not-contains "@@"
+snapshot: collapsed

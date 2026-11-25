@@ -25,6 +25,7 @@ expect screen contains "Loading repository status"
 expect screen not-contains "hello"
 release status
 wait screen contains "Unstaged changes (2)"
+wait screen contains "+line3 CHANGED"
 expect screen contains "Head: main"
 expect screen contains "Unstaged changes (2)"
 expect screen contains "M f.txt"

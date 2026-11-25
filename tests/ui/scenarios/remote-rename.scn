@@ -3,6 +3,7 @@ fixture: modified-two-files
 ---
 sh: git init --bare -q /tmp/magit-remote-rename-target
 sh: git remote add origin /tmp/magit-remote-rename-target
+wait screen contains "+line3 CHANGED"
 keys: M
 wait
 expect screen contains "Rename"

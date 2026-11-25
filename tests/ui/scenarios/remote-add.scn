@@ -1,6 +1,7 @@
 # Early T042: adding a remote from the status remote menu prompts for name and URL.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: M
 wait
 expect screen contains "Fetch after add"

@@ -1,6 +1,7 @@
 # Early T043: setting a branch description from the status branch menu writes Git config.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: b
 wait
 expect screen contains "Set the branch description"
