@@ -53,6 +53,34 @@ fn nothing_within(rx: &mpsc::Receiver<Refresh>, quiet: Duration) -> bool {
     }
 }
 
+/// Quiet window used to drain events the fixture queued before the watch armed.
+///
+/// Several times the test debounce, so a burst held by a coalescing backend
+/// (FSEvents delivers events queued before registration once the stream arms)
+/// has settled; still well inside `WAIT`.
+const DRAIN_QUIET: Duration = Duration::from_millis(300);
+
+/// Discard `Refresh`es until the channel is quiet for [`DRAIN_QUIET`], failing
+/// after `WAIT`.
+///
+/// Setup runs Git (`git add`, `commit`) before `RepoWatcher::start`; a platform
+/// that coalesces may still deliver those events after registration, and they
+/// are correctly relevant (`index`, `refs/`), so a test asserting quiet must
+/// drain them first and measure only the writes it performs afterwards.
+fn drain_until_quiet(rx: &mpsc::Receiver<Refresh>) {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "timed out waiting for the fixture's refreshes to settle"
+        );
+        if nothing_within(rx, DRAIN_QUIET.min(remaining)) {
+            return;
+        }
+    }
+}
+
 #[test]
 fn modifying_a_tracked_file_outside_the_editor_refreshes() {
     let (fixture, _repo) = init_repo();
@@ -146,6 +174,11 @@ fn git_internals_do_not_trigger_a_refresh() {
         tx.send(refresh).expect("send refresh");
     })
     .expect("start watcher");
+
+    // The fixture's own Git commands ran before the watch armed; discard any
+    // coalesced delivery of those (a relevant `.git/index` change) so the
+    // assertion below measures only the noise writes.
+    drain_until_quiet(&rx);
 
     // Noise: `.git` internals that never change what a view renders.
     std::fs::create_dir_all(repo.join(".git/objects/ab")).expect("create objects dir");
