@@ -1,7 +1,6 @@
 //! Directional schema generation and committed-artifact drift checks.
 
-#[path = "common/mod.rs"]
-mod fixtures;
+use magit_lsp_test_support as fixtures;
 #[path = "../scripts/generate_schema.rs"]
 mod generate_schema;
 

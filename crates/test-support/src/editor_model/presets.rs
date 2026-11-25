@@ -35,7 +35,7 @@ pub fn model(preset: Preset) -> (EditorModel, Value) {
         Preset::StockNeovim => {
             // anchor: retained initialize capability and clientInfo capture.
             let capture: Value = serde_json::from_str(include_str!(
-                "../../fixtures/lsp_traces/initialize-plain-neovim-0.12.6.json"
+                "../../../../tests/fixtures/lsp_traces/initialize-plain-neovim-0.12.6.json"
             ))
             .unwrap();
             (
@@ -47,7 +47,7 @@ pub fn model(preset: Preset) -> (EditorModel, Value) {
         Preset::Helix => {
             // anchor: retained initialize capability and clientInfo capture.
             let capture: Value = serde_json::from_str(include_str!(
-                "../../fixtures/lsp_traces/initialize-helix-25.07.1.json"
+                "../../../../tests/fixtures/lsp_traces/initialize-helix-25.07.1.json"
             ))
             .unwrap();
             (
@@ -80,7 +80,7 @@ pub fn profile_model(profile: NamedProfile) -> EditorModel {
 
 fn current(preset: Preset) -> (Value, Value) {
     let all: Value = serde_json::from_str(include_str!(
-        "../../fixtures/current-client-capabilities.json"
+        "../../../../tests/fixtures/current-client-capabilities.json"
     ))
     .expect("current capability fixture is JSON");
     let expected_name = match preset {

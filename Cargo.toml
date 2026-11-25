@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/test-support"]
+default-members = [".", "crates/test-support"]
+
 [package]
 name = "magit-lsp"
 version = "0.2.0"
@@ -39,6 +43,7 @@ url = "2.5"
 expect-test = "1"
 proptest = "1"
 rstest = "0.26"
+magit-lsp-test-support = { path = "crates/test-support" }
 
 # Keep `target/` small: line-tables-only debug info instead of full debug info.
 [profile.dev]

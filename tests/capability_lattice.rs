@@ -1,13 +1,9 @@
 //! Strict server executions over recorded capability declarations.
-#[path = "common/client_pump.rs"]
-mod client_pump;
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
 use fixtures::stdio;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::client_pump;
+use magit_lsp_test_support::editor_model;
+use magit_lsp_test_support::fake_editor;
 
 use magit_lsp::file_uri::uri_from_path;
 use serde_json::{json, Value};
@@ -442,7 +438,7 @@ fn draft_chain(
     // identify the template edit by the document it targets rather than by
     // serialized text. Template refresh is gated on the effective
     // applyEdit+documentChanges capabilities (src/server/plain.rs:1284-1295).
-    // These fixtures send no clientInfo (tests/common/stdio.rs:334-345), so the
+    // These fixtures send no clientInfo (crates/test-support/src/stdio.rs:334-345), so the
     // recorded declaration is effective; the assume-document-changes quirk
     // (src/quirks.rs:81-95) only applies to a matching client identity.
     let template_index = client.editor.outbound.iter().position(|m| {

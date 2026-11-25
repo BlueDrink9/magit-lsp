@@ -39,7 +39,7 @@ To rerun only one newline variant, use `make plain-neovim PLAIN_ARGS="--final-ne
 ### R-UI-1 — tmux driver, debug API, scenario runner
 
 **Target files:** `scripts/ui`, `clients/neovim/lua/magit-lsp/debug.lua`, `tests/ui/` (runner, decoder, fixtures, scenarios), `Makefile`, `AGENTS.md`.
-**Reference files:** `scripts/minimal_init.lua`, `tests/common/mod.rs` (determinism env), existing mini.test cases.
+**Reference files:** `scripts/minimal_init.lua`, `crates/test-support/src/lib.rs` (determinism env), existing mini.test cases.
 **Constraints:** no new runtime dependency for the product; the driver may use `tmux`, `nvim`, and either POSIX shell or Python 3. If `tmux` or `nvim` is missing, `make ui-test` prints "SKIP: tmux not found" and exits 0 locally (non-zero in CI).
 
 - [x] **U0.1 Debug API** in `clients/neovim/lua/magit-lsp/debug.lua`:

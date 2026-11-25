@@ -1,6 +1,6 @@
 //! Plain-mode document synchronization store and real stdio coverage.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::TestServer;
 use magit_lsp::docstore::{Change, DocStore, Encoding};

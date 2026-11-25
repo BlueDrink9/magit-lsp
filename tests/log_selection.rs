@@ -1,6 +1,6 @@
 //! Server-owned commit selection and copy lifecycle.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;

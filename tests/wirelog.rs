@@ -2,8 +2,7 @@ use lsp_server::Message;
 use magit_lsp::{transport, wirelog::WireLog};
 use serde_json::json;
 
-#[path = "common/stdio.rs"]
-mod stdio;
+use magit_lsp_test_support::stdio;
 
 #[test]
 fn records_actual_server_transport_and_drains_at_shutdown() {

@@ -30,32 +30,44 @@ pub const PROFILES: &[Profile] = &[
     Profile {
         name: "selection-replace-pair",
         shape: Shape::DeleteThenInsertPair,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/selection-replace-pair.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/selection-replace-pair.jsonl"
+        ),
     },
     Profile {
         name: "selection-replace-single",
         shape: Shape::RangedOneCharacterReplace,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/selection-replace-single.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/selection-replace-single.jsonl"
+        ),
     },
     Profile {
         name: "rangeless-full-text",
         shape: Shape::Other,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/rangeless-full-text.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/rangeless-full-text.jsonl"
+        ),
     },
     Profile {
         name: "batched-changes",
         shape: Shape::Other,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/batched-changes.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/batched-changes.jsonl"
+        ),
     },
     Profile {
         name: "paste-multichar",
         shape: Shape::Other,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/paste-multichar.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/paste-multichar.jsonl"
+        ),
     },
     Profile {
         name: "undo-after-repair",
         shape: Shape::Other,
-        trace: include_str!("../../fixtures/lsp_traces/plain_keys/undo-after-repair.jsonl"),
+        trace: include_str!(
+            "../../../../tests/fixtures/lsp_traces/plain_keys/undo-after-repair.jsonl"
+        ),
     },
 ];
 

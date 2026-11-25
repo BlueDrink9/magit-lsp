@@ -1,7 +1,7 @@
 //! Process log view (R-3.3): opening, rendering real Git invocations, copying a
 //! record's command, stable node ids and clearing the ring.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;

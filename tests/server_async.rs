@@ -1,6 +1,6 @@
 //! The real server over real pipes: framing, pipelining, concurrency, ordering.
 
-mod common;
+use magit_lsp_test_support as common;
 #[path = "server_async/repository.rs"]
 mod repository;
 #[path = "server_async/rich.rs"]

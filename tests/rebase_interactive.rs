@@ -1,4 +1,4 @@
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::server_binary;
 use common::{git, write, TestSession, STATUS_VIEWPORT};

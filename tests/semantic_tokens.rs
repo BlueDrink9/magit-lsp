@@ -1,7 +1,7 @@
 //! `textDocument/semanticTokens/full` over real pipes: the encoded data must
 //! decode back to the tree's tokens, with UTF-16 columns and modifiers.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::*;
 use common::*;

@@ -9,7 +9,7 @@ Two rules apply to `tests/**/*.rs` and `src/**/*.rs`:
 2. String literals passed to `.join(…)`, `.with_file_name(…)`, `.rename(…)` and
    the tempdir `.prefix(…)` builder are valid Windows path segments. The
    device-name, reserved-character and trailing-dot/space tables are parsed
-   from `windows_path_problem` in `tests/common/mod.rs`, so the runtime guard
+   from `windows_path_problem` in `crates/test-support/src/lib.rs`, so the runtime guard
    and this checker share one definition rather than drifting apart.
 
 An item annotated `#[should_panic(expected = "windows-reserved…")]` is testing
@@ -25,7 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-NAME_TABLE_SOURCE = Path('tests/common/mod.rs')
+NAME_TABLE_SOURCE = Path('crates/test-support/src/lib.rs')
 SCAN_ROOTS = (Path('tests'), Path('src'))
 NAME_METHODS = ('join', 'with_file_name', 'rename', 'prefix')
 WINDOWS_OK = re.compile(r'windows-ok\s*:\s*\S')

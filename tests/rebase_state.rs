@@ -1,4 +1,4 @@
-mod common;
+use magit_lsp_test_support as common;
 
 use common::{git, write};
 use common::{message_texts, RepoFixture, TestSession, WIDE_VIEWPORT};

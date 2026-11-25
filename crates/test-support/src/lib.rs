@@ -5,7 +5,11 @@
 
 #![allow(dead_code)]
 
+pub mod client_pump;
+pub mod editor_model;
+pub mod fake_editor;
 pub mod recording_prompt_ui;
+pub mod recording_ui;
 
 use magit_lsp::git::GitRepo;
 use std::collections::hash_map::DefaultHasher;

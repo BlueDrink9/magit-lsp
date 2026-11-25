@@ -1,6 +1,6 @@
 //! `view/key`, chords, capture and `view/keymap` (R-2.3), in process.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::{BindingSpec, Config, Profile};

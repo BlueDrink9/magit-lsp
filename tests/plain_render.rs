@@ -1,8 +1,5 @@
 //! Deterministic tests for the reusable Plain document synchronization controller.
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
+use magit_lsp_test_support::fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::docstore::Encoding;
@@ -13,9 +10,8 @@ use magit_lsp::presentation::plain::{
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
-#[path = "common/mod.rs"]
-mod fixtures;
 use fixtures::stdio;
+use magit_lsp_test_support as fixtures;
 
 fn controller(encoding: Encoding, versioned: bool) -> PlainDocument {
     PlainDocument::new(

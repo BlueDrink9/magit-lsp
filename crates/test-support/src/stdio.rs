@@ -27,7 +27,18 @@ pub fn server_binary() -> PathBuf {
     match std::env::var_os(SERVER_BINARY_ENV) {
         Some(value) => explicit_server_binary(&value)
             .unwrap_or_else(|error| panic!("{SERVER_BINARY_ENV} {error}")),
-        None => PathBuf::from(env!("CARGO_BIN_EXE_magit-lsp")),
+        None => {
+            // This crate compiles as a dependency of the integration-test
+            // binaries, where Cargo's `CARGO_BIN_EXE_magit-lsp` is not defined.
+            // The harness executable sits in the profile's `deps` directory, so
+            // its parent's parent holds the server Cargo built alongside it.
+            let harness = std::env::current_exe().expect("resolve the test harness executable");
+            harness
+                .parent()
+                .and_then(std::path::Path::parent)
+                .expect("the test harness lives in the Cargo profile directory")
+                .join(format!("magit-lsp{}", std::env::consts::EXE_SUFFIX))
+        }
     }
 }
 

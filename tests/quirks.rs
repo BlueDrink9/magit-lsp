@@ -1,8 +1,8 @@
 use magit_lsp::quirks::{self, Capability, CapabilityTest, Client, Match, REGISTRY};
 use serde_json::{json, Value};
 
-mod common;
 use common::stdio::TestServer;
+use magit_lsp_test_support as common;
 
 fn fixture(path: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()

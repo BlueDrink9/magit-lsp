@@ -1,6 +1,6 @@
 //! `definition` and `documentLink` navigation from the tree (R-1.4).
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::TestServer;
 use common::*;

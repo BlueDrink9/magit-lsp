@@ -1,6 +1,6 @@
 //! Opening the current log from its transient menu.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;

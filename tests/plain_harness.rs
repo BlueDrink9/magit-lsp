@@ -1,16 +1,12 @@
 //! Plain editor conformance self-tests and real-binary protocol smoke test.
-#[path = "common/client_pump.rs"]
-mod client_pump;
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
 use client_pump::ClientPump;
 use fake_editor::{FakeEditor, Profile};
 use fixtures::stdio;
 use magit_lsp::file_uri::uri_from_path;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::client_pump;
+use magit_lsp_test_support::editor_model;
+use magit_lsp_test_support::fake_editor;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;

@@ -6,7 +6,7 @@ use magit_lsp::presentation::keys::eligible;
 use magit_lsp::protocol::Cursor;
 use magit_lsp::view::ViewMode;
 
-mod common;
+use magit_lsp_test_support as common;
 
 #[test]
 fn registry_marks_destructive_commands_and_keeps_safe_representatives_unflagged() {

@@ -1,7 +1,7 @@
 //! Menu framework (R-2.7): layout, switches/options/actions, the argument
 //! preview, the structured model and the menu stack.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use expect_test::expect_file;

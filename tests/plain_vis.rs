@@ -1,10 +1,6 @@
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
 use fixtures::stdio;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::file_uri::uri_from_path;

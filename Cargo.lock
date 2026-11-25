@@ -549,6 +549,7 @@ dependencies = [
  "libc",
  "lsp-server",
  "lsp-types",
+ "magit-lsp-test-support",
  "normpath",
  "notify",
  "percent-encoding",
@@ -565,6 +566,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "magit-lsp-test-support"
+version = "0.2.0"
+dependencies = [
+ "libc",
+ "lsp-server",
+ "magit-lsp",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

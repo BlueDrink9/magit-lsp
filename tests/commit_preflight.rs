@@ -5,7 +5,7 @@
 //! effects and the repository state; the real screen is covered by
 //! `tests/ui/scenarios/commit-*.scn`.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;

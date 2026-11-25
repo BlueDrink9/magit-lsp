@@ -1,4 +1,4 @@
-mod common;
+use magit_lsp_test_support as common;
 
 use magit_lsp::git::GitLogOptions;
 use magit_lsp::log_view::{CommitSelection, LogView};

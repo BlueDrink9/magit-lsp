@@ -1,6 +1,6 @@
 //! Diff-shape cases that stress header preservation in `src/patch.rs`.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::git::GitRepo;

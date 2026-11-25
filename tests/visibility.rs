@@ -1,6 +1,6 @@
 //! Server-owned visibility and lazy bodies (R-1.5).
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;

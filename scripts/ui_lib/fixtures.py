@@ -1,6 +1,6 @@
 """Deterministic Git repositories for the real-UI tests.
 
-The environment mirrors `tests/common/mod.rs`: a throwaway `HOME` and
+The environment mirrors `crates/test-support/src/lib.rs`: a throwaway `HOME` and
 `XDG_CONFIG_HOME`, no system config, `LC_ALL=C`, a fixed identity and fixed
 author/committer dates. Repositories built by the same script therefore have
 the same commit hashes on every machine and every run.

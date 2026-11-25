@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::fake_git::{FakeGit, CHILD_ENV, MARKER_ENV};
 use common::*;

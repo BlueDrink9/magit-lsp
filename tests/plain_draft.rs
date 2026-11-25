@@ -8,17 +8,13 @@
 // that send the template applyEdit, showDocument and manual instructions
 // (src/server/plain.rs:1300-1355) never start. Every scenario here waits for
 // one of those frames, so all of them stalled in the bounded `recv_timeout`
-// (tests/common/stdio.rs:223-262) instead of failing. Real Windows draft
+// (crates/test-support/src/stdio.rs:223-262) instead of failing. Real Windows draft
 // support belongs to the deferred Windows phase; tests/plain_draft_windows.rs
 // pins the documented refusal in the meantime.
 #![cfg(unix)]
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
 use fixtures::stdio;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::file_uri::uri_from_path;

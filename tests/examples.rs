@@ -23,14 +23,10 @@
 //! become `hash-N` by first-seen position. Versions, order and payloads are not
 //! relaxed: an unexpected frame or a divergent expectation fails.
 
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
 #[path = "../scripts/example_recordings.rs"]
 mod example_recordings;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use fixtures::schema::{read_schema, schema_errors};

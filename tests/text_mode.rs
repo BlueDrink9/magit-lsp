@@ -1,7 +1,7 @@
 //! Text mode end to end (R-2.6): mode switching, keymap narrowing, queued
 //! refreshes, positional-request suppression and `common.copy-value`.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::*;
 use common::*;

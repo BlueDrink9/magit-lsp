@@ -1,6 +1,6 @@
 //! Status parsing: odd paths, renames, and branch reporting (R-0.2).
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use rstest::rstest;

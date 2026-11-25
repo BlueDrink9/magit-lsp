@@ -3,7 +3,7 @@
 //! Deterministic by construction: every wait polls with a bounded timeout and
 //! small debounce values, never with sleeps.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::{init_repo, write};
 use magit_lsp::watcher::{Refresh, RepoWatcher, WatcherConfig};

@@ -5,17 +5,13 @@
 //! managed commit drafts require Unix` showMessage and no draft frames follow
 //! (src/server/view_execution.rs:1171-1175). This scenario pins that refusal —
 //! request answered, message delivered, transport still serving — instead of
-//! the suite-wide `recv_timeout` stall (tests/common/stdio.rs:223-262) that
+//! the suite-wide `recv_timeout` stall (crates/test-support/src/stdio.rs:223-262) that
 //! tests/plain_draft.rs used to hit. Real Windows draft support belongs to the
 //! deferred Windows phase, which replaces this expectation.
 #![cfg(not(unix))]
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
-#[path = "common/mod.rs"]
-mod fixtures;
 use fixtures::stdio;
+use magit_lsp_test_support as fixtures;
+use magit_lsp_test_support::fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::file_uri::uri_from_path;

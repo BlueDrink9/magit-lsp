@@ -1,6 +1,6 @@
 //! The command registry (R-2.1): ids, docs, scopes and Planned semantics.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, EffectKind, Scope};

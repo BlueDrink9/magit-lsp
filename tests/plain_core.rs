@@ -9,9 +9,7 @@ use magit_lsp::protocol::*;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-#[path = "common/recording_ui.rs"]
-mod recording_ui;
-use recording_ui::RecordingUi;
+use magit_lsp_test_support::recording_ui::RecordingUi;
 
 #[test]
 fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {

@@ -2,7 +2,7 @@
 //! nothing, the dispatch menu uses the active profile's keys and the large
 //! menus reflow with greyed Planned labels.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::commands::{registry, CommandStatus, Scope};

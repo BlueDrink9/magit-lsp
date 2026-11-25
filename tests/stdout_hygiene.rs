@@ -1,6 +1,6 @@
 //! stdout is the LSP pipe: it must carry framed JSON-RPC and nothing else.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use serde_json::json;

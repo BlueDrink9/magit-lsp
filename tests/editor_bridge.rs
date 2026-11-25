@@ -3,7 +3,7 @@
 
 #![cfg(unix)]
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::stdio::*;
 use common::*;
@@ -118,7 +118,19 @@ const ASKPASS_ANSWER: &str = "s3cret";
 /// The question Git asks in the askpass tests.
 const ASKPASS_QUESTION: &str = "Password for 'git@example.com':";
 
-impl TestServer {
+/// Editor-bridge helpers added to the shared real-pipe server harness.
+trait EditorBridgeServer {
+    /// The bridge socket path, from the server's startup log.
+    fn socket_path(&mut self) -> PathBuf;
+
+    /// The next `view/prompt` notification.
+    fn prompt(&mut self) -> Value;
+
+    /// Answer a prompt; `value` is the answer the server receives.
+    fn respond_prompt(&mut self, id: i64, prompt_id: &str, cancelled: bool, value: Value);
+}
+
+impl EditorBridgeServer for TestServer {
     /// The bridge socket path, from the server's startup log.
     fn socket_path(&mut self) -> PathBuf {
         let deadline = Instant::now() + Duration::from_secs(20);

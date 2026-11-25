@@ -1,0 +1,13 @@
+[package]
+name = "magit-lsp-test-support"
+version = "0.2.0"
+license = "GPL-3.0-only"
+edition = "2021"
+publish = false
+
+[dependencies]
+magit-lsp = { path = "../.." }
+lsp-server = "0.10"
+libc = "0.2"
+serde_json = "1.0"
+tempfile = "3"

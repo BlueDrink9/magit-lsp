@@ -12,7 +12,7 @@ use std::path::Path;
 /// Read one committed artifact from `docs/schema/`.
 pub fn read_schema(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("docs/schema")
+        .join("../../docs/schema")
         .join(name);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));

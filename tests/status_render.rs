@@ -1,7 +1,7 @@
 //! Status rendering: text snapshots, node identity, tokens and tree-derived
 //! folding/targets (R-1.1).
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use expect_test::expect;

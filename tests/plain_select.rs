@@ -1,10 +1,7 @@
 //! Plain presentation of the commit-selection log.
 
-mod common;
-#[path = "common/editor_model/mod.rs"]
-mod editor_model;
-#[path = "common/fake_editor.rs"]
-mod fake_editor;
+use magit_lsp_test_support as common;
+use magit_lsp_test_support::fake_editor;
 
 use common::stdio;
 use common::{RepoFixture, TestSession, WIDE_VIEWPORT};

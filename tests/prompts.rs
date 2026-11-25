@@ -1,7 +1,7 @@
 //! Prompt transport (R-3.1): the scripted UI, menu option prompts, cancellation
 //! and the quit effect.
 
-mod common;
+use magit_lsp_test_support as common;
 
 use common::*;
 use magit_lsp::config::Profile;
