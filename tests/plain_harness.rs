@@ -1510,6 +1510,15 @@ fn shared_dispatch_captures_real_send_order_for_echo_profiles() {
     }
 }
 
+// Managed commit drafts need the Unix helper/validated-fd boundary. On Windows
+// `EditRegistry::create` is the platform stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the commit-create spawn answers
+// the open request with one `Cannot open commit draft: {error}` showMessage and
+// sends none of the draft frames the awaits below need; the test then stalls in
+// the bounded receive instead of failing clearly. The gate covers the four
+// draft-dependent tests in this file. Real Windows draft support belongs to the
+// deferred Windows phase; tests/plain_draft_windows.rs pins the refusal.
+#[cfg(unix)]
 #[test]
 fn live_binary_progress_requests_are_serviced_while_command_runs() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -1648,6 +1657,7 @@ fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
 ///
 /// Request-level progress reuses `$/progress`, so match the operation label
 /// the commit worker announces rather than any begin.
+#[cfg(unix)]
 fn is_commit_begin(message: &Value) -> bool {
     message["method"] == "$/progress"
         && message["params"]["value"]["kind"] == "begin"
@@ -1659,6 +1669,7 @@ fn is_commit_begin(message: &Value) -> bool {
 /// Plain clients without `showDocument` get this message only after the draft
 /// helper joined and its template was recorded, so it proves the draft is
 /// attachable.
+#[cfg(unix)]
 fn is_manual_commit_instructions(message: &Value, uri: &str) -> bool {
     message["method"] == "window/showMessage"
         && message["params"]["message"]
@@ -2217,6 +2228,8 @@ fn plain_gate_rebase_conflict_is_readable_and_abort_restores_exact_state() {
     plain_gate_finish(client);
 }
 
+// Draft-dependent: see the Windows gate note on live_binary_progress_requests_...
+#[cfg(unix)]
 #[test]
 fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft() {
     let original = fixtures::TEN_LINES;
@@ -2387,6 +2400,8 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
     client.finish();
 }
 
+// Draft-dependent: see the Windows gate note on live_binary_progress_requests_...
+#[cfg(unix)]
 #[test]
 fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     for (case, declared, profile, succeeds) in [
@@ -2838,6 +2853,8 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     }
 }
 
+// Draft-dependent: see the Windows gate note on live_binary_progress_requests_...
+#[cfg(unix)]
 #[test]
 fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
     let (repo, _) = fixtures::RepoFixture::new()
