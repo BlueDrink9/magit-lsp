@@ -303,7 +303,11 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
   - User decision (2026-11-25): two tiers. This full wire-crate extraction is tier 2 and may be deferred; tier 1 — simple, self-contained splits (leaf modules with no reverse dependency on the lib, and test-specific helper crates) — is being done immediately as separate items in this section.
 
-- [ ] **Tier-1 crate splits: simple, self-contained workspace splits done immediately (leaf modules and test-specific helpers) (Part 1/2, do not tick).**
+  - Deferred non-leaf candidates (2026-11-25, verified just before the tier-1 split): `src/tree.rs` (docstore `:8`, git `:143`, patch `:147`, editor `:302`, file_uri `:460,488`), `src/semantic_tokens.rs` (docstore+tree `:7-8`), `src/ui.rs` (protocol + `Error` `:10-11`), `src/errors.rs` (git + protocol + `Error`/`Result` `:1-3`, patch `:167`) and `src/keymap.rs` (commands + config + keys `:10-12`, config `:87,370`) all depend upward on lib internals, so they cannot become standalone leaf crates: they move with the tier-2 wire crate or after it. Tier 1 therefore shipped only `magit-lsp-test-support` (`fd4625f`), `magit-lsp-patch` and `magit-lsp-quirks`.
+
+- [x] **Tier-1 crate splits: simple, self-contained workspace splits done immediately (leaf modules and test-specific helpers).**
+  - Done: `5b08be5` + `be9519b` (Part 2: `magit-lsp-patch` and `magit-lsp-quirks`; the `git mv` renames landed in `5246fa6`, a concurrent session's commit that swept the staged index). Part 1 (test-support crate): `fd4625f`, queue `47253eb`.
+  - Verified: `make test-rust` → exit 0 (`ok: rust (warnings detected; check log: build/test-logs/rust.VQl0I3)`; the only warnings are pre-existing `unused_variables`/`unused_mut`/`dead_code` in `src/server/view_execution.rs:1279`, `src/session.rs:1550` and the schema tooling). Moved unit tests run from the new crate: `make test-rust FILTER="-p magit-lsp-patch"` → `ok: rust`, 50 passed, 0 failed (`build/test-logs/rust.2DhZMX`). `make format-check` → `ok: format-check`. The module re-export form `pub use magit_lsp_patch as patch;`/`pub use magit_lsp_quirks as quirks;` (`src/lib.rs:25,30`) leaves every `crate::patch::…`, `crate::quirks::…` and `magit_lsp::patch`/`magit_lsp::quirks` consumer path untouched.
 
 ## Audit findings and work order (2026-11-18)
 
