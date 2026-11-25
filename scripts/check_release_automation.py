@@ -187,6 +187,9 @@ MANIFEST_FIELDS = frozenset({
     'executable_sha256',
 })
 ARTIFACT_DIGEST_PATTERN = re.compile(r'sha256:[0-9a-f]{64}')
+# actions/upload-artifact emits the bare lowercase hex form at the workflow
+# boundary; the writer canonicalizes it to the prefixed contract form.
+BARE_ARTIFACT_DIGEST_PATTERN = re.compile(r'[0-9a-f]{64}')
 # The lockfiles the producer hashes into a release manifest. Publication reads
 # them at the bound source commit, never from the publisher checkout.
 SOURCE_LOCK_FILES = (
@@ -1352,6 +1355,8 @@ def write_vsix_upload_identity():
     """Record the immutable upload ID and digest for the VSIX handoff."""
     fields = ('ARTIFACT_ID', 'ARTIFACT_DIGEST', 'RUN_ID', 'RUN_ATTEMPT')
     payload = {key.lower(): os.environ.get(key, '') for key in fields}
+    if BARE_ARTIFACT_DIGEST_PATTERN.fullmatch(payload['artifact_digest']):
+        payload['artifact_digest'] = f"sha256:{payload['artifact_digest']}"
     if not all(payload.values()) or not ARTIFACT_DIGEST_PATTERN.fullmatch(
             payload['artifact_digest']):
         fail('VSIX upload identity: missing or invalid immutable upload identity')
@@ -2563,7 +2568,7 @@ def expect_check(label, function, *args, expected=None):
 
 
 def test_vsix_binding_fixtures(directory):
-    """Exercise VSIX provenance generation and rejection paths offline."""
+    """Exercise VSIX provenance and upload-identity generation offline."""
     root = Path(directory)
     (root / 'clients/vscode').mkdir(parents=True)
     (root / 'build/vscode').mkdir(parents=True)
@@ -2579,6 +2584,9 @@ def test_vsix_binding_fixtures(directory):
         'RELEASE_EVENT': 'push', 'RELEASE_RUN_ID': '1234',
         'GITHUB_RUN_ID': '1234', 'RELEASE_RUN_ATTEMPT': '2',
         'GITHUB_RUN_ATTEMPT': '2',
+        'ARTIFACT_ID': '15062506626',
+        'ARTIFACT_DIGEST': hashlib.sha256(b'fixture VSIX bytes').hexdigest(),
+        'RUN_ID': '45698514208', 'RUN_ATTEMPT': '1',
     }
     saved = {key: os.environ.get(key) for key in env}
     cwd = Path.cwd()
@@ -2589,6 +2597,17 @@ def test_vsix_binding_fixtures(directory):
         manifest = json.loads(Path('build/vscode/vsix-manifest.json').read_text())
         if manifest['vsix_sha256'] != hashlib.sha256(artifact.read_bytes()).hexdigest():
             fail('self-test: VSIX provenance did not hash the exact fixture bytes')
+        # actions/upload-artifact reports the bare hex digest; the identity
+        # writer must canonicalize that boundary form and reject anything else.
+        write_vsix_upload_identity()
+        identity = json.loads(
+            Path('build/vscode/vsix-upload-identity.json').read_text())
+        if identity['artifact_digest'] != 'sha256:' + env['ARTIFACT_DIGEST']:
+            fail('self-test: upload identity did not canonicalize the bare digest')
+        os.environ['ARTIFACT_DIGEST'] = 'not-a-digest'
+        expect_check('VSIX upload identity with an invalid digest',
+                     write_vsix_upload_identity, expected='missing or invalid')
+        os.environ['ARTIFACT_DIGEST'] = env['ARTIFACT_DIGEST']
         os.environ['RELEASE_SOURCE_SHA'] = SELF_TEST_OTHER_SHA
         expect_check('VSIX provenance with wrong source', write_vsix_binding,
                      expected='source SHA does not match')

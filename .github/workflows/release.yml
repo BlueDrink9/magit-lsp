@@ -165,7 +165,7 @@ jobs:
           CANDIDATE_TARGET: x86_64-unknown-linux-gnu
         run: |
           test -n "$ARTIFACT_ID" && test -n "$ARTIFACT_DIGEST"
-          printf '{"artifact_id":"%s","artifact_digest":"%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
+          printf '{"artifact_id":"%s","artifact_digest":"sha256:%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
             "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$RUN_ID" "$RUN_ATTEMPT" "$CANDIDATE_TARGET" \
             > build/release/upload-identity.json
 
@@ -261,7 +261,7 @@ jobs:
           CANDIDATE_TARGET: ${{ matrix.target }}
         run: |
           test -n "$ARTIFACT_ID" && test -n "$ARTIFACT_DIGEST"
-          printf '{"artifact_id":"%s","artifact_digest":"%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
+          printf '{"artifact_id":"%s","artifact_digest":"sha256:%s","run_id":"%s","run_attempt":"%s","target":"%s"}\n' \
             "$ARTIFACT_ID" "$ARTIFACT_DIGEST" "$RUN_ID" "$RUN_ATTEMPT" "$CANDIDATE_TARGET" \
             > build/release/upload-identity.json
 
