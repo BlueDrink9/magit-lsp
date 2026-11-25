@@ -303,6 +303,8 @@ Gate rationale (2026-11-19): revalidate Phase 6 closure after accumulated 51-fil
 
   - User decision (2026-11-25): two tiers. This full wire-crate extraction is tier 2 and may be deferred; tier 1 — simple, self-contained splits (leaf modules with no reverse dependency on the lib, and test-specific helper crates) — is being done immediately as separate items in this section.
 
+- [ ] **Tier-1 crate splits: simple, self-contained workspace splits done immediately (leaf modules and test-specific helpers) (Part 1/2, do not tick).**
+
 ## Audit findings and work order (2026-11-18)
 
 This file alone owns checkbox states and Done evidence. [TASKS_PART_SEVEN.md](./TASKS_PART_SEVEN.md) owns detailed numbered scopes/dependencies, not duplicate completion status. Current contracts live in maintained architecture/protocol references, not historical attempt logs.
