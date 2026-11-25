@@ -68,8 +68,11 @@ jobs:
       - name: make vscode-test
         run: nix develop --no-update-lock-file -c make vscode-test V=1
 
-      - name: make test-rust test-lua
-        run: nix develop --no-update-lock-file -c make test-rust test-lua V=1
+      - name: make test-rust
+        run: nix develop --no-update-lock-file -c make test-rust V=1
+
+      - name: make test-lua
+        run: nix develop --no-update-lock-file -c make test-lua V=1
 
 
   coverage:

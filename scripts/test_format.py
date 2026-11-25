@@ -36,7 +36,8 @@ LINUX_JOB_COMMANDS = {
     "release-contract": (f"{NIX_DEVELOP} make release-contract-check",),
     "test": (
         f"{NIX_DEVELOP} make vscode-test",
-        f"{NIX_DEVELOP} make test-rust test-lua",
+        f"{NIX_DEVELOP} make test-rust",
+        f"{NIX_DEVELOP} make test-lua",
     ),
     "coverage": (f"{NIX_DEVELOP} make coverage-rust",),
     "documentation": (f"{NIX_DEVELOP} make docs-artifacts-check docs-check",),
