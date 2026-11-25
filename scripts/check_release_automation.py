@@ -722,9 +722,11 @@ def check_native_candidates(block):
     if 'make release-native-build RELEASE_TARGET=${{ matrix.target }}' not in code:
         fail('build workflow: native candidates must run the shared native build for '
              'their matrix target')
-    if 'env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS make release-native-build' not in code:
+    if ('env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET '
+            'make release-native-build') not in code:
         fail('build workflow: native candidates must clear the dev shell Nix flag '
-             'variables before the native build')
+             'variables and the macOS runner deployment target before the native '
+             'build')
     if PIPELINE_ARTIFACTS not in code:
         fail('build workflow: native candidates must package through the shared pipeline')
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
@@ -5086,9 +5088,15 @@ def run_self_tests():
             ('build workflow building a native candidate outside its locked shell',
              (('.#release-native', '.#release-naive', None),),
              '.#release-native'),
-             ('build workflow native candidate inheriting the dev shell Nix flags',
-              (('env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS ', '', 1),),
-              'clear the dev shell Nix flag'),
+            ('build workflow native candidate inheriting the dev shell Nix flags',
+             (('env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS ', '', 1),),
+             'clear the dev shell Nix flag variables and the macOS runner '
+             'deployment target'),
+            ('build workflow native candidate inheriting the runner deployment target',
+             (('env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET ',
+               'env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS ', 1),),
+             'clear the dev shell Nix flag variables and the macOS runner '
+             'deployment target'),
              ('build workflow native candidate skipping the shared pipeline',
               (('nix develop --no-update-lock-file .#release-native -c python3 '
                 'scripts/check_release_pipeline.py artifacts',

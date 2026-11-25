@@ -216,10 +216,13 @@ jobs:
         run: nix develop --no-update-lock-file .#release-native -c make test-rust FILTER="--locked --test server_async"
 
       # The mkShellNoCC dev shell exports NIX_CFLAGS_COMPILE/NIX_LDFLAGS from
-      # its packages' setup hooks. The native lane refuses inherited flags and
-      # sets its own host compiler/linker explicitly, so clear them here.
+      # its packages' setup hooks, and the macOS runner image exports
+      # MACOSX_DEPLOYMENT_TARGET. The native lane refuses inherited flags and
+      # sets its own host compiler/linker and deployment target explicitly (the
+      # latter via check_release_pipeline.py), so clear them here. The macOS
+      # strip is a no-op on Ubuntu.
       - name: Experimental native-linker build
-        run: nix develop --no-update-lock-file .#release-native -c env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS make release-native-build RELEASE_TARGET=${{ matrix.target }}
+        run: nix develop --no-update-lock-file .#release-native -c env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET make release-native-build RELEASE_TARGET=${{ matrix.target }}
 
       - name: Package the experimental candidate
         env:
