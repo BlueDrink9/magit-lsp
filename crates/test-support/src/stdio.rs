@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -18,27 +18,66 @@ use std::time::{Duration, Instant};
 /// ordinary source tests leave it unset.
 pub const SERVER_BINARY_ENV: &str = "MAGIT_LSP_BIN";
 
+/// Server path registered by [`cargo_server_binary!`] from a test crate.
+///
+/// First write wins, so a parallel sibling's registration can never replace an
+/// earlier one.
+static CARGO_SERVER_BINARY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Record the server path Cargo guaranteed for the invoking test crate.
+///
+/// [`cargo_server_binary!`] calls this with the compile-time
+/// `CARGO_BIN_EXE_magit-lsp` value; the first registration wins and returns the
+/// stored path. [`server_binary`] prefers it over its walk fallback.
+pub fn register_cargo_server_binary(path: &'static str) -> PathBuf {
+    CARGO_SERVER_BINARY
+        .get_or_init(|| PathBuf::from(path))
+        .clone()
+}
+
+/// Register the Cargo-built server executable from inside a test crate.
+///
+/// `CARGO_BIN_EXE_magit-lsp` is defined only while compiling the root package's
+/// test crates, so this helper crate cannot reference it itself. A spawning test
+/// invokes this macro before its first spawn; the body expands in the invoking
+/// crate, where the variable exists, and registers the value with
+/// [`register_cargo_server_binary`].
+#[macro_export]
+macro_rules! cargo_server_binary {
+    () => {
+        $crate::stdio::register_cargo_server_binary(env!("CARGO_BIN_EXE_magit-lsp"))
+    };
+}
+
 /// Resolve the server executable a real-pipe spawn must run.
 ///
 /// An explicit [`SERVER_BINARY_ENV`] selection is used verbatim; only without
-/// one does the shared transport use the server Cargo built alongside the test
-/// harness. An invalid explicit selection panics instead of falling back.
+/// one does the shared transport use the path registered by
+/// [`cargo_server_binary!`], or the server Cargo built alongside the test
+/// harness when no test in the binary registered one. An invalid explicit
+/// selection panics instead of falling back.
 pub fn server_binary() -> PathBuf {
     match std::env::var_os(SERVER_BINARY_ENV) {
         Some(value) => explicit_server_binary(&value)
             .unwrap_or_else(|error| panic!("{SERVER_BINARY_ENV} {error}")),
-        None => {
-            // This crate compiles as a dependency of the integration-test
-            // binaries, where Cargo's `CARGO_BIN_EXE_magit-lsp` is not defined.
-            // The harness executable sits in the profile's `deps` directory, so
-            // its parent's parent holds the server Cargo built alongside it.
-            let harness = std::env::current_exe().expect("resolve the test harness executable");
-            harness
-                .parent()
-                .and_then(std::path::Path::parent)
-                .expect("the test harness lives in the Cargo profile directory")
-                .join(format!("magit-lsp{}", std::env::consts::EXE_SUFFIX))
-        }
+        None => match CARGO_SERVER_BINARY.get() {
+            Some(path) => path.clone(),
+            None => {
+                // This crate compiles as a dependency of the integration-test
+                // binaries, where Cargo's `CARGO_BIN_EXE_magit-lsp` is not
+                // defined. A suite that does not register it (see
+                // [`cargo_server_binary!`]) still resolves the server through
+                // this walk: the harness executable sits in the profile's
+                // `deps` directory, so its parent's parent holds the server
+                // Cargo built alongside it.
+                let harness = std::env::current_exe().expect("resolve the test harness executable");
+                harness
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .expect("the test harness lives in the Cargo profile directory")
+                    .join(format!("magit-lsp{}", std::env::consts::EXE_SUFFIX))
+            }
+        },
     }
 }
 

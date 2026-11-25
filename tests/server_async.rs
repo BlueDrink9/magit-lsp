@@ -3747,6 +3747,7 @@ fn shutdown_and_exit(server: &mut TestServer) {
 
 #[test]
 fn the_shared_selector_uses_a_supplied_server_verbatim_and_cargo_otherwise() {
+    magit_lsp_test_support::cargo_server_binary!();
     match std::env::var_os(SERVER_BINARY_ENV) {
         Some(value) => assert_eq!(
             server_binary(),

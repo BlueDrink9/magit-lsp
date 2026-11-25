@@ -44,6 +44,7 @@ fn stage_profile(
     profile: fake_editor::Profile,
     expected_end: Option<usize>,
 ) -> (String, String, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let special_parent = tempfile::tempdir().expect("tempdir");
     let repo_parent = special_parent.path().join("repo é#%");
     std::fs::create_dir(&repo_parent).expect("repository parent");
@@ -353,6 +354,7 @@ fn draft_chain(
     progress: bool,
     document_changes: bool,
 ) -> (String, String, String, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::fork("capability-status-standard", |parent| {
         fixtures::RepoFixture::new_in(parent)
             .commit("init", [("f.txt", fixtures::TEN_LINES)])
@@ -638,6 +640,7 @@ fn rich_protocol_declaration() -> Value {
 
 #[test]
 fn rich_protocol_version_initialize_wire_advertises_and_rejects_before_rich_open() {
+    magit_lsp_test_support::cargo_server_binary!();
     // The accepted session advertises exactly the version it speaks.
     let mut server = stdio::TestServer::spawn(&[]);
     let response = server.initialize(json!({"experimental":{"magit":rich_protocol_declaration()}}));
