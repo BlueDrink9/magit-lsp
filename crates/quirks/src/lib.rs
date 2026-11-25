@@ -1,5 +1,9 @@
 //! Evidence-backed client quirks and their deterministic resolver.
 
+// The LSP wire protocol owns stdout; a stray print would corrupt it.
+#![deny(clippy::print_stdout)]
+#![deny(clippy::dbg_macro)]
+
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 

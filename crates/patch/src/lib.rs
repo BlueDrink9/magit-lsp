@@ -1,3 +1,9 @@
+//! Unified-diff parsing, selection and hunk operations.
+
+// The LSP wire protocol owns stdout; a stray print would corrupt it.
+#![deny(clippy::print_stdout)]
+#![deny(clippy::dbg_macro)]
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
