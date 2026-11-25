@@ -1,4 +1,17 @@
 //! Plain-mode commit draft delivery: replace an already-open buffer first.
+// Managed commit drafts need the Unix helper/validated-fd boundary, so the
+// whole suite builds only where that boundary exists. On Windows the editor
+// registry's `EditRegistry::create` is the platform stub at src/editor.rs:793
+// ("managed commit drafts require Unix"); `spawn_repository_operation` answers
+// the create request with one `Cannot open commit draft: {error}` showMessage
+// and returns None (src/server/view_execution.rs:1171-1175), so the draft runs
+// that send the template applyEdit, showDocument and manual instructions
+// (src/server/plain.rs:1300-1355) never start. Every scenario here waits for
+// one of those frames, so all of them stalled in the bounded `recv_timeout`
+// (tests/common/stdio.rs:223-262) instead of failing. Real Windows draft
+// support belongs to the deferred Windows phase; tests/plain_draft_windows.rs
+// pins the documented refusal in the meantime.
+#![cfg(unix)]
 #[path = "common/editor_model/mod.rs"]
 mod editor_model;
 #[path = "common/fake_editor.rs"]

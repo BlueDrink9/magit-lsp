@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 /// spelling. Callers that can legitimately see nonexistent paths should use
 /// [`canonical_or_raw`] instead.
 pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    // windows-ok: `std::fs::canonicalize` is the documented cross-platform resolver (GetFinalPathNameByHandleW on Windows), and the verbatim-prefix stripping below is the portability adaptation that makes its output usable un-gated.
     match std::fs::canonicalize(path) {
         Ok(resolved) => Ok(strip_verbatim(resolved)),
         Err(_) => Ok(path.normalize()?.into_path_buf()),
