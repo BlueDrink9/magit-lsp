@@ -322,7 +322,10 @@ mod tests {
             .find_map(|(key, value)| (key == "PATH").then_some(value))
             .expect("PATH override");
         // A non-gated subcommand: it reaches the fake but never the gate.
-        let output = Command::new(&gate.script)
+        // Route through the shell so the script is read as data: a direct exec
+        // can race a sibling thread's still-open write fd and fail ETXTBSY.
+        let output = Command::new("sh")
+            .arg(&gate.script)
             .arg("status")
             .env("PATH", path)
             .output()
