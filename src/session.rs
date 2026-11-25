@@ -289,6 +289,9 @@ pub struct OpenView {
     /// Deferred status hunk fetch armed by the last refresh render, with the
     /// exact render version and publish instant that start its promise.
     pending_timed_fetch: Option<(u64, std::time::Instant, crate::status_view::TimedFetch)>,
+    /// When the deferred opening's original promise started, so a refresh can
+    /// renew it only while that promise is still open.
+    open_promise_start: Option<std::time::Instant>,
 }
 
 #[derive(Clone)]
@@ -466,14 +469,25 @@ impl OpenView {
     }
 
     /// Remember a deferred hunk fetch whose generation was renewed by a refresh.
+    ///
+    /// A refresh past the original opening promise cannot renew it; inside the
+    /// window the new deadline starts at this render's publish instant.
     fn arm_refresh_fetch(&mut self, render: &ViewRender) {
+        let now = std::time::Instant::now();
+        if !self
+            .open_promise_start
+            .is_some_and(|start| crate::status_view::open_within_promise(start, now))
+        {
+            return;
+        }
         let fetch = self
             .view
             .as_any()
             .and_then(|state| state.downcast_ref::<StatusView>())
             .and_then(StatusView::timed_fetch);
         if let Some(fetch) = fetch {
-            self.pending_timed_fetch = Some((render.version, std::time::Instant::now(), fetch));
+            self.open_promise_start = Some(now);
+            self.pending_timed_fetch = Some((render.version, now, fetch));
         }
     }
 
@@ -642,6 +656,7 @@ fn initialize_open_view(
         repo_path: repo_path_owned,
         draft_owner,
         pending_timed_fetch: None,
+        open_promise_start: None,
     };
     (descriptor, render, open_view)
 }
@@ -879,6 +894,9 @@ impl Session {
             return Ok((None, None));
         }
         let fetch = status.timed_fetch();
+        if fetch.is_some() {
+            view.open_promise_start = Some(std::time::Instant::now());
+        }
         // Text mode owns the buffer: keep the installed result unpublished and
         // unversioned until leaving text mode renders it as a full replace.
         if view.mode() == ViewMode::Text {
@@ -1524,6 +1542,9 @@ impl Session {
                 });
             }
         }
+        // A key-bound refresh stays a key action; only a command invocation
+        // (rich view/invoke or Plain executeCommand) renews the open promise.
+        let rearm_refresh = request.command == "common.refresh" && target.key.is_none();
         let mut result = self.run_versioned_command(
             &target.view_id,
             &request.command,
@@ -1535,10 +1556,7 @@ impl Session {
             target.key,
             ui,
         )?;
-        // A mutation's own refresh must not re-arm and publish hunks against an
-        // already-superseded client interaction; an explicit refresh command
-        // renews the deferred opening promise here.
-        if request.command == "common.refresh" {
+        if rearm_refresh {
             if let Some(render) = result.render.as_ref() {
                 self.arm_refresh_fetch(render);
             }
@@ -2722,10 +2740,12 @@ impl Session {
         if tree == view.tree && menu == view.view.menu() {
             return Ok(None);
         }
-        let render =
-            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
-        view.arm_refresh_fetch(&render);
-        Ok(Some(render))
+        Ok(Some(view.render_tree_with_delivery(
+            tree,
+            None,
+            None,
+            RenderDelivery::Acknowledged,
+        )?))
     }
 
     /// Arm the deferred fetch renewed by an explicit refresh render.
