@@ -370,6 +370,22 @@ local function open_body(file)
   child.lua_get("HELPERS.wait_idle()")
 end
 
+--- Wait for the timed background fetch's expanded-open render: the file row
+--- and its hunk bodies can arrive after `setup_child` has settled.
+local function wait_expanded(body)
+  body = body or "    +NEW line"
+  MiniTest.expect.equality(
+    child.lua_get(
+      string.format(
+        "HELPERS.wait_for(function() return HELPERS.has_line('  M f.txt') and HELPERS.has_line(%q) end)",
+        body
+      )
+    ),
+    true,
+    "timed expansion reached the buffer"
+  )
+end
+
 --- Place the cursor on the first matching rendered line and invoke a command.
 local function invoke_at(line, command, opts)
   local call = string.format(
@@ -1451,6 +1467,7 @@ end
 
 T["status buffer is read-only to native edits"] = function()
   setup_child()
+  wait_expanded()
   local before = child.lua_get("vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)")
 
   local function opt(name)
@@ -1517,6 +1534,7 @@ end
 
 T["refresh and mutations still work after blocked edits"] = function()
   setup_child()
+  wait_expanded()
   -- `d` now opens the diff menu (Magit's key), so use native edits that are
   -- unbound in every profile.
   type_edit("J")
@@ -1529,10 +1547,9 @@ T["refresh and mutations still work after blocked edits"] = function()
 
   child.lua("M.refresh()")
   MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
-  -- The refreshed hunks start collapsed: open the section, then the file, so
-  -- both new hunks render their bodies.
-  open_section("Unstaged changes (1)")
-  open_body("  M f.txt")
+  -- The refresh's timed fetch expands the new hunk; wait for it instead of
+  -- toggling an already-expanded section.
+  wait_expanded("    +line11")
   assert_line("    +line11")
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
@@ -1546,6 +1563,7 @@ end
 
 T["write is a no-op and keeps the buffer unmodified"] = function()
   setup_child()
+  wait_expanded()
   child.lua([[
     HINTS = {}
     vim.notify = function(msg, level)
@@ -1789,10 +1807,9 @@ T["the g r chord refreshes the view"] = function()
 
   child.type_keys(50, "g", "r")
   MiniTest.expect.equality(child.lua_get("HELPERS.wait_idle()"), true)
-  -- The refreshed view starts closed; the new hunk is only reachable after the
-  -- point-to-section and file opens, so its presence still proves the refresh.
-  open_section("Unstaged changes (1)")
-  open_body("  M f.txt")
+  -- The refresh's timed fetch expands the new hunk; its presence still proves
+  -- the refresh without toggling an already-expanded section.
+  wait_expanded("    +line11")
   assert_line("    +line11")
 end
 
@@ -1921,6 +1938,7 @@ end
 
 T["capture mode forwards printable keys and shows the server hint"] = function()
   setup_child()
+  wait_expanded()
   child.lua([[
     VIEW.apply_keymap({
       viewId = STATUS.id,
@@ -1992,6 +2010,7 @@ end
 
 T["ctrl+t makes the buffer editable and ctrl+t restores the server text"] = function()
   setup_child()
+  wait_expanded()
   local before = child.lua_get("STATUS.lines")
   local undo = child.lua_get("require('magit-lsp.buffer').undo_levels(STATUS.buf)")
   MiniTest.expect.equality(undo ~= -1, true, "the user undo setting was captured")
@@ -2198,11 +2217,12 @@ T["buffers renders that beat the view/open response"] = function()
     "the render beat the view/open response"
   )
 
-  -- The buffered render is the closed opening render: headers only.
+  -- The buffered render already includes the timed expansion; the point is
+  -- that it reached the buffer before the delayed view/open response.
   assert_line("Head: main")
   assert_line("Unstaged changes (1)")
-  assert_no_line("  M f.txt")
-  assert_no_line("    +NEW line")
+  assert_line("  M f.txt")
+  assert_line("    +NEW line")
 
   local diff = child.lua_get("HELPERS.keymap_diff()")
   MiniTest.expect.equality(diff.missing, {}, "the early keymap was applied")
@@ -2310,9 +2330,9 @@ T["two repositories get independent status views"] = function()
       other
     )
   )
-  -- Both views start closed. Open each section through the real fold key so the
-  -- member rows render; the first view's unstaged section also makes the row-8
-  -- cursor used below valid.
+  -- The timed fetch has already expanded the views; wait for the member rows
+  -- rather than toggling a fold key, which would collapse them. The first
+  -- view's unstaged section also makes the row-8 cursor used below valid.
   local view_keys = child.lua_get([==[(function()
     local v = require('magit-lsp.view')
     local out = {}
@@ -2323,31 +2343,23 @@ T["two repositories get independent status views"] = function()
     end
     return out
   end)()]==])
-  local function open_view_section(key, header)
-    child.lua(string.format(
+  MiniTest.expect.equality(
+    child.lua_get(string.format(
       [[
-      (function()
+      HELPERS.wait_for(function()
         local v = require('magit-lsp.view')
-        local record = v.views[%q]
-        v.focus(record.key)
-        for i, line in ipairs(vim.api.nvim_buf_get_lines(record.buf, 0, -1, false)) do
-          if line == %q then
-            vim.api.nvim_win_set_cursor(0, { i, 0 })
-            return
-          end
-        end
-        error('section header rendered: ' .. %q)
-      end)()
+        local first = vim.api.nvim_buf_get_lines(v.views[%q].buf, 0, -1, false)
+        local second = vim.api.nvim_buf_get_lines(v.views[%q].buf, 0, -1, false)
+        return vim.tbl_contains(first, '  M f.txt')
+          and vim.tbl_contains(second, '  ? other.txt')
+      end)
     ]],
-      key,
-      header,
-      header
-    ))
-    child.type_keys(50, "<Tab>")
-    child.lua_get("HELPERS.wait_idle()")
-  end
-  open_view_section(view_keys[1], "Unstaged changes (1)")
-  open_view_section(view_keys[2], "Untracked files (1)")
+      view_keys[1],
+      view_keys[2]
+    )),
+    true,
+    "timed expansion rendered both views' member rows"
+  )
   local state = child.lua_get([==[(function()
     local v = require('magit-lsp.view')
     local out = {}
