@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def server_binary() -> Path | None:
     """Resolve the server binary under test, or None when none is built."""
-    binary = os.environ.get('MAGIT_LSP_TEST_BINARY')
+    binary = os.environ.get('MAGIT_LSP_BIN')
     if not binary:
         for candidate in ('target/debug/magit-lsp', 'target/release/magit-lsp'):
             if (ROOT / candidate).is_file():

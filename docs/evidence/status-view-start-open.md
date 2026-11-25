@@ -107,16 +107,16 @@ Deterministic checks (all green at the commit recording this note):
     with the default promise: the rows-first seed streams into the complete
     buffer; the same fixture under `auto` still publishes the closed render
     first. The existing `auto` refresh and slow-path tests are unchanged.
-- `MAGIT_LSP_TEST_BINARY=$PWD/scripts/open-promise-server.sh make ui-file
+- `MAGIT_LSP_BIN=$PWD/scripts/open-promise-server.sh make ui-file
   FILE=tests/ui/scenarios/status-basics.scn` (Part 1) — green. The scenario
   waits for `+line3 CHANGED` before its fold walk, so it does not depend on the
   client going idle at the right moment.
 
 ## Residual risk in suite runs
 
-`make ui-test` (and any other suite run not given `MAGIT_LSP_TEST_BINARY`) keeps
+`make ui-test` (and any other suite run not given `MAGIT_LSP_BIN`) keeps
 the production 500 ms promise for `auto`. On a machine slow enough that the
 first status fetch exceeds it, the batch is discarded and the scenario's wait
 for `+line3 CHANGED` fails even though the server behaved as documented. Use
-`MAGIT_LSP_TEST_BINARY=$PWD/scripts/open-promise-server.sh` for the scenario;
+`MAGIT_LSP_BIN=$PWD/scripts/open-promise-server.sh` for the scenario;
 wiring that wrapper into the suite run is out of scope.

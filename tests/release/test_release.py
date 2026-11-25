@@ -313,9 +313,9 @@ except OSError:
         self.binary.write_bytes(b'#!/bin/sh\necho replacement\n')
         self.assertNotEqual(self.package(self.binary, provenance=provenance).returncode, 0)
 
-    @unittest.skipUnless(os.environ.get('MAGIT_LSP_TEST_BINARY'), 'set MAGIT_LSP_TEST_BINARY for actual-artifact smoke')
+    @unittest.skipUnless(os.environ.get('MAGIT_LSP_BIN'), 'set MAGIT_LSP_BIN for actual-artifact smoke')
     def test_real_binary_package_install_launch(self):
-        binary = Path(os.environ['MAGIT_LSP_TEST_BINARY']).resolve()
+        binary = Path(os.environ['MAGIT_LSP_BIN']).resolve()
         result = self.package(binary)
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.install('--version', VERSION)

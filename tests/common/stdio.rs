@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 /// executable file, and the server Cargo built for the test harness is never
 /// used as a fallback. `make test-rust-artifact` sets it for the artifact lane;
 /// ordinary source tests leave it unset.
-pub const SERVER_BINARY_ENV: &str = "MAGIT_LSP_TEST_BINARY";
+pub const SERVER_BINARY_ENV: &str = "MAGIT_LSP_BIN";
 
 /// Resolve the server executable a real-pipe spawn must run.
 ///

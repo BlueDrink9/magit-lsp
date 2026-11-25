@@ -334,7 +334,7 @@ can replace both files. Review the installer before executing it. It neither
 launches the downloaded binary nor modifies PATH/editor configuration.
 
 Tests mock curl, uname and getconf via PATH; all downloads stay offline. The
-optional `MAGIT_LSP_TEST_BINARY` test packages, installs and launches a real local
+optional `MAGIT_LSP_BIN` test packages, installs and launches a real local
 binary with `--version`; regular CI otherwise uses a synthetic executable.
 
 ## Platform evidence and limits

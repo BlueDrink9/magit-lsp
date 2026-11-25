@@ -358,6 +358,8 @@ the command line and real colours.
   passing `xfail` fails the run until the tag is removed.
 - `make ui-test` runs every scenario; `make ui-tour` writes
   `build/ui/tour.md`; `make ui-unit` runs the harness's own Python tests.
+  `MAGIT_LSP_BIN` (an absolute executable path) selects the server the harness
+  launches; unset uses `target/debug/magit-lsp`.
 - Each scenario runs once by default at `80x24` with the `standard` profile.
   Add `matrix: true` to opt into all four combinations of `80x24`/`100x30` and
   `standard`/`vim`. An explicit `size` or `profile` selects that value first

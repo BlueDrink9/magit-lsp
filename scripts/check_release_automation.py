@@ -817,7 +817,7 @@ def check_native_functional_consumers(block):
         'cargo test --no-run --test server_async --test editor_bridge --test rebase_interactive',
         'test-rust-artifact',
         'FILTER="--test server_async --test editor_bridge --test rebase_interactive"',
-        'native-neovim-artifact-check', 'MAGIT_LSP_TEST_BINARY=',
+        'native-neovim-artifact-check', 'MAGIT_LSP_BIN=',
         'executable_sha256', 'before_sha256', 'after_sha256',
         'native-functional-evidence.json', 'if: always()', 'if-no-files-found: warn',
         'steps.harness.outcome', 'steps.rust-functional.outcome',
@@ -1055,7 +1055,7 @@ def check_server_test_graph(context, block, target, native):
              f'{SERVER_RELEASE_STEP!r} step')
     debug_text = '\n'.join(steps[debug][1])
     release_text = '\n'.join(steps[release][1])
-    if 'MAGIT_LSP_TEST_BINARY' in debug_text:
+    if 'MAGIT_LSP_BIN' in debug_text:
         fail(f'build workflow: {context} debug server tests must not target the '
              'release executable')
     acceptance = ACCEPTANCE_COMMANDS + ('--test editor_bridge',
@@ -1090,7 +1090,7 @@ def check_server_test_graph(context, block, target, native):
              f'{RELEASE_MANIFEST} executable_sha256')
     digest = 'shasum -a 256' if native else 'sha256sum'
     if digest not in release_text or '= "$expected"' not in release_text \
-            or 'MAGIT_LSP_TEST_BINARY="$binary"' not in release_text:
+            or 'MAGIT_LSP_BIN="$binary"' not in release_text:
         fail(f'build workflow: {context} release server tests must compare the '
              f'packaged binary hash before running it')
 
@@ -1422,7 +1422,7 @@ def pipeline_violations(module, environment):
         problems.append('artifact steps must not hand the binary to a runtime test')
     for step in steps:
         joined = ' '.join(step)
-        for forbidden in ('cargo', 'unittest', 'MAGIT_LSP_TEST_BINARY'):
+        for forbidden in ('cargo', 'unittest', 'MAGIT_LSP_BIN'):
             if forbidden in joined:
                 problems.append(f'artifact step must not run {forbidden}')
     for name in ('validate_identity', 'resolve_identity', 'verify_source',
@@ -3121,7 +3121,7 @@ def run_pipeline_self_tests():
             fail('self-test: packaging must not hand the binary to a test process')
         for step in steps:
             if any(part in ' '.join(step) for part in
-                   ('cargo', 'unittest', 'MAGIT_LSP_TEST_BINARY')):
+                   ('cargo', 'unittest', 'MAGIT_LSP_BIN')):
                 fail('self-test: packaging steps must not compile or execute')
         for key in pipeline.REQUIRED_IDENTITY:
             incomplete = dict(identity)
@@ -5182,7 +5182,7 @@ def run_self_tests():
         debug_run = '        run: make test-rust FILTER="--locked --test server_async"\n'
         build_run = f'        run: {PIPELINE_BUILD}\n'
         release_make = ('          make test-rust-artifact '
-                        'MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"\n')
+                        'MAGIT_LSP_BIN="$binary" FILTER="--test server_async"\n')
         package_run = f'        run: {PIPELINE_ARTIFACTS}\n'
         for label, mutations, expected in (
             ('build workflow after swapping the debug and build commands',

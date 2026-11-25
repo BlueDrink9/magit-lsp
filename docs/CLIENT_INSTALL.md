@@ -299,7 +299,7 @@ Missing Neovim/server prerequisites skip the smoke, so inspect the test output,
 not just the exit code:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_TEST_BINARY=target/release/magit-lsp \
+PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_BIN=target/release/magit-lsp \
   python3 -m unittest discover -s tests/release -p 'test_client_setup.py' -v
 ```
 

@@ -12,9 +12,9 @@ LOG_TAIL ?= 60
 # deliberately does not match incidental prose that merely contains the word
 # "warning" (e.g. "0 warnings", "warning count zero"). See docs/TESTING.md.
 WARN_RE := ^[[:space:]]*[Ww]arning:|^[[:space:]]*[[:upper:]][[:alnum:]]*Warning:|^.+:[0-9]+(:[0-9]+)?:[[:space:]]*[Ww]arning:|^.+:[0-9]+:[[:space:]]*[[:upper:]][[:alnum:]]*Warning:
-# Always test the freshly built debug server, never a stale release binary.
-# (Confirm scripts/ui and clients/vscode read MAGIT_LSP_BIN.)
-export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
+# `MAGIT_LSP_BIN` names the server binary to use. Recipes that launch a server
+# default it to the freshly built debug binary, never a stale release one, but a
+# caller-supplied value always wins (caller env > built/default artifact).
 # Optional: isolate tests from your Git config. Fixtures may then need
 # explicit GIT_AUTHOR_*/GIT_COMMITTER_* env, and private git deps may break.
 # export GIT_CONFIG_GLOBAL := /dev/null
@@ -164,7 +164,7 @@ test-parallel: build
 	exit $$status
 
 vscode-keybindings-generate:
-	$(call run,vscode-keybindings-generate,node clients/vscode/scripts/gen-keybindings.mjs)
+	$(call run,vscode-keybindings-generate,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" node clients/vscode/scripts/gen-keybindings.mjs)
 
 .PHONY: vscode-semantic-generate vscode-semantic-check vscode-semantic-test
 vscode-semantic-generate:
@@ -191,23 +191,23 @@ test-timings:
 
 # Real-pipe Rust suites against one explicitly supplied server executable. The
 # native harness may be compiled here, but the server under test must be the
-# supplied artifact, never the binary Cargo builds: `MAGIT_LSP_TEST_BINARY` is
+# supplied artifact, never the binary Cargo builds: `MAGIT_LSP_BIN` is
 # required, absolute and executable, and its SHA-256 is recorded before Cargo
 # starts. The Rust harness is compiled separately from the selected server
 # identity; there is no `build` (server) prerequisite. FILTER may select a
 # focused hosted suite set without changing ordinary test-rust defaults.
-MAGIT_LSP_TEST_BINARY ?=
+MAGIT_LSP_BIN ?=
 RUST_ARTIFACT_FILTER ?= --test server_async
 test-rust-artifact:
-	@case "$(MAGIT_LSP_TEST_BINARY)" in \
-	'') echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
-	/*) if [ ! -f "$(MAGIT_LSP_TEST_BINARY)" ] || [ ! -x "$(MAGIT_LSP_TEST_BINARY)" ]; then \
-	      echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY is not an executable file: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2; \
+	@case "$(MAGIT_LSP_BIN)" in \
+	'') echo "test-rust-artifact: MAGIT_LSP_BIN is required: absolute path to the verified server executable" >&2; exit 2;; \
+	/*) if [ ! -f "$(MAGIT_LSP_BIN)" ] || [ ! -x "$(MAGIT_LSP_BIN)" ]; then \
+	      echo "test-rust-artifact: MAGIT_LSP_BIN is not an executable file: $(MAGIT_LSP_BIN)" >&2; exit 2; \
 	    fi;; \
-	*) echo "test-rust-artifact: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
+	*) echo "test-rust-artifact: MAGIT_LSP_BIN must be an absolute path, got: $(MAGIT_LSP_BIN)" >&2; exit 2;; \
 	esac
-	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("test-rust-artifact: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
-	$(call run,rust-artifact,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" cargo test -q $(if $(strip $(FILTER)),$(FILTER),$(RUST_ARTIFACT_FILTER)))
+	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("test-rust-artifact: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_BIN)"
+	$(call run,rust-artifact,MAGIT_LSP_BIN="$(MAGIT_LSP_BIN)" cargo test -q $(if $(strip $(FILTER)),$(FILTER),$(RUST_ARTIFACT_FILTER)))
 
 # Exercises the real `run` macro above through temporary included Makefiles.
 .PHONY: wrapper-check
@@ -226,10 +226,10 @@ update-examples:
 	$(call run,update-examples,MAGIT_LSP_REGENERATE_EXAMPLES=1 cargo test -q --test examples plain_examples_replay_against_the_real_binary)
 
 test-lua: build
-	$(call run,lua,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()")
+	$(call run,lua,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()")
 
 test-file: build
-	$(call run,lua,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')")
+	$(call run,lua,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')")
 
 ui-unit:
 	$(call run,ui-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py')
@@ -244,11 +244,11 @@ neovim: build
 
 PLAIN_ARGS ?=
 plain-neovim: build
-	$(call run,plain-neovim,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_neovim.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
+	$(call run,plain-neovim,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_neovim.py --binary "$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
 
 .PHONY: plain-presets update-capability-presets
 plain-presets: build
-	$(call run,plain-presets,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --binary "$(CURDIR)/target/debug/magit-lsp")
+	$(call run,plain-presets,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --binary "$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}")
 
 update-capability-presets:
 	$(call run,update-capability-presets,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --generate)
@@ -280,15 +280,15 @@ ui-file: build
 
 # Consume the exact externally supplied server; intentionally has no build prerequisite.
 native-neovim-artifact-check:
-	@case "$(MAGIT_LSP_TEST_BINARY)" in \
-	'') echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY is required: absolute path to the verified server executable" >&2; exit 2;; \
-	/*) if [ ! -f "$(MAGIT_LSP_TEST_BINARY)" ] || [ ! -x "$(MAGIT_LSP_TEST_BINARY)" ]; then \
-	      echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY is not an executable file: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2; \
+	@case "$(MAGIT_LSP_BIN)" in \
+	'') echo "native-neovim-artifact-check: MAGIT_LSP_BIN is required: absolute path to the verified server executable" >&2; exit 2;; \
+	/*) if [ ! -f "$(MAGIT_LSP_BIN)" ] || [ ! -x "$(MAGIT_LSP_BIN)" ]; then \
+	      echo "native-neovim-artifact-check: MAGIT_LSP_BIN is not an executable file: $(MAGIT_LSP_BIN)" >&2; exit 2; \
 	    fi;; \
-	*) echo "native-neovim-artifact-check: MAGIT_LSP_TEST_BINARY must be an absolute path, got: $(MAGIT_LSP_TEST_BINARY)" >&2; exit 2;; \
+	*) echo "native-neovim-artifact-check: MAGIT_LSP_BIN must be an absolute path, got: $(MAGIT_LSP_BIN)" >&2; exit 2;; \
 	esac
-	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("native-neovim-artifact-check: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_TEST_BINARY)"
-	$(call run,native-neovim-artifact-check,MAGIT_LSP_TEST_BINARY="$(MAGIT_LSP_TEST_BINARY)" MAGIT_LSP_BIN="$(MAGIT_LSP_TEST_BINARY)" PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/scenarios/status-basics.scn tests/ui/scenarios/commit-message-editor.scn)
+	@python3 -c 'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1], "rb"); [h.update(b) for b in iter(lambda: f.read(1048576), b"")]; print("native-neovim-artifact-check: server sha256 %s %s" % (h.hexdigest(), sys.argv[1]))' "$(MAGIT_LSP_BIN)"
+	$(call run,native-neovim-artifact-check,MAGIT_LSP_BIN="$(MAGIT_LSP_BIN)" PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/scenarios/status-basics.scn tests/ui/scenarios/commit-message-editor.scn)
 
 nvim-startup-check: build
 	$(call run,nvim-startup-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/measure_nvim_startup.py)
@@ -333,7 +333,7 @@ vscode-test: build vscode-deps
 	$(MAKE) vscode-semantic-check
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode,pnpm --dir clients/vscode test)
-	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)
+	$(call run,keybindings,MAGIT_LSP_BIN="$${MAGIT_LSP_BIN:-$(CURDIR)/target/debug/magit-lsp}" node clients/vscode/scripts/gen-keybindings.mjs --check)
 
 vscode-typecheck: vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)

@@ -922,7 +922,7 @@ def start(
     `startup_mode` is `ready` (wait for the first rendered view) or `held`
     (return after RPC readiness and hold the first Git `status` subprocess).
     """
-    external_binary = os.environ.get("MAGIT_LSP_TEST_BINARY")
+    external_binary = os.environ.get("MAGIT_LSP_BIN")
     if external_binary is not None:
         binary_path = Path(external_binary)
         if (
@@ -931,7 +931,7 @@ def start(
             or not os.access(binary_path, os.X_OK)
         ):
             raise DriverError(
-                "MAGIT_LSP_TEST_BINARY must be an absolute path to an executable file"
+                "MAGIT_LSP_BIN must be an absolute path to an executable file"
             )
         server_binary = external_binary
     else:
@@ -987,8 +987,9 @@ def start(
         )
         if extra_env:
             env.update(extra_env)
-        if external_binary is not None:
-            env["MAGIT_LSP_BIN"] = server_binary
+        # The harness-selected binary is authoritative: a scenario `env:` block
+        # can set anything else, but never redirect which server is launched.
+        env["MAGIT_LSP_BIN"] = server_binary
         if mode == "held":
             if run.gate is None:
                 raise DriverError("held startup requires a first-status gate")

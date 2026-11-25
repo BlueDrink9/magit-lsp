@@ -1005,7 +1005,15 @@ class StartPathTest(unittest.TestCase):
         self._assert_server_binary(None, Path(driver.__file__).resolve().parents[2] / "target/debug/magit-lsp")
 
     def test_explicit_server_binary_override_survives_environment_isolation(self) -> None:
-        self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/test-magit-lsp"}, Path("/tmp/test-magit-lsp"))
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "harness-magit-lsp"
+            binary.write_text("binary", encoding="utf-8")
+            binary.chmod(0o755)
+            self._assert_server_binary(
+                {"MAGIT_LSP_BIN": "/tmp/scenario-override"},
+                binary,
+                environment={"MAGIT_LSP_BIN": str(binary)},
+            )
 
     def test_external_artifact_path_with_spaces_is_propagated_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1013,8 +1021,11 @@ class StartPathTest(unittest.TestCase):
             binary.parent.mkdir()
             binary.write_text("binary", encoding="utf-8")
             binary.chmod(0o755)
-            with patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": str(binary)}, clear=True):
-                self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/ordinary"}, binary)
+            self._assert_server_binary(
+                {"MAGIT_LSP_BIN": "/tmp/ordinary"},
+                binary,
+                environment={"MAGIT_LSP_BIN": str(binary)},
+            )
 
     def test_invalid_external_artifact_fails_before_fixture_or_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1022,17 +1033,21 @@ class StartPathTest(unittest.TestCase):
             non_executable.write_text("binary", encoding="utf-8")
             for explicit in (str(Path(directory) / "missing"), str(non_executable), "relative/path"):
                 with (
-                    patch.dict(os.environ, {"MAGIT_LSP_TEST_BINARY": explicit,
-                                            "MAGIT_LSP_BIN": "/tmp/fallback"}, clear=True),
+                    patch.dict(os.environ, {"MAGIT_LSP_BIN": explicit}, clear=True),
                     patch.object(driver, "check_tools") as check_tools,
                     patch.object(driver.fixtures, "build") as build,
                 ):
-                    with self.assertRaisesRegex(driver.DriverError, "MAGIT_LSP_TEST_BINARY"):
+                    with self.assertRaisesRegex(driver.DriverError, "MAGIT_LSP_BIN"):
                         driver.start("clean")
                 check_tools.assert_not_called()
                 build.assert_not_called()
 
-    def _assert_server_binary(self, extra_env: dict[str, str] | None, expected: Path) -> None:
+    def _assert_server_binary(
+        self,
+        extra_env: dict[str, str] | None,
+        expected: Path,
+        environment: dict[str, str] | None = None,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"
             state = startup.SocketState(path=str(run_dir / "nvim.sock"), length=1)
@@ -1042,9 +1057,9 @@ class StartPathTest(unittest.TestCase):
                 captured.update(env)
                 raise RuntimeError("stop after environment capture")
 
-            isolated_env = dict(extra_env or {})
-            if "MAGIT_LSP_TEST_BINARY" in os.environ:
-                isolated_env["MAGIT_LSP_TEST_BINARY"] = os.environ["MAGIT_LSP_TEST_BINARY"]
+            isolated_env = dict(environment or {})
+            if environment is None and "MAGIT_LSP_BIN" in os.environ:
+                isolated_env["MAGIT_LSP_BIN"] = os.environ["MAGIT_LSP_BIN"]
             with (
                 patch.dict(os.environ, isolated_env, clear=True),
                 patch.object(driver, "check_tools"),
@@ -1243,18 +1258,19 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
             python.chmod(0o755)
             cargo = fake_bin / "cargo"
             cargo.write_text(
-                "#!/bin/sh\nprintf '%s|%s\\n' \"$MAGIT_LSP_TEST_BINARY\" \"$*\" >> \"$CAPTURE\"\n",
+                "#!/bin/sh\nprintf '%s|%s\\n' \"$MAGIT_LSP_BIN\" \"$*\" >> \"$CAPTURE\"\n",
                 encoding="utf-8",
             )
             cargo.chmod(0o755)
             env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture))
+            env.pop("MAGIT_LSP_BIN", None)
             for selector, expected in (
                 (None, "test -q --test server_async"),
                 ("--test server_async --test editor_bridge --test rebase_interactive",
                  "test -q --test server_async --test editor_bridge --test rebase_interactive"),
             ):
                 capture.unlink(missing_ok=True)
-                command = ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={binary}"]
+                command = ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_BIN={binary}"]
                 if selector:
                     command.append(f"FILTER={selector}")
                 result = subprocess.run(command, cwd=ROOT, env=env, text=True, capture_output=True, check=False)
@@ -1263,6 +1279,17 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
                 self.assertEqual(calls.count("python-called"), 1)
                 self.assertEqual(calls.splitlines()[-1], f"{binary}|{expected}")
                 self.assertNotIn("build", calls)
+            capture.unlink(missing_ok=True)
+            result = subprocess.run(
+                ["make", "-s", "test-rust-artifact"],
+                cwd=ROOT, env=dict(env, MAGIT_LSP_BIN=str(binary)),
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                capture.read_text(encoding="utf-8").splitlines()[-1],
+                f"{binary}|test -q --test server_async",
+            )
 
     def test_missing_artifact_fails_before_python_or_build(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1274,16 +1301,17 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
             python.write_text("#!/bin/sh\necho called >> \"$CAPTURE\"\n", encoding="utf-8")
             python.chmod(0o755)
             env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", CAPTURE=str(capture))
+            env.pop("MAGIT_LSP_BIN", None)
             non_executable = root / "not executable"
             non_executable.write_text("fake server", encoding="utf-8")
             for selected, expected in (
-                ("", "MAGIT_LSP_TEST_BINARY is required"),
+                ("", "MAGIT_LSP_BIN is required"),
                 ("relative/server", "must be an absolute path"),
                 (str(non_executable), "is not an executable file"),
                 (str(root / "missing"), "is not an executable file"),
             ):
                 result = subprocess.run(
-                    ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_TEST_BINARY={selected}"],
+                    ["make", "-s", "test-rust-artifact", f"MAGIT_LSP_BIN={selected}"],
                     cwd=ROOT, env=env, text=True, capture_output=True, check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)

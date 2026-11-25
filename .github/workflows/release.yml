@@ -142,7 +142,7 @@ jobs:
           binary="$(realpath target/x86_64-unknown-linux-gnu/release/magit-lsp)"
           expected=$(python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
           test "$(sha256sum "$binary" | awk '{print $1}')" = "$expected"
-          make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
+          make test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -238,7 +238,7 @@ jobs:
           binary="$(realpath "target/${{ matrix.target }}/release/magit-lsp")"
           expected=$(nix develop --no-update-lock-file .#release-native -c python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
           test "$(shasum -a 256 "$binary" | awk '{print $1}')" = "$expected"
-          nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async"
+          nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async"
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -392,8 +392,8 @@ jobs:
           binary=$(find "$RUNNER_TEMP/native-functional-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit); expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["executable_sha256"])' "$manifest")
           before=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$before" = "$expected"; echo '{"ok":false,"phase":"rust-functional"}' > "$RUNNER_TEMP/native-functional-evidence.json"
           make_bin=$(command -v make)
-          nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_TEST_BINARY="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
-          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_TEST_BINARY="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
+          nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
+          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_BIN="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
           after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; if grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"; then exit 1; fi
           printf '{"ok":true,"target":"%s","executable_sha256":"%s","before_sha256":"%s","after_sha256":"%s","rust_suites":["server_async","editor_bridge","rebase_interactive"],"neovim_scenarios":["status-basics.scn","commit-message-editor.scn"],"cleanup":"make targets completed"}\n' "$name" "$expected" "$before" "$after" > "$RUNNER_TEMP/native-functional-evidence.json"
 

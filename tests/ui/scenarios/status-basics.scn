@@ -5,7 +5,7 @@
 # before the fold walk, so the scenario never depends on the client going idle
 # at the right moment. On a machine whose first fetch could exceed the
 # production promise, run it with
-# `MAGIT_LSP_TEST_BINARY=scripts/open-promise-server.sh`, which widens the
+# `MAGIT_LSP_BIN=scripts/open-promise-server.sh`, which widens the
 # promise. The slow path (closed sections on open) is covered by the
 # server_async status_open tests.
 #
