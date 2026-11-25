@@ -5,6 +5,7 @@ profile-only: true
 ---
 # The fixture already holds the two sibling hunks in f.txt; refresh explicitly
 # and then only fold, so no out-of-band repository write races the watcher.
+wait screen contains "+line5 CHANGED"
 keys: g r
 wait
 goto "+line5 CHANGED"
