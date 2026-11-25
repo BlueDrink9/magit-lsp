@@ -994,7 +994,14 @@ fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
     else {
         return;
     };
-    if entry.key_state.repair_echo.is_some() {
+    // An outstanding echo suppresses a repair only while the buffer still holds
+    // that edit's authoritative text. A refused key leaves different text behind,
+    // so the repair must run even while the previous push is unacknowledged.
+    if entry
+        .key_state
+        .repair_echo
+        .is_some_and(|(_, _, hash)| hash == crate::presentation::plain::hash_text(&text))
+    {
         return;
     }
     let Some((tree, view_id, generation, scope, menu)) = entry.controller.latest_action_meta()
