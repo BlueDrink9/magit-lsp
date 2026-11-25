@@ -199,6 +199,80 @@ fn status_open_fast_background_fetch_expands_like_the_sync_render() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+/// A refresh inside the open promise re-arms the deferred fetch with the
+/// refresh render's own deadline, so the sections still expand like the
+/// synchronous render even though the original fetch was superseded.
+#[cfg(unix)]
+#[test]
+fn status_open_refresh_inside_promise_rearms_background_fetch() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    // Park the opening fetch so only a re-armed fetch can expand the sections.
+    let gate = GatedGit::arm("diff");
+    let gate_env = gate.child_env();
+    let env: Vec<_> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+    server.recv_timeout = Duration::from_secs(10);
+    let closed = server.wait_for_view_render_after(&view, loading_version);
+    let closed_version = closed["params"]["version"].as_u64().unwrap();
+    gate.wait_entered();
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":view,"command":"common.refresh"}}));
+    let refreshed = server.response_with_id(3);
+    assert!(refreshed["error"].is_null(), "{refreshed}");
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let current = server.response_with_id(4);
+    let refreshed_version = current["result"]["version"].as_u64().unwrap();
+    assert!(refreshed_version > closed_version, "{current}");
+
+    // Poll the server-owned render: a re-armed fetch installs the same text as
+    // the synchronous fully-expanded status opening.
+    let mut authoritative = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    let expected = authoritative.render(&Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut lines: Vec<String> = Vec::new();
+    let mut id = 5;
+    while Instant::now() < deadline {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync",
+            "params":{"viewId":view}}));
+        let resync = server.response_with_id(id);
+        id += 1;
+        lines = serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+        if lines == expected.lines {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        lines, expected.lines,
+        "a refresh inside the promise must re-arm the fully-expanded render"
+    );
+    gate.release();
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[cfg(unix)]
 #[test]
 fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {

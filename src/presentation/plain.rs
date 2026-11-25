@@ -306,6 +306,27 @@ impl PlainDocument {
         self.prepare()
     }
 
+    /// Whether the controller has already observed this exact editor snapshot.
+    ///
+    /// A delivered render observes the snapshot it replaced before rendering new
+    /// authoritative text; a refused key's typed snapshot is never observed.
+    /// That distinguishes an acknowledged render from text that still needs an
+    /// authoritative repair.
+    pub fn has_observed(&self, version: i32, text: &str) -> bool {
+        self.client
+            .as_ref()
+            .is_some_and(|client| client.version == version && client.hash == hash_text(text))
+    }
+
+    /// Retry the retained authoritative render against an observed snapshot.
+    ///
+    /// Unlike [`Self::render_actions`], this never re-renders, so navigation
+    /// attached to the delivered render survives the retry.
+    pub fn repair(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
+        self.observe(version, text);
+        self.prepare()
+    }
+
     /// Record an observed didChange snapshot and reconcile an in-flight edit echo.
     ///
     /// This is the observation half of [`PlainDocument::change`]: it updates the

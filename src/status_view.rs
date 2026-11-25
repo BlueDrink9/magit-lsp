@@ -230,8 +230,10 @@ impl StatusView {
 
     /// The files a deferred opening still needs for its background fetch.
     ///
-    /// Returns `None` once the opening default has been consumed or overridden,
-    /// so a user-opened section is never expanded on the fetch's behalf.
+    /// A refresh renews the generation and exposes a new fetch here, whose
+    /// promise starts at the refresh render's publish instant. Returns `None`
+    /// once the opening default has been consumed or overridden, so a
+    /// user-opened section is never expanded on the fetch's behalf.
     pub fn timed_fetch(&self) -> Option<TimedFetch> {
         if !self.auto_expand || !matches!(self.state, StatusState::Ready { .. }) {
             return None;

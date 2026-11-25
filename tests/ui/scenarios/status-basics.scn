@@ -37,11 +37,7 @@ wait
 expect screen contains "Staged changes (0)"
 expect screen contains "Unstaged changes (2)"
 snapshot: unstaged-file
-keys: k k k k k k k k k k k k k k k k k k k k
-keys: j j j j j j j j j j
-keys: Right Right Right Right
-wait
-expect cursor on "+line3 CHANGED"
+goto "+line3 CHANGED"
 document: before-edit
 keys: J
 wait

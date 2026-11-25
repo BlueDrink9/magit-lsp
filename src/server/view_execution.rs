@@ -411,7 +411,7 @@ fn install_status_acquisition(
 /// expanded render through its repository's turn only if the fetch beat the
 /// promise deadline. Past the deadline the sections stay closed for on-demand
 /// loading; a superseded generation is discarded by the install.
-fn spawn_timed_hunks(
+pub(super) fn spawn_timed_hunks(
     shared: Shared,
     repository: crate::git::GitRepo,
     repo_path: String,

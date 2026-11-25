@@ -286,6 +286,9 @@ pub struct OpenView {
     published: PublishedViews,
     repo_path: String,
     draft_owner: Option<String>,
+    /// Deferred status hunk fetch armed by the last refresh render, with the
+    /// exact render version and publish instant that start its promise.
+    pending_timed_fetch: Option<(u64, std::time::Instant, crate::status_view::TimedFetch)>,
 }
 
 #[derive(Clone)]
@@ -461,6 +464,30 @@ impl OpenView {
         self.view.on_refresh()?;
         self.render_with_delivery(cursor, None, RenderDelivery::Acknowledged)
     }
+
+    /// Remember a deferred hunk fetch whose generation was renewed by a refresh.
+    fn arm_refresh_fetch(&mut self, render: &ViewRender) {
+        let fetch = self
+            .view
+            .as_any()
+            .and_then(|state| state.downcast_ref::<StatusView>())
+            .and_then(StatusView::timed_fetch);
+        if let Some(fetch) = fetch {
+            self.pending_timed_fetch = Some((render.version, std::time::Instant::now(), fetch));
+        }
+    }
+
+    /// Take the deferred fetch armed by this exact refresh render.
+    ///
+    /// A later render consumes the latch, so a superseded fetch can never be
+    /// published against a fresh promise window.
+    pub(crate) fn take_timed_fetch(
+        &mut self,
+        version: u64,
+    ) -> Option<(std::time::Instant, crate::status_view::TimedFetch)> {
+        let (armed_version, published, fetch) = self.pending_timed_fetch.take()?;
+        (armed_version == version).then_some((published, fetch))
+    }
     /// Render without touching the repository, diffing against the last tree.
     ///
     /// `forced` replaces the identity-based successor cursor; section
@@ -614,6 +641,7 @@ fn initialize_open_view(
         published: PublishedViews::default(),
         repo_path: repo_path_owned,
         draft_owner,
+        pending_timed_fetch: None,
     };
     (descriptor, render, open_view)
 }
@@ -1496,7 +1524,7 @@ impl Session {
                 });
             }
         }
-        self.run_versioned_command(
+        let mut result = self.run_versioned_command(
             &target.view_id,
             &request.command,
             target.version,
@@ -1506,7 +1534,16 @@ impl Session {
             request.args.as_ref(),
             target.key,
             ui,
-        )
+        )?;
+        // A mutation's own refresh must not re-arm and publish hunks against an
+        // already-superseded client interaction; an explicit refresh command
+        // renews the deferred opening promise here.
+        if request.command == "common.refresh" {
+            if let Some(render) = result.render.as_ref() {
+                self.arm_refresh_fetch(render);
+            }
+        }
+        Ok(result)
     }
 
     /// Handle one key step: resolve it through the view's keymap and either run
@@ -2685,12 +2722,26 @@ impl Session {
         if tree == view.tree && menu == view.view.menu() {
             return Ok(None);
         }
-        Ok(Some(view.render_tree_with_delivery(
-            tree,
-            None,
-            None,
-            RenderDelivery::Acknowledged,
-        )?))
+        let render =
+            view.render_tree_with_delivery(tree, None, None, RenderDelivery::Acknowledged)?;
+        view.arm_refresh_fetch(&render);
+        Ok(Some(render))
+    }
+
+    /// Arm the deferred fetch renewed by an explicit refresh render.
+    fn arm_refresh_fetch(&mut self, render: &ViewRender) {
+        if let Some(view) = self.views.get_mut(&render.view_id) {
+            view.arm_refresh_fetch(render);
+        }
+    }
+
+    /// Take a refresh render's deferred fetch through its owning view.
+    pub(crate) fn take_timed_fetch(
+        &mut self,
+        view_id: &str,
+        version: u64,
+    ) -> Option<(std::time::Instant, crate::status_view::TimedFetch)> {
+        self.views.get_mut(view_id)?.take_timed_fetch(version)
     }
 
     fn queue_loading_status_refresh(&mut self, view_id: &str) -> bool {

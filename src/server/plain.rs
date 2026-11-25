@@ -994,31 +994,15 @@ fn repair_plain_authoritative(shared: &Shared, uri: &str, incarnation: u64) {
     else {
         return;
     };
-    // An outstanding echo suppresses a repair only while the buffer still holds
-    // that edit's authoritative text. A refused key leaves different text behind,
-    // so the repair must run even while the previous push is unacknowledged.
-    if entry
-        .key_state
-        .repair_echo
-        .is_some_and(|(_, _, hash)| hash == crate::presentation::plain::hash_text(&text))
-    {
+    // A delivered render already observed the current docstore snapshot before
+    // rendering its authoritative text. Re-observing it now would mark the open
+    // flight diverged, clear its navigation with a fresh render and re-push
+    // against stale client text. Refused keys leave typed text the controller
+    // never observed, so they still repair while a push is unacknowledged.
+    if entry.controller.has_observed(version, &text) {
         return;
     }
-    let Some((tree, view_id, generation, scope, menu)) = entry.controller.latest_action_meta()
-    else {
-        return;
-    };
-    let (tree, view_id, generation, scope, menu) = (
-        tree.clone(),
-        view_id.to_owned(),
-        generation,
-        scope.to_owned(),
-        menu.cloned(),
-    );
-    entry.controller.observe(version, text);
-    let edit = entry
-        .controller
-        .render_actions(tree, view_id, generation, scope, menu);
+    let edit = entry.controller.repair(version, text);
     if let Some(edit) = edit {
         let incarnation = entry.incarnation;
         drop(documents);
@@ -1388,11 +1372,55 @@ pub(super) fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Mess
         .unwrap_or_else(|p| p.into_inner())
         .values()
         .find_map(|views| views.current_snapshot(&render.view_id));
-    if route_plain_render(shared, &render.view_id, snapshot, render.cursor) {
+    let routed = route_plain_render(shared, &render.view_id, snapshot, render.cursor);
+    deliver_refresh_fetch(shared, &render.view_id, render.version);
+    if routed {
         None
     } else {
         Some(custom_ui(&shared.client).render(render))
     }
+}
+
+/// Publish a deferred hunk fetch whose promise was renewed by this refresh render.
+fn deliver_refresh_fetch(shared: &Shared, view_id: &str, version: u64) {
+    let Some(repo) = shared.repo_for_view(view_id) else {
+        return;
+    };
+    let Some(handle) = shared.session(&repo) else {
+        return;
+    };
+    let armed = {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.take_timed_fetch(view_id, version)
+    };
+    let Some((published, fetch)) = armed else {
+        return;
+    };
+    let repository = match crate::git::GitRepo::open(&repo) {
+        Ok(repository) => repository,
+        Err(error) => {
+            tracing::warn!(%error, "deferred refresh fetch lost its repository");
+            return;
+        }
+    };
+    // Renders are also delivered from synchronous transport threads, which have
+    // no ambient reactor; use the runtime captured by the connection.
+    let Some(runtime) = shared.runtime.clone() else {
+        return;
+    };
+    let shared = shared.clone();
+    let view = view_id.to_owned();
+    runtime.spawn(async move {
+        super::view_execution::spawn_timed_hunks(
+            shared,
+            repository,
+            repo,
+            view,
+            crate::runner::current_trace_id(),
+            published,
+            fetch,
+        );
+    });
 }
 
 /// Feed an authoritative logical-view render into its Plain document, if any.

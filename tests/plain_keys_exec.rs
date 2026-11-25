@@ -250,6 +250,26 @@ fn offered_actions(
     }
 }
 
+/// Drain frames until a reader barrier answers, recording any extra edits.
+///
+/// Extra edits are answered without their echoes so the server stays live while
+/// the assertion sees every push the key task made.
+fn drain_until(server: &mut stdio::TestServer, uri: &str, id: i64, frames: &mut Vec<Value>) {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
+    loop {
+        let message = server.recv();
+        if message["id"] == json!(id) {
+            return;
+        }
+        if message["method"] == "workspace/applyEdit" {
+            frames.push(message.clone());
+            server.send(json!({"jsonrpc":"2.0","id":message["id"],"result":{"applied":false}}));
+        } else {
+            frames.push(message);
+        }
+    }
+}
+
 /// Poll for the Plain action `command` offered on `needle`'s row.
 fn wait_for_action(
     server: &mut stdio::TestServer,
@@ -562,6 +582,102 @@ fn eligible_key_stages_exactly_and_repairs_authoritative_text() {
         fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
         "f.txt\n",
         "repair echo never repeats staging"
+    );
+}
+
+/// A typed key that enters another view keeps its transition navigation through
+/// the repair that follows the key task: the reader sees one applyEdit, then one
+/// showDocument after that edit's applied response.
+#[test]
+fn typed_key_view_transition_navigates_after_its_apply_edit_response() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("init", [("f.txt", "one\n")])
+        .commit("tip", [("f.txt", "two\n")])
+        .modify("f.txt", "three\n")
+        .build();
+    let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", true);
+    let line = line_of(&editor, &uri, "f.txt");
+    replace(&mut server, &mut editor, &uri, line, 0, 0, "c");
+    apply(&mut server, &mut editor);
+    // The first key opens the commit menu; the second selects Fixup and enters
+    // the log selection view, whose render carries the transition intent.
+    let line = line_of(&editor, &uri, "Fixup");
+    replace(&mut server, &mut editor, &uri, line, 0, 0, "f");
+    let (edit, _) = next_apply(&mut server);
+
+    let mut frames = Vec::new();
+    drain_until(&mut server, &uri, 8450, &mut frames);
+    assert!(
+        !frames.iter().any(|m| m["method"] == "workspace/applyEdit"),
+        "the post-key repair must not push before the transition's response: {frames:#?}"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":edit["id"],"result":{"applied":true}}));
+    for id in 8451..8456 {
+        drain_until(&mut server, &uri, id, &mut frames);
+    }
+    let navigation: Vec<_> = frames
+        .iter()
+        .filter(|m| m["method"] == "window/showDocument")
+        .collect();
+    assert_eq!(
+        navigation.len(),
+        1,
+        "exactly one transition navigation: {frames:#?}"
+    );
+    assert_eq!(
+        navigation[0]["params"],
+        json!({"uri":uri,"external":false,"takeFocus":true,
+               "selection":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}}}),
+        "navigation must span the heading through the new view's cursor"
+    );
+    assert!(
+        !frames.iter().any(|m| m["method"] == "workspace/applyEdit"),
+        "the accepted push must not be re-pushed by the repair: {frames:#?}"
+    );
+}
+
+/// An applied response that beats the edit echo must not make the repair push
+/// the stale client snapshot a second time.
+#[test]
+fn applied_response_before_echo_does_not_repush_the_key_render() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("init", [("f.txt", "one\n")])
+        .modify("f.txt", "two\n")
+        .build();
+    let (mut server, mut editor, uri) = open(&repo, "Key Exec Client", true);
+    let line = line_of(&editor, &uri, "f.txt");
+    replace(&mut server, &mut editor, &uri, line, 0, 1, "s");
+    let (edit, _) = next_apply(&mut server);
+    let frames = editor.dispatch(&edit);
+    let response = frames
+        .iter()
+        .find(|frame| frame.get("result").is_some())
+        .expect("the applyEdit response")
+        .clone();
+    let echo = frames
+        .iter()
+        .find(|frame| frame["method"] == "textDocument/didChange")
+        .expect("the applyEdit echo")
+        .clone();
+
+    server.send(response);
+    let mut seen = Vec::new();
+    drain_until(&mut server, &uri, 8460, &mut seen);
+    assert!(
+        !seen.iter().any(|m| m["method"] == "workspace/applyEdit"),
+        "an applied response without an echo must not re-push: {seen:#?}"
+    );
+    server.send(echo);
+    drain_until(&mut server, &uri, 8461, &mut seen);
+    assert!(
+        !seen.iter().any(|m| m["method"] == "workspace/applyEdit"),
+        "the late echo must not trigger a second repair push: {seen:#?}"
+    );
+    assert_eq!(
+        fixtures::git(repo.path(), &["diff", "--cached", "--name-only"]),
+        "f.txt\n",
+        "the key staged exactly once"
     );
 }
 
