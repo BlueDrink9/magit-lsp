@@ -1886,6 +1886,10 @@ fn windows_path_portability_rejects_verbatim_prefixes_and_reserved_names() {
     for accepted in ["/repo/console.txt", "/repo/contact.txt"] {
         assert_eq!(windows_path_problem(Path::new(accepted), true), None);
     }
+    // `.` and `..` are navigation segments, not filenames.
+    for relative in ["/repo/../fixtures", "/repo/./fixtures"] {
+        assert_eq!(windows_path_problem(Path::new(relative), true), None);
+    }
     // Git arguments are names only sometimes, so reserved characters are fine.
     assert_eq!(
         windows_path_problem(Path::new("*.configured-private"), false),

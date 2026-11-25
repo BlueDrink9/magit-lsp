@@ -57,7 +57,8 @@ const WINDOWS_DEVICE_NAMES: &[&str] = &[
 /// `check_name_chars` also rejects reserved characters in every path segment,
 /// reserved device names (stem-matched, ASCII-case-insensitively, so `nul.txt`
 /// and `COM3` are rejected while `console.txt` is not) and a segment ending in
-/// a dot or a space.
+/// a dot or a space. The `.` and `..` navigation segments are exempt, since
+/// they are not filenames.
 /// Callers pass `false` for values that are not filenames (git arguments such
 /// as commit messages or ignore patterns) so only the verbatim prefix is
 /// rejected there.
@@ -98,6 +99,10 @@ pub fn windows_path_problem(path: &Path, check_name_chars: bool) -> Option<&'sta
             return Some(
                 "windows-reserved device name in path segment (`CON`, `NUL`, `COM1`, `LPT1`, ...)",
             );
+        }
+        // `.` and `..` are navigation segments, not filenames.
+        if matches!(segment, "." | "..") {
+            continue;
         }
         if segment.ends_with('.') || segment.ends_with(' ') {
             return Some("windows-reserved trailing dot or space in path segment");

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Statically check Rust test premises for Windows portability.
 
-Two rules apply to `tests/**/*.rs` and `src/**/*.rs`:
+Two rules apply to `tests/**/*.rs`, `src/**/*.rs` and
+`crates/test-support/src/**/*.rs`:
 
 1. Every `canonicalize` call is Unix-only (its file or enclosing item carries
    `#[cfg(unix)]` or `#![cfg(unix)]`) or a nearby `windows-ok: <reason>`
@@ -10,7 +11,9 @@ Two rules apply to `tests/**/*.rs` and `src/**/*.rs`:
    the tempdir `.prefix(…)` builder are valid Windows path segments. The
    device-name, reserved-character and trailing-dot/space tables are parsed
    from `windows_path_problem` in `crates/test-support/src/lib.rs`, so the runtime guard
-   and this checker share one definition rather than drifting apart.
+   and this checker share one definition rather than drifting apart. The `.` and
+   `..` navigation segments are exempt from the trailing-dot rule: they are not
+   filenames.
 
 An item annotated `#[should_panic(expected = "windows-reserved…")]` is testing
 the guard itself, so rule 2 suppresses it (as does a `windows-ok:` comment).
@@ -26,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 NAME_TABLE_SOURCE = Path('crates/test-support/src/lib.rs')
-SCAN_ROOTS = (Path('tests'), Path('src'))
+SCAN_ROOTS = (Path('tests'), Path('src'), Path('crates/test-support/src'))
 NAME_METHODS = ('join', 'with_file_name', 'rename', 'prefix')
 WINDOWS_OK = re.compile(r'windows-ok\s*:\s*\S')
 SHOULD_PANIC = 'should_panic(expected = "windows-reserved'
@@ -367,6 +370,9 @@ def name_problem(text, rules):
         stem = segment.split('.')[0]
         if any(device.lower() == stem.lower() for device in rules.devices):
             return 'windows-reserved device name in path segment'
+        if segment in ('.', '..'):
+            # Parent/current-directory navigation, not a filename.
+            continue
         if (
             (rules.trailing_dot and segment.endswith('.'))
             or (rules.trailing_space and segment.endswith(' '))
@@ -564,6 +570,15 @@ fn negated_gate() {
 fn trailing_segment(dir: std::path::PathBuf) {
     let _ = dir.join("trailing ");
 }
+
+fn relative_segments(dir: std::path::PathBuf) {
+    let _ = dir.join("../fixtures");
+    let _ = dir.join("./fixtures");
+}
+
+fn trailing_dot_segment(dir: std::path::PathBuf) {
+    let _ = dir.join("trailing.");
+}
 '''
 
 SELF_TEST_MODULE_SOURCE = '''
@@ -609,6 +624,7 @@ def self_test():
             ('tests/probe.rs', 2, 21),
             ('tests/probe.rs', 1, 31),
             ('tests/probe.rs', 2, 35),
+            ('tests/probe.rs', 2, 44),
             ('src/menu.rs', 1, 3),
         }
         if found != expected:

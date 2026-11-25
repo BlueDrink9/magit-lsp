@@ -48,7 +48,7 @@ declares `workspace.applyEdit` and omits
 `workspace/applyEdit` edits that use `documentChanges`. The generated known-client
 appendix records this as `assume-document-changes` with the fake-editor model
 `neovim-accepts-undeclared-documentChanges`
-(`tests/common/editor_model/mod.rs`), so the server corrects the declaration. Do
+(`crates/test-support/src/editor_model/mod.rs`), so the server corrects the declaration. Do
 not generalize from this trace; it is bounded to the matched client version. The
 same trace also matches `apply-result-unreliable` (`silent-stale-apply`), which
 reconciles a silent stale apply result without changing the derived level.
