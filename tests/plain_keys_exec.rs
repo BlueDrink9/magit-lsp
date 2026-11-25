@@ -271,6 +271,7 @@ fn drain_until(server: &mut stdio::TestServer, uri: &str, id: i64, frames: &mut 
 }
 
 /// Poll for the Plain action `command` offered on `needle`'s row.
+#[cfg(unix)]
 fn wait_for_action(
     server: &mut stdio::TestServer,
     editor: &mut FakeEditor,
@@ -971,6 +972,14 @@ fn chord_and_menu_steps_keep_server_state() {
     );
 }
 
+// Managed commit drafts need the Unix helper/validated-fd boundary. On Windows
+// `EditRegistry::create` is the platform stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so commit creation answers the open
+// request with a showMessage and the `.git/COMMIT_EDITMSG` frames awaited below
+// never arrive; the test then stalls in `pump`'s bounded receive instead of
+// failing clearly. Real Windows draft support belongs to the deferred Windows
+// phase; tests/plain_draft_windows.rs pins the refusal.
+#[cfg(unix)]
 #[test]
 fn plain_armed_stage_key_is_refused_while_a_commit_draft_owns_the_repository() {
     let (repo, _) = fixtures::RepoFixture::new()
