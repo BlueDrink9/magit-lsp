@@ -517,11 +517,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 plain_provider_snapshot(shared, uri)
                     .map(|(tree, _, _)| semantic_tokens::encode_with_encoding(&tree, encoding))
             } else {
-                Some(
-                    tree_for_positional_request(shared, uri)
-                        .map(|tree| semantic_tokens::encode(&tree))
-                        .unwrap_or_default(),
-                )
+                // No resolved tree (unknown or unopened URI) is null, like
+                // documentLink above; only an encoded zero-token tree is `{"data":[]}`.
+                tree_for_positional_request(shared, uri).map(|tree| semantic_tokens::encode(&tree))
             };
             let Some(tokens) = tokens else {
                 return Ok(Dispatched::value(Value::Null));
