@@ -40,12 +40,9 @@ expect-test = "1"
 proptest = "1"
 rstest = "0.26"
 
-# Keep `target/` small: full debug info and incremental artifacts need far more
-# disk than the test cycle benefits from.
+# Keep `target/` small: line-tables-only debug info instead of full debug info.
 [profile.dev]
 debug = "line-tables-only"
-incremental = false
 
 [profile.test]
 debug = "line-tables-only"
-incremental = false
