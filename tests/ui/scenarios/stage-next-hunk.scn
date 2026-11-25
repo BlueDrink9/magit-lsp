@@ -3,6 +3,7 @@ fixture: modified-two-files
 profile: vim
 profile-only: true
 ---
+wait screen contains "+line3 CHANGED"
 sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'three-hunk base'; sed -i.bak -e '5s/$/ CHANGED/' -e '20s/$/ CHANGED/' -e '35s/$/ CHANGED/' f.txt && rm f.txt.bak
 keys: g r
 wait
