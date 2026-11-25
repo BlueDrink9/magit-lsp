@@ -1,0 +1,9 @@
+[package]
+name = "magit-lsp-quirks"
+version = "0.2.0"
+license = "GPL-3.0-only"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = "1.0"

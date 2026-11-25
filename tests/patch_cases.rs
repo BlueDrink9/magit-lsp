@@ -1,4 +1,4 @@
-//! Diff-shape cases that stress header preservation in `src/patch.rs`.
+//! Diff-shape cases that stress header preservation in `crates/patch/src/lib.rs`.
 
 use magit_lsp_test_support as common;
 

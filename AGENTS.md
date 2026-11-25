@@ -25,8 +25,8 @@ records that ack as the base for the next incremental update.
   client acks; refreshes, renders and diffs views.
 - `src/commands.rs`: actions, context and effects. `src/keyhandler.rs`: key
   sequences. `src/menu.rs`: transient menus and arguments.
-- `src/git.rs`: the Git boundary. `src/patch.rs`: patch/hunk operations. Keep
-  VCS work behind these.
+- `src/git.rs`: the Git boundary. `crates/patch` (`magit-lsp-patch`): patch/hunk
+  operations. Keep VCS work behind these.
 - `src/server.rs`: LSP/transport to sessions and notifications.
   `src/protocol.rs`: wire payloads. The Neovim adapter is `clients/neovim/lua/magit-lsp/`,
   a thin display/input client.

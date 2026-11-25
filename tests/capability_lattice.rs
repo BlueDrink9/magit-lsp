@@ -440,7 +440,7 @@ fn draft_chain(
     // applyEdit+documentChanges capabilities (src/server/plain.rs:1284-1295).
     // These fixtures send no clientInfo (crates/test-support/src/stdio.rs:334-345), so the
     // recorded declaration is effective; the assume-document-changes quirk
-    // (src/quirks.rs:81-95) only applies to a matching client identity.
+    // (crates/quirks/src/lib.rs:81-95) only applies to a matching client identity.
     let template_index = client.editor.outbound.iter().position(|m| {
         if m["method"] != "workspace/applyEdit" {
             return false;
