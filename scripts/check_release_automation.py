@@ -1985,22 +1985,25 @@ def paginated_entries(pages, key, label):
 def validate_run_jobs(pages, run_id, run_attempt, mandatory=MANDATORY_RUN_JOBS):
     """Require every page and every declared mandatory job to succeed.
 
-    Every listed job must belong to ``run_id`` and ``run_attempt``. Each
-    mandatory name must appear and every job with that name must be completed
-    with conclusion ``success``; a missing, skipped, cancelled, neutral or
-    otherwise inconclusive mandatory job fails the run.
+    Every listed job must belong to ``run_id`` and to an attempt no later than
+    ``run_attempt`` (the run document reports the latest attempt). Each
+    mandatory name is judged by its latest attempt: a partial re-run supersedes
+    an older failed or skipped row with a successful one, while a latest row
+    that is missing, inconclusive or unsuccessful fails the run.
     """
     jobs = paginated_entries(pages, 'jobs', 'build run jobs')
     expected_run = run_int(run_id)
-    expected_attempt = run_int(run_attempt)
+    latest_attempt = run_int(run_attempt)
     by_name = {}
     for job in jobs:
         if job.get('run_id') != expected_run:
             fail(f'build run job {job.get("name")!r} belongs to run '
                  f'{job.get("run_id")!r}, expected {expected_run}')
-        if job.get('run_attempt') != expected_attempt:
+        attempt = job.get('run_attempt')
+        if isinstance(attempt, bool) or not isinstance(attempt, int) or \
+                attempt < 1 or attempt > latest_attempt:
             fail(f'build run job {job.get("name")!r} belongs to attempt '
-                 f'{job.get("run_attempt")!r}, expected {expected_attempt}')
+                 f'{attempt!r}, expected at most {latest_attempt}')
         name = job.get('name')
         if not isinstance(name, str) or not name:
             fail('build run job has no name')
@@ -2009,7 +2012,10 @@ def validate_run_jobs(pages, run_id, run_attempt, mandatory=MANDATORY_RUN_JOBS):
         matches = by_name.get(name, [])
         if not matches:
             fail(f'build run is missing mandatory job {name!r}')
+        newest = max(job['run_attempt'] for job in matches)
         for job in matches:
+            if job['run_attempt'] != newest:
+                continue
             if job.get('status') != 'completed':
                 fail(f'mandatory job {name!r} is inconclusive '
                      f'(status {job.get("status")!r})')
@@ -2023,9 +2029,11 @@ def validate_manifest_binding(manifest, expected):
     """Fail unless the untrusted run manifest is the trusted exact binding.
 
     ``expected`` carries the trusted version, target, run identity, locks and
-    toolchain. The manifest's keys must be exactly the producer contract's
-    fields, and its tag ref must be the version's ``refs/tags/v*``. The source
-    SHA is only shape-checked here and bound to the tag by
+    toolchain. ``expected['run_attempt']`` is the producing attempt recorded by
+    the authenticated upload identity, which a partial re-run may leave below
+    the event attempt. The manifest's keys must be exactly the producer
+    contract's fields, and its tag ref must be the version's ``refs/tags/v*``.
+    The source SHA is only shape-checked here and bound to the tag by
     :func:`validate_tag_binding`; manifest content is never executed.
     """
     if not isinstance(manifest, dict):
@@ -2107,11 +2115,14 @@ def validate_tag_binding(status, ref_body, tag_body, manifest):
 
 
 def validate_run_artifacts(pages, run_id, required=REQUIRED_RUN_ARTIFACTS):
-    """Return the run's artifacts keyed by name after a fail-closed check.
+    """Return the run's artifacts grouped by name after a fail-closed check.
 
-    Every required production artifact must appear exactly once with an integer
-    id, a ``sha256:`` digest and a non-expired state, and any recorded
-    ``workflow_run`` must be this run. Only the explicit ``native-*``
+    Every required production artifact must appear with an integer id, a
+    ``sha256:`` digest and a non-expired state, and any recorded
+    ``workflow_run`` must be this run. A partial re-run re-uploads a same-name
+    artifact under a new immutable id, so a name may repeat: each entry is
+    checked on its own and identity pairing decides between them. Identical ids
+    are rejected by :func:`paginated_entries`. Only the explicit ``native-*``
     experiments may coexist; any other unexpected name is refused.
     """
     artifacts = paginated_entries(pages, 'artifacts', 'build run artifacts')
@@ -2133,9 +2144,7 @@ def validate_run_artifacts(pages, run_id, required=REQUIRED_RUN_ARTIFACTS):
             if not isinstance(workflow_run, dict) or \
                     run_int(workflow_run.get('id')) != expected_run:
                 fail(f'build run artifact {name!r} belongs to another run')
-        if name in by_name:
-            fail(f'build run has duplicate artifact {name!r}')
-        by_name[name] = artifact
+        by_name.setdefault(name, []).append(artifact)
     for name in required:
         if name not in by_name:
             fail(f'build run is missing required artifact {name!r}')
@@ -2146,11 +2155,14 @@ def validate_run_artifacts(pages, run_id, required=REQUIRED_RUN_ARTIFACTS):
 
 
 def validate_upload_identity(document, run_id, run_attempt, artifact):
-    """Bind the downloaded upload identity to this run attempt and artifact.
+    """Bind the downloaded upload identity to this run and immutable artifact.
 
     The identity file is untrusted data: it must carry exactly the producer's
     fields, name the same run/attempt and target, and reproduce the API
-    artifact's id and digest.
+    artifact's id and digest. Its ``run_attempt`` is the attempt that produced
+    the artifact, which a partial re-run legitimately leaves below the run's
+    latest ``run_attempt``; it is provenance from the same run and may never
+    name a later attempt.
     """
     if not isinstance(document, dict):
         fail('upload identity: expected a JSON object')
@@ -2160,9 +2172,13 @@ def validate_upload_identity(document, run_id, run_attempt, artifact):
         fail(f'upload identity fields differ: {sorted(document)}')
     if document['run_id'] != str(run_int(run_id)):
         fail(f'upload identity run_id is {document["run_id"]!r}, expected {run_id!r}')
-    if document['run_attempt'] != str(run_int(run_attempt)):
-        fail(f'upload identity run_attempt is {document["run_attempt"]!r}, '
-             f'expected {run_attempt!r}')
+    producing = document['run_attempt']
+    if not isinstance(producing, str) or not re.fullmatch(r'[0-9]+', producing) or \
+            int(producing) < 1:
+        fail(f'upload identity run_attempt is {producing!r}, not a run number')
+    if int(producing) > run_int(run_attempt):
+        fail(f'upload identity run_attempt is {producing!r}, later than the run '
+             f'attempt {run_attempt!r}')
     if document['target'] != ASSET:
         fail(f'upload identity target is {document["target"]!r}, expected {ASSET!r}')
     if not ARTIFACT_DIGEST_PATTERN.fullmatch(str(document['artifact_digest'])):
@@ -2203,9 +2219,20 @@ def validate_publication_binding(run_document, job_pages, artifact_pages,
                          workflow_id, trusted.get('original_ref'))
     jobs = validate_run_jobs(job_pages, run_id, run_attempt)
     artifacts = validate_run_artifacts(artifact_pages, run_id)
-    validate_manifest_binding(manifest, trusted)
-    validate_upload_identity(identity_document, run_id, run_attempt,
-                             artifacts[ARTIFACT_NAME])
+    candidate_id = (identity_document.get('artifact_id')
+                    if isinstance(identity_document, dict) else None)
+    matches = [artifact for artifact in artifacts[ARTIFACT_NAME]
+               if candidate_id is not None
+               and str(artifact.get('id')) == str(candidate_id)]
+    if len(matches) != 1:
+        fail('publication binding identity does not name one candidate artifact')
+    candidate = matches[0]
+    validate_upload_identity(identity_document, run_id, run_attempt, candidate)
+    # The manifest records the attempt that produced the candidate, which a
+    # partial re-run leaves below the event attempt; the authenticated identity
+    # is that producing-attempt provenance.
+    validate_manifest_binding(
+        manifest, {**trusted, 'run_attempt': identity_document['run_attempt']})
     source = validate_tag_binding(tag_status, tag_ref, tag_object, manifest)
     return {'source_sha': source, 'jobs': jobs, 'artifacts': artifacts,
             'manifest': manifest}
@@ -2309,10 +2336,12 @@ def validate_publication_orchestration(event, repository, checkout_ref,
 def prepare_publication_runtime(event_path):
     """Validate the event and upstream API binding, then write the exact-byte handoff.
 
-    The required aggregate and integrity jobs must all be completed successfully;
-    the native and VSIX candidates are downloaded and validated as immutable
-    artifacts without executing or rebuilding them. Registry publication is not
-    enabled here.
+    The required aggregate and integrity jobs must all be completed successfully,
+    each judged by its latest attempt so a partial re-run's superseded rows never
+    block. The native and VSIX candidates are downloaded and validated as
+    immutable artifacts by identity, so their producing attempt may stay below
+    the event attempt; nothing is executed or rebuilt. Registry publication is
+    not enabled here.
     """
     event = parse_json(Path(event_path).read_bytes(), 'workflow_run event')
     repository = os.environ.get('GITHUB_REPOSITORY', '')
@@ -2397,7 +2426,7 @@ def prepare_publication_runtime(event_path):
     if tag_object is None and isinstance(target, dict) and target.get('type') != 'commit':
         fail('publication original tag has an unsupported object type')
     # Artifact bytes are untrusted data. Authenticate only against the fixed
-    # GitHub API origin, bind the identity ZIP to its immutable artifact ID,
+    # GitHub API origin, bind each identity ZIP to its immutable artifact ID,
     # then validate the candidate ZIP and its manifest before considering gates.
     if str(Path.cwd()) not in sys.path:
         sys.path.insert(0, str(Path.cwd()))
@@ -2405,8 +2434,6 @@ def prepare_publication_runtime(event_path):
     artifacts = validate_run_artifacts(
         publication_api_pages(repository, f'/actions/runs/{run_id}/artifacts', token,
                               'artifacts'), run_id)
-    candidate = artifacts[ARTIFACT_NAME]
-    identity_artifact = artifacts[f'{ARTIFACT_NAME}-identity']
     owner, _, repo = repository.partition('/')
     if not owner or not repo:
         fail('publication repository slug is invalid')
@@ -2420,15 +2447,37 @@ def prepare_publication_runtime(event_path):
         except transport.DownloadError as error:
             fail(f'publication artifact download failed: {error}')
 
-    identity_zip = artifact_bytes(identity_artifact)
-    if transport.digest(identity_zip) != identity_artifact['digest'].removeprefix('sha256:'):
-        fail('publication identity transport digest mismatch')
-    try:
-        identity_files = transport.exact_zip(identity_zip, ['upload-identity.json'])
-        identity = parse_json(identity_files['upload-identity.json'], 'publication upload identity')
-    except (transport.DownloadError, KeyError) as error:
-        fail(f'publication identity artifact is invalid: {error}')
-    validate_upload_identity(identity, run_id, attempt, candidate)
+    # A partial re-run re-uploads the same artifact name under a new immutable
+    # id, so identity pairing decides which candidate is the run's: a lone pair
+    # is used as-is and several pairs resolve by the event attempt only when
+    # exactly one of them names it. The producing attempt is provenance.
+    pairs = []
+    for identity_artifact in artifacts[f'{ARTIFACT_NAME}-identity']:
+        identity_zip = artifact_bytes(identity_artifact)
+        if transport.digest(identity_zip) != identity_artifact['digest'].removeprefix('sha256:'):
+            fail('publication identity transport digest mismatch')
+        try:
+            identity_files = transport.exact_zip(identity_zip, ['upload-identity.json'])
+            identity = parse_json(identity_files['upload-identity.json'],
+                                  'publication upload identity')
+        except (transport.DownloadError, KeyError) as error:
+            fail(f'publication identity artifact is invalid: {error}')
+        matches = [item for item in artifacts[ARTIFACT_NAME]
+                   if str(item.get('id')) ==
+                   str(identity.get('artifact_id') if isinstance(identity, dict) else None)]
+        if not matches:
+            continue
+        candidate = matches[0]
+        validate_upload_identity(identity, run_id, attempt, candidate)
+        pairs.append((candidate, identity))
+    matching = [pair for pair in pairs if pair[1]['run_attempt'] == str(attempt)]
+    if len(pairs) == 1:
+        candidate, identity = pairs[0]
+    elif len(matching) == 1:
+        candidate, identity = matching[0]
+    else:
+        fail('publication has no unique identity/candidate pair for the run attempt')
+    producing_attempt = identity['run_attempt']
     candidate_zip = artifact_bytes(candidate)
     if transport.digest(candidate_zip) != candidate['digest'].removeprefix('sha256:'):
         fail('publication candidate transport digest mismatch')
@@ -2456,7 +2505,7 @@ def prepare_publication_runtime(event_path):
     source_sha = validate_tag_binding(tag_status, tag_body, tag_object_body, manifest)
     source_locks = fetch_source_locks(repository, source_sha, token)
     trusted = {
-        'run_id': str(run_id), 'run_attempt': str(attempt), 'event': RUN_EVENT,
+        'run_id': str(run_id), 'run_attempt': producing_attempt, 'event': RUN_EVENT,
         'version': original_ref[1:], 'target': ASSET, 'original_ref': tag_ref,
         'lock_hashes': {name: source_locks[name]
                         for name in ('Cargo.lock', 'flake.lock')},
@@ -2539,6 +2588,7 @@ def prepare_publication_runtime(event_path):
         'native': {
             'artifact_id': str(candidate.get('id')),
             'artifact_digest': candidate.get('digest'),
+            'run_attempt': producing_attempt,
             'archive': archive_name,
             'checksum': archive_name + '.sha256',
             'manifest': 'release-manifest.json',
@@ -3612,6 +3662,21 @@ def run_self_tests():
             list(MANDATORY_RUN_JOBS):
         fail('self-test: coherent jobs must list the mandatory producer and '
              'aggregate jobs')
+    # A partial re-run leaves superseded attempt rows behind: each mandatory
+    # name is judged by its latest attempt, so an older failure never blocks a
+    # successful re-run.
+    rerun_jobs = [job if job['name'] != FALLBACK_JOB
+                  else job_document(FALLBACK_JOB, 2, conclusion='failure')
+                  for job in coherent_jobs]
+    rerun_jobs.append(job_document(FALLBACK_JOB, 8, run_attempt=2))
+    if len(validate_run_jobs([page_document('jobs', rerun_jobs)],
+                             SELF_TEST_RUN_ID, '2')) != len(rerun_jobs):
+        fail('self-test: a partial re-run must keep every superseded job row')
+    expect_check(
+        'unsuccessful latest re-run', validate_run_jobs,
+        [page_document('jobs', coherent_jobs + [
+            job_document(FALLBACK_JOB, 8, run_attempt=2, conclusion='failure')])],
+        SELF_TEST_RUN_ID, '2', expected='not success')
     for label, pages, expected in (
         ('missing mandatory job',
          [page_document('jobs', [job_document(SOURCE_CHECK_JOB, 1)])],
@@ -3707,15 +3772,23 @@ def run_self_tests():
     ]
     artifacts = validate_run_artifacts(
         [page_document('artifacts', coherent_artifacts)], SELF_TEST_RUN_ID)
+    candidate_artifact = artifacts[ARTIFACT_NAME][0]
     identity = {
         'artifact_id': '100',
-        'artifact_digest': artifacts[ARTIFACT_NAME]['digest'],
+        'artifact_digest': candidate_artifact['digest'],
         'run_id': SELF_TEST_RUN_ID,
         'run_attempt': SELF_TEST_RUN_ATTEMPT,
         'target': ASSET,
     }
     validate_upload_identity(identity, SELF_TEST_RUN_ID,
-                             SELF_TEST_RUN_ATTEMPT, artifacts[ARTIFACT_NAME])
+                             SELF_TEST_RUN_ATTEMPT, candidate_artifact)
+    # A partial re-run re-uploads the same artifact name under a new immutable
+    # id; both entries stay distinct so identity pairing can choose between them.
+    rerun_artifacts = validate_run_artifacts(
+        [page_document('artifacts', coherent_artifacts + [
+            artifact_document(ARTIFACT_NAME, 105)])], SELF_TEST_RUN_ID)
+    if [item['id'] for item in rerun_artifacts[ARTIFACT_NAME]] != [100, 105]:
+        fail('self-test: same-name artifacts across attempts must stay distinct')
     for label, pages, expected in (
         ('missing candidate artifact',
          [page_document('artifacts', coherent_artifacts[1:])],
@@ -3756,39 +3829,41 @@ def run_self_tests():
          [page_document('artifacts', coherent_artifacts, total=1)],
          'contradictory pagination'),
         ('no artifact pages', [], 'no API pages'),
-        ('duplicate artifact names',
+        ('duplicate artifact ids',
          [page_document('artifacts', coherent_artifacts + [
-             artifact_document(ARTIFACT_NAME, 105)])],
-         'duplicate artifact'),
+             artifact_document(ARTIFACT_NAME, 100)])],
+         'duplicate entry id'),
     ):
         expect_check(label, validate_run_artifacts, pages, SELF_TEST_RUN_ID,
                      expected=expected)
     for label, document, artifact, expected in (
         ('identity for another artifact id',
-         dict(identity, artifact_id='999'), artifacts[ARTIFACT_NAME],
+         dict(identity, artifact_id='999'), candidate_artifact,
          'artifact id'),
         ('identity for another digest',
          dict(identity, artifact_digest='sha256:' + '0' * 64),
-         artifacts[ARTIFACT_NAME], 'artifact digest does not match'),
+         candidate_artifact, 'artifact digest does not match'),
         ('identity for another run', dict(identity, run_id='999'),
-         artifacts[ARTIFACT_NAME], 'run_id is'),
-        ('identity for another attempt', dict(identity, run_attempt='2'),
-         artifacts[ARTIFACT_NAME], 'run_attempt is'),
+         candidate_artifact, 'run_id is'),
+        ('identity claiming a later attempt', dict(identity, run_attempt='2'),
+         candidate_artifact, 'run_attempt is'),
+        ('identity without a run number', dict(identity, run_attempt='x'),
+         candidate_artifact, 'run_attempt is'),
         ('identity for another target',
          dict(identity, target='aarch64-apple-darwin'),
-         artifacts[ARTIFACT_NAME], 'target is'),
+         candidate_artifact, 'target is'),
         ('identity with extra fields', dict(identity, extra='x'),
-         artifacts[ARTIFACT_NAME], 'fields differ'),
+         candidate_artifact, 'fields differ'),
         ('identity with a malformed digest',
          dict(identity, artifact_digest='not-a-digest'),
-         artifacts[ARTIFACT_NAME], 'not a supported digest'),
+         candidate_artifact, 'not a supported digest'),
     ):
         expect_check(label, validate_upload_identity, document,
                      SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT, artifact,
                      expected=expected)
     expect_check('non-object upload identity', validate_upload_identity, [],
                  SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
-                 artifacts[ARTIFACT_NAME], expected='expected a JSON object')
+                 candidate_artifact, expected='expected a JSON object')
 
     manifest = manifest_fixture()
     validate_manifest_binding(manifest, manifest_expectation())
@@ -3811,7 +3886,8 @@ def run_self_tests():
          'release manifest target is'),
         ('manifest for another run', manifest_fixture(run_id='999'),
          'release manifest run_id is'),
-        ('manifest for another attempt', manifest_fixture(run_attempt='2'),
+        ('manifest from another producing attempt',
+         manifest_fixture(run_attempt='2'),
          'release manifest run_attempt is'),
         ('manifest from another event',
          manifest_fixture(event='workflow_dispatch'),
@@ -3878,7 +3954,8 @@ def run_self_tests():
     def binding(*, run=None, jobs=None, artifacts_pages=None,
                 identity_document=None, manifest_document=None,
                 trusted=None, tag_status=200, tag_body=None,
-                tag_object=None, repository=SELF_TEST_REPOSITORY):
+                tag_object=None, repository=SELF_TEST_REPOSITORY,
+                run_attempt=SELF_TEST_RUN_ATTEMPT):
         return validate_publication_binding(
             run or run_binding_fixture(),
             jobs or [page_document('jobs', coherent_jobs)],
@@ -3886,14 +3963,49 @@ def run_self_tests():
             identity_document or identity,
             manifest_document or manifest,
             trusted or manifest_expectation(),
-            repository, SELF_TEST_RUN_ID, SELF_TEST_RUN_ATTEMPT,
+            repository, SELF_TEST_RUN_ID, run_attempt,
             SELF_TEST_WORKFLOW_ID, tag_status, tag_body or tag_ref_body(),
             tag_object)
     bound = binding()
     if bound['source_sha'] != SELF_TEST_SHA or \
-            bound['artifacts'][ARTIFACT_NAME]['id'] != 100 or \
+            bound['artifacts'][ARTIFACT_NAME][0]['id'] != 100 or \
             [job['name'] for job in bound['jobs']] != list(MANDATORY_RUN_JOBS):
         fail('self-test: the publication binding must return the validated data')
+    # The offline entrypoint resolves the one candidate/identity pair by the
+    # identity it was handed and accepts a producing attempt below the event
+    # attempt, as a partial re-run leaves it.
+    partial_pairs = [
+        artifact_document(ARTIFACT_NAME, 200),
+        artifact_document(f'{ARTIFACT_NAME}-identity', 201),
+        artifact_document(ARTIFACT_NAME, 105),
+        artifact_document(f'{ARTIFACT_NAME}-identity', 106),
+        *coherent_artifacts[2:]]
+    partial_bound = binding(
+        run=run_binding_fixture(run_attempt=2),
+        artifacts_pages=[page_document('artifacts', partial_pairs)],
+        identity_document=dict(identity, artifact_id='105', run_attempt='1'),
+        manifest_document=manifest_fixture(run_attempt='1'), run_attempt='2')
+    if partial_bound['source_sha'] != SELF_TEST_SHA:
+        fail('self-test: the publication binding must accept a producing '
+             'attempt below the event attempt')
+    expect_check(
+        'binding whose identity names no candidate',
+        lambda: binding(
+            run=run_binding_fixture(run_attempt=2),
+            artifacts_pages=[page_document('artifacts', partial_pairs)],
+            identity_document=dict(identity, artifact_id='999', run_attempt='1'),
+            manifest_document=manifest_fixture(run_attempt='1'),
+            run_attempt='2'),
+        expected='does not name one candidate artifact')
+    expect_check(
+        'binding whose identity claims a later attempt',
+        lambda: binding(
+            run=run_binding_fixture(run_attempt=2),
+            artifacts_pages=[page_document('artifacts', partial_pairs)],
+            identity_document=dict(identity, artifact_id='105', run_attempt='3'),
+            manifest_document=manifest_fixture(run_attempt='3'),
+            run_attempt='2'),
+        expected='later than the run attempt')
     if binding(tag_body=tag_ref_body(kind='tag', sha=annotated_sha),
                tag_object=tag_object_body())['source_sha'] != SELF_TEST_SHA:
         fail('self-test: the publication binding must accept an annotated tag')
@@ -4683,7 +4795,7 @@ def run_self_tests():
                     patch.object(runtime_transport_module, 'request', runtime_transport):
                 expect_check('runtime collector rejects a mismatched VSIX identity',
                              prepare_publication_runtime, str(event_path),
-                             expected='upload identity does not bind candidate/run/attempt')
+                             expected='no unique VSIX identity/candidate pair')
             # Missing or malformed source lock data fails closed before any
             # handoff or publication; it never falls back to the checkout or
             # the default branch.
@@ -4809,6 +4921,138 @@ def run_self_tests():
                 runtime_vsix_identity['artifact_digest']
             runtime_coherent_artifacts[3]['digest'] = (
                 'sha256:' + hashlib.sha256(runtime_vsix_identity_zip).hexdigest())
+            # A partial re-run: the event and run document report attempt 2, the
+            # mandatory jobs mix superseded attempt-1 rows with attempt-2 re-runs,
+            # the native lane re-uploaded its candidate under a new id at attempt
+            # 2, and the VSIX kept its attempt-1 bytes. Identity pairing must
+            # choose the event-attempt native pair and accept the VSIX's
+            # producing attempt, and the publisher must accept that handoff.
+            def native_rerun_pair(candidate_id, identity_id, producing):
+                document = dict(runtime_manifest, run_attempt=str(producing))
+                manifest_bytes = json.dumps(document).encode()
+                assets = {
+                    runtime_archive_name: tar_stream.getvalue(),
+                    runtime_archive_name + '.sha256':
+                        f'{hashlib.sha256(tar_stream.getvalue()).hexdigest()}  '
+                        f'{runtime_archive_name}\n'.encode(),
+                    'release-manifest.json': manifest_bytes,
+                    'release-manifest.json.sha256':
+                        f'{hashlib.sha256(manifest_bytes).hexdigest()}  '
+                        'release-manifest.json\n'.encode(),
+                }
+                candidate_zip = zip_bytes(assets)
+                identity_document = {
+                    'artifact_id': str(candidate_id),
+                    'artifact_digest': 'sha256:' +
+                    hashlib.sha256(candidate_zip).hexdigest(),
+                    'run_id': SELF_TEST_RUN_ID,
+                    'run_attempt': str(producing), 'target': ASSET}
+                identity_zip = zip_bytes(
+                    {'upload-identity.json': json.dumps(identity_document).encode()})
+                return candidate_zip, identity_zip
+
+            first_native, first_native_identity = native_rerun_pair(200, 201, 1)
+            second_native, second_native_identity = native_rerun_pair(202, 203, 2)
+            partial_artifacts = [
+                artifact_document(ARTIFACT_NAME, 200, digest='sha256:' +
+                                  hashlib.sha256(first_native).hexdigest()),
+                artifact_document(f'{ARTIFACT_NAME}-identity', 201, digest='sha256:' +
+                                  hashlib.sha256(first_native_identity).hexdigest()),
+                artifact_document(ARTIFACT_NAME, 202, digest='sha256:' +
+                                  hashlib.sha256(second_native).hexdigest()),
+                artifact_document(f'{ARTIFACT_NAME}-identity', 203, digest='sha256:' +
+                                  hashlib.sha256(second_native_identity).hexdigest()),
+                artifact_document(VSIX_ARTIFACT, 102,
+                                  digest=runtime_vsix_identity['artifact_digest']),
+                artifact_document(VSIX_IDENTITY_ARTIFACT, 103, digest='sha256:' +
+                                  hashlib.sha256(runtime_vsix_identity_zip).hexdigest()),
+            ]
+            runtime_zip_bytes.update({'200': first_native, '201': first_native_identity,
+                                      '202': second_native,
+                                      '203': second_native_identity})
+            runtime_coherent_artifacts[:] = partial_artifacts
+            runtime_metadata.update({str(item['id']): item
+                                     for item in partial_artifacts})
+            runtime_responses[f'/actions/runs/{SELF_TEST_RUN_ID}'] = \
+                run_binding_fixture(run_attempt=2)
+            runtime_responses[
+                f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', partial_artifacts)
+            partial_jobs = [job if job['name'] != FALLBACK_JOB
+                            else job_document(FALLBACK_JOB, 2, conclusion='failure')
+                            for job in coherent_jobs]
+            partial_jobs.append(job_document(FALLBACK_JOB, 22, run_attempt=2))
+            runtime_responses[
+                f'/actions/runs/{SELF_TEST_RUN_ID}/jobs?per_page=100&page=1'] = \
+                page_document('jobs', partial_jobs)
+            partial_event = json.loads(json.dumps(runtime_event))
+            partial_event['workflow_run']['run_attempt'] = 2
+            partial_event_path = Path(temporary) / 'partial-event.json'
+            partial_event_path.write_text(json.dumps(partial_event), encoding='utf-8')
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                partial_handoff = prepare_publication_runtime(str(partial_event_path))
+            if partial_handoff['run_attempt'] != '2' or \
+                    partial_handoff['native']['artifact_id'] != '202' or \
+                    partial_handoff['native']['run_attempt'] != '2' or \
+                    partial_handoff['vsix']['artifact_id'] != '102' or \
+                    partial_handoff['vsix']['run_attempt'] != '1':
+                fail('self-test: a partial re-run must record the event attempt and '
+                     f'both producing attempts; saw {sorted(partial_handoff)!r}')
+            partial_publisher_event = json.loads(json.dumps(publisher_event()))
+            partial_publisher_event['workflow_run']['run_attempt'] = 2
+            backend = publisher_backend(publish_release)
+            completed = publish_release.publish(
+                handoff_dir / 'publication-handoff.json', backend=backend,
+                environment=publisher_environment(), event=partial_publisher_event)
+            if completed != ['github-release', 'marketplace', 'openvsx']:
+                fail('self-test: the publisher must accept a partial re-run handoff, '
+                     f'saw {completed!r}')
+            # A sub-object may never claim an attempt after the trusted event, and
+            # each persisted manifest must reproduce its own producing attempt.
+            later = json.loads(json.dumps(partial_handoff))
+            later['native']['run_attempt'] = '3'
+            expect_publish_error(
+                publish_release, 'publisher with a native attempt after the run',
+                publish_release.validate_handoff_binding, later,
+                expected='native run_attempt')
+            later = json.loads(json.dumps(partial_handoff))
+            later['vsix']['run_attempt'] = '3'
+            expect_publish_error(
+                publish_release, 'publisher with a VSIX attempt after the run',
+                publish_release.validate_handoff_binding, later,
+                expected='VSIX run_attempt')
+            expect_publish_error(
+                publish_release, 'publisher manifest from another attempt',
+                publish_release.validate_manifest,
+                dict(runtime_manifest, run_attempt='1'), partial_handoff,
+                partial_handoff['native'], expected='provenance differs')
+            expect_publish_error(
+                publish_release, 'publisher VSIX manifest from another attempt',
+                publish_release.validate_vsix_manifest,
+                dict(vsix_manifest, run_attempt='2'), partial_handoff,
+                partial_handoff['vsix'], expected='run_attempt differs')
+            # Two same-name pairs at the event attempt are ambiguous, never
+            # resolved by list order.
+            third_native, third_native_identity = native_rerun_pair(204, 205, 2)
+            ambiguous_artifacts = partial_artifacts + [
+                artifact_document(ARTIFACT_NAME, 204, digest='sha256:' +
+                                  hashlib.sha256(third_native).hexdigest()),
+                artifact_document(f'{ARTIFACT_NAME}-identity', 205, digest='sha256:' +
+                                  hashlib.sha256(third_native_identity).hexdigest()),
+            ]
+            runtime_zip_bytes.update({'204': third_native, '205': third_native_identity})
+            runtime_coherent_artifacts[:] = ambiguous_artifacts
+            runtime_metadata.update({str(item['id']): item
+                                     for item in ambiguous_artifacts})
+            runtime_responses[
+                f'/actions/runs/{SELF_TEST_RUN_ID}/artifacts?per_page=100&page=1'] = \
+                page_document('artifacts', ambiguous_artifacts)
+            with patch.object(sys.modules[__name__], 'fetch_api', runtime_fetch), \
+                    patch.object(runtime_transport_module, 'request', runtime_transport):
+                expect_check('runtime collector rejects ambiguous re-run pairs',
+                             prepare_publication_runtime, str(partial_event_path),
+                             expected='no unique identity/candidate pair')
     finally:
         for key, value in saved_env.items():
             if value is None:

@@ -30,9 +30,12 @@ TARGET = 'x86_64-unknown-linux-gnu'
 VERSION_PATTERN = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
 HANDOFF_FIELDS = frozenset({'source_sha', 'version', 'original_ref', 'event',
                             'run_id', 'run_attempt', 'target', 'native', 'vsix'})
-NATIVE_FIELDS = frozenset({'artifact_id', 'artifact_digest', 'archive', 'checksum',
-                           'manifest', 'manifest_checksum', 'archive_sha256',
-                           'manifest_sha256', 'executable_sha256'})
+# The top-level run identity is the trusted event's run and latest attempt; each
+# sub-object also records the attempt that produced its immutable artifact, which
+# a partial re-run legitimately leaves below that event attempt.
+NATIVE_FIELDS = frozenset({'artifact_id', 'artifact_digest', 'run_attempt', 'archive',
+                           'checksum', 'manifest', 'manifest_checksum',
+                           'archive_sha256', 'manifest_sha256', 'executable_sha256'})
 VSIX_FIELDS = frozenset({'artifact_id', 'artifact_digest', 'run_id', 'run_attempt',
                          'source_sha', 'vsix', 'manifest', 'vsix_sha256'})
 MANIFEST_FIELDS = frozenset({
@@ -77,6 +80,18 @@ def full_name(value):
 
 def digest_bytes(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def producing_attempt(value, event_attempt):
+    """Return whether ``value`` is a run attempt at or before the event attempt.
+
+    Each handoff sub-object records the attempt that produced its immutable
+    artifact bytes. A partial re-run legitimately leaves that production below
+    the event's latest attempt, so only a run number from the same run is
+    accepted and it may never name a later attempt.
+    """
+    return (isinstance(value, str) and re.fullmatch(r'[0-9]+', value) is not None
+            and 1 <= int(value) <= int(event_attempt))
 
 
 def parse_json(document, label):
@@ -126,6 +141,9 @@ def validate_handoff_binding(document):
     native = document['native']
     if not isinstance(native, dict) or set(native) != NATIVE_FIELDS:
         fail('publication handoff native binding has the wrong fields')
+    if not producing_attempt(native['run_attempt'], document['run_attempt']):
+        fail('publication handoff native run_attempt is not the artifact '
+             'producing attempt')
     if not SHA256_DIGEST.fullmatch(str(native['artifact_digest'])):
         fail('publication handoff native artifact digest is unsupported')
     for field in ('archive_sha256', 'manifest_sha256', 'executable_sha256'):
@@ -150,11 +168,13 @@ def validate_handoff_binding(document):
     if not HEX64.fullmatch(str(vsix['vsix_sha256'])):
         fail('publication handoff VSIX hash is not a SHA-256')
     for field, expected in (('run_id', document['run_id']),
-                            ('run_attempt', document['run_attempt']),
                             ('source_sha', document['source_sha'])):
         if vsix[field] != expected:
             fail(f'publication handoff VSIX {field} is {vsix[field]!r}, '
                  f'expected {expected!r}')
+    if not producing_attempt(vsix['run_attempt'], document['run_attempt']):
+        fail('publication handoff VSIX run_attempt is not the artifact '
+             'producing attempt')
     if vsix['vsix'] != f'magit-lsp-{version}.vsix':
         fail(f'publication handoff VSIX name is {vsix["vsix"]!r}, expected '
              f'magit-lsp-{version}.vsix')
@@ -249,7 +269,7 @@ def validate_manifest(manifest, document, native):
             manifest['original_ref'] != document['original_ref'] or \
             manifest['event'] != document['event'] or \
             manifest['run_id'] != document['run_id'] or \
-            manifest['run_attempt'] != document['run_attempt'] or \
+            manifest['run_attempt'] != native['run_attempt'] or \
             manifest['target'] != document['target']:
         fail('publication release manifest provenance differs from the handoff')
     if manifest['archive_sha256'] != native['archive_sha256'] or \
@@ -261,10 +281,11 @@ def validate_vsix_manifest(manifest, document, vsix):
     """Bind the persisted VSIX manifest to the handoff and exact VSIX hash."""
     if not isinstance(manifest, dict) or set(manifest) != VSIX_MANIFEST_FIELDS:
         fail('publication VSIX manifest fields differ from the producer contract')
-    for field in ('source_sha', 'original_ref', 'event', 'run_id', 'run_attempt',
-                  'version'):
+    for field in ('source_sha', 'original_ref', 'event', 'run_id', 'version'):
         if manifest[field] != document[field]:
             fail(f'publication VSIX manifest {field} differs from the handoff')
+    if manifest['run_attempt'] != vsix['run_attempt']:
+        fail('publication VSIX manifest run_attempt differs from the handoff')
     if manifest['vsix_sha256'] != vsix['vsix_sha256']:
         fail('publication VSIX manifest hash differs from the handoff')
 
