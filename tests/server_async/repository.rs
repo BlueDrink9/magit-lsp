@@ -1125,7 +1125,10 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         .modify_standard()
         .build();
     let repo = repo_param(tmp.path());
-    let mut server = TestServer::spawn(&[]);
+    // Zero discards the deferred open's background fetch deterministically, so
+    // no extra render can race the client's acks and leave the symbol-less
+    // loading tree as the last acked tree; show-all then loads hunks inline.
+    let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "0"], &[]);
     let response = server.initialize_rich(json!({}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
