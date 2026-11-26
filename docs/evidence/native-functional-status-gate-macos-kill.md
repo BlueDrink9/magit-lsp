@@ -112,3 +112,44 @@ Read the two sources together, in this order:
 
 An ordinary successful reap stays at `debug`, so this adds no per-invocation
 warning noise.
+
+## Verdict (run 45903898257, 2026-11-26): EXTERNAL kill
+
+The discriminating evidence finally arrived and resolves the matrix to branch
+2. In the macOS `native-functional-consumers` lane the failing
+`status_open_refreshes_while_loading_are_coalesced` panicked with
+`AcquisitionFailed` whose embedded server stderr showed:
+
+- `child spawn pid=20793 reason="spawn" program=git
+  args=["--no-optional-locks", "status", "--porcelain=v2", "-z", "--branch"]`
+  at 22:35:40.265;
+- `repository watcher armed` at .273 and one watcher raw event `kind=Other`;
+- `child reap pid=20793 reason="reap" signal=9` at .280 — **18 ms after
+  spawn**, with **no `child term` or `child kill` line** for that pid.
+
+Branch 1 (self-inflicted) is excluded by construction: every server-side kill
+site logs before signalling (`src/runner/owned.rs:216/221`, `:227/230`,
+`:410/413`, `:444/446`; `src/git.rs:3319/3325`, `:3345/3351`), there is no
+`Drop`-kills-child implementation and no tokio `kill_on_drop`, and the gated
+status acquisition runs with **no cancel handle** (`src/server/view_execution.rs:216-220`),
+so no supersede/refresh path can reach a kill. A watcher event only bumps the
+status generation; it never signals the child (`src/server.rs:648-699`).
+
+The stub's self-kill is excluded: the test uses `GatedGit::arm("status")`
+(`tests/server_async.rs:1719`), not `arm_killing`; the fixture `Drop` kill fires
+only after a release plus a 5 s exit timeout with an entered gate — neither held.
+
+Branch 3 is excluded: the child spawned successfully and ran (the parent's
+spawn warn precedes an 18 ms lifetime).
+
+So an external actor SIGKILLed the fresh git-stub child ~18 ms after spawn. The
+`os-kill-forensics` artifact for the run contains **no kernel or userland kill
+record for pid 20793** — only launchd tearing down its own login-window
+services (a GUI-session churn at 22:26, unrelated). Five occurrences across
+lanes (functional ×3, build ×2) fit a macOS-26 hosted-runner environmental
+factor that kills short-lived helper processes without a logged trail.
+
+Standing disposition: record-only (this file), keep the fail-fast
+`AcquisitionFailed` behaviour, no retry — a retry cannot fix an external
+killer and would hide its recurrence. Validation of a lane that lost a test to
+this kill is by re-running the job until green.
