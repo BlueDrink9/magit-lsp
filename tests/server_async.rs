@@ -521,7 +521,14 @@ fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {
     );
     let closed_version = closed["params"]["version"].as_u64().unwrap();
     // The background fetch is held inside Git, so it cannot beat the promise.
-    gate.wait_entered();
+    // Poll the gate and the client stream together so a killed or failed
+    // background child surfaces with its invocation log and server stderr.
+    match wait_for_gate_or_failure(&gate, &mut server, &view) {
+        GateWait::Entered => {}
+        GateWait::AcquisitionFailed { text, stderr } => panic!(
+            "the background fetch must not fail the view; text: {text:?}\nserver stderr:\n{stderr}"
+        ),
+    }
     thread::sleep(Duration::from_millis(700));
     gate.release();
 
@@ -817,7 +824,8 @@ fn status_open_user_collapse_during_batch_wins_over_the_install() {
     let ready_lines: Vec<String> = serde_json::from_value(ready["params"]["text"].clone()).unwrap();
     assert!(
         ready_lines.iter().any(|line| line.contains("s.txt")),
-        "the seed render shows the staged file row: {ready_lines:?}"
+        "the seed render shows the staged file row: {ready_lines:?}\nserver stderr:\n{}",
+        server.stderr_text()
     );
     let staged_line = ready_lines
         .iter()
@@ -1907,6 +1915,40 @@ fn status_open_refresh_wait_reports_killed_git_child_as_acquisition_failure() {
     assert!(
         stderr.contains("child reap") && stderr.contains("signal=9"),
         "the signal-death reap trace must be carried in the evidence:\n{stderr}"
+    );
+    // The parent-side spawn warn is the only witness when a kill lands at or
+    // before exec, so the evidence must carry it, pid-bearing and ordered
+    // before the reap that proves the same child died by signal.
+    let lines: Vec<&str> = stderr.lines().collect();
+    let spawn = lines
+        .iter()
+        .position(|line| line.contains("child spawn") && line.contains("status"))
+        .unwrap_or_else(|| {
+            panic!("the gated status child's parent-side spawn trace must be carried:\n{stderr}")
+        });
+    let spawn_line = lines[spawn];
+    let spawn_pid = spawn_line
+        .split_once("pid=")
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .and_then(|value| value.parse::<u32>().ok());
+    assert!(
+        spawn_pid.is_some(),
+        "the spawn trace must carry the child pid: {spawn_line}"
+    );
+    let spawn_pid = spawn_pid.expect("the spawn trace asserted above");
+    let reap = lines
+        .iter()
+        .position(|line| {
+            line.contains("child reap")
+                && line.contains(&format!("pid={spawn_pid}"))
+                && line.contains("signal=9")
+        })
+        .unwrap_or_else(|| {
+            panic!("the spawned child's signal-death reap trace must be carried:\n{stderr}")
+        });
+    assert!(
+        spawn < reap,
+        "the spawn witness must precede the reap witness:\n{stderr}"
     );
 
     shutdown_and_exit(&mut server);

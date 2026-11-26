@@ -250,20 +250,14 @@ impl GatedGit {
         }
     }
 
-    /// The timeout panic text: the absent enter marker plus the invocation log's
-    /// tail, so a failure shows whether Git ran at all and which subcommands.
+    /// The timeout panic text: the absent enter marker plus the full invocation
+    /// log, so a failure shows whether Git ran at all and which subcommands.
     fn entered_timeout_message(&self, timeout: Duration) -> String {
-        const TAIL_CHARS: usize = 2048;
         let log = self.invocation_log();
-        let tail: String = {
-            let chars: Vec<char> = log.chars().collect();
-            let start = chars.len().saturating_sub(TAIL_CHARS);
-            chars[start..].iter().collect()
-        };
-        let tail = if tail.is_empty() {
+        let log = if log.trim().is_empty() {
             "(no Git invocations recorded)".to_string()
         } else {
-            tail.trim_end().to_string()
+            log.trim_end().to_string()
         };
         let mode = if self.kill {
             " (kill mode: the gated invocation dies by signal and can never enter the gate)"
@@ -272,12 +266,12 @@ impl GatedGit {
         };
         format!(
             "the gated `{}` never entered the gate within {:?}{mode}; enter marker `{}` is still absent; \
-             invocation log `{}` (tail):\n{}",
+             invocation log `{}`:\n{}",
             self.command,
             timeout,
             self.entered_path.display(),
             self.invocations_path.display(),
-            tail
+            log
         )
     }
 
@@ -427,7 +421,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wait_entered_timeout_names_absent_marker_and_invocation_log_tail() {
+    fn wait_entered_timeout_names_absent_marker_and_full_invocation_log() {
         let gate = GatedGit::arm("add");
         let path = gate
             .child_env()
@@ -448,6 +442,17 @@ mod tests {
             "fake git status failed: {output:?}"
         );
 
+        // Pad the log past the old 2048-char tail: the timeout text must print
+        // the whole log, including its first spawn line.
+        {
+            use std::io::Write as _;
+            let mut log = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&gate.invocations_path)
+                .expect("open invocation log");
+            writeln!(log, "{}", "x".repeat(4096)).expect("pad invocation log");
+        }
+
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             gate.wait_entered_within(Duration::from_millis(50));
         }))
@@ -461,7 +466,11 @@ mod tests {
         assert!(message.contains("still absent"), "{message}");
         assert!(
             message.contains("status"),
-            "invocation log tail missing: {message}"
+            "invocation log missing: {message}"
+        );
+        assert!(
+            message.contains("spawned pid="),
+            "the full invocation log must be printed, not a tail: {message}"
         );
 
         // The spawn line is the first write, so it precedes the subcommand echo
@@ -608,7 +617,7 @@ mod tests {
         assert!(message.contains("never entered the gate"), "{message}");
         assert!(
             message.contains("--version"),
-            "invocation log tail missing: {message}"
+            "invocation log missing: {message}"
         );
     }
 }

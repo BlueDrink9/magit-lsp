@@ -129,6 +129,22 @@ mod unix {
         }
         let mut child = command.spawn()?;
         let pid = child.id() as libc::pid_t;
+        // Parent-side spawn evidence: the child's own log line comes after
+        // exec, so a kill at or before exec leaves no child-side witness. The
+        // argv summary also correlates this line with the later term/kill/reap
+        // warns for the same pid.
+        let program = command.get_program().to_string_lossy().into_owned();
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        tracing::warn!(
+            pid,
+            reason = "spawn",
+            program = %program,
+            args = ?args,
+            "child spawn"
+        );
         let cancel = current_cancel();
         let mut out = child.stdout.take().unwrap();
         let mut err = child.stderr.take().unwrap();
