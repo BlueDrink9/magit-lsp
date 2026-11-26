@@ -3826,12 +3826,21 @@ fn the_shared_selector_uses_a_supplied_server_verbatim_and_cargo_otherwise() {
     }
 }
 
+/// Absolute path that does not exist on this platform, so the validator's
+/// readable-file refusal is exercised rather than the absolute-path one.
+#[cfg(windows)]
+const MISSING_ABSOLUTE_SERVER: &str = r"C:\nonexistent\magit-lsp";
+/// Absolute path that does not exist on this platform, so the validator's
+/// readable-file refusal is exercised rather than the absolute-path one.
+#[cfg(not(windows))]
+const MISSING_ABSOLUTE_SERVER: &str = "/nonexistent/magit-lsp";
+
 #[test]
 fn an_invalid_explicit_server_selection_is_refused_without_a_cargo_fallback() {
     for (value, expected) in [
         ("", "is set but empty"),
         ("relative/magit-lsp", "must be an absolute path"),
-        ("/nonexistent/magit-lsp", "does not name a readable file"),
+        (MISSING_ABSOLUTE_SERVER, "does not name a readable file"),
     ] {
         let error = explicit_server_binary(std::ffi::OsStr::new(value))
             .expect_err("an invalid explicit server path must be refused");
