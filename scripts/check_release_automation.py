@@ -143,6 +143,16 @@ COVERAGE_TOKENS = ('cargo llvm-cov', 'coverage-rust', '--instrument-coverage',
 # the duplicated server suites.
 ACCEPTANCE_COMMANDS = ('check_native_artifact.py', 'native-vscode-artifact-check',
                        'native-neovim-artifact-check')
+# Both required native jobs spawn gated fake-Git children, so an OOM or
+# code-signing kill must leave the host's own verdict behind instead of only a
+# client-side test timeout. The dump is on-failure only and fully guarded.
+FORENSICS_ARTIFACT = 'os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}'
+FORENSICS_PATH = '${{ runner.temp }}/os-kill-forensics.log'
+FORENSICS_PREDICATE = ('eventMessage CONTAINS[c] "memorystatus" OR '
+                       'eventMessage CONTAINS[c] "CODE SIGNING" OR '
+                       'eventMessage CONTAINS[c] "killed"')
+FORENSICS_UPLOAD = ('actions/upload-artifact@'
+                    'cf430e030ddbb5b0abf93d22962f4752f3646cd9')
 RELEASE_MANIFEST = 'build/release/release-manifest.json'
 # Every producer packages the exact source/ref/event/run identity it was
 # triggered from; an inferred head_branch or workflow_run SHA is never accepted.
@@ -677,6 +687,39 @@ def check_native_promotion_evidence(selected_artifact, evidence):
                 fail(f'build workflow: native promotion {gate} outcome for {target} must be success')
 
 
+def check_os_kill_forensics(block, context):
+    """Require the guarded on-failure OS kill/memory dump and its pinned upload.
+
+    A killed child (OOM killer, macOS code-signing termination) otherwise shows
+    up only as a client-side test timeout, so each required native job writes the
+    host's own verdicts and uploads them after a failure. Collection is guarded
+    and on-failure only, so it can never change a passing job's result.
+    """
+    code = '\n'.join(code_lines(block))
+    for token in ('if: failure()', 'log show --last 10m --predicate',
+                  FORENSICS_PREDICATE, 'journalctl -k', 'dmesg',
+                  'out of memory|killed process', FORENSICS_ARTIFACT,
+                  FORENSICS_PATH):
+        if token not in code:
+            fail(f'build workflow: {context} must collect on-failure OS '
+                 f'kill/memory evidence ({token!r})')
+    steps = job_steps(block)
+    dump = next((lines for _, lines in steps
+                 if 'log show --last 10m --predicate' in '\n'.join(lines)
+                 and 'uses:' not in '\n'.join(lines)), [])
+    if 'if: failure()' not in '\n'.join(dump):
+        fail(f'build workflow: {context} OS kill/memory collection must be its '
+             'own on-failure step')
+    upload = next((lines for _, lines in steps
+                   if FORENSICS_ARTIFACT in '\n'.join(lines)), [])
+    upload_text = '\n'.join(upload)
+    for token in (FORENSICS_UPLOAD, 'if-no-files-found: warn',
+                  'retention-days: 14'):
+        if token not in upload_text:
+            fail(f'build workflow: {context} must upload the OS kill/memory '
+                 f'evidence with {token!r}')
+
+
 def check_native_candidates(block):
     """Require the strict, mandatory Linux GNU/macOS matrix experiment.
 
@@ -731,6 +774,7 @@ def check_native_candidates(block):
     if PIPELINE_ARTIFACTS not in code:
         fail('build workflow: native candidates must package through the shared pipeline')
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
+    check_os_kill_forensics(block, 'native candidates')
 
 
 def check_native_consumers(block):
@@ -839,6 +883,7 @@ def check_native_functional_consumers(block):
         fail('build workflow: functional suites must fail on ignored or skipped cases')
     if 'test "${{ steps.candidate.outcome }}" = success' not in code:
         fail('build workflow: functional candidate/harness/runtime failures must fail the job')
+    check_os_kill_forensics(block, 'native functional consumers')
 
 
 def check_native_vscode_consumers(block):
@@ -5000,6 +5045,12 @@ def run_self_tests():
             ('build workflow on a mutable runner',
              (('runs-on: ubuntu-22.04', 'runs-on: ubuntu-latest', 1),),
              'mutable runner'),
+            ('build workflow collecting kill evidence on a passing job',
+             (('        if: failure()\n        shell: bash\n'
+               '        run: |\n          out="$RUNNER_TEMP/os-kill-forensics.log"',
+               '        if: always()\n        shell: bash\n'
+               '        run: |\n          out="$RUNNER_TEMP/os-kill-forensics.log"', 1),),
+             'must be its own on-failure step'),
             ('build workflow without the mandatory source-check job',
              (('  source-checks:', '  source-checks-disabled:', 1),),
              "missing mandatory job 'source-checks'"),

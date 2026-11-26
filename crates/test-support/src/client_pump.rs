@@ -275,7 +275,8 @@ impl ClientPump {
         while !condition(self) {
             assert!(
                 std::time::Instant::now() < deadline,
-                "pump condition timed out"
+                "{}",
+                until_timeout_message(self.server.sent.last(), &self.server.stderr_text())
             );
             self.step();
         }
@@ -295,5 +296,49 @@ impl ClientPump {
         assert_eq!(self.until_response(id)["result"], Value::Null);
         self.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
         assert!(self.server.finish(Duration::from_secs(10)).success());
+    }
+}
+
+/// How many stderr lines an unmet pump condition reports, matching the server
+/// transport's timeout precedent.
+const STDERR_TAIL_LINES: usize = 40;
+
+/// Build the panic text for an unmet [`ClientPump::until`] condition.
+///
+/// It reports the last frame the client sent and the bounded stderr tail, so a
+/// stalled pump says what the server was doing instead of only that it timed
+/// out.
+fn until_timeout_message(last_sent: Option<&Value>, stderr: &str) -> String {
+    let tail = stderr
+        .lines()
+        .rev()
+        .take(STDERR_TAIL_LINES)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("pump condition timed out\nlast sent: {last_sent:?}\nserver stderr:\n{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn until_timeout_message_reports_last_frame_and_bounded_stderr_tail() {
+        let stderr = (1..=60)
+            .map(|line| format!("log line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sent =
+            json!({"jsonrpc":"2.0","id":7,"method":"view/resync","params":{"viewId":"main"}});
+        let message = until_timeout_message(Some(&sent), &stderr);
+        assert!(message.contains("pump condition timed out"), "{message}");
+        assert!(message.contains("view/resync"), "{message}");
+        // Only the last 40 of 60 lines survive, oldest first.
+        assert!(!message.contains("log line 20\n"), "{message}");
+        assert!(message.contains("log line 21"), "{message}");
+        assert!(message.contains("log line 60"), "{message}");
     }
 }

@@ -265,16 +265,41 @@ impl Drop for GatedGit {
             while process_exists(pid) && Instant::now() < deadline {
                 thread::sleep(POLL);
             }
-            if process_exists(pid) && self.is_gate_child(pid) {
+            if process_exists(pid) {
                 // Last resort so the gate can never leak a waiting child; the
                 // identity check makes sure a recycled pid is never signalled.
-                let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+                // The evidence goes out first: a killed gate child otherwise
+                // only shows up as a later client-side timeout.
+                let gate_child = self.is_gate_child(pid);
+                eprintln!("{}", self.kill_forensics(pid, gate_child));
+                if gate_child {
+                    let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+                }
             }
         }
     }
 }
 
 impl GatedGit {
+    /// The stderr evidence emitted before the last-resort `kill -9`.
+    ///
+    /// It names the pid, its `ps -o pid=,ppid=,args=` line and the identity
+    /// guard's verdict, so a kill (or a live pid the guard refused to signal)
+    /// is explainable from the test log. Every step is failure-tolerant: this
+    /// runs from [`Drop`], which must never panic.
+    fn kill_forensics(&self, pid: u32, gate_child: bool) -> String {
+        let verdict = if gate_child {
+            "confirmed this fixture's gate child; signalling kill -9"
+        } else {
+            "failed (pid is not this fixture's gate child); not signalled"
+        };
+        format!(
+            "gated git last-resort kill forensics: pid {pid}; identity guard: {verdict}; \
+             `ps -o pid=,ppid=,args=`:\n{}",
+            process_table_entry(pid)
+        )
+    }
+
     /// Whether `pid` is a process still running this fixture's gate script.
     ///
     /// The script path is unique per fixture, so a recycled pid can never be
@@ -285,6 +310,27 @@ impl GatedGit {
             .output()
             .expect("run ps");
         String::from_utf8_lossy(&output.stdout).contains(self.script.to_string_lossy().as_ref())
+    }
+}
+
+/// One bounded `ps -o pid=,ppid=,args=` line for `pid`, for kill diagnostics.
+///
+/// A failed or absent `ps` becomes readable text instead of a panic, because
+/// the caller is a [`Drop`] implementation.
+fn process_table_entry(pid: u32) -> String {
+    match Command::new("ps")
+        .args(["-o", "pid=,ppid=,args=", "-p", &pid.to_string()])
+        .output()
+    {
+        Ok(output) => {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if text.is_empty() {
+                "(no process table entry)".to_string()
+            } else {
+                text
+            }
+        }
+        Err(error) => format!("(ps failed: {error})"),
     }
 }
 
@@ -349,6 +395,33 @@ mod tests {
         assert!(
             message.contains("status"),
             "invocation log tail missing: {message}"
+        );
+    }
+
+    #[test]
+    fn last_resort_kill_forensics_names_pid_table_and_guard_verdict() {
+        let gate = GatedGit::arm("add");
+        // This test process is alive but can never be this fixture's gate
+        // child, so the builder reports the refusal and signals nothing.
+        let pid = std::process::id();
+        let refused = gate.kill_forensics(pid, false);
+        assert!(refused.contains(&format!("pid {pid};")), "{refused}");
+        assert!(
+            refused.contains("failed (pid is not this fixture's gate child); not signalled"),
+            "{refused}"
+        );
+        assert!(refused.contains("ps -o pid=,ppid=,args="), "{refused}");
+        let entry = refused.split("`ps -o pid=,ppid=,args=`:\n").nth(1);
+        let entry = entry.expect("process table entry section");
+        assert!(
+            entry.contains(&pid.to_string()),
+            "ps entry missing the pid: {entry}"
+        );
+
+        let confirmed = gate.kill_forensics(pid, true);
+        assert!(
+            confirmed.contains("confirmed this fixture's gate child; signalling kill -9"),
+            "{confirmed}"
         );
     }
 }

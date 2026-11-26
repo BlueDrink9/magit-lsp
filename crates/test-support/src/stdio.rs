@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -110,6 +110,38 @@ pub fn explicit_server_binary(value: &OsStr) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Build the panic detail for a failed server spawn.
+///
+/// It names the attempted program and arguments, the harness executable that
+/// resolved a fallback, and the [`SERVER_BINARY_ENV`] selection when one was
+/// set, so a spawn failure says which executable the test meant to run instead
+/// of only that spawning failed. `harness_exe` and `env_value` are parameters so
+/// a unit test never has to touch the process environment.
+pub fn spawn_failure_detail(
+    command: &Command,
+    harness_exe: Option<&Path>,
+    env_value: Option<&OsStr>,
+) -> String {
+    let program = command.get_program().to_string_lossy();
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let harness = match harness_exe {
+        Some(path) => path.display().to_string(),
+        None => "(current_exe unavailable)".to_string(),
+    };
+    let selection = match env_value {
+        Some(value) => format!("{SERVER_BINARY_ENV}={}", value.to_string_lossy()),
+        None => format!("{SERVER_BINARY_ENV} is unset"),
+    };
+    format!(
+        "attempted program: {program}\nattempted args: [{args}]\n\
+         test harness: {harness}\nserver selection: {selection}"
+    )
+}
+
 /// A running server plus its framed stdout stream.
 pub struct TestServer {
     child: Child,
@@ -190,7 +222,18 @@ impl TestServer {
             command.env(key, value);
         }
 
-        let mut child = command.spawn().expect("spawn magit-lsp");
+        let spawned = command.spawn();
+        let mut child = match spawned {
+            Ok(child) => child,
+            Err(error) => panic!(
+                "spawn magit-lsp: {error}\n{}",
+                spawn_failure_detail(
+                    &command,
+                    std::env::current_exe().ok().as_deref(),
+                    std::env::var_os(SERVER_BINARY_ENV).as_deref(),
+                )
+            ),
+        };
         let stdin = child.stdin.take().expect("child stdin");
         let stdout = child.stdout.take().expect("child stdout");
         let stderr = child.stderr.take().expect("child stderr");
@@ -613,4 +656,51 @@ fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
     serde_json::from_slice(&body)
         .map(Some)
         .map_err(|error| format!("frame body is not JSON: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_failure_detail_names_program_args_harness_and_explicit_selection() {
+        let mut command = Command::new("/nonexistent/magit-lsp");
+        command.args(["--config", "/tmp/magit-lsp.toml"]);
+        let harness = Path::new("/harness/target/debug/deps/server_async-abc123");
+        let detail = spawn_failure_detail(
+            &command,
+            Some(harness),
+            Some(OsStr::new("/opt/explicit/magit-lsp")),
+        );
+        assert!(
+            detail.contains("attempted program: /nonexistent/magit-lsp"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("attempted args: [--config /tmp/magit-lsp.toml]"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("/harness/target/debug/deps/server_async-abc123"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("server selection: MAGIT_LSP_BIN=/opt/explicit/magit-lsp"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn spawn_failure_detail_states_an_unset_selection_and_missing_harness() {
+        let command = Command::new("/nonexistent/magit-lsp");
+        let detail = spawn_failure_detail(&command, None, None);
+        assert!(
+            detail.contains("test harness: (current_exe unavailable)"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("server selection: MAGIT_LSP_BIN is unset"),
+            "{detail}"
+        );
+    }
 }

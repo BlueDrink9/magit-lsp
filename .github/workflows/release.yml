@@ -275,6 +275,32 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # A child killed by the OOM killer or a macOS code-signing termination
+      # otherwise shows up only as a client-side test timeout. This collector
+      # reads the host's own verdicts; every command is guarded so evidence
+      # collection never changes a failed job's result.
+      - name: Collect OS kill and memory evidence on failure
+        if: failure()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/os-kill-forensics.log"
+          : > "$out" || true
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            log show --last 10m --predicate 'eventMessage CONTAINS[c] "memorystatus" OR eventMessage CONTAINS[c] "CODE SIGNING" OR eventMessage CONTAINS[c] "killed"' >> "$out" 2>&1 || true
+          else
+            journalctl -k --since '-10min' 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
+            dmesg 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
+          fi
+
+      - name: Upload OS kill and memory evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/os-kill-forensics.log
+          if-no-files-found: warn
+          retention-days: 14
+
   native-consumers:
     # Acceptance of the producer's immutable candidates, once per required
     # platform and against the uploaded release output only: these consumers
@@ -417,6 +443,32 @@ jobs:
       - name: Require successful functional run
         if: always()
         run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.harness.outcome }}" = success && test "${{ steps.rust-functional.outcome }}" = success
+
+      # A child killed by the OOM killer or a macOS code-signing termination
+      # otherwise shows up only as a client-side test timeout. This collector
+      # reads the host's own verdicts; every command is guarded so evidence
+      # collection never changes a failed job's result.
+      - name: Collect OS kill and memory evidence on failure
+        if: failure()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/os-kill-forensics.log"
+          : > "$out" || true
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            log show --last 10m --predicate 'eventMessage CONTAINS[c] "memorystatus" OR eventMessage CONTAINS[c] "CODE SIGNING" OR eventMessage CONTAINS[c] "killed"' >> "$out" 2>&1 || true
+          else
+            journalctl -k --since '-10min' 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
+            dmesg 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
+          fi
+
+      - name: Upload OS kill and memory evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/os-kill-forensics.log
+          if-no-files-found: warn
+          retention-days: 14
 
   native-vscode-consumers:
     # Required installed-extension acceptance consumes the exact native and VSIX uploads.
