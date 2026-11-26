@@ -843,13 +843,11 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         .as_str()
         .expect("view uri")
         .to_string();
-    assert_eq!(
-        opened["result"]["uri"],
-        json!(format!(
-            "magit://status/{}",
-            tmp.path().to_string_lossy().trim_start_matches('/')
-        ))
-    );
+    // The server's canonical encoder: a raw native path is not a valid
+    // `lsp_types::Uri` on Windows (its backslashes and drive prefix are outside
+    // the path grammar), so requests built from one fail to deserialize.
+    let expected_uri = magit_lsp::session::status_uri(&tmp.path().to_string_lossy());
+    assert_eq!(opened["result"]["uri"], json!(expected_uri));
 
     let initial = server.recv();
     assert_eq!(initial["method"], json!("view/render"), "{initial}");
