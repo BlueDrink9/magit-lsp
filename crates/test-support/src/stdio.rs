@@ -362,6 +362,27 @@ impl TestServer {
         message
     }
 
+    /// Return the next frame if one arrives within `timeout`, else `None`.
+    ///
+    /// Unlike [`TestServer::recv_raw`] a silent server is not a failure, so a
+    /// poll loop can watch the stream while it also checks another condition.
+    /// Framing errors and a closed stream still panic: only silence is benign.
+    #[track_caller]
+    pub fn try_recv_within(&mut self, timeout: Duration) -> Option<Value> {
+        match self.responses.recv_timeout(timeout) {
+            Ok(Ok(message)) => {
+                self.record_received(&message);
+                self.await_step = None;
+                Some(message)
+            }
+            Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("server stream closed while waiting for the next frame")
+            }
+        }
+    }
+
     /// Remember one received frame for timeout diagnostics, bounded to
     /// [`RECEIVED_FRAME_HISTORY`] entries.
     fn record_received(&mut self, message: &Value) {

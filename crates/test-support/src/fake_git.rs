@@ -1,8 +1,9 @@
 //! Tests-only fake `git` executables, each scoped to a spawned child's `PATH`.
 //!
 //! [`GatedGit`] blocks a gated subcommand until the test explicitly releases it,
-//! with an entered/release handshake. [`FakeGit`] replaces `add -u` with a
-//! start marker and a long sleep so cancellation can be observed.
+//! with an entered/release handshake, or (in kill mode) kills that first
+//! invocation by signal before it can log itself. [`FakeGit`] replaces `add -u`
+//! with a start marker and a long sleep so cancellation can be observed.
 //!
 //! Both are placed first on the *server child's* `PATH` only; the test process
 //! and every other process keep the real Git, and no parent environment is ever
@@ -88,7 +89,9 @@ const POLL: Duration = Duration::from_millis(10);
 ///
 /// The gate is single-use: the first gated invocation blocks inside the fake
 /// until [`Self::release`]; every later invocation (gated or not) runs the
-/// real Git immediately.
+/// real Git immediately. In kill mode ([`Self::arm_killing`]) that first
+/// invocation instead dies by signal before it records itself, reproducing a
+/// Git child killed between spawn and completion.
 pub struct GatedGit {
     dir: tempfile::TempDir,
     command: String,
@@ -97,6 +100,8 @@ pub struct GatedGit {
     release_path: PathBuf,
     claimed_path: PathBuf,
     invocations_path: PathBuf,
+    /// Whether the first gated invocation dies by signal instead of blocking.
+    kill: bool,
 }
 
 impl GatedGit {
@@ -105,6 +110,22 @@ impl GatedGit {
     /// Nothing is armed on the parent environment; use [`Self::child_env`] to
     /// scope the fake to a spawned server.
     pub fn arm(command: &str) -> Self {
+        Self::install(command, false)
+    }
+
+    /// Install the fake so the first `command` invocation is killed by signal.
+    ///
+    /// The killed invocation writes [`Self::claimed`]'s marker but never reaches
+    /// its invocation-log echo and never enters the gate, exactly like a Git
+    /// child the host kills on spawn (OOM or code-signing termination). That is
+    /// the CI signature this mode reproduces: the invocation log names only the
+    /// surrounding probes and [`Self::wait_entered`] would wait forever.
+    pub fn arm_killing(command: &str) -> Self {
+        Self::install(command, true)
+    }
+
+    /// Write the fake script for `command` and place it in a private directory.
+    fn install(command: &str, kill: bool) -> Self {
         let real_git = real_git_path();
         let dir = tempfile::TempDir::new().expect("fake git tempdir");
         let entered_path = dir.path().join("entered");
@@ -112,15 +133,26 @@ impl GatedGit {
         let claimed_path = dir.path().join("claimed");
         let invocations_path = dir.path().join("invocations");
         let script = dir.path().join("git");
-        std::fs::write(
-            &script,
+        let action = if kill {
+            // Die before the log echo, but still claim the single gated slot so
+            // a retry would run the real Git instead of dying again.
             format!(
-                "#!/bin/sh\n\
+                "# Tests-only kill gate: the first '{command}' invocation is killed by\n\
+                 # signal before it can log itself, matching a host-killed Git child.\n\
+                 if [ \"$subcommand\" = '{command}' ] && [ ! -f '{claimed}' ]; then\n\
+                   : > '{claimed}'\n\
+                   kill -KILL $$\n\
+                 fi\n\
+                 echo \"$subcommand\" >> '{invocations}'\n",
+                command = command,
+                claimed = claimed_path.display(),
+                invocations = invocations_path.display(),
+            )
+        } else {
+            format!(
+                "echo \"$subcommand\" >> '{invocations}'\n\
                  # Tests-only gate: block the first '{command}' until the release\n\
                  # file exists, then run the real Git so the repository stays correct.\n\
-                 subcommand=\"$1\"\n\
-                 if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
-                 echo \"$subcommand\" >> '{invocations}'\n\
                  if [ \"$subcommand\" = '{command}' ] && [ ! -f '{claimed}' ]; then\n\
                    : > '{claimed}'\n\
                    echo \"$$\" > '{entered}'\n\
@@ -131,14 +163,23 @@ impl GatedGit {
                      [ \"$n\" -ge {timeout} ] && break\n\
                    done\n\
                    rm -f '{entered}'\n\
-                 fi\n\
-                 exec '{real}' \"$@\"\n",
+                 fi\n",
                 command = command,
-                release = release_path.display(),
-                entered = entered_path.display(),
                 claimed = claimed_path.display(),
+                entered = entered_path.display(),
+                release = release_path.display(),
                 invocations = invocations_path.display(),
                 timeout = GATE_TIMEOUT_POLLS,
+            )
+        };
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 subcommand=\"$1\"\n\
+                 if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
+                 {action}\
+                 exec '{real}' \"$@\"\n",
                 real = real_git.display(),
             ),
         )
@@ -157,6 +198,7 @@ impl GatedGit {
             release_path,
             claimed_path,
             invocations_path,
+            kill,
         }
     }
 
@@ -171,6 +213,15 @@ impl GatedGit {
             std::env::var("PATH").unwrap_or_default()
         );
         vec![("PATH".to_string(), path)]
+    }
+
+    /// Whether a gated invocation is currently blocked inside the gate.
+    ///
+    /// Unlike [`Self::wait_entered`] this neither waits nor panics, so a poll
+    /// loop can notice a gate that will never be entered — a killed child, or
+    /// an acquisition that failed before Git ran.
+    pub fn has_entered(&self) -> bool {
+        self.entered_path.exists()
     }
 
     /// Block until a gated invocation has entered the gate (bounded).
@@ -196,9 +247,7 @@ impl GatedGit {
     /// tail, so a failure shows whether Git ran at all and which subcommands.
     fn entered_timeout_message(&self, timeout: Duration) -> String {
         const TAIL_CHARS: usize = 2048;
-        let log = std::fs::read(&self.invocations_path)
-            .map(|bytes| String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
-            .unwrap_or_default();
+        let log = self.invocation_log();
         let tail: String = {
             let chars: Vec<char> = log.chars().collect();
             let start = chars.len().saturating_sub(TAIL_CHARS);
@@ -209,8 +258,13 @@ impl GatedGit {
         } else {
             tail.trim_end().to_string()
         };
+        let mode = if self.kill {
+            " (kill mode: the gated invocation dies by signal and can never enter the gate)"
+        } else {
+            ""
+        };
         format!(
-            "the gated `{}` never entered the gate within {:?}; enter marker `{}` is still absent; \
+            "the gated `{}` never entered the gate within {:?}{mode}; enter marker `{}` is still absent; \
              invocation log `{}` (tail):\n{}",
             self.command,
             timeout,
@@ -233,18 +287,24 @@ impl GatedGit {
         self.release_path.exists()
     }
 
+    /// Every subcommand this fixture's fake Git recorded, in order.
+    ///
+    /// A killed invocation dies before its log echo, so its subcommand is
+    /// absent; the surviving entries are the decisive evidence of what did run.
+    pub fn invocation_log(&self) -> String {
+        std::fs::read_to_string(&self.invocations_path)
+            .map(|log| log.replace("\r\n", "\n"))
+            .unwrap_or_default()
+    }
+
     /// Number of matching Git invocations observed by this fixture.
     ///
     /// The log records every subcommand the fake saw; only the gated one counts.
     pub fn invocation_count(&self) -> usize {
-        std::fs::read_to_string(&self.invocations_path)
-            .map(|lines| {
-                lines
-                    .lines()
-                    .filter(|line| line.trim() == self.command)
-                    .count()
-            })
-            .unwrap_or(0)
+        self.invocation_log()
+            .lines()
+            .filter(|line| line.trim() == self.command)
+            .count()
     }
 
     /// The pid of the child currently blocked in the gate, if any.
@@ -422,6 +482,90 @@ mod tests {
         assert!(
             confirmed.contains("confirmed this fixture's gate child; signalling kill -9"),
             "{confirmed}"
+        );
+    }
+
+    /// The `PATH` override of `gate`, for running the fake script directly.
+    fn gate_path(gate: &GatedGit) -> String {
+        gate.child_env()
+            .into_iter()
+            .find_map(|(key, value)| (key == "PATH").then_some(value))
+            .expect("PATH override")
+    }
+
+    #[test]
+    fn kill_mode_child_dies_by_signal_before_its_invocation_log_echo() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let gate = GatedGit::arm_killing("status");
+        let path = gate_path(&gate);
+        // Route through the shell so the script is read as data (see the
+        // timeout test above for the direct-exec ETXTBSY race).
+        let killed = Command::new("sh")
+            .arg(&gate.script)
+            .arg("status")
+            .env("PATH", &path)
+            .output()
+            .expect("run fake git");
+        assert_eq!(
+            killed.status.signal(),
+            Some(9),
+            "the kill-mode invocation must die by signal: {killed:?}"
+        );
+        assert!(
+            !gate.has_entered(),
+            "a killed invocation can never enter the gate"
+        );
+        assert_eq!(gate.invocation_count(), 0);
+        assert!(
+            !gate
+                .invocation_log()
+                .lines()
+                .any(|line| line.trim() == "status"),
+            "the kill happens before the log echo: {:?}",
+            gate.invocation_log()
+        );
+
+        // The single gated slot stays spent: the next command runs the real Git.
+        let next = Command::new("sh")
+            .arg(&gate.script)
+            .arg("--version")
+            .env("PATH", &path)
+            .output()
+            .expect("run fake git");
+        assert!(next.status.success(), "{next:?}");
+        assert!(
+            gate.invocation_log().contains("--version"),
+            "{:?}",
+            gate.invocation_log()
+        );
+    }
+
+    #[test]
+    fn kill_mode_timeout_names_the_mode_and_the_surviving_invocations() {
+        let gate = GatedGit::arm_killing("status");
+        let path = gate_path(&gate);
+        let survivor = Command::new("sh")
+            .arg(&gate.script)
+            .arg("--version")
+            .env("PATH", &path)
+            .output()
+            .expect("run fake git");
+        assert!(survivor.status.success(), "{survivor:?}");
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            gate.wait_entered_within(Duration::from_millis(50));
+        }))
+        .expect_err("an unentered kill-mode gate must panic");
+        let message = panic
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string()))
+            .expect("panic carries a message");
+        assert!(message.contains("kill mode"), "{message}");
+        assert!(message.contains("never entered the gate"), "{message}");
+        assert!(
+            message.contains("--version"),
+            "invocation log tail missing: {message}"
         );
     }
 }

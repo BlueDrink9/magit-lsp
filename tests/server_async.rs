@@ -59,6 +59,63 @@ fn wait_for_completion_barrier(trace: &std::path::Path, view: &str, expected: us
     }
 }
 
+/// How long a gated acquisition wait tolerates a healthy but loaded CI runner.
+#[cfg(unix)]
+const GATE_ENTER_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// What a gated acquisition wait observed on the wire.
+#[cfg(unix)]
+#[derive(Debug)]
+enum GateWait {
+    /// The gated Git invocation is verifiably blocked inside the fake gate.
+    Entered,
+    /// The server published an acquisition failure for the view instead.
+    AcquisitionFailed { text: Vec<String> },
+}
+
+/// Wait for a gated acquisition, resolving at once when it failed instead.
+///
+/// A plain `gate.wait_entered()` waits out its whole bound and hides the cause:
+/// a Git child killed before its invocation-log echo never enters the gate, so
+/// the test timed out silently while the server had already published
+/// "Unable to load repository status" (docs/evidence/
+/// native-functional-status-gate-macos-kill.md). This polls the gate marker and
+/// the client stream together, so the wait ends at the first of: gate entered,
+/// a render of `view` reporting the acquisition failure (returned with its
+/// text), or the [`GATE_ENTER_TIMEOUT`] bound, whose panic carries the gate's
+/// invocation log. Frames for other views are preserved in
+/// [`TestServer::notifications`], so a caller's later wire assertions still see
+/// them.
+#[cfg(unix)]
+fn wait_for_gate_or_failure(gate: &GatedGit, server: &mut TestServer, view: &str) -> GateWait {
+    let deadline = Instant::now() + GATE_ENTER_TIMEOUT;
+    loop {
+        if gate.has_entered() {
+            return GateWait::Entered;
+        }
+        if let Some(message) = server.try_recv_within(Duration::from_millis(20)) {
+            if message["method"] == "view/render" && message["params"]["viewId"] == view {
+                let text: Vec<String> =
+                    serde_json::from_value(message["params"]["text"].clone()).unwrap_or_default();
+                if text
+                    .iter()
+                    .any(|line| line.contains("Unable to load repository status"))
+                {
+                    return GateWait::AcquisitionFailed { text };
+                }
+            }
+            server.notifications.push(message);
+            continue;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the gated acquisition neither entered the gate nor reported a failure within \
+             {GATE_ENTER_TIMEOUT:?}; the fake Git's invocation log:\n{}",
+            gate.invocation_log()
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn status_open_held_git_unacknowledged_completion_sends_full_text() {
@@ -1644,7 +1701,11 @@ fn status_open_refreshes_while_loading_are_coalesced() {
         json!(["Head: main", "Loading repository status…"])
     );
     assert_eq!(server.recv()["method"], "view/keymap");
-    gate.wait_entered();
+    let entered = wait_for_gate_or_failure(&gate, &mut server, &view);
+    assert!(
+        matches!(entered, GateWait::Entered),
+        "a healthy gated acquisition must enter the gate, not report a failure: {entered:?}"
+    );
     assert_eq!(gate.invocation_count(), 1);
 
     write(
@@ -1741,6 +1802,83 @@ fn status_open_refreshes_while_loading_are_coalesced() {
             "a render after the closed one must be the expansion: {published:?}"
         );
     }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn status_open_refresh_wait_reports_killed_git_child_as_acquisition_failure() {
+    magit_lsp_test_support::cargo_server_binary!();
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    // The fixture kills the first `status` invocation by signal before it can
+    // log itself: the CI signature of run 45759764509 (docs/evidence/
+    // native-functional-status-gate-macos-kill.md).
+    let gate = GatedGit::arm_killing("status");
+    let gate_env = gate.child_env();
+    let env: Vec<(&str, &str)> = gate_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    let mut open = open_view_message(2, &repo_param(tmp.path()));
+    open["params"]["traceId"] = json!(10);
+    server.send(open);
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    assert_eq!(
+        loading["params"]["text"],
+        json!(["Head: main", "Loading repository status…"])
+    );
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    let started = Instant::now();
+    let text = match wait_for_gate_or_failure(&gate, &mut server, &view) {
+        GateWait::Entered => panic!("a killed Git child must surface as an acquisition failure"),
+        GateWait::AcquisitionFailed { text } => text,
+    };
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the failure must resolve promptly, not at the {GATE_ENTER_TIMEOUT:?} bound: {elapsed:?}"
+    );
+    assert!(
+        text.iter()
+            .any(|line| line.contains("Unable to load repository status")),
+        "{text:?}"
+    );
+    assert!(
+        !text
+            .iter()
+            .any(|line| line.contains("Loading repository status")),
+        "{text:?}"
+    );
+
+    // The reproduced signature: the killed child never entered the gate, never
+    // reached its invocation-log echo, and only the below-recommendation probe
+    // that follows a reaped failed child ran.
+    assert!(
+        !gate.has_entered(),
+        "the killed child can never enter the gate"
+    );
+    assert_eq!(gate.invocation_count(), 0);
+    let log = gate.invocation_log();
+    assert!(
+        log.lines().any(|line| line.trim() == "--version"),
+        "the failure probe must run after the reaped child: {log:?}"
+    );
+    assert!(
+        !log.lines().any(|line| line.trim() == "status"),
+        "the killed child died before its log echo: {log:?}"
+    );
+
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
