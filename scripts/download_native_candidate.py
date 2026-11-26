@@ -97,27 +97,50 @@ def fetch_candidate(repository, run_id, attempt, source_sha, target, artifact_na
         raise DownloadError('repository must be OWNER/REPO')
     base = f'{API}/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts?per_page=100'
     run = json_get(f'{API}/repos/{owner}/{repo}/actions/runs/{run_id}', token)
-    if (str(run.get('id')) != str(run_id) or str(run.get('run_attempt')) != str(attempt)
+    if (str(run.get('id')) != str(run_id)
             or run.get('head_sha') != source_sha
             or run.get('repository', {}).get('full_name', repository).lower() != repository.lower()):
-        raise DownloadError('requested run/repository/attempt/source binding mismatch')
+        raise DownloadError('requested run/repository/source binding mismatch')
+    if str(run.get('run_attempt')) != str(attempt):
+        print(f'native candidate download: run attempt {run.get("run_attempt")!r} differs from '
+              f'requested attempt {attempt!r}; binding by artifact identity', file=sys.stderr)
     artifacts = json_get(base, token)
     entries = artifacts.get('artifacts', [])
     identities = [a for a in entries if a.get('name') == f'{artifact_name}-identity'
                   and not a.get('expired')]
     candidates = [a for a in entries if a.get('name') == artifact_name and not a.get('expired')]
-    if len(identities) != 1 or len(candidates) != 1:
-        raise DownloadError('missing or duplicate identity/candidate artifact')
-    identity_artifact, candidate = identities[0], candidates[0]
-    if str(candidate.get('workflow_run', {}).get('id', run_id)) != str(run_id):
-        raise DownloadError('candidate belongs to another run')
-    with opener(f'{API}/repos/{owner}/{repo}/actions/artifacts/{identity_artifact["id"]}/zip', token) as response:
-        identity_members = exact_zip(response.read(), ['upload-identity.json'])
-    identity = json.loads(identity_members['upload-identity.json'])
-    expected = {'artifact_id': str(candidate['id']), 'artifact_digest': candidate.get('digest'),
-                'run_id': str(run_id), 'run_attempt': str(attempt), 'target': target}
-    if identity != expected or candidate.get('digest') != identity.get('artifact_digest'):
-        raise DownloadError('upload identity does not bind the requested artifact/run/attempt/target')
+    if not identities or not candidates:
+        raise DownloadError('missing identity/candidate artifact')
+    if (len({str(a.get('id')) for a in identities}) != len(identities)
+            or len({str(a.get('id')) for a in candidates}) != len(candidates)):
+        raise DownloadError('duplicate identity/candidate artifact')
+    # An identity records the attempt that produced its candidate; a partial
+    # re-run leaves that attempt lower than the consumer's requested attempt.
+    pairs = []
+    for identity_artifact in identities:
+        with opener(f'{API}/repos/{owner}/{repo}/actions/artifacts/{identity_artifact["id"]}/zip', token) as response:
+            identity_members = exact_zip(response.read(), ['upload-identity.json'])
+        identity = json.loads(identity_members['upload-identity.json'])
+        matches = [a for a in candidates if str(a.get('id')) == str(identity.get('artifact_id'))]
+        if not matches:
+            continue
+        candidate = matches[0]
+        expected = {'artifact_id': str(candidate['id']), 'artifact_digest': candidate.get('digest'),
+                    'run_id': str(run_id), 'run_attempt': str(identity.get('run_attempt')),
+                    'target': target}
+        if identity != expected or candidate.get('digest') != identity.get('artifact_digest'):
+            raise DownloadError('upload identity does not bind the requested artifact/run/target')
+        if str(candidate.get('workflow_run', {}).get('id', run_id)) != str(run_id):
+            raise DownloadError('candidate belongs to another run')
+        pairs.append((candidate, identity))
+    matching = [pair for pair in pairs if str(pair[1].get('run_attempt')) == str(attempt)]
+    if len(pairs) == 1:
+        candidate, identity = pairs[0]
+    elif len(matching) == 1:
+        candidate, identity = matching[0]
+    else:
+        raise DownloadError('no unique identity/candidate pair for the requested attempt')
+    producing_attempt = str(identity['run_attempt'])
     metadata = json_get(f'{API}/repos/{owner}/{repo}/actions/artifacts/{candidate["id"]}', token)
     if (str(metadata.get('id')) != str(candidate['id'])
             or metadata.get('digest') != candidate.get('digest')
@@ -133,7 +156,7 @@ def fetch_candidate(repository, run_id, attempt, source_sha, target, artifact_na
         files = exact_zip(payload)
         manifest = json.loads(files['release-manifest.json'])
         for key, value in {'source_sha': source_sha, 'run_id': str(run_id),
-                           'run_attempt': str(attempt), 'target': target}.items():
+                           'run_attempt': producing_attempt, 'target': target}.items():
             if str(manifest.get(key)) != value:
                 raise DownloadError(f'manifest {key} does not match request')
         archive_name = f'magit-lsp-v{manifest["version"]}-{target}.tar.gz'
@@ -166,7 +189,7 @@ def fetch_candidate(repository, run_id, attempt, source_sha, target, artifact_na
                               ('release-manifest.json.sha256', files['release-manifest.json.sha256'])):
             (destination / name).write_bytes(content)
         handoff = {'artifact_id': str(candidate['id']), 'artifact_digest': candidate['digest'],
-                   'run_id': str(run_id), 'run_attempt': str(attempt), 'source_sha': source_sha,
+                   'run_id': str(run_id), 'run_attempt': producing_attempt, 'source_sha': source_sha,
                    'target': target, 'archive': str(destination / archive_name),
                    'manifest': str(destination / 'release-manifest.json'),
                    'archive_sha256': digest(archive_data), 'executable_sha256': manifest['executable_sha256']}

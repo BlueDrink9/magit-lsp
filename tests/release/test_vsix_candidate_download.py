@@ -72,11 +72,26 @@ class VsixCandidateTests(unittest.TestCase):
         self.payload = data
         self.candidate = dict(self.candidate, digest=hashlib.sha256(data).hexdigest())
 
+    def pair(self, attempt_value, artifact_id):
+        """Build a candidate/identity pair produced by attempt_value."""
+        manifest = dict(self.manifest, run_attempt=attempt_value)
+        payload = zipped([(f'magit-lsp-{self.version}.vsix', self.vsix),
+                          ('vsix-manifest.json', json.dumps(manifest).encode())])
+        candidate = {'id': artifact_id, 'name': downloader.ARTIFACT,
+                     'digest': hashlib.sha256(payload).hexdigest(), 'expired': False,
+                     'workflow_run': {'id': self.run_id}}
+        identity = {'id': artifact_id + 1, 'name': downloader.IDENTITY_ARTIFACT, 'expired': False}
+        identity_zip = zipped([('vsix-upload-identity.json', json.dumps({
+            'artifact_id': str(artifact_id), 'artifact_digest': candidate['digest'],
+            'run_id': self.run_id, 'run_attempt': attempt_value}).encode())])
+        return payload, candidate, identity, identity_zip
+
     def execute(self, *, listing=None, identity=None, payload=None, candidate=None,
-                expected_locks=None, checkout=None, opener=None):
+                expected_locks=None, checkout=None, opener=None, producing_attempt=None):
         candidate = candidate or self.candidate
+        producing_attempt = self.attempt if producing_attempt is None else producing_attempt
         identity = identity or {'artifact_id': str(candidate['id']), 'artifact_digest': candidate['digest'],
-                                'run_id': self.run_id, 'run_attempt': self.attempt}
+                                'run_id': self.run_id, 'run_attempt': producing_attempt}
         identity_zip = zipped([('vsix-upload-identity.json', json.dumps(identity).encode())])
         listing = listing if listing is not None else [self.identity, candidate]
         responses = {
@@ -112,13 +127,54 @@ class VsixCandidateTests(unittest.TestCase):
                          (self.ref, self.event, self.version))
         self.assertEqual(manifest['lock_hashes'], self.manifest['lock_hashes'])
 
+    def test_binds_single_pair_produced_by_an_earlier_attempt(self):
+        self.publish(dict(self.manifest, run_attempt='1'))
+        result = self.execute(producing_attempt='1')
+        self.assertEqual(result['run_attempt'], '1')
+        handoff = json.loads((self.root / 'handoff' / 'vsix-candidate.json').read_text())
+        self.assertEqual(handoff['run_attempt'], '1')
+
+    def test_binds_matching_attempt_among_reruns_and_rejects_no_match(self):
+        payload1, cand1, id1, zip1 = self.pair('1', 22)
+        payload2, cand2, id2, zip2 = self.pair('2', 25)
+        listing = [id1, id2, cand1, cand2]
+
+        def run(attempt):
+            responses = {
+                f'{transport.API}/repos/o/r/actions/runs/{self.run_id}': json.dumps({
+                    'id': self.run_id, 'run_attempt': '2', 'head_sha': self.source,
+                    'repository': {'full_name': 'o/r'}}).encode(),
+                f'{transport.API}/repos/o/r/actions/runs/{self.run_id}/artifacts?per_page=100':
+                    json.dumps({'artifacts': listing}).encode(),
+                f'{transport.API}/repos/o/r/actions/artifacts/{id1["id"]}/zip': zip1,
+                f'{transport.API}/repos/o/r/actions/artifacts/{id2["id"]}/zip': zip2,
+                f'{transport.API}/repos/o/r/actions/artifacts/22': json.dumps(cand1).encode(),
+                f'{transport.API}/repos/o/r/actions/artifacts/22/zip': payload1,
+                f'{transport.API}/repos/o/r/actions/artifacts/25': json.dumps(cand2).encode(),
+                f'{transport.API}/repos/o/r/actions/artifacts/25/zip': payload2,
+            }
+            def fake(url, *_args, **_kwargs):
+                if url not in responses:
+                    raise AssertionError(url)
+                return Response(responses[url])
+            output = self.root / f'handoff-{attempt}'
+            with patch.object(transport, 'json_get', lambda url, _token: json.loads(responses[url])):
+                return downloader.fetch_candidate('o/r', self.run_id, attempt, self.source,
+                    self.ref, self.event, self.version, output, 'secret',
+                    checkout=self.root, expected_locks=None, opener=fake)
+
+        self.assertEqual(run('2')['artifact_id'], '25')
+        self.assertEqual(run('1')['artifact_id'], '22')
+        with self.assertRaises(downloader.DownloadError):
+            run('3')
+
     def test_rejects_missing_duplicate_expired_and_identity_mismatches(self):
         for listing in ([], [self.identity, self.identity, self.candidate],
                         [dict(self.identity, expired=True), self.candidate]):
             with self.subTest(listing=listing), self.assertRaises(downloader.DownloadError):
                 self.execute(listing=listing)
         for field, value in [('artifact_id', '999'), ('artifact_digest', 'bad'),
-                             ('run_id', '9'), ('run_attempt', '1')]:
+                             ('run_id', '9')]:
             identity = {'artifact_id': '22', 'artifact_digest': self.candidate['digest'],
                         'run_id': self.run_id, 'run_attempt': self.attempt}
             identity[field] = value

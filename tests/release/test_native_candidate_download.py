@@ -60,6 +60,7 @@ class NativeCandidateDownloadTests(unittest.TestCase):
                     'run_attempt': self.attempt, 'target': self.target,
                     'version': self.version, 'archive_sha256': hashlib.sha256(archive_bytes).hexdigest(),
                     'executable_sha256': hashlib.sha256(binary).hexdigest()}
+        self.archive_bytes, self.manifest = archive_bytes, manifest
         manifest_bytes = (json.dumps(manifest) + '\n').encode()
         outer = zipped({self.archive_name: archive_bytes,
                         self.archive_name + '.sha256': (hashlib.sha256(archive_bytes).hexdigest() + '  ' + self.archive_name + '\n').encode(),
@@ -72,6 +73,26 @@ class NativeCandidateDownloadTests(unittest.TestCase):
             'artifact_id': '22', 'artifact_digest': self.candidate['digest'],
             'run_id': self.run_id, 'run_attempt': self.attempt, 'target': self.target}).encode()})
         self.outer = outer
+
+    def pair(self, attempt_value, artifact_id):
+        """Build a candidate/identity pair produced by attempt_value."""
+        manifest = dict(self.manifest, run_attempt=attempt_value)
+        manifest_bytes = (json.dumps(manifest) + '\n').encode()
+        outer = zipped({self.archive_name: self.archive_bytes,
+                        self.archive_name + '.sha256': (hashlib.sha256(self.archive_bytes).hexdigest() + '  ' + self.archive_name + '\n').encode(),
+                        'release-manifest.json': manifest_bytes,
+                        'release-manifest.json.sha256': (hashlib.sha256(manifest_bytes).hexdigest() + '\n').encode()})
+        candidate = {'id': artifact_id, 'name': self.name, 'expired': False,
+                     'digest': hashlib.sha256(outer).hexdigest(), 'workflow_run': {'id': self.run_id}}
+        identity = {'id': artifact_id + 1, 'name': self.name + '-identity', 'expired': False}
+        identity_zip = zipped({'upload-identity.json': json.dumps({
+            'artifact_id': str(artifact_id), 'artifact_digest': candidate['digest'],
+            'run_id': self.run_id, 'run_attempt': attempt_value, 'target': self.target}).encode()})
+        return outer, candidate, identity, identity_zip
+
+    def republish(self, attempt_value):
+        """Rebuild the default candidate as if produced by attempt_value."""
+        self.outer, self.candidate, self.identity, self.identity_zip = self.pair(attempt_value, 22)
 
     def execute(self, *, identity=None, candidate=None, payload=None, output=None):
         candidate = candidate or self.candidate
@@ -130,20 +151,56 @@ class NativeCandidateDownloadTests(unittest.TestCase):
                         downloader.fetch_candidate('o/r', self.run_id, self.attempt, self.source,
                             self.target, self.name, '/tmp/unused-native-candidate', 'secret')
 
-    def test_rejects_stale_identity_and_transport_digest(self):
-        original = self.identity_zip
+    def test_binds_single_pair_produced_by_an_earlier_attempt(self):
+        self.republish('1')
+        with tempfile.TemporaryDirectory() as temp:
+            result = self.execute(output=Path(temp) / 'out')
+            self.assertEqual(result['run_attempt'], '1')
+            handoff = json.loads((Path(temp) / 'out' / 'native-candidate.json').read_text())
+            self.assertEqual(handoff['run_attempt'], '1')
+
+    def test_rejects_transport_digest_mismatch(self):
+        wrong = 'sha256:' + '0' * 64
+        self.candidate = dict(self.candidate, digest=wrong)
         self.identity_zip = zipped({'upload-identity.json': json.dumps({
-            'artifact_id': '22', 'artifact_digest': self.candidate['digest'],
-            'run_id': self.run_id, 'run_attempt': '1', 'target': self.target}).encode()})
+            'artifact_id': '22', 'artifact_digest': wrong, 'run_id': self.run_id,
+            'run_attempt': self.attempt, 'target': self.target}).encode()})
         with self.assertRaises(downloader.DownloadError):
-            self.execute()
-        self.identity_zip = original
-        bad = dict(self.candidate, digest='sha256:' + '0' * 64)
+            self.execute(payload=self.outer)
+
+    def test_binds_matching_attempt_among_reruns_and_rejects_no_match(self):
+        outer1, cand1, id1, zip1 = self.pair('1', 22)
+        outer2, cand2, id2, zip2 = self.pair('2', 25)
+
+        def run(attempt):
+            responses = {
+                f'{downloader.API}/repos/o/r/actions/runs/{self.run_id}': json.dumps({
+                    'id': self.run_id, 'run_attempt': '2', 'head_sha': self.source,
+                    'repository': {'full_name': 'o/r'}}).encode(),
+                f'{downloader.API}/repos/o/r/actions/runs/{self.run_id}/artifacts?per_page=100':
+                    json.dumps({'artifacts': [id1, id2, cand1, cand2]}).encode(),
+                f'{downloader.API}/repos/o/r/actions/artifacts/{id1["id"]}/zip': zip1,
+                f'{downloader.API}/repos/o/r/actions/artifacts/{id2["id"]}/zip': zip2,
+                f'{downloader.API}/repos/o/r/actions/artifacts/22': json.dumps(cand1).encode(),
+                f'{downloader.API}/repos/o/r/actions/artifacts/22/zip': outer1,
+                f'{downloader.API}/repos/o/r/actions/artifacts/25': json.dumps(cand2).encode(),
+                f'{downloader.API}/repos/o/r/actions/artifacts/25/zip': outer2,
+            }
+            def fake_request(url, token, **_):
+                if url not in responses:
+                    raise AssertionError(url)
+                return Response(responses[url])
+            with tempfile.TemporaryDirectory() as temp, patch.object(downloader, 'request', fake_request):
+                return downloader.fetch_candidate('o/r', self.run_id, attempt, self.source,
+                    self.target, self.name, Path(temp) / 'out', 'secret', opener=downloader.request)
+
+        self.assertEqual(run('2')['artifact_id'], '25')
+        self.assertEqual(run('1')['artifact_id'], '22')
         with self.assertRaises(downloader.DownloadError):
-            self.execute(candidate=bad)
+            run('3')
 
     def test_rejects_run_source_and_target_binding_mismatches(self):
-        for field, value in (('run_attempt', '1'), ('run_id', '999'),
+        for field, value in (('run_id', '999'),
                              ('target', 'aarch64-apple-darwin')):
             identity = {'artifact_id': '22', 'artifact_digest': self.candidate['digest'],
                         'run_id': self.run_id, 'run_attempt': self.attempt,

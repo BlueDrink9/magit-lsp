@@ -54,24 +54,46 @@ def fetch_candidate(repository, run_id, attempt, source_sha, original_ref, event
         raise DownloadError('invalid repository or missing run binding')
     base = f'{transport.API}/repos/{owner}/{repo}/actions/runs/{run_id}'
     run = transport.json_get(base, token)
-    if (str(run.get('id')) != str(run_id) or str(run.get('run_attempt')) != str(attempt)
+    if (str(run.get('id')) != str(run_id)
             or run.get('head_sha') != source_sha
             or run.get('repository', {}).get('full_name', repository).lower() != repository.lower()):
-        raise DownloadError('requested run/repository/attempt/source binding mismatch')
+        raise DownloadError('requested run/repository/source binding mismatch')
+    if str(run.get('run_attempt')) != str(attempt):
+        print(f'VSIX candidate download: run attempt {run.get("run_attempt")!r} differs from '
+              f'requested attempt {attempt!r}; binding by artifact identity', file=sys.stderr)
     listing = transport.json_get(base + '/artifacts?per_page=100', token).get('artifacts', [])
     identity_items = [item for item in listing if item.get('name') == IDENTITY_ARTIFACT and not item.get('expired')]
     candidates = [item for item in listing if item.get('name') == ARTIFACT and not item.get('expired')]
-    if len(identity_items) != 1 or len(candidates) != 1:
-        raise DownloadError('missing or duplicate VSIX identity/candidate')
-    identity_artifact, candidate = identity_items[0], candidates[0]
-    if str(candidate.get('workflow_run', {}).get('id', run_id)) != str(run_id):
-        raise DownloadError('candidate belongs to another run')
-    with opener(f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/{identity_artifact["id"]}/zip', token) as response:
-        identity_files = transport.exact_zip(response.read(), ['vsix-upload-identity.json'])
-    identity = json.loads(identity_files['vsix-upload-identity.json'])
-    if identity != {'artifact_id': str(candidate['id']), 'artifact_digest': candidate.get('digest'),
-                    'run_id': str(run_id), 'run_attempt': str(attempt)}:
-        raise DownloadError('upload identity does not bind candidate/run/attempt')
+    if not identity_items or not candidates:
+        raise DownloadError('missing VSIX identity/candidate')
+    if (len({str(item.get('id')) for item in identity_items}) != len(identity_items)
+            or len({str(item.get('id')) for item in candidates}) != len(candidates)):
+        raise DownloadError('duplicate VSIX identity/candidate')
+    # An identity records the attempt that produced its candidate; a partial
+    # re-run leaves that attempt lower than the consumer's requested attempt.
+    pairs = []
+    for identity_artifact in identity_items:
+        with opener(f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/{identity_artifact["id"]}/zip', token) as response:
+            identity_files = transport.exact_zip(response.read(), ['vsix-upload-identity.json'])
+        identity = json.loads(identity_files['vsix-upload-identity.json'])
+        matches = [item for item in candidates if str(item.get('id')) == str(identity.get('artifact_id'))]
+        if not matches:
+            continue
+        candidate = matches[0]
+        if identity != {'artifact_id': str(candidate['id']), 'artifact_digest': candidate.get('digest'),
+                        'run_id': str(run_id), 'run_attempt': str(identity.get('run_attempt'))}:
+            raise DownloadError('upload identity does not bind candidate/run')
+        if str(candidate.get('workflow_run', {}).get('id', run_id)) != str(run_id):
+            raise DownloadError('candidate belongs to another run')
+        pairs.append((candidate, identity))
+    matching = [pair for pair in pairs if str(pair[1].get('run_attempt')) == str(attempt)]
+    if len(pairs) == 1:
+        candidate, identity = pairs[0]
+    elif len(matching) == 1:
+        candidate, identity = matching[0]
+    else:
+        raise DownloadError('no unique VSIX identity/candidate pair for the requested attempt')
+    producing_attempt = str(identity['run_attempt'])
     metadata = transport.json_get(f'{transport.API}/repos/{owner}/{repo}/actions/artifacts/{candidate["id"]}', token)
     if (str(metadata.get('id')) != str(candidate['id']) or metadata.get('digest') != candidate.get('digest')
             or metadata.get('expired') or metadata.get('name') != ARTIFACT):
@@ -87,7 +109,7 @@ def fetch_candidate(repository, run_id, attempt, source_sha, original_ref, event
         expected_locks = expected_locks if expected_locks is not None else {
             name: hashlib.sha256((Path(checkout) / name).read_bytes()).hexdigest() for name in LOCKS}
         expected = {'source_sha': source_sha, 'original_ref': original_ref, 'event': event,
-                    'run_id': str(run_id), 'run_attempt': str(attempt), 'version': str(version),
+                    'run_id': str(run_id), 'run_attempt': producing_attempt, 'version': str(version),
                     'lock_hashes': expected_locks, 'pnpm_version': PNPM_VERSION}
         if any(manifest.get(key) != value for key, value in expected.items()):
             raise DownloadError('VSIX manifest provenance does not match requested checkout/run')
@@ -104,7 +126,7 @@ def fetch_candidate(repository, run_id, attempt, source_sha, original_ref, event
             os.replace(staged / vsix_path.name, vsix_path)
             os.replace(staged / manifest_path.name, manifest_path)
         handoff = {'artifact_id': str(candidate['id']), 'artifact_digest': candidate['digest'],
-                   'run_id': str(run_id), 'run_attempt': str(attempt), 'source_sha': source_sha,
+                   'run_id': str(run_id), 'run_attempt': producing_attempt, 'source_sha': source_sha,
                    'vsix': str(vsix_path), 'manifest': str(manifest_path),
                    'vsix_sha256': transport.digest(vsix)}
         (destination / 'vsix-candidate.json').write_text(json.dumps(handoff, sort_keys=True) + '\n')
