@@ -376,6 +376,7 @@ fn unicode_fixture() -> (RepoFixture, magit_lsp::git::GitRepo) {
 
 #[test]
 fn capabilities_advertise_the_legend_and_full_tokens() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
     let initialize = server.initialize(json!({}));
     let provider = &initialize["result"]["capabilities"]["semanticTokensProvider"];
@@ -417,6 +418,7 @@ fn capabilities_advertise_the_legend_and_full_tokens() {
 
 #[test]
 fn semantic_tokens_decode_back_to_the_tree_tokens() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, repo) = unicode_fixture();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
     let initialize = server.initialize(json!({}));
@@ -551,6 +553,7 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
 
 #[test]
 fn an_unknown_uri_returns_no_tokens() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
     server.initialize(json!({}));
     server.send(json!({

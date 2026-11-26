@@ -3,6 +3,7 @@ use super::*;
 
 #[test]
 fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (first, _) = init_repo();
     let (second, _) = init_repo();
     std::fs::create_dir(first.path().join("subdir")).unwrap();
@@ -110,6 +111,7 @@ fn assert_stage_binding(notice: &Value, expected: &str) {
 /// User-close requests must remove nested views from routing and parent order.
 #[test]
 fn nested_user_close_and_reopen_does_not_retain_views_or_parents() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = init_repo();
     let (other_tmp, _other_repo) = init_repo();
     let mut server = TestServer::spawn(&[]);
@@ -217,6 +219,7 @@ fn process_exists(pid: u32) -> bool {
 
 #[test]
 fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = init_repo();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
@@ -756,6 +759,7 @@ fn mutations_for_one_repository_apply_in_request_order() {
 
 #[test]
 fn shutdown_then_exit_terminates_zero_without_an_orphan() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     let response = server.initialize(json!({}));
     assert_eq!(
@@ -773,6 +777,7 @@ fn shutdown_then_exit_terminates_zero_without_an_orphan() {
 
 #[test]
 fn exit_without_shutdown_terminates_with_code_one() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     let response = server.initialize(json!({}));
     assert_eq!(
@@ -788,6 +793,7 @@ fn exit_without_shutdown_terminates_with_code_one() {
 
 #[test]
 fn unknown_requests_reply_method_not_found() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     let response = server.initialize(json!({}));
     assert_eq!(
@@ -812,6 +818,7 @@ fn unknown_requests_reply_method_not_found() {
 
 #[test]
 fn view_open_then_invoke_stage_round_trips_over_stdio() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -909,6 +916,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
 
 #[test]
 fn view_resize_notification_reflows_an_acked_menu_incrementally() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1028,6 +1036,7 @@ pub(super) fn keymap_keys(notification: &Value, command: &str) -> Option<Vec<Str
 
 #[test]
 fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1080,6 +1089,7 @@ fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
 
 #[test]
 fn server_rejects_unsupported_presentation_modes() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (field, value) in [
         ("keys", "forwardAll"),
         ("render", "full"),
@@ -1111,6 +1121,7 @@ fn server_rejects_unsupported_presentation_modes() {
 
 #[test]
 fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1212,6 +1223,7 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
 
 #[test]
 fn a_menu_option_prompt_round_trips_over_stdio() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1391,6 +1403,7 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
 /// A Plain client gets the prompt as a document view, never over `view/prompt`.
 #[test]
 fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1507,6 +1520,7 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
 
 #[test]
 fn a_config_reload_repushes_the_view_keymap() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1567,6 +1581,7 @@ fn a_config_reload_repushes_the_view_keymap() {
 
 #[test]
 fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
+    magit_lsp_test_support::cargo_server_binary!();
     for mode in ["cancel", "changed", "closed"] {
         let (tmp, _repo) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
@@ -1654,6 +1669,7 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
 
 #[test]
 fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
+    magit_lsp_test_support::cargo_server_binary!();
     for mode in ["disconnect", "shutdown", "exit"] {
         let (tmp, _) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
@@ -1689,6 +1705,7 @@ fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
 
 #[test]
 fn a12_selection_stage_reports_index_lock_as_successful_error_effect() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1781,6 +1798,7 @@ fn first_hunk_range(server: &mut TestServer, uri: &str) -> (u64, u64) {
 }
 
 fn spawn_with_env(env: &[(String, String)]) -> TestServer {
+    magit_lsp_test_support::cargo_server_binary!();
     let refs: Vec<(&str, &str)> = env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
@@ -1790,6 +1808,7 @@ fn spawn_with_env(env: &[(String, String)]) -> TestServer {
 
 #[test]
 fn a_mutation_reports_work_done_progress() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1870,6 +1889,7 @@ fn a_mutation_reports_work_done_progress() {
 #[cfg(unix)]
 #[test]
 fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
 
     for cancel in [false, true] {
@@ -2116,6 +2136,7 @@ fn install_failing_pre_commit_hook(repo: &RepoFixture) {
 #[cfg(unix)]
 #[test]
 fn a_failed_commit_ends_its_progress_with_an_error() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .staged_file("f.txt", standard_changes())
@@ -2331,6 +2352,7 @@ fn a_cancel_notification_aborts_a_slow_mutation() {
 #[cfg(target_os = "linux")]
 #[test]
 fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
 
     let (tmp, _) = RepoFixture::new()

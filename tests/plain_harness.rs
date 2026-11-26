@@ -259,6 +259,7 @@ fn plain_key_edit_shape_profiles_replay_order_versions_and_test_only_classificat
 
 #[test]
 fn queued_prompt_routing_uses_unique_correlated_request_ids() {
+    magit_lsp_test_support::cargo_server_binary!();
     let prompt_module = editor_model::Module {
         declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#),
         behaves: &[],
@@ -409,6 +410,7 @@ fn rich_stale_render_isolation() {
 
 #[test]
 fn minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate() {
+    magit_lsp_test_support::cargo_server_binary!();
     let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
     assert_eq!(
         plain.capabilities(),
@@ -722,6 +724,7 @@ fn strict_feature_guard_distinguishes_declarations_from_editor_behavior() {
 
 #[test]
 fn rich_server_render_ack_and_stale_resync_preserve_caller_reply() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
         .build();
@@ -968,6 +971,7 @@ fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
 
 #[test]
 fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, caps());
     let uri = "file:///tmp/plain-harness.txt";
     let frame = client.editor.open(uri, "hello\n");
@@ -997,6 +1001,7 @@ fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
 
 #[test]
 fn plain_did_open_apply_edit_is_pumped_and_echoed() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", fixtures::TEN_LINES)])
         .modify_standard()
@@ -1442,6 +1447,7 @@ fn many_decomposed_ranges_replay_sequentially_in_one_notification() {
 
 #[test]
 fn debounce_releases_no_echo_until_flush_on_actual_transport() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut client = ClientPump::new(
         stdio::TestServer::spawn(&[]),
         Profile::DebouncedDidChange,
@@ -1474,6 +1480,7 @@ fn debounce_releases_no_echo_until_flush_on_actual_transport() {
 
 #[test]
 fn shared_dispatch_captures_real_send_order_for_echo_profiles() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (profile, expected) in [
         (Profile::Standard, ["textDocument/didChange", "response"]),
         (Profile::ReorderEcho, ["response", "textDocument/didChange"]),
@@ -1517,6 +1524,7 @@ fn shared_dispatch_captures_real_send_order_for_echo_profiles() {
 #[cfg(unix)]
 #[test]
 fn live_binary_progress_requests_are_serviced_while_command_runs() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("init", [("f.txt", fixtures::TEN_LINES)])
         .modify_standard()
@@ -1674,6 +1682,7 @@ fn is_manual_commit_instructions(message: &Value, uri: &str) -> bool {
 }
 
 fn plain_gate_open(repo: &fixtures::RepoFixture, env: &[(&str, &str)]) -> (ClientPump, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
         .as_str()
@@ -1852,6 +1861,7 @@ fn plain_gate_background_refresh_preserves_todo_offer_without_rich_notifications
 
 #[test]
 fn plain_selection_navigation_waits_for_success_and_ignores_invalid_edits() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (menu, key) in [("open.commit", "f"), ("open.rebase", "i")] {
         for outcome in ["success", "unsupported", "rejected", "superseded"] {
             let (repo, _) = fixtures::RepoFixture::new()
@@ -2228,6 +2238,7 @@ fn plain_gate_rebase_conflict_is_readable_and_abort_restores_exact_state() {
 #[cfg(unix)]
 #[test]
 fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft() {
+    magit_lsp_test_support::cargo_server_binary!();
     let original = fixtures::TEN_LINES;
     let changed = original
         .replace("line1\n", "first-change\n")
@@ -2400,6 +2411,7 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
 #[cfg(unix)]
 #[test]
 fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (case, declared, profile, succeeds) in [
         ("absent support", false, Profile::Standard, None),
         ("declared success", true, Profile::Standard, Some(true)),
@@ -2853,6 +2865,7 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
 #[cfg(unix)]
 #[test]
 fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()

@@ -32,6 +32,7 @@ fn setup_with_encoding(
     String,
     Vec<String>,
 ) {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit(
             "initial",
@@ -86,6 +87,7 @@ fn setup_large(
     String,
     String,
 ) {
+    magit_lsp_test_support::cargo_server_binary!();
     let content = fixtures::lines(600).to_string();
     let changed = content
         .lines()

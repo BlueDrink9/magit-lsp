@@ -67,6 +67,7 @@ fn state(repo: &fixtures::RepoFixture) -> (String, String, String) {
 
 #[test]
 fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\ntwo\n")])
         .commit("second", [("f.txt", "one\ntwo\nthree\n")])
@@ -164,6 +165,7 @@ fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
 
 #[test]
 fn plain_menu_switches_use_retained_targets_and_restore_caller() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\ntwo\n")])
         .commit("second", [("f.txt", "one\ntwo\nthree\n")])

@@ -137,6 +137,7 @@ fn registry_has_four_complete_entries_and_no_universal_safety_quirk() {
 }
 
 fn real_initialize(client: Value, capabilities: Value, config: Value) -> (TestServer, Value) {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     let mut request = common::stdio::initialize_message();
     request["params"]["clientInfo"] = client;
@@ -197,6 +198,7 @@ fn real_server_reports_effective_plain_resolution_and_overrides() {
 
 #[test]
 fn real_server_accepts_valid_rich_and_recovers_invalid_config() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut rich = common::stdio::initialize_message();
     rich["params"]["capabilities"] = json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full","layout":["main"],"effects":[],"prompts":[]
@@ -234,6 +236,7 @@ fn real_server_accepts_valid_rich_and_recovers_invalid_config() {
 
 #[test]
 fn real_server_rejects_invalid_rich_schema() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut request = common::stdio::initialize_message();
     request["params"]["capabilities"] = json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full","layout":["main"],

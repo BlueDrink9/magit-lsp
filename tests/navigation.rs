@@ -575,6 +575,7 @@ fn document_links_point_paths_at_worktree_files() {
 
 #[test]
 fn positional_lsp_requests_use_only_the_acknowledged_render() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();

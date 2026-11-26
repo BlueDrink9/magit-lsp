@@ -269,6 +269,7 @@ fn copy_value_preserves_source_markers_whitespace_and_excludes_metadata() {
 
 #[test]
 fn positional_requests_return_null_in_text_mode() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -474,6 +475,7 @@ fn positional_requests_return_null_in_text_mode() {
 
 #[test]
 fn static_clients_receive_mode_metadata_without_dynamic_keymaps() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()

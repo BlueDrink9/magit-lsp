@@ -15,6 +15,7 @@ pub(super) fn invoke_rich(server: &mut TestServer, id: i64, view: &str, command:
 
 #[test]
 fn rich_acknowledged_edits_reflow_real_menu() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -62,6 +63,7 @@ fn rich_acknowledged_edits_reflow_real_menu() {
 
 #[test]
 fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -213,6 +215,7 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
 
 #[test]
 fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_actions() {
+    magit_lsp_test_support::cargo_server_binary!();
     for modifiers in ["basic", "full"] {
         let (tmp, _) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
@@ -349,6 +352,7 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
 
 #[test]
 fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_effects() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
@@ -450,6 +454,7 @@ fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_ef
 
 #[test]
 fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -595,6 +600,7 @@ fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
 
 #[test]
 fn rich_missing_confirm_opens_a_document_prompt_without_mutation() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
@@ -642,6 +648,7 @@ fn rich_missing_confirm_opens_a_document_prompt_without_mutation() {
 
 #[test]
 fn rich_confirm_row_enter_answers_without_mutation() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
@@ -721,6 +728,7 @@ fn rich_confirm_row_enter_answers_without_mutation() {
 
 #[test]
 fn rich_text_prompt_submit_row_answers_with_the_reconciled_field() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -831,6 +839,7 @@ fn rich_text_prompt_submit_row_answers_with_the_reconciled_field() {
 
 #[test]
 fn rich_full_caps_delivers_clipboard_and_visit_file() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
@@ -868,6 +877,7 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
 
 #[test]
 fn rich_main_only_nested_push_pop_preserves_caller_and_full_caps_keep_placement() {
+    magit_lsp_test_support::cargo_server_binary!();
     for full in [false, true] {
         let (tmp, _) = RepoFixture::new()
             .commit("init", [("f.txt", "initial\n")])
@@ -921,6 +931,7 @@ fn rich_main_only_nested_push_pop_preserves_caller_and_full_caps_keep_placement(
 
 #[test]
 fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_input() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .staged_file("f.txt", "staged\n")

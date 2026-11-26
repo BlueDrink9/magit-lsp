@@ -22,6 +22,7 @@ fn fixture_path_is_canonical_below_a_symlinked_parent() {
 
 #[test]
 fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
+    magit_lsp_test_support::cargo_server_binary!();
     use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
     use magit_lsp::protocol::{DraftFinishReason, Effect};
     use std::sync::{mpsc, Arc};
@@ -114,6 +115,7 @@ fn assert_real_scoped_squash_edits_and_cancel(
     socket: &'static Path,
     effects_rx: &std::sync::mpsc::Receiver<Vec<magit_lsp::protocol::Effect>>,
 ) {
+    magit_lsp_test_support::cargo_server_binary!();
     use magit_lsp::editor::registry;
     use magit_lsp::instant_rebase::{
         InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome,
@@ -286,6 +288,7 @@ fn assert_scoped_helper_denials_and_cleanup(
     socket: &Path,
     effects_rx: &std::sync::mpsc::Receiver<Vec<magit_lsp::protocol::Effect>>,
 ) {
+    magit_lsp_test_support::cargo_server_binary!();
     use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
     use magit_lsp::protocol::{DraftFinishReason, Effect};
 
@@ -453,6 +456,7 @@ fn assert_scoped_helper_denials_and_cleanup(
 
 #[test]
 fn a_cancel_creates_no_commit() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = staged_repo();
     let before = tmp.git(&["status", "--porcelain"]);
     let repo = json!(tmp.path().to_string_lossy());
@@ -544,6 +548,7 @@ fn status_progress_token(server: &TestServer) -> Option<String> {
 #[cfg(target_os = "linux")]
 #[test]
 fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
+    magit_lsp_test_support::cargo_server_binary!();
     for work_done_progress in [None, Some(false), Some(true)] {
         let mut capabilities = rich_capabilities();
         match work_done_progress {
@@ -659,6 +664,7 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
 #[cfg(target_os = "linux")]
 #[test]
 fn r_edit_2_progress_cancel_during_editor_releases_once() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let staged = tmp.git(&["ls-files", "--stage", "-z"]);
@@ -741,6 +747,7 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
 #[cfg(target_os = "linux")]
 #[test]
 fn r_edit_2_progress_cancel_during_commit_msg_hook() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let staged = tmp.git(&["ls-files", "--stage", "-z"]);
@@ -980,6 +987,7 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
 #[cfg(target_os = "linux")]
 #[test]
 fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
 
     for finalizing in [true, false] {
@@ -1268,6 +1276,7 @@ fn wait_for_edit_processes(edit_id: &str, socket: &Path) -> OwnedEdit {
 /// cleanup could fake a pass.
 #[test]
 fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = staged_repo();
     let before = tmp.git(&["status", "--porcelain"]);
     let before_head = tmp.git(&["rev-parse", "HEAD"]);
@@ -1354,6 +1363,7 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
 
 /// The bridge socket path, from a server log file at `path`.
 fn socket_path_in_log(path: &Path) -> PathBuf {
+    magit_lsp_test_support::cargo_server_binary!();
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Ok(log) = std::fs::read_to_string(path) {
@@ -1438,6 +1448,7 @@ pub(super) fn assert_log_kept_the_answer(sink: &str, log: &str, answer: &str) {
 /// environment, so the helper finds the bridge the same way Git would.
 #[test]
 fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     let response = server.initialize_rich(json!({}));
@@ -1458,6 +1469,7 @@ fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
 /// The server's trace log on stderr must never receive the askpass answer.
 #[test]
 fn the_askpass_answer_is_never_logged_to_stderr() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     let response = server.initialize_rich(json!({}));
@@ -1484,6 +1496,7 @@ fn the_askpass_answer_is_never_logged_to_stderr() {
 /// end to end instead of relying on stderr.
 #[test]
 fn the_askpass_answer_is_never_logged_to_a_log_file() {
+    magit_lsp_test_support::cargo_server_binary!();
     let dir = TempDir::new().expect("temp dir for the log");
     let log_path = dir.path().join("magit-lsp.log");
     let log_path_arg = log_path.to_string_lossy().into_owned();
@@ -1513,6 +1526,7 @@ fn the_askpass_answer_is_never_logged_to_a_log_file() {
 
 #[test]
 fn a_cancelled_askpass_prompt_makes_the_helper_fail() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     let response = server.initialize_rich(json!({}));

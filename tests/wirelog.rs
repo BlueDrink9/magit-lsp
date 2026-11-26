@@ -6,6 +6,7 @@ use magit_lsp_test_support::stdio;
 
 #[test]
 fn records_actual_server_transport_and_drains_at_shutdown() {
+    magit_lsp_test_support::cargo_server_binary!();
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("wire.jsonl");
     let path_text = path.to_string_lossy().into_owned();
@@ -23,6 +24,7 @@ fn records_actual_server_transport_and_drains_at_shutdown() {
 
 #[test]
 fn actual_server_without_wirelog_keeps_stdout_clean_and_creates_no_log() {
+    magit_lsp_test_support::cargo_server_binary!();
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("wire.jsonl");
     let mut server = stdio::TestServer::spawn(&[]);
@@ -35,6 +37,7 @@ fn actual_server_without_wirelog_keeps_stdout_clean_and_creates_no_log() {
 
 #[test]
 fn concurrent_servers_append_complete_rows_without_truncating() {
+    magit_lsp_test_support::cargo_server_binary!();
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("shared.jsonl");
     let path_text = path.to_string_lossy().into_owned();
@@ -143,6 +146,7 @@ fn recorder_restart_preserves_existing_rows() {
 
 #[test]
 fn unavailable_output_warns_but_server_still_speaks_valid_lsp() {
+    magit_lsp_test_support::cargo_server_binary!();
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("missing").join("wire.jsonl");
     let path_text = path.to_string_lossy().into_owned();

@@ -5,6 +5,7 @@ use super::*;
 
 #[test]
 fn head_operations_real_git_tree_message_date_and_saved_close() {
+    magit_lsp_test_support::cargo_server_binary!();
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
         for state in [
             "staged",
@@ -237,6 +238,7 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
 #[cfg(target_os = "linux")]
 #[test]
 fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
 
     fn start_time(pid: i32) -> Option<u64> {
@@ -334,6 +336,7 @@ fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
 
 #[test]
 fn bridge_directory_is_private_with_permissive_umask() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
     let tmp = TempDir::new().expect("private temp root");
     let root = tmp.path().to_string_lossy().into_owned();
@@ -361,6 +364,7 @@ fn bridge_directory_is_private_with_permissive_umask() {
 }
 #[test]
 fn bridge_refuses_preexisting_directory_and_symlink() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt};
     use std::os::unix::net::UnixListener;
 
@@ -424,6 +428,7 @@ fn bridge_refuses_preexisting_directory_and_symlink() {
 
 #[test]
 fn real_git_saved_file_empty_and_template_semantics() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (name, saved, template, expected) in [
         ("empty", Some(""), false, None),
         ("comments", Some("# Only a comment\n# Another comment\n"), false, None),
@@ -499,6 +504,7 @@ fn real_git_saved_file_empty_and_template_semantics() {
 
 #[test]
 fn a_commit_is_created_from_the_typed_message() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = staged_repo();
     assert!(
         hunk_count(&cached_diff(tmp.path())) >= 1,
@@ -549,6 +555,7 @@ fn a_commit_is_created_from_the_typed_message() {
 #[cfg(unix)]
 #[test]
 fn a_failed_status_acquisition_does_not_wedge_the_next_commit() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = staged_repo();
     let gate = fake_git::GatedGit::arm("status");
     let gate_env = gate.child_env();
@@ -615,6 +622,7 @@ fn a_failed_status_acquisition_does_not_wedge_the_next_commit() {
 #[cfg(unix)]
 #[test]
 fn typed_commit_options_reach_real_git_through_the_editor_worker() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
     let (tmp, _) = staged_repo();
     write(&tmp.path().join("f.txt"), "typed all content\n");
@@ -670,6 +678,7 @@ fn typed_commit_options_reach_real_git_through_the_editor_worker() {
 
 #[test]
 fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
@@ -786,6 +795,7 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
 
 #[test]
 fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (encoding, lambda_end, astral_end) in [("utf-8", 3, 5), ("utf-16", 2, 3), ("utf-32", 2, 2)]
     {
         let (tmp, _) = staged_repo();
@@ -979,6 +989,7 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
 #[cfg(unix)]
 #[test]
 fn real_file_stdio_failed_write_retains_helper_and_selected_checkpoint() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::symlink;
     let (tmp, _) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
@@ -1011,6 +1022,7 @@ fn real_file_stdio_failed_write_retains_helper_and_selected_checkpoint() {
 #[cfg(unix)]
 #[test]
 fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
@@ -1064,6 +1076,7 @@ fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
 #[cfg(unix)]
 #[test]
 fn real_file_stdio_normal_close_selects_initial_template_without_save() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
     let (tmp, _) = staged_repo();
     let hook = tmp.path().join(".git/hooks/prepare-commit-msg");
@@ -1098,6 +1111,7 @@ fn real_file_stdio_normal_close_selects_initial_template_without_save() {
 
 #[test]
 fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (first, _) = staged_repo();
     let (second, _) = staged_repo();
     let first_head = first.git(&["rev-parse", "HEAD"]);
@@ -1156,6 +1170,7 @@ fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
 
 #[test]
 fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = staged_repo();
     let mut server = TestServer::spawn(&[]);
     server.initialize(rich_capabilities());
@@ -1229,6 +1244,7 @@ fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
 #[cfg(unix)]
 #[test]
 fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (main, _) = staged_repo();
     let main_head = main.git(&["rev-parse", "HEAD"]);
     let main_message = read(&main.path().join(".git/COMMIT_EDITMSG"));
@@ -1272,6 +1288,7 @@ fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
 #[cfg(unix)]
 #[test]
 fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::{fs::PermissionsExt, net::UnixStream};
     let (tmp, _) = staged_repo();

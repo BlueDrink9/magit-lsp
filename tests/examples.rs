@@ -2034,6 +2034,7 @@ fn replay_example_env(
     regenerate: bool,
     extra_env: &[(&str, &str)],
 ) -> Result<Vec<String>, String> {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
@@ -3651,6 +3652,7 @@ fn plain_capabilities() -> Value {
 fn open_plain_status(
     repo: &fixtures::RepoFixture,
 ) -> (fixtures::stdio::TestServer, FakeEditor, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let status_uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native status path has a file URI")
         .as_str()

@@ -98,6 +98,7 @@ fn ranged_and_rangeless_changes_reject_atomically_and_track_lifecycle() {
 
 #[test]
 fn stdio_advertises_incremental_sync_and_accepts_document_lifecycle() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = common::RepoFixture::new()
         .commit("initial", [("f.txt", common::TEN_LINES)])
         .modify_standard()
@@ -162,6 +163,7 @@ fn stdio_advertises_incremental_sync_and_accepts_document_lifecycle() {
 
 #[test]
 fn stdio_defaults_to_utf16_when_no_supported_encoding_is_offered() {
+    magit_lsp_test_support::cargo_server_binary!();
     for capabilities in [
         json!({}),
         json!({"general":{"positionEncodings":["unknown"]}}),

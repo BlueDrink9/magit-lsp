@@ -268,6 +268,7 @@ fn index_lock_failure_returns_a_message_effect_and_status() {
 
 #[test]
 fn not_a_repository_returns_a_message_effect() {
+    magit_lsp_test_support::cargo_server_binary!();
     let tmp = TempDir::new().expect("tempdir");
     let mut server = common::stdio::TestServer::spawn(&[]);
     server.initialize(serde_json::json!({}));

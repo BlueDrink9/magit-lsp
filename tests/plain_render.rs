@@ -176,6 +176,7 @@ fn plain_server(
     versioned: bool,
     extra_env: &[(&str, &str)],
 ) -> stdio::TestServer {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = stdio::TestServer::spawn(extra_env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":apply,"workspaceEdit":{"documentChanges":versioned},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
@@ -192,6 +193,7 @@ fn workaround_server(
     overrides: Value,
     extra_env: &[(&str, &str)],
 ) -> stdio::TestServer {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = stdio::TestServer::spawn(extra_env);
     let mut init = stdio::initialize_message();
     init["params"]["clientInfo"] = client;
@@ -911,6 +913,7 @@ fn delayed_exact_echo_clears_intermediate_format_drift_diagnosis() {
 
 #[test]
 fn actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::time::{Duration, Instant};
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", fixtures::TEN_LINES)])
@@ -1014,6 +1017,7 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
 
 #[test]
 fn timeout_panic_names_awaited_step_wait_and_received_frames() {
+    magit_lsp_test_support::cargo_server_binary!();
     let mut server = stdio::TestServer::spawn(&[]);
     server.send(stdio::initialize_message());
     assert!(server.response_with_id(1)["result"].is_object());
@@ -1043,6 +1047,7 @@ fn timeout_panic_names_awaited_step_wait_and_received_frames() {
 
 #[test]
 fn silent_stale_success_without_echo_recovers_after_watcher_render() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", fixtures::TEN_LINES)])
         .build();

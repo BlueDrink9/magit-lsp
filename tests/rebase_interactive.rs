@@ -13,6 +13,7 @@ use tempfile::TempDir;
 
 #[test]
 fn sequence_editor_helper_copies_exact_bytes_for_paths_with_quotes() {
+    magit_lsp_test_support::cargo_server_binary!();
     let dir = TempDir::new().unwrap();
     let source = dir.path().join("plan ' source");
     let destination = dir.path().join("todo ' destination");
@@ -52,6 +53,7 @@ fn an_invalid_explicit_helper_selection_fails_without_a_cargo_fallback() {
 
 #[test]
 fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
+    magit_lsp_test_support::cargo_server_binary!();
     let dir = TempDir::new().unwrap();
     let destination = dir.path().join("todo");
     std::fs::write(&destination, b"unrelated").unwrap();
@@ -169,6 +171,7 @@ fn exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only() {
 
 #[test]
 fn prepared_message_actions_refuse_before_launch_without_mutation() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (dir, repo, base) = repo();
     let baseline = state(dir.path());
     for action in [TodoAction::Reword, TodoAction::Squash] {
@@ -221,6 +224,7 @@ fn prepared_plan_rejected_edits_preserve_complete_entries() {
 
 #[test]
 fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
+    magit_lsp_test_support::cargo_server_binary!();
     let dir = TempDir::new().unwrap();
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["config", "user.name", "Test"]);
@@ -266,6 +270,7 @@ fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
 
 #[test]
 fn prepared_plan_refuses_same_oid_branch_switch_and_detach() {
+    magit_lsp_test_support::cargo_server_binary!();
     for detach in [false, true] {
         let (dir, repo, base) = repo();
         let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
@@ -313,6 +318,7 @@ fn conflicting_plan() -> (TempDir, GitRepo, String, PreparedRebase) {
 
 #[test]
 fn edited_plan_conflict_survives_resolution_and_continue() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (dir, repo, _base, plan) = conflicting_plan();
     let error = plan.launch(&repo, server_binary().as_path()).unwrap_err();
     assert!(!error.to_string().trim().is_empty());
@@ -346,6 +352,7 @@ fn edited_plan_conflict_survives_resolution_and_continue() {
 
 #[test]
 fn edited_plan_conflict_abort_restores_original_repository() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (dir, repo, _, plan) = conflicting_plan();
     let before = state(dir.path());
     assert!(plan.launch(&repo, server_binary().as_path()).is_err());
@@ -357,6 +364,7 @@ fn edited_plan_conflict_abort_restores_original_repository() {
 
 #[test]
 fn intentional_edit_pause_abort_restores_original_repository() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (dir, repo, _, mut plan) = conflicting_plan();
     let entries = plan
         .entries()
@@ -628,6 +636,7 @@ fn initial_rebase_preparation_failure_keeps_caller_usable() {
 
 #[test]
 fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (dir, repo, base) = repo();
     assert!(PreparedRebase::prepare(&repo, "not-a-revision").is_err());
     let mut head_plan = PreparedRebase::prepare(&repo, &base).unwrap();

@@ -81,6 +81,7 @@ fn shutdown_and_exit(server: &mut Server, id: i64) {
 
 #[test]
 fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
     // A stale index lock makes the staging mutation fail without writing.
@@ -112,6 +113,7 @@ fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
 
 #[test]
 fn log_file_receives_logs_and_stdout_stays_clean() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
     write(&tmp.path().join(".git/index.lock"), "");

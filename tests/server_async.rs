@@ -74,6 +74,7 @@ fn status_open_held_git_acknowledged_completion_uses_exact_base() {
 #[cfg(unix)]
 #[test]
 fn status_open_progress_spans_deferred_acquisition() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -147,6 +148,7 @@ fn status_open_progress_spans_deferred_acquisition() {
 #[cfg(unix)]
 #[test]
 fn status_open_fast_background_fetch_expands_like_the_sync_render() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -205,6 +207,7 @@ fn status_open_fast_background_fetch_expands_like_the_sync_render() {
 /// (`auto`) still publishes the closed render first.
 #[test]
 fn status_open_config_open_streams_to_the_complete_buffer() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -294,6 +297,7 @@ fn status_open_config_open_streams_to_the_complete_buffer() {
 /// test, whose `@@` assertion can then never observe hunks.
 #[test]
 fn status_open_large_promise_observes_expanded_install() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -345,6 +349,7 @@ fn status_open_large_promise_observes_expanded_install() {
 #[cfg(unix)]
 #[test]
 fn status_open_refresh_inside_promise_rearms_background_fetch() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -416,6 +421,7 @@ fn status_open_refresh_inside_promise_rearms_background_fetch() {
 #[cfg(unix)]
 #[test]
 fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -536,6 +542,7 @@ fn render_and_response(
 #[cfg(unix)]
 #[test]
 fn status_open_slow_batch_streams_hunks_by_incremental_edit() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -624,6 +631,7 @@ fn status_open_slow_batch_streams_hunks_by_incremental_edit() {
 #[cfg(unix)]
 #[test]
 fn status_open_refresh_during_batch_rearms_rows_only_then_hunks() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -712,6 +720,7 @@ fn status_open_refresh_during_batch_rearms_rows_only_then_hunks() {
 #[cfg(unix)]
 #[test]
 fn status_open_user_collapse_during_batch_wins_over_the_install() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .staged_file("s.txt", "staged\n")
@@ -802,6 +811,7 @@ fn status_open_user_collapse_during_batch_wins_over_the_install() {
 #[cfg(unix)]
 #[test]
 fn status_open_progress_ends_when_view_closes_during_acquisition() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -878,6 +888,7 @@ fn status_open_progress_ends_when_view_closes_during_acquisition() {
 #[cfg(unix)]
 #[test]
 fn status_open_progress_end_does_not_wait_for_late_create_reply() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -974,6 +985,7 @@ fn status_open_progress_end_does_not_wait_for_late_create_reply() {
 #[cfg(unix)]
 #[test]
 fn commit_confirm_holds_the_publication_order_against_a_watcher_refresh() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt;
 
     let (tmp, _) = RepoFixture::new()
@@ -1113,6 +1125,7 @@ fn commit_confirm_holds_the_publication_order_against_a_watcher_refresh() {
 #[cfg(unix)]
 #[test]
 fn status_open_arms_watcher_after_open_response() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1238,6 +1251,7 @@ fn status_open_arms_watcher_after_open_response() {
 #[cfg(unix)]
 #[test]
 fn status_open_text_mode_defers_held_completion_until_exit() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1354,6 +1368,7 @@ fn status_open_text_mode_defers_held_completion_until_exit() {
 #[cfg(unix)]
 #[test]
 fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1485,6 +1500,7 @@ fn status_open_text_mode_exit_honors_refresh_after_held_completion() {
 #[cfg(unix)]
 #[test]
 fn status_open_close_drops_held_success_without_resurrection() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1541,6 +1557,7 @@ fn status_open_close_drops_held_success_without_resurrection() {
 #[cfg(unix)]
 #[test]
 fn status_open_close_drops_held_error_without_resurrection() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1597,6 +1614,7 @@ fn status_open_close_drops_held_error_without_resurrection() {
 #[cfg(unix)]
 #[test]
 fn status_open_refreshes_while_loading_are_coalesced() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1730,6 +1748,7 @@ fn status_open_refreshes_while_loading_are_coalesced() {
 #[cfg(unix)]
 #[test]
 fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -1838,6 +1857,7 @@ fn status_open_failure_is_terminal_and_loading_actions_are_safe() {
 
 #[cfg(unix)]
 fn status_open_held_git(acknowledge: bool) {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -1967,6 +1987,7 @@ fn status_open_held_git(acknowledge: bool) {
 
 #[test]
 fn opening_multirow_rebase_todo_batches_object_resolution_once() {
+    magit_lsp_test_support::cargo_server_binary!();
     for rows in [2, 5] {
         let mut fixture = RepoFixture::new().commit("root", [("f.txt", "0\n")]);
         for index in 1..=rows + 1 {
@@ -2023,6 +2044,7 @@ fn opening_multirow_rebase_todo_batches_object_resolution_once() {
 
 #[test]
 fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("base", [("base", "base\n")])
         .commit("one", [("one", "1\n")])
@@ -2154,6 +2176,7 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
 
 #[test]
 fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("root subject", [("root.txt", "root\n")])
         .commit("base subject", [("base.txt", "base\n")])
@@ -2273,6 +2296,7 @@ fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller(
 
 #[test]
 fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("root", [("file", "root\n")])
         .commit("selected target", [("file", "target\n")])
@@ -2466,6 +2490,7 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
 
 #[test]
 fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("root", [("file", "root\n")])
         .commit("selected target", [("file", "target\n")])
@@ -2706,6 +2731,7 @@ fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
 
 #[test]
 fn instant_squash_selection_edits_message_through_registered_server_callback() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("root subject", [("root.txt", "root\n")])
         .commit("base subject", [("base.txt", "base\n")])
@@ -2951,6 +2977,7 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
 
 #[test]
 fn instant_squash_registered_editor_abort_retains_marker_and_releases_worker() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("root subject", [("root.txt", "root\n")])
         .commit("base subject", [("base.txt", "base\n")])
@@ -3105,6 +3132,7 @@ fn instant_squash_registered_editor_abort_retains_marker_and_releases_worker() {
 
 #[test]
 fn prepared_rebase_message_actions_refuse_through_real_server_submit() {
+    magit_lsp_test_support::cargo_server_binary!();
     for (key, label) in [("r", "reword"), ("s", "squash")] {
         let (tmp, _) = RepoFixture::new()
             .commit("base", [("base", "base\n")])
@@ -3232,6 +3260,7 @@ fn prepared_rebase_message_actions_refuse_through_real_server_submit() {
 
 #[test]
 fn prepared_rebase_edit_pause_is_abortable_from_usable_caller() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("base", [("base", "base\n")])
         .commit("one", [("one", "1\n")])
@@ -3343,6 +3372,7 @@ fn prepared_rebase_edit_pause_is_abortable_from_usable_caller() {
 
 #[test]
 fn prepared_rebase_conflict_can_be_resolved_and_continued_from_caller() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("base", [("file", "base\n")])
         .commit("first", [("file", "first\n")])
@@ -3483,6 +3513,7 @@ fn prepared_rebase_conflict_can_be_resolved_and_continued_from_caller() {
 
 #[test]
 fn stale_prepared_rebase_submit_retains_editor_and_edits() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (tmp, _) = RepoFixture::new()
         .commit("base", [("base", "base\n")])
         .commit("one", [("one", "1\n")])
@@ -3811,6 +3842,7 @@ const SPAWN_MARKER_ENV: &str = "MAGIT_LSP_TEST_SPAWN_MARKER";
 #[cfg(unix)]
 #[test]
 fn every_spawn_variant_runs_the_supplied_server() {
+    magit_lsp_test_support::cargo_server_binary!();
     use std::os::unix::fs::PermissionsExt as _;
 
     if std::env::var_os(SPAWN_CHILD_ENV).is_none() {

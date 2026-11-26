@@ -81,6 +81,7 @@ fn resolves_none_workspace_document_nested_alias_and_linked_worktree_without_gue
 
 #[test]
 fn real_binary_accepts_workspace_file_uri_and_preserves_explicit_rich_open() {
+    magit_lsp_test_support::cargo_server_binary!();
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo é #%");
     repo(&root);

@@ -23,6 +23,7 @@ fn open_with_env(
     keys: bool,
     env: &[(String, String)],
 ) -> (stdio::TestServer, FakeEditor, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
         .as_str()

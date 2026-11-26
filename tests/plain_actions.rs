@@ -67,6 +67,7 @@ fn open_plain_with_capabilities_and_env(
     capabilities: Value,
     env: &[(&str, &str)],
 ) -> (stdio::TestServer, FakeEditor, String) {
+    magit_lsp_test_support::cargo_server_binary!();
     let uri = uri_from_path(&repo.path().join(".magit"))
         .expect("native path has a file URI")
         .as_str()
@@ -599,6 +600,7 @@ fn offered_for_range(
 
 #[test]
 fn titles_use_repository_style_configured_chord_and_structured_path() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
         .modify("f.txt", "changed\n")
@@ -671,6 +673,7 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
 
 #[test]
 fn selection_range_offers_exact_target_and_stages_only_selected_change() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\ntwo\nthree\n")])
         .build();
@@ -976,6 +979,7 @@ fn selection_survives_independent_fresh_hunk_shift() {
 
 #[test]
 fn cursor_actions_target_file_or_owning_hunk_once() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("a.txt", "before\nkeep\nafter\n")])
         .build();
@@ -1069,6 +1073,7 @@ fn cursor_actions_target_file_or_owning_hunk_once() {
 
 #[test]
 fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
+    magit_lsp_test_support::cargo_server_binary!();
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f-😀.txt", "one\ntwo\n")])
         .build();
