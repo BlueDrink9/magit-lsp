@@ -268,6 +268,9 @@ struct ProgressRun {
     edit_scope: Option<Arc<editor::EditScope>>,
     cancellation_requested: bool,
     repo: Option<String>,
+    // The begin is published, or (for a status open) claimed ahead of the
+    // create reply in the same store that marks the create in flight, so the
+    // reply cannot publish it twice.
     visible: bool,
     // A `window/workDoneProgress/create` reply is still awaited, so a racing
     // end defers to the confirmed create instead of dropping the token.
@@ -802,7 +805,7 @@ impl Shared {
         edit_id: Option<String>,
         repo: Option<&str>,
     ) -> (String, CancelHandle) {
-        self.begin_progress_with_scope(sender, command, edit_id, repo, None)
+        self.begin_progress_run(sender, command, edit_id, repo, None, false)
     }
 
     /// Announce progress whose cancellation also closes scoped editor admission.
@@ -813,6 +816,25 @@ impl Shared {
         edit_id: Option<String>,
         repo: Option<&str>,
         edit_scope: Option<Arc<editor::EditScope>>,
+    ) -> (String, CancelHandle) {
+        self.begin_progress_run(sender, command, edit_id, repo, edit_scope, false)
+    }
+
+    /// Insert a progress run and announce its create request.
+    ///
+    /// `claim_visible` is the status-open Creating transition: the run claims
+    /// its visible slot in the same store that marks the create in flight, so
+    /// a create reply can never publish a second begin for the begin the
+    /// caller publishes next. Every other run stays hidden until that reply
+    /// confirms the token.
+    fn begin_progress_run(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        command: &str,
+        edit_id: Option<String>,
+        repo: Option<&str>,
+        edit_scope: Option<Arc<editor::EditScope>>,
+        claim_visible: bool,
     ) -> (String, CancelHandle) {
         let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
         let token = format!("magit-lsp/mutation/{next}");
@@ -855,7 +877,7 @@ impl Shared {
             // the same ordered channel, any begin the caller publishes next;
             // a spawned announcer could race the caller and put the begin on
             // the wire first, where a client may drop it without its create.
-            if let Some((pending, rx)) = self.announce_progress_create(&token) {
+            if let Some((pending, rx)) = self.announce_progress_create(&token, claim_visible) {
                 let shared = self.clone();
                 let sender = sender.clone();
                 let token = token.clone();
@@ -877,8 +899,9 @@ impl Shared {
     /// arrive too late and let an early key hit the loading guard. The create
     /// request is announced first, in the caller's publication order, and
     /// this begin follows it on the same ordered channel, still ahead of the
-    /// render. The reply does not publish a second begin for an
-    /// already-visible token.
+    /// render. The run claims the visible slot when its create is announced,
+    /// in the same store, so a reply that resolves before this begin is
+    /// published still cannot duplicate it.
     fn begin_status_progress(
         &self,
         sender: &mpsc::UnboundedSender<Message>,
@@ -892,16 +915,8 @@ impl Shared {
         if !enabled {
             return None;
         }
-        let (token, _cancel) = self.begin_progress(sender, "status open", None, Some(repo));
-        {
-            let mut progress = self
-                .progress
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(run) = progress.get_mut(&token) {
-                run.visible = true;
-            }
-        }
+        let (token, _cancel) =
+            self.begin_progress_run(sender, "status open", None, Some(repo), None, true);
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({ "token": token, "value": {
@@ -966,7 +981,7 @@ impl Shared {
         token: &str,
         command: &str,
     ) {
-        let Some((pending, rx)) = self.announce_progress_create(token) else {
+        let Some((pending, rx)) = self.announce_progress_create(token, false) else {
             return;
         };
         self.await_progress_create(sender, token, command, pending, rx)
@@ -977,17 +992,24 @@ impl Shared {
     /// publication order, ahead of any begin the caller publishes next.
     ///
     /// Marking the create in flight before announcing it keeps a racing end
-    /// deferring to the reply instead of removing the run unseen. Returns
-    /// `None`, after abandoning the pending create, when the run is gone or
-    /// the client request transport is closed.
+    /// deferring to the reply instead of removing the run unseen. A
+    /// `claim_visible` run (status open) enters the single Creating state in
+    /// that same store: it claims the visible slot so the reply cannot publish
+    /// a second begin for a begin the caller publishes next. Returns `None`,
+    /// after abandoning the pending create, when the run is gone or the client
+    /// request transport is closed.
     fn announce_progress_create(
         &self,
         token: &str,
+        claim_visible: bool,
     ) -> Option<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
         {
             let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             let run = runs.get_mut(token)?;
             run.create_pending = true;
+            if claim_visible {
+                run.visible = true;
+            }
         }
         match self.register_outbound(
             "window/workDoneProgress/create",
@@ -1059,13 +1081,17 @@ impl Shared {
     ///
     /// The pending marker is cleared, and a run whose owner already ended is
     /// removed: no reply will ever arrive to flush its pair, so the token
-    /// stays unobserved and cannot wedge progress waiting.
+    /// stays unobserved and cannot wedge progress waiting. A run claimed
+    /// visible at announcement is reset too: a failed create must not leave a
+    /// pre-visible token. Confirmed runs clear their pending marker before
+    /// becoming visible, so they never reach this path.
     fn abandon_pending_create(&self, token: &str) {
         let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
         let Some(run) = runs.get_mut(token) else {
             return;
         };
         run.create_pending = false;
+        run.visible = false;
         if run.ended {
             runs.remove(token);
             drop(runs);
@@ -2459,6 +2485,53 @@ mod commit_tests {
         assert!(shared.progress.lock().unwrap().is_empty());
         assert!(shared.outbound.lock().unwrap().is_empty());
         assert!(messages.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn status_progress_claims_visibility_before_create_reply_and_ends_once() {
+        let (shared, mut messages) = test_shared();
+        shared.client.lock().unwrap().work_done_progress = true;
+        let token = shared
+            .begin_status_progress(&shared.sender, "repo")
+            .expect("status progress token");
+        {
+            let progress = shared.progress.lock().unwrap();
+            let run = &progress[&token];
+            assert!(run.create_pending, "the create reply is still outstanding");
+            assert!(
+                run.visible,
+                "the status begin is claimed before the reply resolves"
+            );
+        }
+        let id = request_id(&mut messages);
+        // The status path publishes its begin directly, ahead of the reply.
+        let Message::Notification(begin) = messages.try_recv().unwrap() else {
+            panic!("expected the status begin")
+        };
+        assert_eq!(begin.params["value"]["kind"], "begin");
+        shared.resolve_outbound(Response::new_ok(id, Value::Null));
+        for _ in 0..16 {
+            if !shared.progress.lock().unwrap()[&token].create_pending {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !shared.progress.lock().unwrap()[&token].create_pending,
+            "the create reply must be consumed"
+        );
+        assert!(
+            messages.try_recv().is_err(),
+            "the reply publishes no second begin"
+        );
+        shared.end_progress(&shared.sender, &token);
+        let Message::Notification(end) = messages.try_recv().unwrap() else {
+            panic!("expected the status end")
+        };
+        assert_eq!(end.params["value"]["kind"], "end");
+        assert!(messages.try_recv().is_err(), "exactly one begin and end");
+        assert!(shared.progress.lock().unwrap().is_empty());
+        assert!(shared.outbound.lock().unwrap().is_empty());
     }
 
     #[test]
