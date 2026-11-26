@@ -7,11 +7,13 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -398,8 +400,131 @@ if (focusedVsix) {
 }
 if (focusedHead) env.MAGIT_VSCODE_HEAD_ONLY = "1";
 if (focusedVersion) env.MAGIT_VSCODE_VERSION_ONLY = "1";
+
+/** Whether `file` is a regular file this user may execute. */
+function isExecutableFile(file) {
+  try {
+    if (!statSync(file).isFile()) return false;
+    accessSync(file, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The `Contents/MacOS` directory of the app bundle containing `file`, if any.
+ *
+ * The CLI may sit anywhere inside the bundle, including a symlinked
+ * `Contents/Resources/app/bin/code`, so every ancestor is considered.
+ *
+ * @param {string} file
+ * @returns {string | null}
+ */
+function findMacosDir(file) {
+  let current = resolve(file);
+  for (;;) {
+    const macos = join(current, "Contents", "MacOS");
+    if (existsSync(macos)) return macos;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+/**
+ * The Electron executable inside an app bundle's `Contents/MacOS` directory.
+ *
+ * `Info.plist` names it authoritatively; the fixed list covers bundles whose
+ * plist cannot be read, and any executable file is the last resort.
+ *
+ * @param {string} macosDir
+ * @returns {string | null}
+ */
+function bundleExecutable(macosDir) {
+  const plist = join(macosDir, "..", "Info.plist");
+  if (existsSync(plist)) {
+    const match = /<key>CFBundleExecutable<\/key>\s*<string>([^<]+)<\/string>/.exec(
+      readFileSync(plist, "utf8"),
+    );
+    if (match && isExecutableFile(join(macosDir, match[1]))) return join(macosDir, match[1]);
+  }
+  for (const name of ["Electron", "Code", "Code - Insiders", "VSCodium"]) {
+    const candidate = join(macosDir, name);
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return (
+    readdirSync(macosDir)
+      .map((name) => join(macosDir, name))
+      .find(isExecutableFile) ?? null
+  );
+}
+
+/**
+ * The darwin Electron executable for the resolved editor CLI.
+ *
+ * The CLI is often a symlink (`/usr/local/bin/code`) into
+ * `<bundle>/Contents/Resources/app/bin/code`, so the bundle is found from its
+ * real path. Never fall back to the CLI: on darwin it does not start the app in
+ * this process, which is the stall this launch path exists to expose.
+ *
+ * @param {string} cli resolved editor CLI path
+ * @returns {string}
+ */
+function darwinExecutable(cli) {
+  const paths = [cli];
+  try {
+    const real = realpathSync(cli);
+    if (real !== cli) paths.unshift(real);
+  } catch {
+    // Keep the unresolved path as the only candidate.
+  }
+  for (const path of paths) {
+    const macos = findMacosDir(path);
+    const executable = macos ? bundleExecutable(macos) : null;
+    if (executable) return executable;
+  }
+  console.error(
+    `FAIL e2e: no electron executable found in the app bundle for ${cli} (point MAGIT_VSCODE_BIN at the bundle or its CLI)`,
+  );
+  process.exit(1);
+}
+
+/**
+ * The executable, leading arguments and environment that start the editor GUI.
+ *
+ * Linux and Windows keep the resolved CLI plus `--wait` exactly as before. On
+ * darwin the `code` CLI hands delivery to LaunchServices and only blocks on a
+ * marker file, so a stalled app start leaves no editor output and no main.log;
+ * spawn the Electron executable inside the bundle directly instead, as
+ * `@vscode/test-electron` does, with crash and log directories under the
+ * evidence directory. `--wait` exists only on the CLI path, and the focused
+ * launch already waits on `native-complete.json`, the child exit and 180s.
+ *
+ * @param {string} cli resolved editor CLI path
+ * @returns {{ command: string, args: string[], env: NodeJS.ProcessEnv }}
+ */
+function resolveEditorLaunch(cli) {
+  if (process.platform !== "darwin") return { command: cli, args: ["--wait"], env };
+  const crashReporterDirectory = `${directory}/crash-reports`;
+  const logsPath = `${directory}/logs`;
+  mkdirSync(crashReporterDirectory, { recursive: true });
+  mkdirSync(logsPath, { recursive: true });
+  // An Electron binary with ELECTRON_RUN_AS_NODE set is a plain Node process.
+  const launchEnv = { ...env };
+  delete launchEnv.ELECTRON_RUN_AS_NODE;
+  return {
+    command: darwinExecutable(cli),
+    args: [`--crash-reporter-directory=${crashReporterDirectory}`, `--logsPath=${logsPath}`],
+    env: launchEnv,
+  };
+}
+
+const launch = resolveEditorLaunch(editor);
+// A direct darwin spawn starts the app itself; record which executable ran.
+if (launch.command !== editor) console.log(`VSCode editor executable: ${launch.command}`);
 const args = [
-  "--wait",
+  ...launch.args,
   "--verbose",
   "--no-sandbox",
   "--disable-gpu",
@@ -436,7 +561,10 @@ if (
 ) {
   const launchLog = `${directory}/editor-launch.log`;
   const launchLogFd = openSync(launchLog, "w");
-  const child = spawn(editor, args, { env, stdio: ["inherit", launchLogFd, launchLogFd] });
+  const child = spawn(launch.command, args, {
+    env: launch.env,
+    stdio: ["inherit", launchLogFd, launchLogFd],
+  });
   let launchError;
   let launchExit = null;
   child.on("error", (error) => {
@@ -493,7 +621,11 @@ if (
     error: launchError,
   };
 } else {
-  result = spawnSync(editor, args, { env, stdio: "inherit", timeout: 180000 });
+  result = spawnSync(launch.command, args, {
+    env: launch.env,
+    stdio: "inherit",
+    timeout: 180000,
+  });
 }
 stopOwned(directory);
 const remainingOwnedPids = focusedArtifact ? ownedPids(directory) : [];
