@@ -18,6 +18,16 @@ Two rules apply to `tests/**/*.rs`, `src/**/*.rs` and
 An item annotated `#[should_panic(expected = "windows-reserved…")]` is testing
 the guard itself, so rule 2 suppresses it (as does a `windows-ok:` comment).
 
+3. A UI scenario under `tests/ui/scenarios` whose `fixture:` is change-bearing
+   must not mutate the repository from a body `sh:` command before the body's
+   first `wait` statement. That mutation can race the deferred initial render:
+   a watcher refresh drops the client's acknowledgement base and a later menu
+   or prompt dispatch fails the stale-origin gate (`ui-test-plan.md` §A.5).
+   The change-bearing list is `scripts/ui_lib/fixtures.py` minus the clean
+   (`clean`) and history-only (`log-history`, `linear-rebase-history`) fixtures.
+   This first cut covers only mutations before the initial settle; the
+   convention in §A.5 also asks authors to precede later mutations.
+
 Run by `make check-test-premises`, which first runs `--self-test` to plant one
 violation per rule in a temporary tree. Standard library only.
 """
@@ -30,10 +40,54 @@ from pathlib import Path
 
 NAME_TABLE_SOURCE = Path('crates/test-support/src/lib.rs')
 SCAN_ROOTS = (Path('tests'), Path('src'), Path('crates/test-support/src'))
+SCENARIO_ROOT = Path('tests/ui/scenarios')
 NAME_METHODS = ('join', 'with_file_name', 'rename', 'prefix')
 WINDOWS_OK = re.compile(r'windows-ok\s*:\s*\S')
 SHOULD_PANIC = 'should_panic(expected = "windows-reserved'
 INTERNAL_ERROR = 2
+
+# Fixtures whose initial render is deferred, so a first-statement repository
+# mutation can supersede it. Mirrors the builders in `scripts/ui_lib/fixtures.py`
+# minus `clean` and the run-only history fixtures `log-history` and
+# `linear-rebase-history`.
+CHANGE_BEARING_FIXTURES = frozenset(
+    (
+        'modified-two-files',
+        'two-hunk-siblings',
+        'staged-one-file',
+        'staged-and-unstaged',
+        'staged-failing-hook',
+        'staged-slow-hook',
+        'untracked',
+        'unborn',
+        'in-progress-rebase',
+        'in-progress-cherry-pick',
+        'paused-linear-rebase-todo',
+        'instant-rebase-history',
+    )
+)
+GIT_MUTATIONS = re.compile(
+    r'\bgit\s+(?:add|commit|rm|mv|reset|checkout|rebase|cherry-pick|merge|'
+    r'stash|apply)\b'
+)
+GIT_BRANCH_WRITE = re.compile(
+    r'\bgit\s+branch\b(?!\s+(?:--show-current|--list|-l|-a|--all|--contains|'
+    r'--merged|--no-merged|-v|--format))'
+)
+GIT_TAG_WRITE = re.compile(
+    r'\bgit\s+tag\b(?!\s+(?:--list|-l|--contains|--points-at|--format))'
+)
+GIT_NOTES_WRITE = re.compile(r'\bgit\s+notes\b(?!\s+(?:list|show))')
+GIT_CONFIG_WRITE = re.compile(
+    r'\bgit\s+config\s+(?:--(?:local|global|system)\s+)?[A-Za-z0-9][\w./-]*\s+'
+    r'(?![-)&|;])'
+)
+GIT_SNAPSHOT_REDIRECT = re.compile(r'>>?\s*\.git/\S+')
+GIT_SNAPSHOT_COPY = re.compile(r'\bcp\s+[^\s;|&]+\s+\.git/\S+')
+STDERR_DEV_NULL = re.compile(r'\d?>\s*/dev/null')
+SHELL_REDIRECT = re.compile(r'(?<![0-9&])>>?')
+SED_IN_PLACE = re.compile(r'\bsed\s+(?:-\S+\s+)*-i')
+FILE_OPERATION = re.compile(r'\b(?:rm|mv|mkdir|touch|chmod|ln)\b')
 
 
 class CheckError(Exception):
@@ -496,6 +550,83 @@ def rust_files(root):
     return files
 
 
+def scenario_files(root):
+    """All UI scenario files below `root`, in stable order."""
+    directory = root / SCENARIO_ROOT
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob('*.scn'))
+
+
+def mutating_shell(command):
+    """Whether an `sh:` command can change worktree, index, refs or config.
+
+    Writes and copies into `.git/` are oracle snapshots, and `2>/dev/null`
+    discards stderr, so neither counts. Reads (`git rev-parse`, `show`,
+    `write-tree`, `diff`, `ls-files`, `hash-object`), remote and `init`
+    commands outside the repository, and editor RPC are left to the runtime
+    harness; a broader first cut can be added when a scenario needs it.
+    """
+    command = GIT_SNAPSHOT_REDIRECT.sub(' ', command)
+    command = GIT_SNAPSHOT_COPY.sub(' ', command)
+    command = STDERR_DEV_NULL.sub(' ', command)
+    return bool(
+        GIT_MUTATIONS.search(command)
+        or GIT_BRANCH_WRITE.search(command)
+        or GIT_TAG_WRITE.search(command)
+        or GIT_NOTES_WRITE.search(command)
+        or GIT_CONFIG_WRITE.search(command)
+        or SHELL_REDIRECT.search(command)
+        or SED_IN_PLACE.search(command)
+        or FILE_OPERATION.search(command)
+    )
+
+
+def scan_scenario(path):
+    """Return rule-3 violations in one UI scenario file."""
+    try:
+        lines = path.read_text(encoding='utf-8').split('\n')
+    except OSError as error:
+        raise CheckError(f'cannot read {path}: {error}') from error
+    fixture = None
+    body = []
+    in_body = False
+    for number, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not in_body:
+            match = re.match(r'fixture:\s*(\S+)', stripped)
+            if match:
+                fixture = match.group(1)
+            if stripped == '---':
+                in_body = True
+            continue
+        if stripped and not stripped.startswith('#'):
+            body.append((number, stripped))
+    if fixture not in CHANGE_BEARING_FIXTURES:
+        return []
+    first_wait = next(
+        (index for index, (_, statement) in enumerate(body) if statement.startswith('wait')),
+        len(body),
+    )
+    violations = []
+    for index in range(first_wait):
+        number, statement = body[index]
+        if not statement.startswith('sh:'):
+            continue
+        if not mutating_shell(statement[3:].strip()):
+            continue
+        violations.append(
+            Violation(
+                path,
+                number,
+                3,
+                'repository-mutating `sh:` before the first `wait`: settle the '
+                'initial render with `wait screen contains` first',
+            )
+        )
+    return violations
+
+
 def audit(root, rules_source=NAME_TABLE_SOURCE):
     """Return violations for the tree at `root`."""
     source = root / rules_source
@@ -505,7 +636,15 @@ def audit(root, rules_source=NAME_TABLE_SOURCE):
     rules = parse_name_rules(source)
     files = rust_files(root)
     gates = module_gates(files)
-    return [violation for path in files for violation in scan_file(path, rules, gates)]
+    violations = [
+        violation for path in files for violation in scan_file(path, rules, gates)
+    ]
+    violations.extend(
+        violation
+        for path in scenario_files(root)
+        for violation in scan_scenario(path)
+    )
+    return violations
 
 
 SELF_TEST_SOURCE = '''
@@ -598,6 +737,20 @@ pub fn real() {
 }
 '''
 
+SELF_TEST_STRIPPED_SCENARIO = '''fixture: modified-two-files
+---
+sh: git commit -am probe
+goto "+line3 CHANGED"
+keys: c
+'''
+
+SELF_TEST_CLEAN_SCENARIO = '''fixture: clean
+---
+sh: git commit -am probe
+goto "+line3 CHANGED"
+keys: c
+'''
+
 
 def self_test():
     """Plant one violation per rule and confirm the checker reports it."""
@@ -613,6 +766,14 @@ def self_test():
         (source / 'menu.rs').write_text(SELF_TEST_DECOY, encoding='utf-8')
         (source / 'session').mkdir()
         (source / 'session' / 'menu.rs').write_text(SELF_TEST_REAL_CHILD, encoding='utf-8')
+        scenarios = root / 'tests' / 'ui' / 'scenarios'
+        scenarios.mkdir(parents=True)
+        (scenarios / 'stripped.scn').write_text(
+            SELF_TEST_STRIPPED_SCENARIO, encoding='utf-8'
+        )
+        (scenarios / 'clean-shaped.scn').write_text(
+            SELF_TEST_CLEAN_SCENARIO, encoding='utf-8'
+        )
         violations = audit(root)
         found = {
             (violation.path.relative_to(root).as_posix(), violation.rule, violation.line)
@@ -626,6 +787,7 @@ def self_test():
             ('tests/probe.rs', 2, 35),
             ('tests/probe.rs', 2, 44),
             ('src/menu.rs', 1, 3),
+            ('tests/ui/scenarios/stripped.scn', 3, 3),
         }
         if found != expected:
             for violation in violations:
@@ -652,7 +814,10 @@ def self_test():
                 print(violation, file=sys.stderr)
             print('self-test: cfg gate, windows-ok or should_panic did not suppress', file=sys.stderr)
             return 1
-        print('ok: self-test planted violations in both rules and suppressed the annotations')
+        print(
+            'ok: self-test planted violations in all three rules, suppressed the '
+            'annotations and left the clean-fixture scenario passing'
+        )
         return 0
 
 
