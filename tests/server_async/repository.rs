@@ -1585,7 +1585,10 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
             .commit("init", [("f.txt", TEN_LINES)])
             .modify_standard()
             .build();
-        let mut server = TestServer::spawn(&[]);
+        // Zero discards the deferred open's background fetch deterministically, so
+        // no extra render can race the client's acks and leave the symbol-less
+        // loading tree as the last acked tree; show-all then loads hunks inline.
+        let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "0"], &[]);
         server.initialize(limited_rich(json!([]), json!(["confirm"])));
         server.send(open_view_message(2, &repo_param(tmp.path())));
         let opened = server.response_with_id(2);
