@@ -21,10 +21,41 @@ TARGETS = {
     'aarch64-apple-darwin': ('darwin', 'arm64', 'otool'),
 }
 MAX_GLIBC = (2, 35)
+RENDER_WAIT_SECONDS = 15
+LOADING_STATUS_PREFIX = 'Loading repository status'
 
 
 class InspectionError(Exception):
     """An artifact or inspection tool failed a static contract."""
+
+
+def _read_frame(process, deadline, label):
+    """Read one bounded framed JSON-RPC message before the monotonic deadline."""
+    buffer = getattr(process, '_native_rpc_buffer', b'')
+    while b'\r\n\r\n' not in buffer:
+        ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
+        if not ready:
+            raise InspectionError(f'timed out waiting for {label}')
+        chunk = os.read(process.stdout.fileno(), 4096)
+        if not chunk:
+            raise InspectionError('server closed JSON-RPC stream')
+        buffer += chunk
+    header, body = buffer.split(b'\r\n\r\n', 1)
+    lengths = [line.split(b':', 1)[1].strip() for line in header.split(b'\r\n')
+               if line.lower().startswith(b'content-length:')]
+    if len(lengths) != 1:
+        raise InspectionError('invalid JSON-RPC headers')
+    length = int(lengths[0])
+    if length <= 0 or length > 4 * 1024 * 1024:
+        raise InspectionError('invalid JSON-RPC frame length')
+    while len(body) < length:
+        ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
+        if not ready:
+            raise InspectionError(f'timed out reading {label} frame')
+        body += os.read(process.stdout.fileno(), min(4096, length - len(body)))
+    message = json.loads(body[:length])
+    process._native_rpc_buffer = body[length:]
+    return message
 
 
 def _rpc(process, method, params, request_id):
@@ -35,30 +66,7 @@ def _rpc(process, method, params, request_id):
     process.stdin.flush()
     deadline = time.monotonic() + 15
     while True:
-        buffer = getattr(process, '_native_rpc_buffer', b'')
-        while b'\r\n\r\n' not in buffer:
-            ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
-            if not ready:
-                raise InspectionError(f'timed out waiting for {method}')
-            chunk = os.read(process.stdout.fileno(), 4096)
-            if not chunk:
-                raise InspectionError('server closed JSON-RPC stream')
-            buffer += chunk
-        header, body = buffer.split(b'\r\n\r\n', 1)
-        lengths = [line.split(b':', 1)[1].strip() for line in header.split(b'\r\n')
-                   if line.lower().startswith(b'content-length:')]
-        if len(lengths) != 1:
-            raise InspectionError('invalid JSON-RPC headers')
-        length = int(lengths[0])
-        if length <= 0 or length > 4 * 1024 * 1024:
-            raise InspectionError('invalid JSON-RPC frame length')
-        while len(body) < length:
-            ready, _, _ = select.select([process.stdout], [], [], max(0, deadline - time.monotonic()))
-            if not ready:
-                raise InspectionError(f'timed out reading {method} frame')
-            body += os.read(process.stdout.fileno(), min(4096, length - len(body)))
-        message = json.loads(body[:length])
-        process._native_rpc_buffer = body[length:]
+        message = _read_frame(process, deadline, method)
         if message.get('method') == 'view/render':
             params = message.get('params', {})
             renders = getattr(process, '_native_renders', [])
@@ -95,6 +103,38 @@ def _ack_status_render(process, params):
     process._native_render_count = getattr(process, '_native_render_count', 0) + 1
     process._native_render_version = params['version']
     return True
+
+
+def _loading_render(params):
+    """Return whether a render is the pre-acquisition status placeholder."""
+    text = params.get('text')
+    return isinstance(text, list) and any(
+        isinstance(line, str) and line.startswith(LOADING_STATUS_PREFIX) for line in text)
+
+
+def _wait_status_render(process, timeout=None):
+    """Wait bounded for a matching non-loading render, acknowledging each matching render.
+
+    Returns True once a matching render without the loading placeholder has been
+    acknowledged, or False when the bound expires or the stream ends first.
+    """
+    view = process._native_status_view
+    deadline = time.monotonic() + (RENDER_WAIT_SECONDS if timeout is None else timeout)
+    while True:
+        try:
+            message = _read_frame(process, deadline, 'status render')
+        except InspectionError:
+            return False
+        if message.get('method') != 'view/render':
+            continue
+        params = message.get('params', {})
+        if params.get('viewId') != view['id']:
+            continue
+        renders = getattr(process, '_native_renders', [])
+        renders.append(params)
+        process._native_renders = renders
+        if _ack_status_render(process, params) and not _loading_render(params):
+            return True
 
 
 def _stop_process(process, evidence):
@@ -161,10 +201,14 @@ def _functional(binary, target, version_expected, evidence):
             if not view_id or view_kind != 'status' or not isinstance(view_mode, str):
                 raise InspectionError('status view/open returned an invalid status descriptor')
             process._native_status_view = {'id': view_id, 'mode': view_mode}
+            acquired = False
             for render in getattr(process, '_native_renders', []):
                 if render.get('viewId') == view_id:
-                    _ack_status_render(process, render)
-            if not getattr(process, '_native_render_count', 0):
+                    if _ack_status_render(process, render) and not _loading_render(render):
+                        acquired = True
+            if not acquired:
+                acquired = _wait_status_render(process)
+            if not acquired or not getattr(process, '_native_render_count', 0):
                 raise InspectionError('status view emitted no valid matching full render')
             _rpc(process, 'view/invoke', {'viewId': view_id, 'command': 'status.stage-all'}, 3)
             staged = subprocess.run(['git', '-C', repo, 'diff', '--cached', '--name-only'],

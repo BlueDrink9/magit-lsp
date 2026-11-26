@@ -343,6 +343,85 @@ class NativeArtifactTests(unittest.TestCase):
         finally:
             child.stdout.close()
 
+    def test_functional_probe_waits_for_deferred_status_render(self):
+        def frame(message):
+            payload = json.dumps(message).encode()
+            return b'Content-Length: %d\r\n\r\n' % len(payload) + payload
+
+        messages = [
+            {'jsonrpc': '2.0', 'id': 1, 'result': {'capabilities': {'experimental': {
+                'magit': {'protocolVersion': 1}}}}},
+            {'jsonrpc': '2.0', 'id': 2, 'result': {'id': 's', 'kind': 'status',
+                                                    'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'method': 'view/render', 'params': {
+                'viewId': 's', 'version': 1,
+                'text': ['Head: main', 'Loading repository status…'], 'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'method': 'view/render', 'params': {
+                'viewId': 's', 'version': 2, 'text': ['Unstaged changes'],
+                'mode': 'interactive'}},
+            {'jsonrpc': '2.0', 'id': 3, 'result': {'effects': []}},
+            {'jsonrpc': '2.0', 'id': 4, 'result': None},
+        ]
+
+        class Capture(io.BytesIO):
+            def close(self):
+                pass
+
+        class Child:
+            def __init__(self):
+                self.stdin = Capture()
+                self.read_fd, self.write_fd = os.pipe()
+                os.write(self.write_fd, b''.join(map(frame, messages)))
+                os.close(self.write_fd)
+                self.stdout = os.fdopen(self.read_fd, 'rb', buffering=0)
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                self.alive = False
+
+            def wait(self, timeout=None):
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        child = Child()
+        def fake_run(args, **kwargs):
+            output = 'magit-lsp 1.2.3\n' if args[-1:] == ['--version'] else (
+                'tracked.txt\n' if args[-3:] == ['diff', '--cached', '--name-only'] else '')
+            return subprocess.CompletedProcess(args, 0, stdout=output, stderr='')
+
+        evidence = {}
+        try:
+            with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
+                    mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                    mock.patch.object(inspector.subprocess, 'run', side_effect=fake_run), \
+                    mock.patch.object(inspector.subprocess, 'Popen', return_value=child):
+                inspector._functional(Path('/tmp/extracted exact/magit-lsp'),
+                                      'x86_64-unknown-linux-gnu', '1.2.3', evidence)
+            sent = child.stdin.getvalue()
+            frames = []
+            while sent:
+                head, rest = sent.split(b'\r\n\r\n', 1)
+                size = int(head.split(b':', 1)[1])
+                frames.append(json.loads(rest[:size]))
+                sent = rest[size:]
+            methods = [message.get('method') for message in frames]
+            acks = [message['params'] for message in frames if message.get('method') == 'view/rendered']
+            self.assertEqual([ack['version'] for ack in acks], [1, 2])
+            self.assertEqual({ack['viewId'] for ack in acks}, {'s'})
+            last_ack = max(index for index, method in enumerate(methods) if method == 'view/rendered')
+            self.assertLess(last_ack, methods.index('view/invoke'))
+            self.assertEqual(evidence['git']['staged'], ['tracked.txt'])
+            self.assertEqual(evidence['lsp']['status_render_acks'], 2)
+            self.assertEqual(evidence['lsp']['last_render_version'], 2)
+            self.assertEqual(evidence['teardown'], 'complete')
+        finally:
+            child.stdout.close()
+
     def test_functional_rejects_invalid_negotiation_descriptor_and_render_before_mutation(self):
         def frame(message):
             payload = json.dumps(message).encode()
@@ -391,6 +470,7 @@ class NativeArtifactTests(unittest.TestCase):
             try:
                 with mock.patch.object(inspector.platform, 'system', return_value='Linux'), \
                         mock.patch.object(inspector.platform, 'machine', return_value='x86_64'), \
+                        mock.patch.object(inspector, 'RENDER_WAIT_SECONDS', 0.01), \
                         mock.patch.object(inspector.subprocess, 'run', side_effect=fake_run), \
                         mock.patch.object(inspector.subprocess, 'Popen', return_value=child):
                     with self.assertRaisesRegex(inspector.InspectionError, error):
