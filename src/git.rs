@@ -3315,6 +3315,13 @@ fn warn_if_git_is_below_recommendation(
         return None;
     };
     let Some(stdout) = child.stdout.take() else {
+        // `Child::kill` terminates the probe child (SIGKILL on Unix).
+        tracing::warn!(
+            pid = child.id(),
+            reason = "version_probe_stdout_missing",
+            signal = 9,
+            "child kill"
+        );
         let _ = child.kill();
         let _ = child.wait();
         return None;
@@ -3334,6 +3341,13 @@ fn warn_if_git_is_below_recommendation(
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             _ => {
+                // `Child::kill` terminates the probe child (SIGKILL on Unix).
+                tracing::warn!(
+                    pid = child.id(),
+                    reason = "version_probe_deadline",
+                    signal = 9,
+                    "child kill"
+                );
                 let _ = child.kill();
                 let _ = child.wait();
                 return None;

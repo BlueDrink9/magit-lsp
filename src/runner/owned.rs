@@ -96,7 +96,10 @@ fn fallback(command: &mut Command, input: Option<&[u8]>) -> io::Result<OwnedOutp
 #[cfg(unix)]
 mod unix {
     use super::*;
-    use std::os::{fd::AsRawFd, unix::process::CommandExt};
+    use std::os::{
+        fd::AsRawFd,
+        unix::process::{CommandExt, ExitStatusExt},
+    };
 
     enum State {
         Running,
@@ -199,6 +202,7 @@ mod unix {
                     libc::kill(-pid, libc::SIGCONT);
                     event(pid, "cont");
                 }
+                tracing::warn!(pid, reason = "cancel", signal = libc::SIGTERM, "child term");
                 state = State::Cancelling(Instant::now());
             }
             if let State::Cancelling(t) = state {
@@ -207,6 +211,12 @@ mod unix {
                         libc::kill(-pid, libc::SIGKILL);
                     }
                     event(pid, "kill");
+                    tracing::warn!(
+                        pid,
+                        reason = "cancel_grace",
+                        signal = libc::SIGKILL,
+                        "child kill"
+                    );
                     state = State::AfterKill(Instant::now());
                 }
             }
@@ -300,6 +310,7 @@ mod unix {
             }
             Ok(Some(s)) => {
                 event(pid, "reap");
+                log_reap(pid, &s);
                 status = Some(s);
             }
             Ok(None) => {
@@ -311,6 +322,7 @@ mod unix {
                     match child.try_wait() {
                         Ok(Some(s)) => {
                             event(pid, "reap");
+                            log_reap(pid, &s);
                             status = Some(s);
                             break;
                         }
@@ -323,9 +335,15 @@ mod unix {
                 }
                 if status.is_none() {
                     outcome.reap_incomplete = true;
+                    tracing::warn!(
+                        pid,
+                        reason = "reap_incomplete",
+                        "child still running after grace; handed to background reaper"
+                    );
                     std::thread::spawn(move || {
-                        if child.wait().is_ok() {
+                        if let Ok(s) = child.wait() {
                             event(pid, "reap");
+                            log_reap(pid, &s);
                         }
                     });
                 }
@@ -359,12 +377,29 @@ mod unix {
         static EVENTS: std::cell::RefCell<Vec<(&'static str, Instant, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
+    /// Record a reap, warning when a signal ended the child.
+    ///
+    /// Ordinary successful reaps stay at debug so every Git call is not a
+    /// warning; a signal death is the discriminator an external kill leaves.
+    fn log_reap(pid: libc::pid_t, status: &ExitStatus) {
+        match status.signal() {
+            Some(signal) => tracing::warn!(pid, reason = "reap", signal, "child reap"),
+            None => tracing::debug!(pid, reason = "reap", code = status.code(), "child reap"),
+        }
+    }
+
     fn cleanup(mut child: std::process::Child, pid: libc::pid_t, signal_group: bool) {
         if signal_group {
             unsafe {
                 libc::kill(-pid, libc::SIGTERM);
                 libc::kill(-pid, libc::SIGCONT);
             }
+            tracing::warn!(
+                pid,
+                reason = "cleanup",
+                signal = libc::SIGTERM,
+                "child term"
+            );
             let deadline = Instant::now() + GRACE;
             while Instant::now() < deadline {
                 let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
@@ -378,7 +413,9 @@ mod unix {
                 };
                 if result < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) {
                     std::thread::spawn(move || {
-                        let _ = child.wait();
+                        if let Ok(s) = child.wait() {
+                            log_reap(pid, &s);
+                        }
                     });
                     return;
                 }
@@ -390,9 +427,17 @@ mod unix {
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }
+            tracing::warn!(
+                pid,
+                reason = "cleanup_grace",
+                signal = libc::SIGKILL,
+                "child kill"
+            );
         }
         std::thread::spawn(move || {
-            let _ = child.wait();
+            if let Ok(s) = child.wait() {
+                log_reap(pid, &s);
+            }
         });
     }
 

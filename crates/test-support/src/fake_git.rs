@@ -178,9 +178,16 @@ impl GatedGit {
                 "#!/bin/sh\n\
                  subcommand=\"$1\"\n\
                  if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
+                 # Spawn evidence: identity is the script's first write, before any\n\
+                 # fork, so an exec-time or early kill still names the child. The\n\
+                 # epoch is appended in a second write; a `$(date +%s)` in the first\n\
+                 # would reopen the exec-to-write window this line measures.\n\
+                 printf 'spawned pid=%s ppid=%s t=' \"$$\" \"$PPID\" >> '{invocations}'\n\
+                 printf '%s\\n' \"$(date +%s)\" >> '{invocations}'\n\
                  {action}\
                  exec '{real}' \"$@\"\n",
                 real = real_git.display(),
+                invocations = invocations_path.display(),
             ),
         )
         .expect("write fake git");
@@ -456,6 +463,23 @@ mod tests {
             message.contains("status"),
             "invocation log tail missing: {message}"
         );
+
+        // The spawn line is the first write, so it precedes the subcommand echo
+        // that runs before the gate check.
+        let log = gate.invocation_log();
+        let lines: Vec<&str> = log.lines().collect();
+        let spawned = lines
+            .iter()
+            .position(|line| line.starts_with("spawned pid="))
+            .unwrap_or_else(|| panic!("spawn line missing: {log:?}"));
+        let status = lines
+            .iter()
+            .position(|line| *line == "status")
+            .unwrap_or_else(|| panic!("status echo missing: {log:?}"));
+        assert!(
+            spawned < status,
+            "spawn line must be written before the gate is reached: {log:?}"
+        );
     }
 
     #[test]
@@ -524,6 +548,25 @@ mod tests {
             "the kill happens before the log echo: {:?}",
             gate.invocation_log()
         );
+
+        // The spawn line survives the self-kill, so a killed child still names
+        // itself and its parent: the discriminator this mode exists to produce.
+        let log = gate.invocation_log();
+        let spawned = log
+            .lines()
+            .find(|line| line.starts_with("spawned pid="))
+            .unwrap_or_else(|| panic!("kill mode must record the spawn line: {log:?}"));
+        let fields: Vec<&str> = spawned.split_whitespace().collect();
+        assert_eq!(fields.len(), 4, "spawn line fields: {spawned:?}");
+        assert_eq!(fields[0], "spawned");
+        for field in &fields[1..] {
+            assert!(
+                field
+                    .split_once('=')
+                    .is_some_and(|(_, value)| value.parse::<u64>().is_ok_and(|n| n > 0)),
+                "spawn line field is not a positive number: {field:?} in {spawned:?}"
+            );
+        }
 
         // The single gated slot stays spent: the next command runs the real Git.
         let next = Command::new("sh")

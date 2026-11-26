@@ -82,3 +82,33 @@ host-killed Git child fail the test with its cause instead of a silent timeout,
 so the macOS consumer job must be re-run to confirm either that the kill no
 longer occurs or that its evidence now names the killed child. No cross-platform
 claim is made from local Linux runs.
+
+## Reading the kill evidence
+
+`GatedGit::install` now writes `spawned pid=$$ ppid=$PPID t=<epoch>` to the
+invocation log as the gated script's first write, in both `arm` and
+`arm_killing` modes. Identity is written before any fork (the epoch follows in a
+second write), so even a child killed during exec setup leaves its pid, its
+parent pid and (when it lived past the identity write) a timestamp. The parent
+also logs every term, grace kill, cleanup kill, still-running child handed to
+the background reaper and signal-death reap at `warn`, so those lines pass the
+default `warn` filter into the server's stderr, which `wait_for_gate_or_failure`
+returns with an acquisition failure and includes in its timeout panic.
+
+Read the two sources together, in this order:
+
+1. **Spawned line + a parent kill/term line for the same pid** — self-inflicted:
+   the server's own cancellation or cleanup killed the child. This is a
+   production bug and gets a follow-up ticket; the trace names the reason and
+   the signal.
+2. **Spawned line + a signal-death reap (`child reap ... signal=N`) with no
+   parent kill line** — external: something outside the server killed the child.
+   Re-query host logs for the test-step timestamp (macOS `log show --start
+   <timestamp>`), the sender (kernel or another process), and the pid from the
+   spawned line.
+3. **No spawned line** — exec-time kill: the script never ran, so the killer
+   acted between spawn and exec (code signing, jetsam). The reap trace still
+   names the signal and pid.
+
+An ordinary successful reap stays at `debug`, so this adds no per-invocation
+warning noise.

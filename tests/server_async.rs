@@ -70,7 +70,12 @@ enum GateWait {
     /// The gated Git invocation is verifiably blocked inside the fake gate.
     Entered,
     /// The server published an acquisition failure for the view instead.
-    AcquisitionFailed { text: Vec<String> },
+    AcquisitionFailed {
+        /// The rendered view text naming the failure.
+        text: Vec<String>,
+        /// The server's captured stderr, carrying any kill/reap trace lines.
+        stderr: String,
+    },
 }
 
 /// Wait for a gated acquisition, resolving at once when it failed instead.
@@ -101,7 +106,10 @@ fn wait_for_gate_or_failure(gate: &GatedGit, server: &mut TestServer, view: &str
                     .iter()
                     .any(|line| line.contains("Unable to load repository status"))
                 {
-                    return GateWait::AcquisitionFailed { text };
+                    return GateWait::AcquisitionFailed {
+                        text,
+                        stderr: server.stderr_text(),
+                    };
                 }
             }
             server.notifications.push(message);
@@ -110,8 +118,9 @@ fn wait_for_gate_or_failure(gate: &GatedGit, server: &mut TestServer, view: &str
         assert!(
             Instant::now() < deadline,
             "the gated acquisition neither entered the gate nor reported a failure within \
-             {GATE_ENTER_TIMEOUT:?}; the fake Git's invocation log:\n{}",
-            gate.invocation_log()
+             {GATE_ENTER_TIMEOUT:?}; the fake Git's invocation log:\n{}\nserver stderr:\n{}",
+            gate.invocation_log(),
+            server.stderr_text()
         );
     }
 }
@@ -1840,9 +1849,12 @@ fn status_open_refresh_wait_reports_killed_git_child_as_acquisition_failure() {
     assert_eq!(server.recv()["method"], "view/keymap");
 
     let started = Instant::now();
-    let text = match wait_for_gate_or_failure(&gate, &mut server, &view) {
-        GateWait::Entered => panic!("a killed Git child must surface as an acquisition failure"),
-        GateWait::AcquisitionFailed { text } => text,
+    let (text, mut stderr) = match wait_for_gate_or_failure(&gate, &mut server, &view) {
+        GateWait::Entered => panic!(
+            "a killed Git child must surface as an acquisition failure; server stderr:\n{}",
+            server.stderr_text()
+        ),
+        GateWait::AcquisitionFailed { text, stderr } => (text, stderr),
     };
     let elapsed = started.elapsed();
     assert!(
@@ -1877,6 +1889,24 @@ fn status_open_refresh_wait_reports_killed_git_child_as_acquisition_failure() {
     assert!(
         !log.lines().any(|line| line.trim() == "status"),
         "the killed child died before its log echo: {log:?}"
+    );
+    // Three-way evidence: the spawn line proves the gated script ran, so this
+    // is not an exec-time kill, while its subcommand echo stays absent.
+    assert!(
+        log.lines()
+            .any(|line| line.trim_start().starts_with("spawned pid=")),
+        "the killed child must record its spawn line: {log:?}"
+    );
+    // The parent reaped a signal death and logged it at warn, so the trace
+    // survives the default `warn` filter into this test's captured stderr.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !stderr.contains("child reap") && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+        stderr = server.stderr_text();
+    }
+    assert!(
+        stderr.contains("child reap") && stderr.contains("signal=9"),
+        "the signal-death reap trace must be carried in the evidence:\n{stderr}"
     );
 
     shutdown_and_exit(&mut server);
