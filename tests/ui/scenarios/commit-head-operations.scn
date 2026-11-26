@@ -1,6 +1,7 @@
 # Native commit-menu HEAD operations; each case checkpoints its own Git state.
 fixture: staged-one-file
 ---
+wait screen contains "+line3 CHANGED"
 # A real parent, exact body and a prior date distinct from the worker clock.
 sh: GIT_COMMITTER_DATE='2001-01-01T00:00:00+0000' git -c core.editor=true commit -m 'Native HEAD baseline' -m 'Exact retained body.' >/dev/null && git rev-parse HEAD > .git/baseline && printf '\nstaged amend sentinel\n' >> f.txt && git add f.txt
 # Staged Amend: keep Git's original message intact.

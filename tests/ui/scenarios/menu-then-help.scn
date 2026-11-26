@@ -2,6 +2,7 @@
 # second menu.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: m
 wait
 expect windows.floating == 1

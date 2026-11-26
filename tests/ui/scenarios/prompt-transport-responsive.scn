@@ -1,6 +1,7 @@
 # A05: real input() prompt, then ack/resize/resync BEFORE its answer.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: c
 wait
 expect screen contains "Commit"

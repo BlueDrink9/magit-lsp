@@ -1,6 +1,7 @@
 # T044 Part 9: index flags are independent, explicit and reversible.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 sh: mkdir -p dir; printf 'tracked\n' > 'dir/a b*.txt'; printf 'tracked\n' > dir/other.txt; git add dir && git commit -m 'index flags fixture' >/dev/null; printf 'changed\n' >> 'dir/a b*.txt'; printf 'changed\n' >> dir/other.txt; printf 'untracked\n' > untracked.txt; git add g.txt; git rev-parse HEAD > .git/flags-head; git ls-files -s > .git/flags-index; git diff --cached --binary > .git/flags-staged; git hash-object 'dir/a b*.txt' > .git/flags-odd; git hash-object dir/other.txt > .git/flags-other
 wait screen contains "dir/a b*.txt"
 goto "M dir/a b*.txt"

@@ -8,6 +8,7 @@
 #   stage a hunk                 <= 400ms
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: ?
 wait
 expect screen contains "Transient and dwim commands"

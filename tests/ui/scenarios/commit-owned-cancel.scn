@@ -2,6 +2,7 @@
 # The hook records TERM and readiness; cancellation uses the observed native token.
 fixture: staged-one-file
 ---
+wait screen contains "+line3 CHANGED"
 sh: git rev-parse HEAD > .git/cancel-before; printf '%s\n' '#!/bin/sh' 'trap '\''echo terminated > .git/cancel-terminated; exit 1'\'' TERM' 'echo ready > .git/cancel-ready' 'while :; do sleep 0.02; done' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
 keys: c
 wait

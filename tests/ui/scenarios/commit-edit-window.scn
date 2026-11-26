@@ -3,6 +3,7 @@ fixture: staged-one-file
 ---
 keys: ":lua CALLER={win=vim.api.nvim_get_current_win(),buf=vim.api.nvim_get_current_buf(),width=vim.api.nvim_win_get_width(0),height=vim.api.nvim_win_get_height(0),count=#vim.api.nvim_list_wins()}; function CheckWindow(draft) local v=require('magit-lsp.view').current(); assert(v and (v.document==true)==draft); assert(vim.api.nvim_get_current_win()==CALLER.win and #vim.api.nvim_list_wins()==CALLER.count); assert(vim.api.nvim_win_get_width(0)==CALLER.width and vim.api.nvim_win_get_height(0)==CALLER.height); if not draft then assert(vim.api.nvim_get_current_buf()==CALLER.buf) end end" Enter
 snapshot: caller
+wait screen contains "+line3 CHANGED"
 keys: c
 wait
 keys: c

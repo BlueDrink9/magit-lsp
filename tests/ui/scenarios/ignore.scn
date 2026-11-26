@@ -1,6 +1,7 @@
 # T044 Part 8: native ignore actions write only the chosen destination.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 sh: mkdir -p dir/nested; printf 'tracked\n' > 'dir/nested/a b*.txt'; printf 'decoy\n' > dir/nested/axxb.txt; printf 'tracked\n' > dir/top.txt; git add dir && git commit -m 'ignore fixture' >/dev/null; git add g.txt; printf 'changed\n' >> 'dir/nested/a b*.txt'; printf 'changed\n' >> dir/top.txt; git config core.excludesFile "$PWD/.git/private-user-excludes"; printf '# retained\n' > .git/private-user-excludes; cp .git/info/exclude .git/ignore-exclude-orig; git hash-object .git/info/exclude > .git/ignore-exclude-hash; git rev-parse HEAD > .git/ignore-head; git ls-files -s > .git/ignore-index; git diff --cached --binary > .git/ignore-staged; git hash-object g.txt > .git/ignore-g
 wait screen contains "dir/nested/a b*.txt"
 goto "M dir/nested/a b*.txt"

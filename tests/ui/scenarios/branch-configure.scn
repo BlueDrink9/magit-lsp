@@ -1,6 +1,7 @@
 # T043 Part 3: configure and explicitly clear a non-current branch setting.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 sh: git branch feature && git config branch.feature.rebase false
 keys: b
 wait

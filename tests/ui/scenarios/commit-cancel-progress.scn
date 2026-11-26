@@ -1,6 +1,7 @@
 # Managed editor-active cancellation uses the actual work-done token, not close.
 fixture: staged-one-file
 ---
+wait screen contains "+line3 CHANGED"
 sh: git rev-parse HEAD > .git/cancel-before; git write-tree > .git/cancel-index; git hash-object f.txt > .git/cancel-worktree
 keys: c
 wait

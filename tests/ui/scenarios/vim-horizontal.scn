@@ -3,6 +3,7 @@ fixture: modified-two-files
 profile: vim
 profile-only: true
 ---
+wait screen contains "+line3 CHANGED"
 keys: l
 wait screen contains "Log"
 expect screen contains "Log"

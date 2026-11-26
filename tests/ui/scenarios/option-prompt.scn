@@ -11,6 +11,7 @@
 # and the scenario would fail.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: c
 wait
 expect screen contains "Commit"

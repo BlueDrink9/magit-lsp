@@ -1,6 +1,7 @@
 # Saving the real Git message file does not commit; close confirms Git's saved file.
 fixture: staged-one-file
 ---
+wait screen contains "+line3 CHANGED"
 sh: git rev-parse HEAD > .git/close-before; git write-tree > .git/close-index; git hash-object f.txt > .git/close-worktree; git rev-list --count HEAD > .git/close-count
 keys: :vsplit Enter
 keys: c

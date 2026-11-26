@@ -1,6 +1,7 @@
 # Fold staged content into selected non-root commit through native instant fixup.
 fixture: instant-rebase-history
 ---
+wait screen contains "+staged sentinel"
 sh: git rev-parse HEAD~3 > .git/base && git rev-parse HEAD~2 > .git/one && git rev-parse HEAD~1 > .git/target && git rev-parse HEAD > .git/head-before && git write-tree > .git/index-before && git branch --show-current > .git/branch-before
 keys: c
 wait screen contains "Fixup"

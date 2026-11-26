@@ -3,6 +3,7 @@
 # `h` stays a motion in the vim profile (rule R4).
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 keys: ?
 wait
 expect screen contains "Transient and dwim commands"
