@@ -160,7 +160,10 @@ def fetch_candidate(repository, run_id, attempt, source_sha, target, artifact_na
             raise DownloadError('extracted executable digest differs from manifest')
         destination = Path(output).resolve()
         destination.mkdir(parents=True, exist_ok=True)
-        for name, content in ((archive_name, archive_data), ('release-manifest.json', files['release-manifest.json'])):
+        for name, content in ((archive_name, archive_data),
+                              (archive_name + '.sha256', checksum_data),
+                              ('release-manifest.json', files['release-manifest.json']),
+                              ('release-manifest.json.sha256', files['release-manifest.json.sha256'])):
             (destination / name).write_bytes(content)
         handoff = {'artifact_id': str(candidate['id']), 'artifact_digest': candidate['digest'],
                    'run_id': str(run_id), 'run_attempt': str(attempt), 'source_sha': source_sha,

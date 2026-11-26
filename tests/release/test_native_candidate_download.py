@@ -108,6 +108,14 @@ class NativeCandidateDownloadTests(unittest.TestCase):
                              (self.source, self.run_id, self.attempt, self.target))
             self.assertEqual(result['executable_sha256'], hashlib.sha256(b'not executed').hexdigest())
 
+    def test_writes_checksum_and_manifest_sidecars_verbatim(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = self.execute(output=Path(temp) / 'out')
+            output = Path(result['archive']).parent
+            with zipfile.ZipFile(io.BytesIO(self.outer)) as candidate:
+                for name in (self.archive_name + '.sha256', 'release-manifest.json.sha256'):
+                    self.assertEqual((output / name).read_bytes(), candidate.read(name))
+
     def test_rejects_duplicate_identity_and_candidate(self):
         for artifacts in ([self.candidate], [self.identity, self.identity, self.candidate],
                           [self.identity, self.candidate, self.candidate]):
