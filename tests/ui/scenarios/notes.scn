@@ -1,6 +1,7 @@
 # T044 Part 3: notes round-trip on an explicit non-HEAD commit and confirm removal.
 fixture: modified-two-files
 ---
+wait screen contains "+line3 CHANGED"
 sh: git config core.notesRef refs/notes/ui-test && git commit --allow-empty -m 'notes target' && git commit --allow-empty -m 'notes head' && git notes add -m 'head note' HEAD && git notes add -m 'other note' HEAD~2
 keys: ?
 wait
