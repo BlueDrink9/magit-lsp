@@ -966,10 +966,14 @@ def check_native_vscode_consumers(block):
                 'test "$native_before" = "$native_after"',
                 'test "$vsix_before" = "$vsix_after"',
                 'xvfb-run -a make native-vscode-artifact-check',
+                'linux-deb-x64',
                 'if: always()', 'native-vscode-evidence.json', 'if-no-files-found: warn')
     for token in required:
         if token not in code:
             fail(f'build workflow: native VSCode consumers must include {token!r}')
+    if 'snap install' in code:
+        fail('build workflow: editor setup must install VS Code from the official .deb, '
+             'not a snap whose confinement reports a glibc below the native floor')
     if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
         fail('build workflow: native VSCode consumers must use immutable source checkout')
     for forbidden in ('vscode-package', 'cargo build', 'release-native-build'):
@@ -5554,6 +5558,15 @@ def run_self_tests():
                (('          name: native-vscode-review-${{ matrix.target }}-${{ github.run_attempt }}\n',
                  '          name: native-vscode-review-disabled\n', 1),),
                'must upload the VSCode review evidence'),
+              ('build workflow native VSCode consumers adding a snap install',
+               (('sudo apt-get install -y "$RUNNER_TEMP/code.deb" xvfb\n',
+                 'sudo apt-get install -y "$RUNNER_TEMP/code.deb" xvfb && sudo snap install code --classic\n', 1),),
+               'must install VS Code from the official .deb'),
+              ('build workflow native VSCode consumers installing VS Code from snap',
+               (('          wget -O "$RUNNER_TEMP/code.deb" '
+                 "'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64'\n",
+                 '          sudo snap install code --classic\n', 1),),
+               "must include 'linux-deb-x64'"),
              ('build workflow with a lost readiness dependency',
               (('      - native-consumers\n', '', 1),),
               'must need exactly'),

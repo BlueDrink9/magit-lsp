@@ -503,7 +503,10 @@ jobs:
           node-version: '24'
       - name: Install VSCode on Linux
         if: runner.os == 'Linux'
-        run: sudo snap install code --classic && sudo apt-get update && sudo apt-get install -y xvfb
+        run: |
+          wget -O "$RUNNER_TEMP/code.deb" 'https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64'
+          sudo apt-get update
+          sudo apt-get install -y "$RUNNER_TEMP/code.deb" xvfb
       - name: Install VSCode on macOS
         if: runner.os == 'macOS'
         run: brew install --cask visual-studio-code
@@ -570,6 +573,8 @@ jobs:
         run: |
           out="$RUNNER_TEMP/vscode-review-evidence"
           mkdir -p "$out" || true
+          # Log names are alphanumeric; `-t` newest-first ordering is required here.
+          # shellcheck disable=SC2012
           log=$(ls -t build/test-logs/native-vscode-artifact-check.* 2>/dev/null | head -1) || true
           if [ -n "$log" ]; then
             dir=$(sed -n 's/.*VSCode text evidence: //p' "$log" | tail -1) || true

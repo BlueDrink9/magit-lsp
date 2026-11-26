@@ -1,9 +1,11 @@
 import {
   accessSync,
+  closeSync,
   constants,
   existsSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -432,12 +434,19 @@ if (
   focusedVsix ||
   focusedCommands
 ) {
-  const child = spawn(editor, args, { env, stdio: "inherit" });
+  const launchLog = `${directory}/editor-launch.log`;
+  const launchLogFd = openSync(launchLog, "w");
+  const child = spawn(editor, args, { env, stdio: ["inherit", launchLogFd, launchLogFd] });
   let launchError;
+  let launchExit = null;
   child.on("error", (error) => {
     launchError = error;
   });
+  child.on("exit", (code, signal) => {
+    launchExit = { code, signal };
+  });
   const deadline = Date.now() + 180000;
+  let launchTimedOut = false;
   await new Promise((resolve) => {
     const timer = setInterval(() => {
       if (
@@ -446,11 +455,32 @@ if (
         existsSync(`${directory}/native-complete.json`) ||
         Date.now() > deadline
       ) {
+        launchTimedOut = Date.now() > deadline && !existsSync(`${directory}/native-complete.json`);
         clearInterval(timer);
         resolve();
       }
     }, 30);
   });
+  closeSync(launchLogFd);
+  // An editor that never starts otherwise leaves no trace in the uploaded
+  // evidence: the focused spawn's output goes only to the runner's make log.
+  // Record the launch's stdout/stderr, exit and deadline outcome next to the
+  // suite evidence so a failed start is diagnosable from the artifact alone.
+  writeFileSync(
+    `${directory}/editor-launch-evidence.json`,
+    JSON.stringify(
+      {
+        exitCode: launchExit?.code ?? child.exitCode ?? null,
+        signal: launchExit?.signal ?? null,
+        launchError: launchError ? String(launchError.message ?? launchError) : null,
+        deadlineExpired: launchTimedOut,
+        deadlineMs: 180000,
+        log: launchLog,
+      },
+      null,
+      2,
+    ),
+  );
   result = {
     status: existsSync(`${directory}/native-complete.json`)
       ? JSON.parse((await import("node:fs")).readFileSync(`${directory}/native-complete.json`))
