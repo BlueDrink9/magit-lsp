@@ -492,6 +492,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.28.3/install
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
@@ -504,6 +507,10 @@ jobs:
       - name: Install VSCode on macOS
         if: runner.os == 'macOS'
         run: brew install --cask visual-studio-code
+      - name: Install client dependencies
+        run: |
+          make_bin=$(command -v make)
+          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" vscode-deps
       - name: Download immutable native candidate
         env:
           GITHUB_TOKEN: ${{ github.token }}

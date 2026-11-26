@@ -907,7 +907,9 @@ def check_native_vscode_consumers(block):
             matrix[match.group(1)] = target
     if matrix != dict(NATIVE_MATRIX):
         fail('build workflow: native VSCode matrix must exactly match both native hosts')
-    required = ('python3 -m scripts.download_native_candidate',
+    required = ('cachix/install-nix-action@',
+                '.#release-acceptance', 'vscode-deps',
+                'python3 -m scripts.download_native_candidate',
                 'python3 -m scripts.download_vsix_candidate',
                 '--run-id "${{ github.run_id }}"', '--attempt "${{ github.run_attempt }}"',
                 '--source-sha "${{ github.sha }}"', '--ref "${{ github.ref }}"',
@@ -926,7 +928,7 @@ def check_native_vscode_consumers(block):
             fail(f'build workflow: native VSCode consumers must include {token!r}')
     if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
         fail('build workflow: native VSCode consumers must use immutable source checkout')
-    for forbidden in ('vscode-package', 'vscode-deps', 'cargo build', 'release-native-build'):
+    for forbidden in ('vscode-package', 'cargo build', 'release-native-build'):
         if forbidden in code:
             fail(f'build workflow: native VSCode consumers must not build or package ({forbidden})')
     if "if: runner.os == 'Linux'" not in code or "if: runner.os == 'macOS'" not in code:
@@ -5247,6 +5249,13 @@ def run_self_tests():
              ('build workflow native VSCode misses post-run hash',
               (('test "$vsix_before" = "$vsix_after"', 'true', 1),),
               "must include 'test \"$vsix_before\" = \"$vsix_after\"'"),
+             ('build workflow native VSCode consumer without client dependencies',
+              (('      - name: Install client dependencies\n'
+                '        run: |\n'
+                '          make_bin=$(command -v make)\n'
+                '          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" vscode-deps\n',
+                '', 1),),
+              "must include '.#release-acceptance'"),
              ('build workflow with a lost readiness dependency',
               (('      - native-consumers\n', '', 1),),
               'must need exactly'),
