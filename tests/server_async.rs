@@ -23,6 +23,23 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+/// Assert a polled status render against the synchronous oracle, appending the
+/// server's captured stderr so a Git child killed or reaped mid-fetch is
+/// decidable from the panic text (`child spawn` / `child term` warn lines).
+fn assert_expanded_render(
+    server: &TestServer,
+    lines: &[String],
+    expected: &[String],
+    context: &str,
+) {
+    assert_eq!(
+        lines,
+        expected,
+        "{context}: {lines:?}\nserver stderr:\n{}",
+        server.stderr_text()
+    );
+}
+
 /// The server's trace file for a client trace path (see `runner::TRACE_ENV`).
 #[cfg(unix)]
 fn completion_trace_file(trace: &std::path::Path) -> std::path::PathBuf {
@@ -262,7 +279,12 @@ fn status_open_fast_background_fetch_expands_like_the_sync_render() {
         viewport: Viewport::default(),
         pending: &[],
     });
-    assert_eq!(lines, expected.lines);
+    assert_expanded_render(
+        &server,
+        &lines,
+        &expected.lines,
+        "the fast background fetch must reproduce the synchronous fully-expanded render",
+    );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -327,9 +349,11 @@ fn status_open_config_open_streams_to_the_complete_buffer() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(
-        lines, expected.lines,
-        "the open batch must stream into the synchronous fully-expanded buffer"
+    assert_expanded_render(
+        &server,
+        &lines,
+        &expected.lines,
+        "the open batch must stream into the synchronous fully-expanded buffer",
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -401,9 +425,11 @@ fn status_open_large_promise_observes_expanded_install() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(
-        lines, expected.lines,
-        "the long promise must install the fully-expanded render"
+    assert_expanded_render(
+        &server,
+        &lines,
+        &expected.lines,
+        "the long promise must install the fully-expanded render",
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -475,9 +501,11 @@ fn status_open_refresh_inside_promise_rearms_background_fetch() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(
-        lines, expected.lines,
-        "a refresh inside the promise must re-arm the fully-expanded render"
+    assert_expanded_render(
+        &server,
+        &lines,
+        &expected.lines,
+        "a refresh inside the promise must re-arm the fully-expanded render",
     );
     gate.release();
     shutdown_and_exit(&mut server);
@@ -690,9 +718,11 @@ fn status_open_slow_batch_streams_hunks_by_incremental_edit() {
             .any(|line| line.contains("+line3 CHANGED")),
         "the oracle itself carries the hunk body"
     );
-    assert_eq!(
-        streamed, expected.lines,
-        "the streamed hunks reproduce the synchronous fully-expanded render"
+    assert_expanded_render(
+        &server,
+        &streamed,
+        &expected.lines,
+        "the streamed hunks reproduce the synchronous fully-expanded render",
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -779,9 +809,11 @@ fn status_open_refresh_during_batch_rearms_rows_only_then_hunks() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(
-        lines, expected.lines,
-        "the re-armed batch must restore the fully-expanded hunks"
+    assert_expanded_render(
+        &server,
+        &lines,
+        &expected.lines,
+        "the re-armed batch must restore the fully-expanded hunks",
     );
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
