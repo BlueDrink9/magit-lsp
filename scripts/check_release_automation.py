@@ -10,10 +10,11 @@ by the workflows themselves: ``--validate-run-metadata`` verifies that the
 selected build run is this repository's successful release build of the
 dispatch commit, ``--check-release-target`` resolves the version tag's commit
 and prints ``RELEASE_TARGET=<sha>``, ``--validate-release-ref`` validates the
-version pair and tag ref for a build run, ``--validate-artifacts`` verifies the
+version pair and tag ref for a build run and writes the ``RELEASE_VERSION``
+environment line, ``--validate-artifacts`` verifies the
 downloaded release archive/sidecar set and version triple, and
-``--print-version`` emits the ``RELEASE_VERSION`` environment line for later
-jobs. The default mode also verifies that the build workflow and the local
+``--print-version`` prints the bare validated version for later jobs. The
+default mode also verifies that the build workflow and the local
 `make release-locked`/`release-artifact-check` targets share one pinned
 release pipeline script, and runs fixture-driven self-tests of those decision
 points, so the rejections are exercised rather than only described.
@@ -5365,6 +5366,28 @@ def run_self_tests():
         expect_pipeline_error(pipeline, 'missing CI release version handoff',
                               pipeline.resolve_version, {'GITHUB_ACTIONS': 'true'},
                               expected='RELEASE_VERSION is missing')
+
+    # ``--print-version`` feeds the consumer steps verbatim: the VSIX
+    # downloader fullmatches the value as semver and the artifact step
+    # interpolates it, so it must print the bare version, not the
+    # ``RELEASE_VERSION=`` environment line ``--validate-release-ref`` writes.
+    root = Path(__file__).resolve().parents[1]
+    environment = {key: value for key, value in os.environ.items()
+                   if key != 'PYTHONPATH'}
+    result = subprocess.run(
+        [sys.executable, str(root / 'scripts/check_release_automation.py'),
+         '--print-version'],
+        cwd=root, env=environment, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        tail = detail[-6:] if detail else ['no output']
+        fail(f'self-test: --print-version exited {result.returncode}: '
+             + ' | '.join(tail))
+    printed = result.stdout.rstrip('\n')
+    if (printed != release_versions() or '=' in printed
+            or not VERSION_PATTERN.fullmatch(printed)):
+        fail('self-test: --print-version must print the bare validated version, '
+             f'found {result.stdout!r}')
     print('ok: release provenance, tag, artifact and workflow wiring self-tests')
 
 
@@ -5400,7 +5423,7 @@ def build_parser():
     parser.add_argument('--validate-release-ref', action='store_true',
                         help='validate RELEASE_REF and the version pair, writing $GITHUB_ENV')
     parser.add_argument('--print-version', action='store_true',
-                        help='print RELEASE_VERSION=<X.Y.Z> for $GITHUB_ENV')
+                        help='print the bare validated version for later jobs')
     parser.add_argument('--write-vsix-binding', action='store_true',
                         help='write exact VSIX hash and run provenance')
     parser.add_argument('--write-vsix-upload-identity', action='store_true',
@@ -5453,7 +5476,7 @@ def main():
             validate_release_ref()
             return 0
         if args.print_version:
-            print(f'RELEASE_VERSION={release_versions()}')
+            print(release_versions())
             return 0
         run_self_tests()
         check_workflow()
