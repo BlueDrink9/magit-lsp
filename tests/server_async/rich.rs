@@ -847,10 +847,10 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
     let mut server = TestServer::spawn(&[]);
     server.initialize_rich(json!({}));
     let (view, acquired) = super::open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
-    let uri = format!(
-        "magit://status/{}",
-        tmp.path().to_string_lossy().trim_start_matches('/')
-    );
+    // The server's canonical encoder: a raw native path is not a valid
+    // `lsp_types::Uri` on Windows (its backslashes and drive prefix are outside
+    // the path grammar), so requests built from one fail to deserialize.
+    let uri = magit_lsp::session::status_uri(&tmp.path().to_string_lossy());
     // The hunk is only in the outline once the closed section is opened.
     let version = super::show_all_and_ack(&mut server, 3, &view, acquired);
     // Resolve the request position from the server's structured outline.
