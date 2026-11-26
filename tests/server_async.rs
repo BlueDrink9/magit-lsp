@@ -2174,6 +2174,15 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+// Managed commit drafts need the Unix helper/validated-fd boundary. On Windows
+// `EditRegistry::create` is the platform stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the instant-autosquash draft scope
+// fails to open and the server answers with one "Cannot open instant autosquash
+// draft scope: {error}" showMessage while sending none of the frames the awaits
+// below need; the test then stalls in the bounded receive instead of failing
+// clearly. Real Windows draft support belongs to the deferred Windows phase;
+// tests/plain_draft_windows.rs pins the refusal.
+#[cfg(unix)]
 #[test]
 fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller() {
     magit_lsp_test_support::cargo_server_binary!();
@@ -2294,6 +2303,12 @@ fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller(
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+// Windows draft gate: `EditRegistry::create` is the stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the instant-autosquash draft scope
+// cannot open and the awaited draft frames never arrive — the test stalls in the
+// bounded receive instead of failing clearly. tests/plain_draft_windows.rs pins
+// the refusal; real Windows draft support is the deferred Windows phase.
+#[cfg(unix)]
 #[test]
 fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     magit_lsp_test_support::cargo_server_binary!();
@@ -2488,6 +2503,12 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+// Windows draft gate: `EditRegistry::create` is the stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the instant-autosquash draft scope
+// cannot open and the awaited draft frames never arrive — the test stalls in the
+// bounded receive instead of failing clearly. tests/plain_draft_windows.rs pins
+// the refusal; real Windows draft support is the deferred Windows phase.
+#[cfg(unix)]
 #[test]
 fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
     magit_lsp_test_support::cargo_server_binary!();
@@ -2729,6 +2750,12 @@ fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+// Windows draft gate: `EditRegistry::create` is the stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the instant-autosquash draft scope
+// cannot open and the awaited draft frames never arrive — the test stalls in the
+// bounded receive instead of failing clearly. tests/plain_draft_windows.rs pins
+// the refusal; real Windows draft support is the deferred Windows phase.
+#[cfg(unix)]
 #[test]
 fn instant_squash_selection_edits_message_through_registered_server_callback() {
     magit_lsp_test_support::cargo_server_binary!();
@@ -2975,6 +3002,12 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+// Windows draft gate: `EditRegistry::create` is the stub at src/editor.rs:791-794
+// ("managed commit drafts require Unix"), so the instant-autosquash draft scope
+// cannot open and the awaited draft frames never arrive — the test stalls in the
+// bounded receive instead of failing clearly. tests/plain_draft_windows.rs pins
+// the refusal; real Windows draft support is the deferred Windows phase.
+#[cfg(unix)]
 #[test]
 fn instant_squash_registered_editor_abort_retains_marker_and_releases_worker() {
     magit_lsp_test_support::cargo_server_binary!();

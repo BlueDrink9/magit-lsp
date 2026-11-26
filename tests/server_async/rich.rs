@@ -929,6 +929,14 @@ fn rich_main_only_nested_push_pop_preserves_caller_and_full_caps_keep_placement(
     }
 }
 
+// Draft-dependent: same Windows gate as
+// `instant_fixup_selection_autosquashes_through_real_server_and_restores_caller`
+// in tests/server_async.rs. On Windows `EditRegistry::create` is the stub at
+// src/editor.rs:791-794 ("managed commit drafts require Unix"), so after
+// `commit.create` no `editDocument` effect arrives and the loop below stalls in
+// the bounded receive instead of failing clearly. tests/plain_draft_windows.rs
+// pins the refusal; real Windows draft support is the deferred Windows phase.
+#[cfg(unix)]
 #[test]
 fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_input() {
     magit_lsp_test_support::cargo_server_binary!();
