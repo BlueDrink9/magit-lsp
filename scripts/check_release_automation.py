@@ -1672,13 +1672,17 @@ def validate_artifacts(directory, version=None):
     """Verify the downloaded archive/sidecar set and version triple.
 
     ``version`` defaults to the manifests' version; the self-tests pass a fixed
-    one so they do not depend on the checkout's current version. The directory
-    must contain exactly the expected archive and sidecar: an unexpected file is
-    refused rather than uploaded later, and the checksum is still compared.
+    one so they do not depend on the checkout's current version. The expected
+    target comes from ``RELEASE_BUILD_TARGET`` (the lane's matrix target) and
+    falls back to ``ASSET``, because every matrix lane validates its own
+    download. The directory must contain exactly the expected archive and
+    sidecar: an unexpected file is refused rather than uploaded later, and the
+    checksum is still compared.
     """
     version = version or release_versions()
     root = Path(directory)
-    stem = f'magit-lsp-v{version}-{ASSET}'
+    target = os.environ.get('RELEASE_BUILD_TARGET') or ASSET
+    stem = f'magit-lsp-v{version}-{target}'
     archive = root / f'{stem}.tar.gz'
     sidecar = root / f'{archive.name}.sha256'
     if not archive.is_file():
@@ -4824,6 +4828,28 @@ def run_self_tests():
         sidecar.unlink()
         expect_check('missing artifact sidecar', validate_artifacts, artifacts, '1.2.3',
                      expected='missing')
+
+        # The packaging step validates its own lane download, so the target must
+        # come from RELEASE_BUILD_TARGET rather than the Linux ASSET constant.
+        lane = directory / 'lane'
+        lane.mkdir()
+        lane_archive = lane / 'magit-lsp-v1.2.3-aarch64-apple-darwin.tar.gz'
+        lane_archive.write_bytes(b'lane bytes')
+        (lane / f'{lane_archive.name}.sha256').write_text(
+            f'{hashlib.sha256(b"lane bytes").hexdigest()}  {lane_archive.name}\n',
+            encoding='utf-8')
+        previous_target = os.environ.get('RELEASE_BUILD_TARGET')
+        os.environ['RELEASE_BUILD_TARGET'] = 'aarch64-apple-darwin'
+        try:
+            validate_artifacts(lane, '1.2.3')
+            del os.environ['RELEASE_BUILD_TARGET']
+            expect_check('lane artifact without the lane target', validate_artifacts,
+                         lane, '1.2.3', expected='x86_64-unknown-linux-gnu')
+        finally:
+            if previous_target is None:
+                os.environ.pop('RELEASE_BUILD_TARGET', None)
+            else:
+                os.environ['RELEASE_BUILD_TARGET'] = previous_target
 
         # The downloaded archive must still hash to the run-bound manifest.
         archive = next((artifacts).glob('*.tar.gz'))
