@@ -844,7 +844,10 @@ fn rich_full_caps_delivers_clipboard_and_visit_file() {
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
         .build();
-    let mut server = TestServer::spawn(&[]);
+    // Zero discards the deferred open's background fetch deterministically, so
+    // no extra render can race the client's acks and leave the symbol-less
+    // loading tree as the last acked tree; show-all then loads hunks inline.
+    let mut server = TestServer::spawn_with_args(&["--open-promise-ms", "0"], &[]);
     server.initialize_rich(json!({}));
     let (view, acquired) = super::open_view_versioned(&mut server, 2, &repo_param(tmp.path()));
     // The server's canonical encoder: a raw native path is not a valid
