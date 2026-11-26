@@ -326,6 +326,16 @@ class NativeArtifactTests(unittest.TestCase):
             self.assertIn(b'"method": "view/rendered"', sent)
             self.assertIn(b'"method": "view/invoke"', sent)
             self.assertIn(b'"command": "status.stage-all"', sent)
+            frames = []
+            while sent:
+                head, rest = sent.split(b'\r\n\r\n', 1)
+                size = int(head.split(b':', 1)[1])
+                frames.append(json.loads(rest[:size]))
+                sent = rest[size:]
+            view_open = next(message for message in frames if message.get('method') == 'view/open')
+            self.assertEqual(view_open['params']['viewport'], {'cols': 80, 'rows': 24})
+            self.assertNotIn(b'"width"', child.stdin.getvalue())
+            self.assertNotIn(b'"height"', child.stdin.getvalue())
             self.assertIn(['/tmp/extracted exact/magit-lsp', '--version'], calls)
             self.assertEqual(evidence['git']['staged'], ['tracked.txt'])
             self.assertEqual(evidence['lsp']['status_render_acks'], 1)

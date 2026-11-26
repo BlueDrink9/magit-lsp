@@ -154,7 +154,7 @@ def _functional(binary, target, version_expected, evidence):
                 raise InspectionError('server did not negotiate Magit protocol version 1')
             _notify(process, 'initialized', {})
             opened = _rpc(process, 'view/open', {'kind': 'status', 'args': {'repo_path': repo},
-                                'viewport': {'width': 80, 'height': 24}}, 2)
+                                'viewport': {'cols': 80, 'rows': 24}}, 2)
             view_id = opened.get('id') if isinstance(opened, dict) else None
             view_kind = opened.get('kind') if isinstance(opened, dict) else None
             view_mode = opened.get('mode') if isinstance(opened, dict) else None
