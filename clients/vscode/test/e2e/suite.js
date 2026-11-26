@@ -342,6 +342,11 @@ async function run() {
       "managed",
       "the install smoke uses the managed seeded server",
     );
+    // A rejected client start is UI-only inside the extension (output channel
+    // and showErrorMessage), so settle it here first: it then fails with its
+    // own stack instead of surfacing as the render timeout below.
+    await waitFor(() => Boolean(store.clientReady), "installed extension client promise");
+    await store.clientReady;
     await vscode.commands.executeCommand("magit.open");
     await waitFor(() => {
       const active = vscode.window.activeTextEditor;
@@ -352,8 +357,6 @@ async function run() {
       );
     }, "managed seeded-server status render");
     const statusText = vscode.window.activeTextEditor.document.getText();
-    await waitFor(() => Boolean(store.clientReady), "installed extension client promise");
-    await store.clientReady;
     const initialized = store.client?.initializeResult;
     assert(initialized, "the managed server completed initialization");
     const protocolVersion = initialized.capabilities?.experimental?.magit?.protocolVersion;
@@ -2939,8 +2942,23 @@ async function run() {
       /* Keep the original verification failure. */
     }
     let lifecycle = {};
+    let clientFailure;
+    let serverOrigin;
     try {
       const { store } = require(`${extension.extensionPath}/lib/store.js`);
+      serverOrigin = store.server;
+      // Bounded: a still-pending readiness promise must never hang the capture.
+      clientFailure = store.clientReady
+        ? await Promise.race([
+            store.clientReady.then(
+              () => null,
+              (readyError) => String(readyError?.stack || readyError),
+            ),
+            new Promise((resolve) =>
+              setTimeout(() => resolve("client readiness was still pending"), 2000),
+            ),
+          ])
+        : "the extension never started a language client";
       lifecycle = {
         activeViewId: store.activeViewId,
         quickPickViewId: store.quickPickViewId,
@@ -2972,6 +2990,8 @@ async function run() {
           renderedLines: Object.fromEntries(renderedLines),
           text: vscode.window.activeTextEditor?.document.getText(),
           lifecycle,
+          clientFailure,
+          serverOrigin,
         },
         null,
         2,

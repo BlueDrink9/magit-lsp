@@ -530,6 +530,8 @@ jobs:
           --event "${{ github.event_name }}" --version "$(python3 scripts/check_release_automation.py --print-version)"
           --output "$RUNNER_TEMP/vscode-vsix" > "$RUNNER_TEMP/vscode-vsix-download.json"
       - name: Run installed VSIX acceptance
+        env:
+          MAGIT_LSP_WIRELOG: ${{ runner.temp }}/magit-lsp-wire.jsonl
         run: |
           mkdir -p "$RUNNER_TEMP/vscode-native-bin"
           python3 -c 'from pathlib import Path; from scripts.check_native_artifact import safe_extract; import json,sys; h=json.load(open(sys.argv[1])); safe_extract(Path(h["archive"]),Path(sys.argv[2]),Path(h["archive"]).name.removesuffix(".tar.gz"))' "$RUNNER_TEMP/vscode-native/native-candidate.json" "$RUNNER_TEMP/vscode-native-bin"
@@ -552,6 +554,37 @@ jobs:
             ${{ runner.temp }}/vscode-vsix/vsix-candidate.json
             ${{ runner.temp }}/vscode-vsix-download.json
             ${{ runner.temp }}/native-vscode-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # A failing installed-extension run otherwise reports only a client-side
+      # render timeout: a rejected start is UI-only, and the run's isolated
+      # evidence directory (failure.txt, failure-state.json) is printed into a
+      # make log the `run` macro keeps only on failure. Recover it from that
+      # kept log, add the server's wire log, and upload both. Every command is
+      # guarded so collection never changes a failed job's result; a missing
+      # wire log means the server never spawned and only warns.
+      - name: Collect VSCode review evidence on failure
+        if: failure()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/vscode-review-evidence"
+          mkdir -p "$out" || true
+          log=$(ls -t build/test-logs/native-vscode-artifact-check.* 2>/dev/null | head -1) || true
+          if [ -n "$log" ]; then
+            dir=$(sed -n 's/.*VSCode text evidence: //p' "$log" | tail -1) || true
+            if [ -n "$dir" ] && [ -d "$dir" ]; then
+              cp -a "$dir/." "$out/" || true
+            fi
+          fi
+          cp -a "$RUNNER_TEMP/magit-lsp-wire.jsonl" "$out/" 2>/dev/null || true
+
+      - name: Upload VSCode review evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-vscode-review-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vscode-review-evidence
           if-no-files-found: warn
           retention-days: 14
 

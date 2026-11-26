@@ -153,6 +153,15 @@ FORENSICS_PREDICATE = ('eventMessage CONTAINS[c] "memorystatus" OR '
                        'eventMessage CONTAINS[c] "killed"')
 FORENSICS_UPLOAD = ('actions/upload-artifact@'
                     'cf430e030ddbb5b0abf93d22962f4752f3646cd9')
+# A failing installed-extension lane otherwise reports only a client-side render
+# timeout, because a rejected client start is UI-only. The run's isolated
+# evidence directory is printed into a make log kept only on failure, so the
+# lane recovers it from that log and uploads it with the server's wire log. A
+# missing wire log means the server never spawned, so it never errors.
+REVIEW_ARTIFACT = 'native-vscode-review-${{ matrix.target }}-${{ github.run_attempt }}'
+REVIEW_PATH = '${{ runner.temp }}/vscode-review-evidence'
+REVIEW_WIRELOG = '${{ runner.temp }}/magit-lsp-wire.jsonl'
+REVIEW_MARKER = 'VSCode text evidence: '
 RELEASE_MANIFEST = 'build/release/release-manifest.json'
 # Every producer packages the exact source/ref/event/run identity it was
 # triggered from; an inferred head_branch or workflow_run SHA is never accepted.
@@ -720,6 +729,41 @@ def check_os_kill_forensics(block, context):
                  f'evidence with {token!r}')
 
 
+def check_vscode_review_forensics(block, context):
+    """Require the guarded on-failure VSCode evidence and wire-log upload.
+
+    A rejected installed-extension client start is reported only in the
+    editor's UI, so a failed lane otherwise names nothing but a render timeout.
+    The run's isolated evidence directory is printed into a make log the ``run``
+    macro keeps only on failure; the lane recovers it from that kept log,
+    tolerates its absence, and uploads it with the server's wire log. Collection
+    is on-failure only and fully guarded, so it can never change a passing
+    job's result, and a missing wire log (the server never spawned) only warns.
+    """
+    code = '\n'.join(code_lines(block))
+    for token in ('if: failure()', REVIEW_MARKER, REVIEW_PATH, REVIEW_WIRELOG,
+                  'MAGIT_LSP_WIRELOG:', 'ls -t build/test-logs/native-vscode-artifact-check.',
+                  'cp -a'):
+        if token not in code:
+            fail(f'build workflow: {context} must collect on-failure VSCode '
+                 f'review evidence ({token!r})')
+    steps = job_steps(block)
+    collect = next((lines for _, lines in steps
+                    if REVIEW_MARKER in '\n'.join(lines)
+                    and 'uses:' not in '\n'.join(lines)), [])
+    if 'if: failure()' not in '\n'.join(collect):
+        fail(f'build workflow: {context} VSCode review evidence collection '
+             'must be its own on-failure step')
+    upload = next((lines for _, lines in steps
+                   if REVIEW_ARTIFACT in '\n'.join(lines)), [])
+    upload_text = '\n'.join(upload)
+    for token in (FORENSICS_UPLOAD, 'if-no-files-found: warn',
+                  'retention-days: 14'):
+        if token not in upload_text:
+            fail(f'build workflow: {context} must upload the VSCode review '
+                 f'evidence with {token!r}')
+
+
 def check_native_candidates(block):
     """Require the strict, mandatory Linux GNU/macOS matrix experiment.
 
@@ -933,6 +977,7 @@ def check_native_vscode_consumers(block):
             fail(f'build workflow: native VSCode consumers must not build or package ({forbidden})')
     if "if: runner.os == 'Linux'" not in code or "if: runner.os == 'macOS'" not in code:
         fail('build workflow: editor setup must cover Linux and macOS hosted runners')
+    check_vscode_review_forensics(block, 'native VSCode consumers')
 
 
 def check_consumer_entrypoints(path=BUILD_WORKFLOW):
@@ -5500,6 +5545,15 @@ def run_self_tests():
                 '          nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" vscode-deps\n',
                 '', 1),),
               "must include '.#release-acceptance'"),
+              ('build workflow native VSCode acceptance without a wire log',
+               (('        env:\n'
+                 '          MAGIT_LSP_WIRELOG: ${{ runner.temp }}/magit-lsp-wire.jsonl\n',
+                 '', 1),),
+               'must collect on-failure VSCode review evidence'),
+              ('build workflow native VSCode review evidence without an upload',
+               (('          name: native-vscode-review-${{ matrix.target }}-${{ github.run_attempt }}\n',
+                 '          name: native-vscode-review-disabled\n', 1),),
+               'must upload the VSCode review evidence'),
              ('build workflow with a lost readiness dependency',
               (('      - native-consumers\n', '', 1),),
               'must need exactly'),
