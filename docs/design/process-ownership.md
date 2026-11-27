@@ -38,7 +38,10 @@ The retained unreaped leader pins PID/PGID identity: no other waiter, `try_wait`
 final reap. Exit observation is distinct from pipe EOF. On normal leader exit,
 never signal to force inherited-pipe EOF; allow the 2-second drain deadline,
 report incomplete drain, finalize.
-Terminal access on Darwin stays closed by construction (see Portability gate).
+Git's own terminal-prompt paths on Darwin stay closed by construction (see
+Portability gate). Children that address `/dev/tty` directly can still reach an
+inherited controlling terminal; unconditional KILL escalation remains their
+containment.
 Readers must support cancellation/parent-pipe close, bounded data and deadline,
 not detached indefinitely-blocked threads. Crash cannot run this reaper or
 guarantee child cleanup. Nested hooks share group; `setsid` escapees cannot be
@@ -58,11 +61,14 @@ evidence in
 The Darwin guarantee is therefore **process-group ownership, not a new session**:
 `CommandExt::process_group(0)` maps to `POSIX_SPAWN_SETPGROUP`, so pgid == pid
 and the group is signalled via `-pid`, while the session is inherited and a
-controlling tty remains possible. Terminal access is closed by construction
-instead: stdin is always null or piped and never inherited
+controlling tty remains possible. Git's own prompt paths are closed instead:
+stdin is always null or piped and never inherited
 (`src/runner/owned.rs:112-119`), `GIT_TERMINAL_PROMPT=0` is always set
 (`src/git.rs:3450`), and `GIT_ASKPASS`/`SSH_ASKPASS` are routed through the
-editor bridge whenever a server runs (`src/git.rs:3454-3459`).
+editor bridge whenever a server runs (`src/git.rs:3454-3459`). This does not close
+a child that opens `/dev/tty` directly (for example ssh host-key confirmation);
+when the server inherited a controlling terminal, that path remains reachable
+and the escalation KILL is the containment backstop.
 
 Spawn-path disqualifiers are audited. Rust std uses `posix_spawnp` for a bare
 program name like `git` and bails to fork+exec only when: `pre_exec` sets

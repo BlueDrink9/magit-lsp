@@ -150,16 +150,18 @@ lanes (functional ×3, build ×2) fit a macOS-26 hosted-runner environmental
 factor that kills short-lived helper processes without a logged trail.
 
 Standing disposition: record-only (this file), keep the fail-fast
-`AcquisitionFailed` behaviour, no retry — a retry cannot fix an external
-killer and would hide its recurrence. Validation of a lane that lost a test to
-this kill is by re-running the job until green.
+`AcquisitionFailed` behaviour, and do not retry as a fix — a retry would hide
+recurrence of the spawn-path defect rather than remove it. Validation is by a
+fresh hosted run with zero matching child-side fork aborts.
 
 ## Verdict (run 45971196440, 2026-11-27): fork pre-exec child-side abort
 
 The next release run's `.ips` captures resolve the earlier "external killer with
-no logged trail": the child was never killed from outside — it aborted on the
-**child side of fork, before exec**. Two identical incidents were collected in
-that run, at 09:26:51 and 09:27:24 (for example
+no logged trail". The **practical root cause** is fork in a multithreaded parent
+while another thread held a libplatform `os_once` gate (libnotify globals): the
+child's atfork handler aborted before exec, and `pre_exec(setsid)` forced that
+fork. The exact concurrent parent-side trigger remains inferred. Two identical
+incidents were collected in that run, at 09:26:51 and 09:27:24 (for example
 `diagnostic-reports/user-magit-lsp-2026-11-27-092724.ips` under
 `profile-one/`).
 
@@ -182,9 +184,11 @@ The fix is therefore a **spawn-path change, not a kill disposition**:
 any `pre_exec` forces std's fork+exec path and reproduces the abort. On Darwin the
 child's process group is set with `CommandExt::process_group(0)`
 (`POSIX_SPAWN_SETPGROUP`), which keeps group ownership (`kill(-pid)`) with the
-session inherited; the verified terminal-access invariants above
-(stdin never inherited, `GIT_TERMINAL_PROMPT=0`, askpass bridge) close the
-resulting tty risk. `process_group` has been stable since Rust 1.64; the checked
+session inherited; the verified invariants above (stdin never inherited,
+`GIT_TERMINAL_PROMPT=0`, askpass bridge) close Git's own prompt paths, while a
+child that opens `/dev/tty` directly can still reach an inherited controlling
+terminal and remains contained by escalation KILL. `process_group` has been
+stable since Rust 1.64; the checked
 local toolchain was rustc 1.99.1. The Darwin pgid == pid test cannot run on a
 Linux worker: hosted macOS stays **unverified until the next release run**, which
 is the real oracle.
