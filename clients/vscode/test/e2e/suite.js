@@ -350,10 +350,17 @@ async function run() {
     await vscode.commands.executeCommand("magit.open");
     await waitFor(() => {
       const active = vscode.window.activeTextEditor;
-      return Boolean(
-        active &&
-        active.document.uri.scheme === "magit" &&
-        /tracked\.txt/.test(active.document.getText()),
+      if (!active || active.document.uri.scheme !== "magit") return false;
+      // The product default (StatusOpen::Auto) renders the Head line and
+      // section counts first and expands file rows only when the background
+      // hunk fetch beats the open promise, so assert that declared closed
+      // render rather than a file row.
+      const text = active.document.getText();
+      return (
+        text.includes("Head:") &&
+        text.includes("Staged changes") &&
+        text.includes("Unstaged changes") &&
+        text.includes("Untracked files")
       );
     }, "managed seeded-server status render");
     const statusText = vscode.window.activeTextEditor.document.getText();

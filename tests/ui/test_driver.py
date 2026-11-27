@@ -1243,6 +1243,17 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
             self.assertIn("native-vscode-artifact-check:\n", makefile)
             self.assertIn("vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps", makefile)
 
+    def test_vscode_vsix_status_render_predicate_asserts_declared_default_render(self) -> None:
+        """Guard the install probe against re-asserting an expanded file row."""
+        suite = (ROOT / "clients/vscode/test/e2e/suite.js").read_text(encoding="utf-8")
+        start = suite.index('await vscode.commands.executeCommand("magit.open");')
+        end = suite.index('"managed seeded-server status render"', start)
+        predicate = suite[start:end]
+        self.assertNotIn("tracked\\.txt", predicate)
+        self.assertIn('uri.scheme !== "magit"', predicate)
+        for header in ("Head:", "Staged changes", "Unstaged changes", "Untracked files"):
+            self.assertIn(header, predicate)
+
     def test_rust_artifact_target_defaults_to_server_async_and_selects_suites(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
