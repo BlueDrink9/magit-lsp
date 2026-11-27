@@ -190,8 +190,9 @@ child that opens `/dev/tty` directly can still reach an inherited controlling
 terminal and remains contained by escalation KILL. `process_group` has been
 stable since Rust 1.64; the checked
 local toolchain was rustc 1.99.1. The Darwin pgid == pid test cannot run on a
-Linux worker: hosted macOS stays **unverified until the next release run**, which
-is the real oracle.
+Linux worker. The first hosted macOS run after the fix is recorded below; that
+run is the real oracle for the released binary, while the pgid-specific
+assertion remains macOS-only.
 
 ### Spawn-path disqualifiers (structural audit)
 
@@ -213,10 +214,11 @@ the working directory passed as the git global option `-C <cwd>` rather than
 `Command::current_dir` (`git_command` and `user_excludes_path` in `src/git.rs`).
 The `-C` change removes the cwd/`addchdir_np` class entirely, so posix_spawn is
 structurally unconditional for these commands instead of depending on the
-runtime probe. Hosted macOS proof that the released binary takes that path
-remains **pending the next release run** and is not claimed here.
+runtime probe. Hosted macOS run `46076380885` exercised the released binary with
+no observed fork abort; this is absence evidence from one run, not proof of
+std's internal path (see below).
 
-## Host verdict capture (pending hosted run)
+## Host verdict capture (run 46076380885)
 
 `scripts/profile_ci_test.py` now tees the wrapped command's stdout/stderr into
 `child-output.log` with drain threads that forward every chunk to the caller's
@@ -238,13 +240,16 @@ collectors whose statuses are recorded in `summary.json` under their own keys:
 
 Neither collector can change the exit status or the caller's streams; both
 behavioural properties are proven by `make profiler-check`, and the script
-tokens are guarded by `make release-automation-unit`. Hosted evidence remains
-**pending the next release run**: the existing `macos-profile-*` upload takes
-the whole `$RUNNER_TEMP/macos-profile` directory, so the next macOS job carries
-`child-output.log`, `kernel-log.log` and any `diagnostic-reports/` copies with
-no workflow change. No hosted `.ips` or kernel-log capture is claimed here.
+tokens are guarded by `make release-automation-unit`.
 
-Next step: sender-capture and memory profiling now wraps both macOS lanes
-(`scripts/profile_ci_test.py`, uploaded as `macos-profile-*`), and the same
-lanes collect the host verdicts above; hosted capture remains **pending the
-next release run** and is not claimed here.
+Run `46076380885` at `255b43f` exercised the macOS native-candidates and native
+functional Rust suites after the spawn-path fix. The functional profiler exited
+0, parsed no victim pids, copied no `.ips` reports, and found no kernel victim
+pids: the earlier fork/pre-exec abort did not recur in that run. This is absence
+evidence from one hosted run, not proof of std's internal path or final release
+acceptance. The release still failed later in `native-functional-consumers`,
+when the Neovim `status-basics` scenario raced the closed `StatusOpen::Auto`
+render and timed out waiting for file rows. That scenario now opens explicitly
+(`7763cd1`), so a fresh release run remains necessary for complete validation.
+The existing `macos-profile-*` upload carried `child-output.log`, `kernel-log.log`
+and the collector status without a workflow change.
