@@ -1931,12 +1931,28 @@ fn status_open_refresh_wait_reports_killed_git_child_as_acquisition_failure() {
         "the killed child died before its log echo: {log:?}"
     );
     // Three-way evidence: the spawn line proves the gated script ran, so this
-    // is not an exec-time kill, while its subcommand echo stays absent.
-    assert!(
-        log.lines()
-            .any(|line| line.trim_start().starts_with("spawned pid=")),
-        "the killed child must record its spawn line: {log:?}"
+    // is not an exec-time kill, while its subcommand echo stays absent. Read
+    // the file-backed witness before touching stderr: `drain_stderr` can drop
+    // the front of the captured stream, but never this log.
+    let spawn = log
+        .lines()
+        .find(|line| line.trim_start().starts_with("spawned pid="))
+        .unwrap_or_else(|| panic!("the killed child must record its spawn line: {log:?}"));
+    let spawn_fields: Vec<&str> = spawn.split_whitespace().collect();
+    assert_eq!(
+        spawn_fields.len(),
+        3,
+        "one complete spawn line, no torn suffix: {spawn:?} in {log:?}"
     );
+    assert_eq!(spawn_fields[0], "spawned", "{spawn:?}");
+    for field in &spawn_fields[1..] {
+        assert!(
+            field
+                .split_once('=')
+                .is_some_and(|(_, value)| value.parse::<u64>().is_ok_and(|n| n > 0)),
+            "spawn line field is not a positive number: {field:?} in {spawn:?}"
+        );
+    }
     // The parent reaped a signal death and logged it at warn, so the trace
     // survives the default `warn` filter into this test's captured stderr.
     let deadline = Instant::now() + Duration::from_secs(5);

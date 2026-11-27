@@ -179,11 +179,10 @@ impl GatedGit {
                  subcommand=\"$1\"\n\
                  if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
                  # Spawn evidence: identity is the script's first write, before any\n\
-                 # fork, so an exec-time or early kill still names the child. The\n\
-                 # epoch is appended in a second write; a `$(date +%s)` in the first\n\
-                 # would reopen the exec-to-write window this line measures.\n\
-                 printf 'spawned pid=%s ppid=%s t=' \"$$\" \"$PPID\" >> '{invocations}'\n\
-                 printf '%s\\n' \"$(date +%s)\" >> '{invocations}'\n\
+                 # fork, so an exec-time or early kill still names the child. One\n\
+                 # printf appends the whole line at once; a command substitution\n\
+                 # here would fork mid-write and tear the line a kill interrupts.\n\
+                 printf 'spawned pid=%s ppid=%s\\n' \"$$\" \"$PPID\" >> '{invocations}'\n\
                  {action}\
                  exec '{real}' \"$@\"\n",
                 real = real_git.display(),
@@ -518,6 +517,38 @@ mod tests {
         );
     }
 
+    /// Every spawn witness in `log` as `(pid, ppid)`.
+    ///
+    /// Panics on a line that is torn or incomplete: the script writes each
+    /// witness with one `printf`, so exactly one whole
+    /// `spawned pid=<pid> ppid=<ppid>` line exists per invocation.
+    fn parse_spawn_lines(log: &str) -> Vec<(u64, u64)> {
+        log.lines()
+            .filter(|line| line.starts_with("spawned pid="))
+            .map(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                assert_eq!(
+                    fields.len(),
+                    3,
+                    "one complete spawn line, no torn suffix: {line:?} in {log:?}"
+                );
+                assert_eq!(fields[0], "spawned", "spawn line prefix: {line:?}");
+                let number = |field: &str, key: &str| {
+                    field
+                        .strip_prefix(key)
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .filter(|n| *n > 0)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "spawn line field is not a positive number: {field:?} in {line:?}"
+                            )
+                        })
+                };
+                (number(fields[1], "pid="), number(fields[2], "ppid="))
+            })
+            .collect()
+    }
+
     /// The `PATH` override of `gate`, for running the fake script directly.
     fn gate_path(gate: &GatedGit) -> String {
         gate.child_env()
@@ -560,22 +591,16 @@ mod tests {
 
         // The spawn line survives the self-kill, so a killed child still names
         // itself and its parent: the discriminator this mode exists to produce.
+        // One printf appends the line whole, so a kill leaves either no line or
+        // one complete `spawned pid=<pid> ppid=<ppid>` line, never a torn one.
         let log = gate.invocation_log();
-        let spawned = log
-            .lines()
-            .find(|line| line.starts_with("spawned pid="))
-            .unwrap_or_else(|| panic!("kill mode must record the spawn line: {log:?}"));
-        let fields: Vec<&str> = spawned.split_whitespace().collect();
-        assert_eq!(fields.len(), 4, "spawn line fields: {spawned:?}");
-        assert_eq!(fields[0], "spawned");
-        for field in &fields[1..] {
-            assert!(
-                field
-                    .split_once('=')
-                    .is_some_and(|(_, value)| value.parse::<u64>().is_ok_and(|n| n > 0)),
-                "spawn line field is not a positive number: {field:?} in {spawned:?}"
-            );
-        }
+        let spawned = parse_spawn_lines(&log);
+        assert_eq!(
+            spawned.len(),
+            1,
+            "the killed child must leave exactly one complete spawn line: {log:?}"
+        );
+        let killed_spawn = spawned[0];
 
         // The single gated slot stays spent: the next command runs the real Git.
         let next = Command::new("sh")
@@ -585,10 +610,17 @@ mod tests {
             .output()
             .expect("run fake git");
         assert!(next.status.success(), "{next:?}");
-        assert!(
-            gate.invocation_log().contains("--version"),
-            "{:?}",
-            gate.invocation_log()
+        let log = gate.invocation_log();
+        assert!(log.contains("--version"), "{log:?}");
+        let survivors = parse_spawn_lines(&log);
+        assert_eq!(
+            survivors.len(),
+            2,
+            "each invocation appends exactly one spawn line: {log:?}"
+        );
+        assert_eq!(
+            survivors[0], killed_spawn,
+            "the later append must not rewrite the killed child's line: {log:?}"
         );
     }
 
