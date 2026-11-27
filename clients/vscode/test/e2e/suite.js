@@ -358,9 +358,9 @@ async function run() {
       const text = active.document.getText();
       return (
         text.includes("Head:") &&
-        text.includes("Staged changes") &&
-        text.includes("Unstaged changes") &&
-        text.includes("Untracked files")
+        text.includes("Staged changes (0)") &&
+        text.includes("Unstaged changes (1)") &&
+        text.includes("Untracked files (1)")
       );
     }, "managed seeded-server status render");
     const statusText = vscode.window.activeTextEditor.document.getText();

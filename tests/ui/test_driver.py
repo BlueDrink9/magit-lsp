@@ -1251,7 +1251,12 @@ class NativeArtifactMakeTargetTest(unittest.TestCase):
         predicate = suite[start:end]
         self.assertNotIn("tracked\\.txt", predicate)
         self.assertIn('uri.scheme !== "magit"', predicate)
-        for header in ("Head:", "Staged changes", "Unstaged changes", "Untracked files"):
+        for header in (
+            "Head:",
+            "Staged changes (0)",
+            "Unstaged changes (1)",
+            "Untracked files (1)",
+        ):
             self.assertIn(header, predicate)
 
     def test_rust_artifact_target_defaults_to_server_async_and_selects_suites(self) -> None:
