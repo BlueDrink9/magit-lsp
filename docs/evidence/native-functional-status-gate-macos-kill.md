@@ -153,3 +153,7 @@ Standing disposition: record-only (this file), keep the fail-fast
 `AcquisitionFailed` behaviour, no retry — a retry cannot fix an external
 killer and would hide its recurrence. Validation of a lane that lost a test to
 this kill is by re-running the job until green.
+
+Next step: sender-capture and memory profiling now wraps both macOS lanes
+(`scripts/profile_ci_test.py`, uploaded as `macos-profile-*`); hosted capture
+remains **pending the next release run** and is not claimed here.
