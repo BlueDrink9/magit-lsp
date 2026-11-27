@@ -2360,6 +2360,11 @@ impl StatusGate {
             &script,
             &format!(
                 "#!/bin/sh\n\
+                 # Git is invoked as `git -C <cwd> [--no-optional-locks] <subcommand>`;\n\
+                 # strip the leading -C pair (cd keeps its cwd semantics) before\n\
+                 # identifying the subcommand, then restore it for passthrough.\n\
+                 strip_c=\"\"\n\
+                 if [ \"$1\" = -C ]; then strip_c=\"$2\"; cd \"$2\" || exit 1; shift 2; fi\n\
                  subcommand=\"$1\"\n\
                  if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
                  if [ \"$subcommand\" = 'status' ] && [ -f '{arm}' ] && [ ! -f '{claimed}' ]; then\n\
@@ -2377,6 +2382,7 @@ impl StatusGate {
                    : > '{finished}'\n\
                    exit $status\n\
                  fi\n\
+                 if [ -n \"$strip_c\" ]; then set -- -C \"$strip_c\" \"$@\"; fi\n\
                  exec '{real}' \"$@\"\n",
                 arm = arm.display(),
                 claimed = claimed.display(),

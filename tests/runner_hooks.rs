@@ -409,7 +409,7 @@ fn lock_warning_probe_has_its_own_bounded_readonly_deadline() {
         assert!(real.status.success());
         let real = String::from_utf8(real.stdout).unwrap();
         let wrapper = dir.path().join("git");
-        write(&wrapper, &format!("#!/bin/sh\nif [ \"$*\" = '--no-optional-locks rev-parse --absolute-git-dir --git-common-dir' ]; then\n trap '' TERM\n echo $$ > \"$MAGIT_TEST_PROBE_PID\"\n exec sleep 60\nfi\nexec '{}' \"$@\"\n", real.trim()));
+        write(&wrapper, &format!("#!/bin/sh\n# production argv is: git -C <cwd> --no-optional-locks ...\nif [ \"$1\" = -C ]; then cd \"$2\" || exit 1; shift 2; fi\nif [ \"$*\" = '--no-optional-locks rev-parse --absolute-git-dir --git-common-dir' ]; then\n trap '' TERM\n echo $$ > \"$MAGIT_TEST_PROBE_PID\"\n exec sleep 60\nfi\nexec '{}' \"$@\"\n", real.trim()));
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
