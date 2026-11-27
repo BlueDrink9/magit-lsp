@@ -3315,12 +3315,14 @@ fn warn_if_git_is_below_recommendation(
         return None;
     };
     let Some(stdout) = child.stdout.take() else {
-        // `Child::kill` terminates the probe child (SIGKILL on Unix).
-        tracing::warn!(
+        // `Child::kill` terminates the probe child (SIGKILL on Unix). This is
+        // routine probe cleanup, not a Git failure, so it stays at debug.
+        tracing::debug!(
             pid = child.id(),
+            subcommand = "--version",
             reason = "version_probe_stdout_missing",
             signal = 9,
-            "child kill"
+            "probe kill"
         );
         let _ = child.kill();
         let _ = child.wait();
@@ -3342,11 +3344,14 @@ fn warn_if_git_is_below_recommendation(
             }
             _ => {
                 // `Child::kill` terminates the probe child (SIGKILL on Unix).
-                tracing::warn!(
+                // This is routine probe cleanup, not a Git failure, so it
+                // stays at debug.
+                tracing::debug!(
                     pid = child.id(),
+                    subcommand = "--version",
                     reason = "version_probe_deadline",
                     signal = 9,
-                    "child kill"
+                    "probe kill"
                 );
                 let _ = child.kill();
                 let _ = child.wait();
@@ -3468,7 +3473,10 @@ fn log_finished(
     stdout: &[u8],
     stderr: &[u8],
 ) {
-    let exit_code = status.code().unwrap_or(-1);
+    // A signal death carries no exit status; keep the negated signal so the
+    // process log and the `git_call` trace describe the same command outcome
+    // as `GitFailure` instead of a bare -1.
+    let exit_code = exit_code_of(status);
     let elapsed_ms = elapsed.as_millis();
     let record_id = runner::global_log().record(cwd, args, exit_code, elapsed, stdout, stderr);
     runner::trace_current(

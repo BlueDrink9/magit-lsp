@@ -605,3 +605,99 @@ fn a_signal_killed_git_failure_names_the_signal() {
         "git status failed (killed by signal 9)"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_signal_killed_git_child_records_the_negated_signal_in_the_process_log() {
+    use magit_lsp::runner;
+
+    let (tmp, repo) = init_repo();
+    // A hook that SIGKILLs its parent (`git`) makes the child die without an
+    // exit status: the case the process log must keep self-describing instead
+    // of collapsing the signal death to -1.
+    let hook = tmp.path().join(".git/hooks/pre-commit");
+    std::fs::create_dir_all(hook.parent().expect("hooks directory")).expect("hooks dir");
+    std::fs::write(&hook, "#!/bin/sh\nkill -9 $PPID\n").expect("write hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod hook");
+    // Staged work makes `git commit` run the hook rather than abort first.
+    std::fs::write(tmp.path().join("signal.txt"), "payload\n").expect("write file");
+    tmp.git(&["add", "signal.txt"]);
+
+    let evidence = "signal-killed child logged";
+    let error = repo
+        .commit(&["-m", evidence], &[])
+        .expect_err("SIGKILLed git must fail");
+    assert_eq!(error.git.expect("git failure").exit_code, -9);
+
+    let record = runner::global_log()
+        .iter()
+        .into_iter()
+        .rev()
+        .find(|record| record.args.contains(&evidence.to_string()))
+        .expect("the killed commit is recorded");
+    assert_eq!(
+        record.exit_code, -9,
+        "the process log must keep the negated signal"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn version_probe_kill_logs_probe_kill_at_debug() {
+    // The probe log line goes to the process's tracing subscriber, so the
+    // assertion body runs in a child of this test binary: it can install the
+    // subscriber and scope a hanging `git --version` to its own PATH.
+    const CHILD: &str = "MAGIT_LSP_VERSION_PROBE_LOG_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let real_git = std::env::split_paths(&std::env::var_os("PATH").expect("PATH"))
+            .map(|dir| dir.join("git"))
+            .find(|path| path.is_file())
+            .expect("real git on PATH");
+        let fake = TempDir::new().expect("fake git dir");
+        let script = fake.path().join("git");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exec sleep 30; fi\nexec '{}' \"$@\"\n",
+                real_git.display()
+            ),
+        )
+        .expect("write fake git");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod fake git");
+        let mut paths = vec![fake.path().to_path_buf()];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let output = Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", "version_probe_kill_logs_probe_kill_at_debug"])
+            .env(CHILD, "1")
+            .env("MAGIT_LSP_LOG", "debug")
+            .env("PATH", std::env::join_paths(paths).expect("join PATH"))
+            .output()
+            .expect("run child");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "child failed: {stderr}{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let probe = stderr
+            .lines()
+            .find(|line| line.contains("probe kill") && line.contains("subcommand"))
+            .unwrap_or_else(|| panic!("no probe kill line: {stderr}"));
+        assert!(
+            probe.contains("DEBUG"),
+            "the probe kill must log at debug: {probe}"
+        );
+        assert!(
+            probe.contains("--version"),
+            "the probe kill must name its subcommand: {probe}"
+        );
+        return;
+    }
+
+    magit_lsp::logging::init().expect("logging");
+    let (_tmp, repo) = init_repo();
+    // Nothing staged: `git commit` fails and triggers the version probe, whose
+    // `git --version` child never finishes inside the 500ms deadline.
+    let _ = repo.commit(&["-m", "probe"], &[]);
+}
