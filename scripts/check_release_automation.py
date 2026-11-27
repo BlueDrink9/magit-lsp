@@ -773,6 +773,15 @@ def check_macos_profile_capture(block, context):
         if token not in code:
             fail(f'build workflow: {context} must wrap only the macOS branch in '
                  f'the profile wrapper ({token!r})')
+    # A redirect on the wrapper's own command sends the wrapped command's stream
+    # past the profiler's tee, so child-output.log stays empty and the reap-line
+    # victim pids are lost. Each `;` list below is one shell command.
+    for line in code_lines(block):
+        for command in line.split(';'):
+            if ('scripts/profile_ci_test.py' in command
+                    and '2>&1' in command):
+                fail(f'build workflow: {context} must not redirect around the '
+                     'profile wrapper (its tee captures the child stream)')
     steps = job_steps(block)
     upload = next((lines for _, lines in steps
                    if PROFILE_ARTIFACT in '\n'.join(lines)), [])
@@ -972,6 +981,8 @@ def check_native_functional_consumers(block, profile_script=PROFILE_SCRIPT):
         'executable_sha256', 'before_sha256', 'after_sha256',
         'native-functional-evidence.json', 'if: always()', 'if-no-files-found: warn',
         'steps.harness.outcome', 'steps.rust-functional.outcome',
+        'cp "$RUNNER_TEMP/macos-profile/child-output.log" '
+        '"$RUNNER_TEMP/native-functional-rust.log"',
     )
     for token in required:
         if token not in code:
@@ -5671,6 +5682,19 @@ def run_self_tests():
                 'test-rust-artifact',
                 '-c "$make_bin" test-rust-artifact', 1),),
               'must run the profile wrapper'),
+             ('build workflow macOS functional consumers redirecting around the profile wrapper',
+              (('-c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" '
+                'FILTER="--test server_async --test editor_bridge '
+                '--test rebase_interactive" || status=$?',
+                '-c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" '
+                'FILTER="--test server_async --test editor_bridge '
+                '--test rebase_interactive" > "$RUNNER_TEMP/'
+                'native-functional-rust.log" 2>&1 || status=$?', 1),),
+              'must not redirect around the profile wrapper'),
+             ('build workflow macOS functional consumers losing the captured child stream',
+              ((' cp "$RUNNER_TEMP/macos-profile/child-output.log" '
+                '"$RUNNER_TEMP/native-functional-rust.log" || true;', '', 1),),
+              'child-output.log'),
              ('build workflow macOS candidates without the profile upload',
               (('      - name: Upload macOS profile samples\n'
                 '        if: always()\n'

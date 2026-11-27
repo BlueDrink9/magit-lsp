@@ -91,6 +91,17 @@ def check_victim_pid_parsing():
         raise SystemExit('FAILED: victim pid extraction')
     if profile_ci_test.parse_victim_pids('') != []:
         raise SystemExit('FAILED: empty output produced victim pids')
+    quiet = '\n'.join((
+        'child spawn pid=20793 reason="spawn" program=git',
+        'child reap pid=19221 reason="exit" signal=0',
+        'child reap pid=19221 reason="reap" sig=9',
+    ))
+    if profile_ci_test.parse_victim_pids(quiet) != []:
+        raise SystemExit(
+            'FAILED: a stream without a signal=9 reap line produced victim pids')
+    if profile_ci_test.parse_victim_pids(
+            'child reap pid=19221 reason="reap" signal=9') != [19221]:
+        raise SystemExit('FAILED: a captured reap line did not yield its pid')
 
 
 def check_log_window_and_predicate():
