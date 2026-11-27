@@ -113,7 +113,14 @@ fn debounce_collapses_a_burst_into_one_refresh() {
     let (fixture, _repo) = init_repo();
     let repo = fixture.path().to_path_buf();
     let (tx, rx) = mpsc::channel();
-    let mut watcher = RepoWatcher::start(&repo, test_config(), move |refresh| {
+    // A burst is defined by every event landing inside one debounce window.
+    // Under coverage instrumentation and CI load, notify's delivery of the
+    // four writes can be spaced past the 20 ms test debounce — two windows,
+    // hence two correct refreshes. Widen only this test's window so the four
+    // writes stay one burst; 500 ms is still far below WAIT.
+    let mut config = test_config();
+    config.debounce = Duration::from_millis(500);
+    let mut watcher = RepoWatcher::start(&repo, config, move |refresh| {
         tx.send(refresh).expect("send refresh");
     })
     .expect("start watcher");
@@ -126,8 +133,10 @@ fn debounce_collapses_a_burst_into_one_refresh() {
     wait_for(&rx, "the burst's refresh", |refresh| {
         matches!(refresh, Refresh::Changed(_))
     });
+    // Quiet check is 2x the debounce: a genuine duplicate within the window
+    // still fails, while a correctly coalesced burst stays silent.
     assert!(
-        nothing_within(&rx, Duration::from_millis(100)),
+        nothing_within(&rx, Duration::from_millis(1000)),
         "one burst produced more than one refresh"
     );
 
