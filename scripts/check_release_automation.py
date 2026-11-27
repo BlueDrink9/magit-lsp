@@ -752,6 +752,10 @@ def check_profile_capture_script(path=PROFILE_SCRIPT):
         if token not in text:
             fail('profile profiler must capture sender and memory evidence '
                  f'({token!r})')
+    for token in ('*.ips', 'DiagnosticReports', 'log show --info --debug'):
+        if token not in text:
+            fail('profile profiler must capture the host kill verdict '
+                 f'({token!r})')
 
 
 def check_macos_profile_capture(block, context):
@@ -5716,6 +5720,21 @@ def run_self_tests():
                 mutated_file(PROFILE_SCRIPT, directory, label,
                              (('/usr/bin/eslogger', '/usr/bin/fixture-sender', None),)),
                 expected='capture sender and memory evidence')
+
+        # The same script must keep the post-exit host verdicts: the macOS
+        # diagnostic reports and the bounded kernel `log show` window.
+        for label, mutations in (
+            ('macOS candidates profiler without the DiagnosticReports capture',
+             (('DiagnosticReports', 'fixture-reports', None),)),
+            ('macOS candidates profiler without the diagnostic report glob',
+             (("'*.ips'", "'*.fixture'", 1),)),
+            ('macOS candidates profiler without the kernel log capture',
+             (('log show --info --debug', 'log show --last 10m', None),)),
+        ):
+            expect_check(
+                label, check_native_candidates, profile_jobs[NATIVE_JOB],
+                mutated_file(PROFILE_SCRIPT, directory, label, mutations),
+                expected='capture the host kill verdict')
 
         # The same-job server graph: real command ordering, the exact packaged
         # release selector/hash, server-only duplication, coverage separation,

@@ -154,6 +154,35 @@ Standing disposition: record-only (this file), keep the fail-fast
 killer and would hide its recurrence. Validation of a lane that lost a test to
 this kill is by re-running the job until green.
 
+## Host verdict capture (pending hosted run)
+
+`scripts/profile_ci_test.py` now tees the wrapped command's stdout/stderr into
+`child-output.log` with drain threads that forward every chunk to the caller's
+inherited descriptors as it arrives, so the caller's bytes and timing are
+unchanged. After the child exits, and only on macOS, it runs two best-effort
+collectors whose statuses are recorded in `summary.json` under their own keys:
+
+- `ips_reports` copies the code-signing/jetsam `.ips` reports written during the
+  command window from `/Library/Logs/DiagnosticReports` and
+  `~/Library/Logs/DiagnosticReports` into `diagnostic-reports/` inside
+  `--output-dir`. A missing directory records `absent`, an unreadable one
+  `denied`, a non-Darwin host `unavailable`, and a copy failure `denied`.
+- `kernel_log` runs `log show --info --debug --start <start> --end <end>
+  --predicate 'sender == "kernel" OR eventMessage CONTAINS[c] "<pid>"'` for the
+  pids parsed from the server's `child reap pid=N ... signal=9` lines, and
+  writes `kernel-log.log`. With no parsed victim pid it falls back to the
+  kernel-only predicate. A missing `log`, a timeout or a non-zero exit is
+  recorded, never fatal.
+
+Neither collector can change the exit status or the caller's streams; both
+behavioural properties are proven by `make profiler-check`, and the script
+tokens are guarded by `make release-automation-unit`. Hosted evidence remains
+**pending the next release run**: the existing `macos-profile-*` upload takes
+the whole `$RUNNER_TEMP/macos-profile` directory, so the next macOS job carries
+`child-output.log`, `kernel-log.log` and any `diagnostic-reports/` copies with
+no workflow change. No hosted `.ips` or kernel-log capture is claimed here.
+
 Next step: sender-capture and memory profiling now wraps both macOS lanes
-(`scripts/profile_ci_test.py`, uploaded as `macos-profile-*`); hosted capture
-remains **pending the next release run** and is not claimed here.
+(`scripts/profile_ci_test.py`, uploaded as `macos-profile-*`), and the same
+lanes collect the host verdicts above; hosted capture remains **pending the
+next release run** and is not claimed here.
