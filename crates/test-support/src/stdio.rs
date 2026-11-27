@@ -507,6 +507,15 @@ impl TestServer {
             .clone()
     }
 
+    /// Return captured stderr once the reader thread has caught up with it.
+    ///
+    /// The drain thread appends asynchronously, so [`TestServer::stderr_text`]
+    /// at a panic site can omit lines the child already wrote. This settles the
+    /// samples with [`settled_text`] before reporting them.
+    pub fn stderr_text_settled(&self) -> String {
+        settled_text(|| self.stderr_text())
+    }
+
     /// Close the input pipe.
     pub fn close_stdin(&mut self) {
         self.stdin.take();
@@ -598,6 +607,32 @@ pub fn frame(message: Value) -> Vec<u8> {
     bytes
 }
 
+/// Quiescence window two [`settled_text`] samples must span before they count
+/// as agreeing.
+const SETTLE_QUIET: Duration = Duration::from_millis(250);
+
+/// Hard bound on one [`settled_text`] wait, so a chatty server cannot stall a
+/// panic path.
+const SETTLE_CAP: Duration = Duration::from_secs(2);
+
+/// Sample `text` until two samples a quiescence window apart agree.
+///
+/// The stderr drain thread appends asynchronously, so a single snapshot at a
+/// failure site can report capture lag as if the line were absent. The wait is
+/// bounded by [`SETTLE_CAP`]; the drain log truncates its front past 200k
+/// chars, so two equal samples are the only settle signal this uses.
+fn settled_text(mut text: impl FnMut() -> String) -> String {
+    let deadline = Instant::now() + SETTLE_CAP;
+    loop {
+        let before = text();
+        thread::sleep(SETTLE_QUIET);
+        let after = text();
+        if before == after || Instant::now() >= deadline {
+            return after;
+        }
+    }
+}
+
 /// Drain the server's stderr so a full pipe can never block it, keeping the
 /// tail for failure messages.
 fn drain_stderr(mut stderr: std::process::ChildStderr, log: Arc<Mutex<String>>) -> JoinHandle<()> {
@@ -682,6 +717,30 @@ fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stderr_text_settled_reports_a_line_written_before_the_call() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("marker");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("echo marker-line >&2; touch \"$1\"; exec sleep 5")
+            .arg("marker-writer")
+            .arg(&marker);
+        let server = TestServer::from_command(command, &[]);
+
+        // The marker exists only after the child wrote its stderr line, so the
+        // call below races only the reader thread, never the child.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "marker file was never created");
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        let text = server.stderr_text_settled();
+        assert!(text.contains("marker-line"), "settled stderr: {text:?}");
+    }
 
     #[test]
     fn spawn_failure_detail_names_program_args_harness_and_explicit_selection() {

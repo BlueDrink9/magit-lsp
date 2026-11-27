@@ -125,7 +125,7 @@ fn wait_for_gate_or_failure(gate: &GatedGit, server: &mut TestServer, view: &str
                 {
                     return GateWait::AcquisitionFailed {
                         text,
-                        stderr: server.stderr_text(),
+                        stderr: server.stderr_text_settled(),
                     };
                 }
             }
@@ -137,7 +137,7 @@ fn wait_for_gate_or_failure(gate: &GatedGit, server: &mut TestServer, view: &str
             "the gated acquisition neither entered the gate nor reported a failure within \
              {GATE_ENTER_TIMEOUT:?}; the fake Git's invocation log:\n{}\nserver stderr:\n{}",
             gate.invocation_log(),
-            server.stderr_text()
+            server.stderr_text_settled()
         );
     }
 }
