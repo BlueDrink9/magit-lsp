@@ -45,7 +45,22 @@ impl FakeGit {
             &script,
             format!(
                 "#!/bin/sh\n\
-                 if [ \"$1\" = \"add\" ] && [ \"$2\" = \"-u\" ]; then\n\
+                 # Skip leading `-C <dir>` global options before detecting the\n\
+                 # subcommand; `$@` is forwarded unchanged so the real Git still\n\
+                 # applies them.\n\
+                 first=\"\"\n\
+                 second=\"\"\n\
+                 seen=\"\"\n\
+                 skip=\"\"\n\
+                 for arg in \"$@\"; do\n\
+                   if [ \"$skip\" = 1 ]; then skip=\"\"; continue; fi\n\
+                   case \"$arg\" in\n\
+                     -C) skip=1 ;;\n\
+                     *) if [ \"$seen\" = 1 ]; then second=\"$arg\"; break; fi\n\
+                        first=\"$arg\"; seen=1 ;;\n\
+                   esac\n\
+                 done\n\
+                 if [ \"$first\" = \"add\" ] && [ \"$second\" = \"-u\" ]; then\n\
                    printf 'started\\n' > \"${{{MARKER_ENV}}}\"\n\
                    exec sleep 30\n\
                  fi\n\
@@ -176,8 +191,18 @@ impl GatedGit {
             &script,
             format!(
                 "#!/bin/sh\n\
-                 subcommand=\"$1\"\n\
-                 if [ \"$subcommand\" = '--no-optional-locks' ]; then subcommand=\"$2\"; fi\n\
+                 # Skip leading global options (`-C <dir>` and\n\
+                 # `--no-optional-locks`) so the subcommand is found; `$@` is\n\
+                 # forwarded unchanged so the real Git still applies them.\n\
+                 subcommand=\"\"\n\
+                 skip=\"\"\n\
+                 for arg in \"$@\"; do\n\
+                   if [ \"$skip\" = 1 ]; then skip=\"\"; continue; fi\n\
+                   if [ \"$arg\" = '-C' ]; then skip=1; continue; fi\n\
+                   if [ \"$arg\" = '--no-optional-locks' ]; then continue; fi\n\
+                   subcommand=\"$arg\"\n\
+                   break\n\
+                 done\n\
                  # Spawn evidence: identity is the script's first write, before any\n\
                  # fork, so an exec-time or early kill still names the child. One\n\
                  # printf appends the whole line at once; a command substitution\n\
@@ -678,5 +703,113 @@ mod tests {
             message.contains("--version"),
             "invocation log missing: {message}"
         );
+    }
+
+    /// A leading `-C <dir>` global option (the production spawn shape) must
+    /// leave subcommand detection, the gate handshake and the invocation log
+    /// unchanged versus the `-C`-less argv.
+    #[test]
+    fn leading_dash_c_pair_keeps_gate_detection_and_invocation_log() {
+        let repo = tempfile::tempdir().expect("repo");
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(repo.path())
+            .status()
+            .expect("run git init")
+            .success());
+        std::fs::write(repo.path().join("untracked.txt"), "x\n").expect("untracked file");
+
+        let gate = GatedGit::arm("status");
+        let path = gate_path(&gate);
+        let mut gated = Command::new("sh")
+            .arg(&gate.script)
+            .args([
+                "-C",
+                repo.path().to_str().expect("utf-8 temp path"),
+                "status",
+                "--porcelain",
+            ])
+            .env("PATH", &path)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("run gated fake git");
+        // The `-C` prefix must not hide `status`: the gate is entered, not
+        // skipped on the way to the real Git.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !gate.has_entered() {
+            if let Some(status) = gated.try_wait().expect("poll gated fake git") {
+                panic!(
+                    "the -C pair hid the subcommand; fake git exited {status:?}; log: {}",
+                    gate.invocation_log()
+                );
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the gated `status` never entered the gate; log: {}",
+                gate.invocation_log()
+            );
+            thread::sleep(POLL);
+        }
+        gate.release();
+        let gated = gated.wait_with_output().expect("gated fake git result");
+        assert!(gated.status.success(), "gated fake git failed: {gated:?}");
+        // `$@` is forwarded unchanged, so the real Git ran with the same `-C`.
+        assert!(
+            String::from_utf8_lossy(&gated.stdout).contains("?? untracked.txt"),
+            "the -C directory was not forwarded: {:?}",
+            String::from_utf8_lossy(&gated.stdout)
+        );
+
+        // Control: the same subcommand without the prefix. Both runs must log
+        // exactly one `status` line, so detection is unchanged.
+        let control = Command::new("sh")
+            .arg(&gate.script)
+            .args(["status", "--porcelain"])
+            .current_dir(repo.path())
+            .env("PATH", &path)
+            .output()
+            .expect("run control fake git");
+        assert!(control.status.success(), "{control:?}");
+        assert_eq!(
+            gate.invocation_count(),
+            2,
+            "invocation log: {}",
+            gate.invocation_log()
+        );
+    }
+
+    /// The plain fake's `add -u` gate must still fire when the production argv
+    /// leads with `-C <dir>`.
+    #[test]
+    fn plain_fake_detects_add_u_after_a_leading_dash_c_pair() {
+        let repo = tempfile::tempdir().expect("repo");
+        let marker = repo.path().join("started");
+        let fake = FakeGit::new();
+        // Route through the shell so the freshly written script is read as
+        // data, as in the gate tests above.
+        let mut child = Command::new("sh")
+            .args(["-c", "git \"$@\"", "fake-git", "-C"])
+            .arg(repo.path())
+            .args(["add", "-u"])
+            .env("PATH", &fake.path)
+            .env(MARKER_ENV, &marker)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("run fake git");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() {
+            if let Some(status) = child.try_wait().expect("poll fake git") {
+                panic!("the -C pair hid `add -u`; fake git exited {status:?}");
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the fake git never signalled the `add -u` gate"
+            );
+            thread::sleep(POLL);
+        }
+        child.kill().expect("kill the gated sleep");
+        let status = child.wait().expect("reap the gated sleep");
+        assert!(!status.success(), "the gated sleep must not exit cleanly");
     }
 }

@@ -64,6 +64,23 @@ instead: stdin is always null or piped and never inherited
 (`src/git.rs:3450`), and `GIT_ASKPASS`/`SSH_ASKPASS` are routed through the
 editor bridge whenever a server runs (`src/git.rs:3454-3459`).
 
+Spawn-path disqualifiers are audited. Rust std uses `posix_spawnp` for a bare
+program name like `git` and bails to fork+exec only when: `pre_exec` sets
+uid/gid/groups/chroot (`library/std/src/sys/process/unix/unix.rs:469-477`); an
+env override of `PATH` accompanies a non-path program (:471); or a cwd is set
+and the *runtime weak-symbol* probe for
+`posix_spawn_file_actions_addchdir_np` (macOS ≥ 10.15) fails, or the program is
+a relative path on Apple (:657-678). The posix_spawn entry point is
+`posix_spawnp` (:783); these citations are from the upstream master source and
+the checked local toolchain was rustc 1.99.1
+([evidence](../evidence/native-functional-status-gate-macos-kill.md)).
+Production Git commands now use no disqualifier: no `pre_exec`, no `PATH` env
+key, the bare program name `git`, and the working directory passed as the git
+global option `-C <cwd>` instead of `Command::current_dir` (both production
+spawns, `git_command` and `user_excludes_path`, in `src/git.rs`). Hosted macOS
+proof that these spawns actually take the posix_spawn path remains **pending
+the next release run**; this is a structural audit, not host evidence.
+
 PID reuse stays excluded on every Unix target: group signals are sent only before
 the direct child is reaped, and the unreaped zombie pins pid/pgid for exactly as
 long as ownership is retained. Grace escalation (TERM, 2-second grace, one group

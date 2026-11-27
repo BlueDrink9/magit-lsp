@@ -118,9 +118,12 @@ fn reject_symlink_destination(root: &Path, path: &Path) -> Result<()> {
 }
 
 fn user_excludes_path(root: &Path) -> Result<PathBuf> {
+    // `-C` instead of `Command::current_dir` keeps every production Git spawn
+    // on the structurally unconditional posix_spawn path; see `git_command`.
     let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args(["config", "--path", "--get", "core.excludesFile"])
-        .current_dir(root)
         .output()?;
     if output.status.success() {
         return Ok(PathBuf::from(
@@ -3439,11 +3442,18 @@ fn record_diff_call(path: &Path) {
 
 /// Build a `git` child that can never write to the server's own stdout and
 /// never prompts on a terminal nobody is reading.
+///
+/// The target directory is passed as the git global option `-C <cwd>` rather
+/// than through `Command::current_dir`: on Darwin a set cwd qualifies for Rust
+/// std's fork+exec fallback whenever the runtime `posix_spawn_file_actions_addchdir_np`
+/// probe fails, while `-C` keeps the spawn on the unconditional `posix_spawn`
+/// path (see `docs/design/process-ownership.md`).
 fn git_command(cwd: &Path, args: &[&str], stdin: Stdio, env: &[(&str, &str)]) -> Command {
     let mut command = Command::new("git");
     command
+        .arg("-C")
+        .arg(cwd)
         .args(args)
-        .current_dir(cwd)
         .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -3653,5 +3663,89 @@ mod tests {
                 "missing cardinality: {message}"
             );
         }
+    }
+
+    /// The production builder must select the repository with `-C <cwd>`, not
+    /// with the child's process cwd: a relative pathspec resolves against the
+    /// repository root exactly as the old `Command::current_dir` form did.
+    #[test]
+    fn git_command_passes_cwd_as_dash_c_for_relative_pathspecs() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(root)
+                    .status()
+                    .expect("run git")
+                    .success(),
+                "git {args:?} failed"
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::create_dir(root.join("sub")).expect("sub dir");
+        std::fs::write(root.join("sub/tracked.txt"), "before\n").expect("tracked file");
+        git(&["add", "sub/tracked.txt"]);
+        git(&["commit", "-qm", "initial"]);
+        std::fs::write(root.join("sub/tracked.txt"), "after\n").expect("edit tracked file");
+
+        let mut command = git_command(
+            root,
+            &["status", "--porcelain", "--", "sub/tracked.txt"],
+            Stdio::null(),
+            &[],
+        );
+        // `-C` leads so the argv shape is stable for logs and fixtures.
+        let argv: Vec<_> = command.get_args().collect();
+        assert_eq!(argv[0], "-C");
+        assert_eq!(Path::new(argv[1]), root);
+        let output = command.output().expect("run git status");
+        assert!(output.status.success(), "git status failed: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            " M sub/tracked.txt\n",
+            "the relative pathspec must resolve against the -C directory"
+        );
+
+        // The old `current_dir` spawn is the control: identical output proves
+        // the `-C` mechanism preserves its semantics.
+        let control = Command::new("git")
+            .args(["status", "--porcelain", "--", "sub/tracked.txt"])
+            .current_dir(root)
+            .output()
+            .expect("run control git status");
+        assert_eq!(control.stdout, output.stdout);
+    }
+
+    /// The second production Git spawn (`user_excludes_path`) must resolve the
+    /// repository through `-C` too, not through its own process cwd.
+    #[test]
+    fn user_excludes_path_resolves_config_through_dash_c() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .status()
+            .expect("run git init")
+            .success());
+        let excludes = root.join("global-ignore");
+        assert!(Command::new("git")
+            .args([
+                "config",
+                "core.excludesFile",
+                excludes.to_str().expect("utf-8 temp path"),
+            ])
+            .current_dir(root)
+            .status()
+            .expect("run git config")
+            .success());
+        assert_eq!(
+            user_excludes_path(root).expect("resolve excludes"),
+            excludes
+        );
     }
 }

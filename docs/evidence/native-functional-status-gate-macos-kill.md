@@ -189,6 +189,29 @@ local toolchain was rustc 1.99.1. The Darwin pgid == pid test cannot run on a
 Linux worker: hosted macOS stays **unverified until the next release run**, which
 is the real oracle.
 
+### Spawn-path disqualifiers (structural audit)
+
+The no-fallback guarantee rests on std's runtime choice, not on our code, so the
+disqualifying `Command` settings were audited against upstream std
+(`library/std/src/sys/process/unix/unix.rs`). Std spawns a bare program name via
+`posix_spawnp` (:783) and bails to fork+exec only when:
+
+- `pre_exec` sets uid/gid/groups/chroot (:469-477);
+- an env override of `PATH` accompanies a non-path program (:471);
+- a cwd is set and the runtime weak-symbol probe for
+  `posix_spawn_file_actions_addchdir_np` (macOS ≥ 10.15) fails, or the program
+  is a relative path on Apple (:657-678).
+
+Production Git commands use none of them: no `pre_exec`
+(`src/runner/owned.rs:123-138` is the non-Apple branch), no `PATH` env key (only
+`GIT_*`/`SSH_*`/askpass keys, `src/git.rs:3450-3463`), the bare name `git`, and
+the working directory passed as the git global option `-C <cwd>` rather than
+`Command::current_dir` (`git_command` and `user_excludes_path` in `src/git.rs`).
+The `-C` change removes the cwd/`addchdir_np` class entirely, so posix_spawn is
+structurally unconditional for these commands instead of depending on the
+runtime probe. Hosted macOS proof that the released binary takes that path
+remains **pending the next release run** and is not claimed here.
+
 ## Host verdict capture (pending hosted run)
 
 `scripts/profile_ci_test.py` now tees the wrapped command's stdout/stderr into
