@@ -1,13 +1,11 @@
 # R-1.x/R-2.4 staging, folding, visual stage and a refused native edit.
 #
-# The status view opens closed and expands when the background diff fetch beats
-# the open promise. The conditional wait below requires that expanded render
-# before the fold walk, so the scenario never depends on the client going idle
-# at the right moment. On a machine whose first fetch could exceed the
-# production promise, run it with
-# `MAGIT_LSP_BIN=scripts/open-promise-server.sh`, which widens the
-# promise. The slow path (closed sections on open) is covered by the
-# server_async status_open tests.
+# The status view's default `StatusOpen::Auto` publishes closed sections on
+# open; a background diff fetch expands them only if it beats the open promise.
+# Rather than race that promise, this scenario waits for the open render and
+# then issues an explicit show-all, which takes fold ownership and yields the
+# same fully expanded layout on both fast and slow machines. The promise-losing
+# (closed-render) slow path is covered by the server_async status_open tests.
 #
 # The vim profile uses a real visual selection (`V j s`). The standard profile
 # binds `V` to `open.revert` and `v` to `status.reverse` (§5) and R4 forbids
@@ -18,7 +16,10 @@
 fixture: modified-two-files
 ---
 wait
-wait screen contains "+line3 CHANGED"
+keys vim: z R
+keys standard: M-4
+wait
+expect screen contains "+line3 CHANGED"
 keys: j j j j
 wait
 expect cursor on "Unstaged changes"
