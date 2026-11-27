@@ -489,6 +489,7 @@ fn normal_and_piped_apply_failures_keep_original_details() {
         &fake,
         format!(
             "#!/bin/sh
+            if [ \"$1\" = -C ]; then cd \"$2\" || exit 1; shift 2; fi
             if [ \"$1\" = --version ]; then
             echo 'git version 2.19.6.windows.1'
             exit 0
@@ -658,7 +659,7 @@ fn version_probe_kill_logs_probe_kill_at_debug() {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exec sleep 30; fi\nexec '{}' \"$@\"\n",
+                "#!/bin/sh\nif [ \"$1\" = -C ]; then cd \"$2\" || exit 1; shift 2; fi\nif [ \"$1\" = \"--version\" ]; then exec sleep 30; fi\nexec '{}' \"$@\"\n",
                 real_git.display()
             ),
         )
