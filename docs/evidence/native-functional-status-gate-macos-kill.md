@@ -253,3 +253,27 @@ render and timed out waiting for file rows. That scenario now opens explicitly
 (`7763cd1`), so a fresh release run remains necessary for complete validation.
 The existing `macos-profile-*` upload carried `child-output.log`, `kernel-log.log`
 and the collector status without a workflow change.
+
+## Hosted release validation (run 46083073290)
+
+Release build `46083073290` at `93da8f4` completed successfully on 2026-11-27.
+All 13 required jobs passed, including source checks, the macOS and Linux native
+candidates, native consumers, native functional consumers, installed-VSIX
+consumers, and the final release-readiness gate. This is the complete hosted
+release/native-consumer validation that the preceding run still needed.
+
+The macOS functional profiler again exited 0. Its `summary.json` records 47
+samples, `ips_reports.copied: []`, `ips_reports.victim_pids: []`, and
+`kernel_log.victim_pids: []`; `child-output.log` contains no child signal or reap
+line. Peak descendant-tree RSS was 139024 KiB. No DiagnosticReports copy or
+kernel victim record was produced, so the fork/pre-exec abort did not recur in
+this run. The native functional evidence also records both `status-basics.scn`
+and `commit-message-editor.scn` passing against the identity-bound release
+binary, and the macOS installed-VSIX consumer evidence is `ok: true` with stable
+before/after candidate hashes.
+
+This closes hosted validation for `93da8f4`: the release build and native
+consumer lanes are green, and the corrected Darwin spawn path has a second
+hosted macOS run without a fork-abort recurrence. As before, this is absence
+evidence for the exercised runs, not direct proof of std's internal spawn
+choice.
