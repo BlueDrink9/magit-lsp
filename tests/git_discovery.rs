@@ -44,7 +44,7 @@ fn real_git_path() -> PathBuf {
 fn wrapper(dir: &Path, real_git: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("git");
-    std::fs::write(&path, format!("#!/bin/sh\n[ -n \"$GIT_DISCOVERY_LOG\" ] && printf '%s\\n' \"$*\" >> \"$GIT_DISCOVERY_LOG\"\nfor arg in \"$@\"; do [ \"$arg\" = --path-format=absolute ] && {{ echo 'unsupported --path-format' >&2; exit 129; }}; done\nif [ \"$GIT_DISCOVERY_MODE\" = failure ] && [ \"$1\" = rev-parse ]; then echo 'simulated git execution failure' >&2; exit 23; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
+    std::fs::write(&path, format!("#!/bin/sh\nif [ \"$1\" = -C ]; then cd \"$2\" || exit 1; [ -n \"$GIT_DISCOVERY_CWD_LOG\" ] && printf '%s %s\\n' \"$1\" \"$2\" >> \"$GIT_DISCOVERY_CWD_LOG\"; shift 2; fi\n[ -n \"$GIT_DISCOVERY_LOG\" ] && printf '%s\\n' \"$*\" >> \"$GIT_DISCOVERY_LOG\"\nfor arg in \"$@\"; do [ \"$arg\" = --path-format=absolute ] && {{ echo 'unsupported --path-format' >&2; exit 129; }}; done\nif [ \"$GIT_DISCOVERY_MODE\" = failure ] && [ \"$1\" = rev-parse ]; then echo 'simulated git execution failure' >&2; exit 23; fi\nexec '{}' \"$@\"\n", real_git.display())).unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -70,8 +70,19 @@ fn logged_git_calls() -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn logged_git_cwd_pairs() -> Vec<String> {
+    std::env::var("GIT_DISCOVERY_CWD_LOG")
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|lines| lines.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
 fn reset_git_log() {
     if let Ok(path) = std::env::var("GIT_DISCOVERY_LOG") {
+        std::fs::write(path, "").unwrap();
+    }
+    if let Ok(path) = std::env::var("GIT_DISCOVERY_CWD_LOG") {
         std::fs::write(path, "").unwrap();
     }
 }
@@ -87,6 +98,7 @@ fn child(path: &Path, wrapper_dir: &Path, mode: &str, expected_branch: &str) {
         .env("GIT_DISCOVERY_PATH", path)
         .env("GIT_DISCOVERY_EXPECT_BRANCH", expected_branch)
         .env("GIT_DISCOVERY_LOG", wrapper_dir.join("git-calls.log"))
+        .env("GIT_DISCOVERY_CWD_LOG", wrapper_dir.join("git-cwd.log"))
         .output()
         .unwrap();
     assert!(
@@ -132,7 +144,9 @@ fn recommended_git_queries_discover_and_open_worktrees_and_propagate_failures() 
     );
     git(&linked, &["checkout", "-q", "--detach"]);
     child(&linked, &wrapper_dir, "compatible", "HEAD");
-    child(&temp.path().join("not-a-repo"), &wrapper_dir, "failure", "");
+    let not_a_repo = temp.path().join("not-a-repo");
+    std::fs::create_dir(&not_a_repo).unwrap();
+    child(&not_a_repo, &wrapper_dir, "failure", "");
 }
 
 #[test]
@@ -177,6 +191,12 @@ fn child_checks_discovery() {
     let calls = logged_git_calls();
     assert_eq!(calls.len(), 1, "discovery launched {calls:?}");
     assert!(calls[0].starts_with("rev-parse "), "{}", calls[0]);
+    let cwd_pairs = logged_git_cwd_pairs();
+    assert_eq!(
+        cwd_pairs,
+        vec![format!("-C {}", path.display())],
+        "discovery lost the leading -C <cwd>: {cwd_pairs:?}"
+    );
     assert_eq!(branch, expected_branch);
     reset_git_log();
     let opened = magit_lsp::git::GitRepo::open(&path).unwrap();
