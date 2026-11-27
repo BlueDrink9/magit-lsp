@@ -10,7 +10,8 @@ duplicate/unknown/ended tokens do not report, and cleanup retains the repository
 reservation until the owner finishes. Exit-before-cancel still wins and completed
 commits still report success. Start Git in
 a new session/process group before exec (child-side spawn setup, not racy
-post-spawn `setpgid`). No controlling tty: piped stdout/stderr, null stdin unless
+post-spawn `setpgid`; Darwin uses `posix_spawn`'s `SETPGROUP` and inherits the
+session — see Portability gate). No controlling tty: piped stdout/stderr, null stdin unless
 the invocation requires otherwise. Concurrent readers retain at most 4 MiB per
 stream, continue draining/discarding after cap, and flag truncation. Reader drain
 deadline is 2 seconds after leader exit/terminal cancellation. When the owner
@@ -37,6 +38,7 @@ The retained unreaped leader pins PID/PGID identity: no other waiter, `try_wait`
 final reap. Exit observation is distinct from pipe EOF. On normal leader exit,
 never signal to force inherited-pipe EOF; allow the 2-second drain deadline,
 report incomplete drain, finalize.
+Terminal access on Darwin stays closed by construction (see Portability gate).
 Readers must support cancellation/parent-pipe close, bounded data and deadline,
 not detached indefinitely-blocked threads. Crash cannot run this reaper or
 guarantee child cleanup. Nested hooks share group; `setsid` escapees cannot be
@@ -45,9 +47,30 @@ contained. Never broad-kill, delete locks, or kill normal-exit daemons.
 Portability gate: `setsid` and `waitid(...WNOWAIT)` are Unix interfaces with
 platform-specific availability/semantics; Linux implementation and real-Git
 tests are required before Linux R-EDIT-2 acceptance and R-EDIT-6 client cutover.
-macOS group/WNOWAIT/reap behavior remains unverified and belongs to the separate,
-later R-EDIT-9 CI/platform acceptance ticket, not a Linux acceptance dependency.
-Retain the full-grace fallback on macOS; it is not validation. Investigate kqueue
+Linux is unchanged: session and group leader before exec, no controlling tty.
+
+Darwin must not use `pre_exec` at all: any `pre_exec` forces Rust std's fork+exec
+path, and its child-side libplatform atfork handlers abort mid-spawn
+(`libSystem_atfork_child` → `_notify_fork_child` →
+`_os_once_gate_corruption_abort`, `os_once_t is corrupt`; run 45971196440,
+evidence in
+[`docs/evidence/native-functional-status-gate-macos-kill.md`](../evidence/native-functional-status-gate-macos-kill.md)).
+The Darwin guarantee is therefore **process-group ownership, not a new session**:
+`CommandExt::process_group(0)` maps to `POSIX_SPAWN_SETPGROUP`, so pgid == pid
+and the group is signalled via `-pid`, while the session is inherited and a
+controlling tty remains possible. Terminal access is closed by construction
+instead: stdin is always null or piped and never inherited
+(`src/runner/owned.rs:112-119`), `GIT_TERMINAL_PROMPT=0` is always set
+(`src/git.rs:3450`), and `GIT_ASKPASS`/`SSH_ASKPASS` are routed through the
+editor bridge whenever a server runs (`src/git.rs:3454-3459`).
+
+PID reuse stays excluded on every Unix target: group signals are sent only before
+the direct child is reaped, and the unreaped zombie pins pid/pgid for exactly as
+long as ownership is retained. Grace escalation (TERM, 2-second grace, one group
+KILL) is unchanged on Darwin. macOS group/WNOWAIT/reap behavior otherwise remains
+unverified and belongs to the separate, later R-EDIT-9 CI/platform acceptance
+ticket, not a Linux acceptance dependency. Retain the full-grace fallback on
+macOS; it is not validation. Investigate kqueue
 exit observation only if required, not as an implemented alternative. Rust
 `Child::try_wait` reaps on observed exit, so cannot precede a possible group
 signal; use non-reaping waitid observation plus sole final reap or gate platform.

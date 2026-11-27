@@ -154,6 +154,41 @@ Standing disposition: record-only (this file), keep the fail-fast
 killer and would hide its recurrence. Validation of a lane that lost a test to
 this kill is by re-running the job until green.
 
+## Verdict (run 45971196440, 2026-11-27): fork pre-exec child-side abort
+
+The next release run's `.ips` captures resolve the earlier "external killer with
+no logged trail": the child was never killed from outside — it aborted on the
+**child side of fork, before exec**. Two identical incidents were collected in
+that run, at 09:26:51 and 09:27:24 (for example
+`diagnostic-reports/user-magit-lsp-2026-11-27-092724.ips` under
+`profile-one/`).
+
+- Victim pid 18885: `child spawn pid=18885 reason="spawn" program=git`
+  at 09:27:24.482040, then `child reap pid=18885 reason="reap" signal=9`
+  **13 ms** later, still with no `child term` or `child kill` line — so branch 1
+  (self-inflicted) remains excluded exactly as in the previous verdict, and the
+  profiler's parsed reap victim pid matches the `.ips` report's victim.
+- The `.ips` backtrace is child-side and pre-exec: `libSystem_atfork_child` →
+  `_notify_fork_child` → `_os_once_gate_corruption_abort`, reported as
+  `BUG IN CLIENT OF LIBPLATFORM: os_once_t is corrupt` and
+  `crashed on child side of fork pre-exec`.
+- The earlier absence of any ES/kernel kill record is explained by this: no
+  actor signalled the child; the abort happens in the fork child, and the parent
+  only observes a SIGKILL-class reap. A foreign atfork initializer stays
+  unproven and is not chased (watcher-first-use is SUSPECTED only).
+
+The fix is therefore a **spawn-path change, not a kill disposition**:
+`src/runner/owned.rs` installs `pre_exec(setsid)` only on non-Apple Unix, because
+any `pre_exec` forces std's fork+exec path and reproduces the abort. On Darwin the
+child's process group is set with `CommandExt::process_group(0)`
+(`POSIX_SPAWN_SETPGROUP`), which keeps group ownership (`kill(-pid)`) with the
+session inherited; the verified terminal-access invariants above
+(stdin never inherited, `GIT_TERMINAL_PROMPT=0`, askpass bridge) close the
+resulting tty risk. `process_group` has been stable since Rust 1.64; the checked
+local toolchain was rustc 1.99.1. The Darwin pgid == pid test cannot run on a
+Linux worker: hosted macOS stays **unverified until the next release run**, which
+is the real oracle.
+
 ## Host verdict capture (pending hosted run)
 
 `scripts/profile_ci_test.py` now tees the wrapped command's stdout/stderr into

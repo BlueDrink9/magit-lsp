@@ -117,7 +117,10 @@ mod unix {
             })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Linux and other Unix: new session and group before exec. This
+        // pre_exec forces std's fork+exec path, which is correct here.
         // SAFETY: setsid is async-signal-safe and runs only in the child.
+        #[cfg(not(target_vendor = "apple"))]
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() == -1 {
@@ -127,6 +130,12 @@ mod unix {
                 }
             });
         }
+        // Darwin: any pre_exec forces fork+exec, whose child-side libplatform
+        // atfork handlers abort (`os_once_t is corrupt`, run 45971196440).
+        // process_group(0) maps to POSIX_SPAWN_SETPGROUP instead, keeping group
+        // ownership (`kill(-pid)`) while inheriting the session.
+        #[cfg(target_vendor = "apple")]
+        command.process_group(0);
         let mut child = command.spawn()?;
         let pid = child.id() as libc::pid_t;
         // Parent-side spawn evidence: the child's own log line comes after
@@ -717,6 +726,24 @@ mod unix {
             assert_eq!(pid, fields[2], "new process group before exec");
             assert_eq!(pid, fields[3], "new session before exec");
             assert_eq!(fields[4], "0", "no controlling terminal");
+        }
+
+        #[cfg(target_vendor = "apple")]
+        #[test]
+        fn child_starts_in_its_own_process_group_on_darwin() {
+            let result = run_owned(
+                Command::new("sh")
+                    .arg("-c")
+                    .arg("echo $$ $(ps -o pgid= -p $$)"),
+                None,
+            )
+            .unwrap();
+            assert!(result.status.unwrap().success());
+            let text = String::from_utf8(result.stdout).unwrap();
+            let mut fields = text.split_whitespace();
+            let pid = fields.next().expect("darwin pgid probe pid");
+            let pgid = fields.next().expect("darwin pgid probe group");
+            assert_eq!(pid, pgid, "child is its own process group leader");
         }
 
         #[test]
