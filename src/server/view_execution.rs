@@ -429,9 +429,20 @@ pub(super) fn spawn_timed_hunks(
     tokio::spawn(async move {
         let unbounded = fetch.unbounded();
         let fetch_repo = repository.clone();
+        // Only the promise-bounded fetch is cancellable: abandoning it at the
+        // deadline must not strand its Git children. The seeded-open stream has
+        // no cutoff, so it keeps running under no cancellation target.
+        let cancel = if unbounded {
+            None
+        } else {
+            Some(crate::runner::CancelHandle::new())
+        };
+        let fetch_cancel = cancel.clone();
         let fetched = tokio::task::spawn_blocking(move || {
-            crate::runner::with_trace_id(trace_id, || {
-                crate::status_view::StatusView::fetch_timed_hunks(&fetch_repo, fetch)
+            crate::runner::with_cancel(fetch_cancel, || {
+                crate::runner::with_trace_id(trace_id, || {
+                    crate::status_view::StatusView::fetch_timed_hunks(&fetch_repo, fetch)
+                })
             })
         });
         // Bound the wait by the promise itself: a fetch still running at the
@@ -445,7 +456,19 @@ pub(super) fn spawn_timed_hunks(
             let remaining = promise.saturating_sub(published.elapsed());
             match tokio::time::timeout(remaining, fetched).await {
                 Ok(Ok(hunks)) => hunks,
-                _ => return,
+                _ => {
+                    // The detached blocking fetch observes this handle at its
+                    // next child registration, so the owner terminates the
+                    // invocation it is holding instead of leaving it running.
+                    if let Some(cancel) = &cancel {
+                        cancel.cancel();
+                    }
+                    tracing::debug!(
+                        view = %view_id,
+                        "abandoned timed hunk fetch at promise deadline"
+                    );
+                    return;
+                }
             }
         };
         if !unbounded

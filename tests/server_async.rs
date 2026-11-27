@@ -594,6 +594,77 @@ fn status_open_slow_background_fetch_leaves_sections_closed_until_opened() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+/// The promise deadline abandons the background hunk fetch, so the owner must
+/// terminate that fetch's Git child before its gate can hold it, and the closed
+/// render must still stand.
+#[cfg(unix)]
+#[test]
+fn status_open_expired_promise_cancels_background_hunk_fetch() {
+    magit_lsp_test_support::cargo_server_binary!();
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let gate = GatedGit::arm("diff");
+    let env = gate.child_env();
+    let env: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let mut server = TestServer::spawn(&env);
+    server.initialize_rich(json!({}));
+    server.recv_timeout = Duration::from_secs(3);
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"]
+        .as_str()
+        .expect("status view id")
+        .to_string();
+    let loading = server.recv();
+    let loading_version = loading["params"]["version"].as_u64().unwrap();
+    assert_eq!(server.recv()["method"], "view/keymap");
+
+    server.recv_timeout = Duration::from_secs(10);
+    let closed = server.wait_for_view_render_after(&view, loading_version);
+    let closed_version = closed["params"]["version"].as_u64().unwrap();
+    // The background fetch is held inside Git past the promise deadline, so the
+    // server's timeout abandons it.
+    match wait_for_gate_or_failure(&gate, &mut server, &view) {
+        GateWait::Entered => {}
+        GateWait::AcquisitionFailed { text, stderr } => panic!(
+            "the background fetch must not fail the view; text: {text:?}\nserver stderr:\n{stderr}"
+        ),
+    }
+    // A child terminated inside the gate never runs the gate's `rm`, so the
+    // marker cannot show termination: the recorded pid is the evidence. The
+    // bounded poll also covers the wait past the promise deadline.
+    let pid = gate
+        .child_pid()
+        .expect("the gated diff child recorded its pid");
+    assert!(
+        gate.wait_child_exited_within(Duration::from_secs(10)),
+        "the abandoned fetch's git child {pid} still runs past the promise deadline; \
+         invocation log:\n{}\nserver stderr:\n{}",
+        gate.invocation_log(),
+        server.stderr_text_settled()
+    );
+
+    // No expansion render followed: the closed view is still current.
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/resync",
+        "params":{"viewId":view}}));
+    let resync = server.response_with_id(3);
+    assert_eq!(resync["result"]["version"], closed_version, "{resync}");
+    let still_closed: Vec<String> =
+        serde_json::from_value(resync["result"]["text"].clone()).unwrap();
+    assert!(
+        !still_closed.iter().any(|line| line.contains("f.txt")),
+        "{still_closed:?}"
+    );
+    gate.release();
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 /// A temporary config file seeding the interactive status opening as expanded.
 #[cfg(unix)]
 fn open_seed_config() -> (tempfile::TempDir, String) {

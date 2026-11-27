@@ -313,6 +313,33 @@ impl GatedGit {
             .ok()
             .and_then(|text| text.trim().parse().ok())
     }
+
+    /// The pid the gated invocation recorded when it entered the gate.
+    ///
+    /// The marker outlives a child terminated inside the gate, because a killed
+    /// child never reaches its `rm`; that recorded pid is therefore the
+    /// identity a cancellation test polls after the gate is abandoned.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.entered_pid()
+    }
+
+    /// Whether the recorded gate child has exited within `timeout`.
+    ///
+    /// Bounded like [`Self::wait_entered_within`]; returns `false` when no child
+    /// entered the gate or it is still running at the deadline.
+    pub fn wait_child_exited_within(&self, timeout: Duration) -> bool {
+        let Some(pid) = self.entered_pid() else {
+            return false;
+        };
+        let deadline = Instant::now() + timeout;
+        while process_exists(pid) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(POLL);
+        }
+        true
+    }
 }
 
 impl Drop for GatedGit {
