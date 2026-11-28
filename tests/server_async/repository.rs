@@ -1076,7 +1076,7 @@ fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
     );
     assert!(
         server
-            .stderr_text()
+            .stderr_text_settled()
             .contains("configuration reloaded on client request"),
         "reload completion barrier was not observed"
     );
