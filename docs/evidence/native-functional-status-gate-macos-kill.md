@@ -277,3 +277,29 @@ consumer lanes are green, and the corrected Darwin spawn path has a second
 hosted macOS run without a fork-abort recurrence. As before, this is absence
 evidence for the exercised runs, not direct proof of std's internal spawn
 choice.
+
+## Hosted rerun (run 46088923208)
+
+Release build `46088923208` at the same `93da8f4` commit completed with one
+failed job: Linux native functional consumers. Every other required job passed,
+including the macOS native candidates, functional consumers, native consumers,
+and installed-VSIX consumers. The overall release/native-consumer validation
+therefore did not repeat green, but the macOS functional lane passed again.
+
+The macOS profiler exited 0 with 26 samples and 147056 KiB peak descendant-tree
+RSS. Its `summary.json` records `ips_reports.copied: []`,
+`ips_reports.victim_pids: []`, and `kernel_log.victim_pids: []`; both
+DiagnosticReports directories copied zero reports. The native functional
+evidence is `ok: true`, including the release Rust suites, both Neovim scenarios,
+unchanged binary hashes, and completed cleanup. This is a third hosted macOS run
+without a fork-abort recurrence, still absence evidence rather than direct
+proof of the std spawn path.
+
+The Linux failure was `repository::static_keymap_delivery_suppresses_open_and_reload_pushes`:
+its reload-completion barrier sampled asynchronously drained stderr with
+`stderr_text()` before the drain thread had caught up. The production handler
+unconditionally emits `configuration reloaded on client request` after reload,
+so this was a test-observation race rather than a reload or process-kill defect.
+`bd0e7ea` changes only that assertion to the existing `stderr_text_settled()`
+helper; the targeted test passes. A new user-triggered release run is needed to
+repeat the complete hosted validation with that fix.
