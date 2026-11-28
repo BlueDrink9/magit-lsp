@@ -241,15 +241,7 @@ jobs:
           binary="$(realpath "target/${{ matrix.target }}/release/magit-lsp")"
           expected=$(nix develop --no-update-lock-file .#release-native -c python3 -c 'import json; print(json.load(open("build/release/release-manifest.json"))["executable_sha256"])')
           test "$(shasum -a 256 "$binary" | awk '{print $1}')" = "$expected"
-          # The macOS lane wraps the same Make invocation in the profiler so an
-          # externally killed helper leaves sender and memory samples. The Linux
-          # line below keeps its original bytes (and indentation) unchanged.
-          suite=server_async
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            nix develop --no-update-lock-file .#release-native -c python3 scripts/profile_ci_test.py --output-dir "$RUNNER_TEMP/macos-profile" -- nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test $suite"
-          else
           nix develop --no-update-lock-file .#release-native -c make test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async"
-          fi
 
       - id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -281,44 +273,6 @@ jobs:
           name: ${{ matrix.artifact }}-identity
           path: build/release/upload-identity.json
           if-no-files-found: error
-          retention-days: 14
-
-      # A child killed by the OOM killer or a macOS code-signing termination
-      # otherwise shows up only as a client-side test timeout. This collector
-      # reads the host's own verdicts; every command is guarded so evidence
-      # collection never changes a failed job's result.
-      - name: Collect OS kill and memory evidence on failure
-        if: failure()
-        shell: bash
-        run: |
-          out="$RUNNER_TEMP/os-kill-forensics.log"
-          : > "$out" || true
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            log show --last 10m --predicate 'eventMessage CONTAINS[c] "memorystatus" OR eventMessage CONTAINS[c] "CODE SIGNING" OR eventMessage CONTAINS[c] "killed"' >> "$out" 2>&1 || true
-          else
-            journalctl -k --since '-10min' 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
-            dmesg 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
-          fi
-
-      - name: Upload OS kill and memory evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/os-kill-forensics.log
-          if-no-files-found: warn
-          retention-days: 14
-
-      # Sender and memory samples are uploaded even on a passing run: they are
-      # the evidence a later kill analysis reads, and a lane that never started
-      # the profiler only warns.
-      - name: Upload macOS profile samples
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-profile-${{ matrix.target }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/macos-profile
-          if-no-files-found: warn
           retention-days: 14
 
   native-consumers:
@@ -441,7 +395,7 @@ jobs:
           binary=$(find "$RUNNER_TEMP/native-functional-bin" -type f -name 'magit-lsp*' -perm -u+x -print -quit); expected=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["executable_sha256"])' "$manifest")
           before=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$before" = "$expected"; echo '{"ok":false,"phase":"rust-functional"}' > "$RUNNER_TEMP/native-functional-evidence.json"
           make_bin=$(command -v make)
-          if [ "$RUNNER_OS" = "macOS" ]; then status=0; nix develop --no-update-lock-file .#release-native -c python3 scripts/profile_ci_test.py --output-dir "$RUNNER_TEMP/macos-profile" -- nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" || status=$?; cp "$RUNNER_TEMP/macos-profile/child-output.log" "$RUNNER_TEMP/native-functional-rust.log" || true; test "$status" -eq 0 || exit "$status"; else nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1; fi
+          nix develop --no-update-lock-file .#release-native -c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" FILTER="--test server_async --test editor_bridge --test rebase_interactive" > "$RUNNER_TEMP/native-functional-rust.log" 2>&1
           nix develop --no-update-lock-file .#release-acceptance -c "$make_bin" native-neovim-artifact-check MAGIT_LSP_BIN="$binary" > "$RUNNER_TEMP/native-functional-neovim.log" 2>&1
           after=$(shasum -a 256 "$binary" | awk '{print $1}'); test "$after" = "$expected"; if grep -E '([0-9]+ ignored|skipped)' "$RUNNER_TEMP/native-functional-rust.log" "$RUNNER_TEMP/native-functional-neovim.log"; then exit 1; fi
           printf '{"ok":true,"target":"%s","executable_sha256":"%s","before_sha256":"%s","after_sha256":"%s","rust_suites":["server_async","editor_bridge","rebase_interactive"],"neovim_scenarios":["status-basics.scn","commit-message-editor.scn"],"cleanup":"make targets completed"}\n' "$name" "$expected" "$before" "$after" > "$RUNNER_TEMP/native-functional-evidence.json"
@@ -463,43 +417,6 @@ jobs:
       - name: Require successful functional run
         if: always()
         run: test "${{ steps.candidate.outcome }}" = success && test "${{ steps.harness.outcome }}" = success && test "${{ steps.rust-functional.outcome }}" = success
-
-      # A child killed by the OOM killer or a macOS code-signing termination
-      # otherwise shows up only as a client-side test timeout. This collector
-      # reads the host's own verdicts; every command is guarded so evidence
-      # collection never changes a failed job's result.
-      - name: Collect OS kill and memory evidence on failure
-        if: failure()
-        shell: bash
-        run: |
-          out="$RUNNER_TEMP/os-kill-forensics.log"
-          : > "$out" || true
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            log show --last 10m --predicate 'eventMessage CONTAINS[c] "memorystatus" OR eventMessage CONTAINS[c] "CODE SIGNING" OR eventMessage CONTAINS[c] "killed"' >> "$out" 2>&1 || true
-          else
-            journalctl -k --since '-10min' 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
-            dmesg 2>&1 | grep -iE 'out of memory|killed process' >> "$out" || true
-          fi
-
-      - name: Upload OS kill and memory evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/os-kill-forensics.log
-          if-no-files-found: warn
-          retention-days: 14
-
-      # The same sender and memory samples, uploaded for the functional lane so
-      # a killed helper is attributable without re-running the job.
-      - name: Upload macOS functional profile samples
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-profile-${{ matrix.target }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/macos-profile
-          if-no-files-found: warn
-          retention-days: 14
 
   native-vscode-consumers:
     # Required installed-extension acceptance consumes the exact native and VSIX uploads.

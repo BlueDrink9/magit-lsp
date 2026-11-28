@@ -303,3 +303,38 @@ so this was a test-observation race rather than a reload or process-kill defect.
 `bd0e7ea` changes only that assertion to the existing `stderr_text_settled()`
 helper; the targeted test passes. A new user-triggered release run is needed to
 repeat the complete hosted validation with that fix.
+
+## Retirement of the kill-diagnostic profiler (run 46095367523)
+
+Hosted release `46095367523` at `744daf2` completed fully green on 2026-11-28:
+all 13 required jobs passed, including both native candidate rows, both native
+functional consumer rows, the installed-VSIX consumers and the final
+release-readiness gate. This is the first fully green release run, and the macOS
+functional lane's profiler exited 0 with empty victim sets — no parsed victim
+pids, no copied `.ips` reports and no kernel victim records — matching the three
+preceding clean hosted macOS observations. That makes four consecutive clean
+hosted macOS runs of the exercised suites.
+
+With that green release as the oracle, the temporary kill-diagnostic stack was
+retired as one coherent unit: `scripts/profile_ci_test.py` and its
+`make profiler-check` self-test are deleted, the `macos-profile` wrapper,
+capture and always-upload steps are gone from `.github/workflows/release.yml`,
+and `scripts/check_release_automation.py` no longer carries the
+`check_os_kill_forensics`, `check_profile_capture_script` or
+`check_macos_profile_capture` guards, their call sites, the profile/forensics
+constants or the profiler self-test fixtures. The candidates and native
+functional lanes now run one OS-uniform plain `make test-rust-artifact`
+invocation; the functional lane keeps routing its output to
+`native-functional-rust.log`, a nonzero exit still fails the job, and its
+`if: always()` evidence upload, outcome gates and unchanged-candidate-hash
+checks are untouched.
+
+The retirement removes diagnostics only. Every permanent process-ownership fix
+stays: the owned-child and spawn-path changes in `src/runner/owned.rs` and
+`src/git.rs` with their regression tests, the VSIX probes, the
+`native-functional-evidence.json` upload and exit-status behavior, and
+`docs/design/process-ownership.md`. The generic on-failure OS kill/memory
+evidence in `.github/workflows/ci.yml` also stays as cross-platform failure
+evidence. The caveat is unchanged: four clean hosted macOS observations are
+absence-of-kill evidence for those runs, not proof that no kill can occur.
+

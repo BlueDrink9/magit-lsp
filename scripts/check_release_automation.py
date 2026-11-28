@@ -143,25 +143,8 @@ COVERAGE_TOKENS = ('cargo llvm-cov', 'coverage-rust', '--instrument-coverage',
 # the duplicated server suites.
 ACCEPTANCE_COMMANDS = ('check_native_artifact.py', 'native-vscode-artifact-check',
                        'native-neovim-artifact-check')
-# Both required native jobs spawn gated fake-Git children, so an OOM or
-# code-signing kill must leave the host's own verdict behind instead of only a
-# client-side test timeout. The dump is on-failure only and fully guarded.
-FORENSICS_ARTIFACT = 'os-kill-forensics-${{ matrix.target }}-${{ github.run_attempt }}'
-FORENSICS_PATH = '${{ runner.temp }}/os-kill-forensics.log'
-FORENSICS_PREDICATE = ('eventMessage CONTAINS[c] "memorystatus" OR '
-                       'eventMessage CONTAINS[c] "CODE SIGNING" OR '
-                       'eventMessage CONTAINS[c] "killed"')
 FORENSICS_UPLOAD = ('actions/upload-artifact@'
                     'cf430e030ddbb5b0abf93d22962f4752f3646cd9')
-# An externally SIGKILLed helper names no sender in the host log, so the macOS
-# lanes wrap their locked Make invocation in the profile wrapper, which samples
-# the test/server/Git tree and captures signal senders with eslogger. The
-# wrapper keeps the child's exit status and records its own failures in the
-# profile directory, so capture can never change a lane's result.
-PROFILE_SCRIPT = Path('scripts/profile_ci_test.py')
-PROFILE_ARTIFACT = 'macos-profile-${{ matrix.target }}-${{ github.run_attempt }}'
-PROFILE_PATH = '${{ runner.temp }}/macos-profile'
-PROFILE_UPLOAD = FORENSICS_UPLOAD
 # A failing installed-extension lane otherwise reports only a client-side render
 # timeout, because a rejected client start is UI-only. The run's isolated
 # evidence directory is printed into a make log kept only on failure, so the
@@ -705,94 +688,6 @@ def check_native_promotion_evidence(selected_artifact, evidence):
                 fail(f'build workflow: native promotion {gate} outcome for {target} must be success')
 
 
-def check_os_kill_forensics(block, context):
-    """Require the guarded on-failure OS kill/memory dump and its pinned upload.
-
-    A killed child (OOM killer, macOS code-signing termination) otherwise shows
-    up only as a client-side test timeout, so each required native job writes the
-    host's own verdicts and uploads them after a failure. Collection is guarded
-    and on-failure only, so it can never change a passing job's result.
-    """
-    code = '\n'.join(code_lines(block))
-    for token in ('if: failure()', 'log show --last 10m --predicate',
-                  FORENSICS_PREDICATE, 'journalctl -k', 'dmesg',
-                  'out of memory|killed process', FORENSICS_ARTIFACT,
-                  FORENSICS_PATH):
-        if token not in code:
-            fail(f'build workflow: {context} must collect on-failure OS '
-                 f'kill/memory evidence ({token!r})')
-    steps = job_steps(block)
-    dump = next((lines for _, lines in steps
-                 if 'log show --last 10m --predicate' in '\n'.join(lines)
-                 and 'uses:' not in '\n'.join(lines)), [])
-    if 'if: failure()' not in '\n'.join(dump):
-        fail(f'build workflow: {context} OS kill/memory collection must be its '
-             'own on-failure step')
-    upload = next((lines for _, lines in steps
-                   if FORENSICS_ARTIFACT in '\n'.join(lines)), [])
-    upload_text = '\n'.join(upload)
-    for token in (FORENSICS_UPLOAD, 'if-no-files-found: warn',
-                  'retention-days: 14'):
-        if token not in upload_text:
-            fail(f'build workflow: {context} must upload the OS kill/memory '
-                 f'evidence with {token!r}')
-
-
-def check_profile_capture_script(path=PROFILE_SCRIPT):
-    """Require the profiler to capture signal senders and sample memory state.
-
-    The sender capture is primary and the memory telemetry secondary, so both
-    must be in the wrapper itself; the exit-status contract is proven
-    behaviourally by ``make profiler-check`` rather than by a token here.
-    """
-    text = '\n'.join(code_lines(read_lines(path)))
-    for token in ('/usr/bin/eslogger', "'signal'", 'signal-capture.log',
-                  'memory_pressure', 'vm_stat', 'sysctl', 'samples.log',
-                  'summary.json'):
-        if token not in text:
-            fail('profile profiler must capture sender and memory evidence '
-                 f'({token!r})')
-    for token in ('*.ips', 'DiagnosticReports', 'log show --info --debug'):
-        if token not in text:
-            fail('profile profiler must capture the host kill verdict '
-                 f'({token!r})')
-
-
-def check_macos_profile_capture(block, context):
-    """Require the Darwin-only profile wrapper and its always-on upload.
-
-    Wrapping only the macOS branch leaves the Linux command byte-identical. The
-    samples are uploaded with ``if: always()`` so a passing run still carries
-    the evidence, and a lane that never started the profiler only warns.
-    """
-    code = '\n'.join(code_lines(block))
-    if 'scripts/profile_ci_test.py' not in code:
-        fail(f'build workflow: {context} must run the profile wrapper')
-    for token in ('if [ "$RUNNER_OS" = "macOS" ]',
-                  '--output-dir "$RUNNER_TEMP/macos-profile"'):
-        if token not in code:
-            fail(f'build workflow: {context} must wrap only the macOS branch in '
-                 f'the profile wrapper ({token!r})')
-    # A redirect on the wrapper's own command sends the wrapped command's stream
-    # past the profiler's tee, so child-output.log stays empty and the reap-line
-    # victim pids are lost. Each `;` list below is one shell command.
-    for line in code_lines(block):
-        for command in line.split(';'):
-            if ('scripts/profile_ci_test.py' in command
-                    and '2>&1' in command):
-                fail(f'build workflow: {context} must not redirect around the '
-                     'profile wrapper (its tee captures the child stream)')
-    steps = job_steps(block)
-    upload = next((lines for _, lines in steps
-                   if PROFILE_ARTIFACT in '\n'.join(lines)), [])
-    upload_text = '\n'.join(upload)
-    for token in (PROFILE_UPLOAD, 'if: always()', PROFILE_PATH,
-                  'if-no-files-found: warn', 'retention-days: 14'):
-        if token not in upload_text:
-            fail(f'build workflow: {context} must always upload the macOS profile '
-                 f'samples with {token!r}')
-
-
 def check_vscode_review_forensics(block, context):
     """Require the guarded on-failure VSCode evidence and wire-log upload.
 
@@ -828,7 +723,7 @@ def check_vscode_review_forensics(block, context):
                  f'evidence with {token!r}')
 
 
-def check_native_candidates(block, profile_script=PROFILE_SCRIPT):
+def check_native_candidates(block):
     """Require the strict, mandatory Linux GNU/macOS matrix experiment.
 
     Every required row is a real job: ``continue-on-error`` would mask a failed
@@ -882,9 +777,6 @@ def check_native_candidates(block, profile_script=PROFILE_SCRIPT):
     if PIPELINE_ARTIFACTS not in code:
         fail('build workflow: native candidates must package through the shared pipeline')
     check_producer_handoff(block, '${{ matrix.target }}', 'native candidates', True)
-    check_os_kill_forensics(block, 'native candidates')
-    check_macos_profile_capture(block, 'native candidates')
-    check_profile_capture_script(profile_script)
 
 
 def check_native_consumers(block):
@@ -943,7 +835,7 @@ def check_native_consumers(block):
         fail('build workflow: native consumer candidate/check failures must fail the job')
 
 
-def check_native_functional_consumers(block, profile_script=PROFILE_SCRIPT):
+def check_native_functional_consumers(block):
     """Require separate, mandatory artifact-backed native functional suites."""
     code = '\n'.join(code_lines(block))
     if not any(line.strip() == 'needs: native-candidates' for line in block):
@@ -981,12 +873,16 @@ def check_native_functional_consumers(block, profile_script=PROFILE_SCRIPT):
         'executable_sha256', 'before_sha256', 'after_sha256',
         'native-functional-evidence.json', 'if: always()', 'if-no-files-found: warn',
         'steps.harness.outcome', 'steps.rust-functional.outcome',
-        'cp "$RUNNER_TEMP/macos-profile/child-output.log" '
-        '"$RUNNER_TEMP/native-functional-rust.log"',
+        '"$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" '
+        'FILTER="--test server_async --test editor_bridge --test rebase_interactive"'
+        ' > "$RUNNER_TEMP/native-functional-rust.log" 2>&1',
     )
     for token in required:
         if token not in code:
             fail(f'build workflow: native functional consumers must include {token!r}')
+    if 'RUNNER_OS' in code:
+        fail('build workflow: functional consumers must run one OS-uniform artifact '
+             'command instead of an OS branch')
     if 'persist-credentials: false' not in code or 'ref: ${{ github.sha }}' not in code:
         fail('build workflow: functional consumers must use immutable credential-free checkout')
     if 'test "$after" = "$expected"' not in code:
@@ -995,9 +891,6 @@ def check_native_functional_consumers(block, profile_script=PROFILE_SCRIPT):
         fail('build workflow: functional suites must fail on ignored or skipped cases')
     if 'test "${{ steps.candidate.outcome }}" = success' not in code:
         fail('build workflow: functional candidate/harness/runtime failures must fail the job')
-    check_os_kill_forensics(block, 'native functional consumers')
-    check_macos_profile_capture(block, 'native functional consumers')
-    check_profile_capture_script(profile_script)
 
 
 def check_native_vscode_consumers(block):
@@ -5410,12 +5303,6 @@ def run_self_tests():
             ('build workflow on a mutable runner',
              (('runs-on: ubuntu-22.04', 'runs-on: ubuntu-latest', 1),),
              'mutable runner'),
-            ('build workflow collecting kill evidence on a passing job',
-             (('        if: failure()\n        shell: bash\n'
-               '        run: |\n          out="$RUNNER_TEMP/os-kill-forensics.log"',
-               '        if: always()\n        shell: bash\n'
-               '        run: |\n          out="$RUNNER_TEMP/os-kill-forensics.log"', 1),),
-             'must be its own on-failure step'),
             ('build workflow without the mandatory source-check job',
              (('  source-checks:', '  source-checks-disabled:', 1),),
              "missing mandatory job 'source-checks'"),
@@ -5666,99 +5553,10 @@ def run_self_tests():
                 f'"required job $1 is \'$2\'" >&2; exit 1; fi; }}',
                 '          check() { true; }', None),),
               'non-zero for any required result'),
-             ('build workflow macOS candidates without the profile wrapper',
-              (('-c python3 scripts/profile_ci_test.py --output-dir '
-                '"$RUNNER_TEMP/macos-profile" -- nix develop '
-                '--no-update-lock-file .#release-native -c make '
-                'test-rust-artifact MAGIT_LSP_BIN="$binary" '
-                'FILTER="--test $suite"',
-                '-c make test-rust-artifact MAGIT_LSP_BIN="$binary" '
-                'FILTER="--test $suite"', 1),),
-              'must run the profile wrapper'),
-             ('build workflow macOS functional consumers without the profile wrapper',
-              (('-c python3 scripts/profile_ci_test.py --output-dir '
-                '"$RUNNER_TEMP/macos-profile" -- nix develop '
-                '--no-update-lock-file .#release-native -c "$make_bin" '
-                'test-rust-artifact',
-                '-c "$make_bin" test-rust-artifact', 1),),
-              'must run the profile wrapper'),
-             ('build workflow macOS functional consumers redirecting around the profile wrapper',
-              (('-c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" '
-                'FILTER="--test server_async --test editor_bridge '
-                '--test rebase_interactive" || status=$?',
-                '-c "$make_bin" test-rust-artifact MAGIT_LSP_BIN="$binary" '
-                'FILTER="--test server_async --test editor_bridge '
-                '--test rebase_interactive" > "$RUNNER_TEMP/'
-                'native-functional-rust.log" 2>&1 || status=$?', 1),),
-              'must not redirect around the profile wrapper'),
-             ('build workflow macOS functional consumers losing the captured child stream',
-              ((' cp "$RUNNER_TEMP/macos-profile/child-output.log" '
-                '"$RUNNER_TEMP/native-functional-rust.log" || true;', '', 1),),
-              'child-output.log'),
-             ('build workflow macOS candidates without the profile upload',
-              (('      - name: Upload macOS profile samples\n'
-                '        if: always()\n'
-                '        uses: actions/upload-artifact@'
-                'cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n'
-                '        with:\n'
-                '          name: macos-profile-${{ matrix.target }}-'
-                '${{ github.run_attempt }}',
-                '      - name: Upload macOS profile samples\n'
-                '        if: always()\n'
-                '        uses: actions/upload-artifact@'
-                'cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n'
-                '        with:\n'
-                '          name: macos-profile-disabled', 1),),
-              'must always upload the macOS profile'),
-             ('build workflow macOS functional consumers without the profile upload',
-              (('      - name: Upload macOS functional profile samples\n'
-                '        if: always()\n'
-                '        uses: actions/upload-artifact@'
-                'cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n'
-                '        with:\n'
-                '          name: macos-profile-${{ matrix.target }}-'
-                '${{ github.run_attempt }}',
-                '      - name: Upload macOS functional profile samples\n'
-                '        if: always()\n'
-                '        uses: actions/upload-artifact@'
-                'cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n'
-                '        with:\n'
-                '          name: macos-profile-disabled', 1),),
-              'must always upload the macOS profile'),
            ):
             expect_check(label, check_build_workflow,
                          mutated_file(BUILD_WORKFLOW, directory, label, mutations),
                          expected=expected)
-
-        # The profiler itself must keep the primary sender capture and the
-        # secondary memory sampling; either lane's guard reads the same script.
-        profile_jobs = workflow_jobs(read_lines(BUILD_WORKFLOW))
-        for label, lane, job in (
-            ('macOS candidates profiler without the sender capture',
-             check_native_candidates, NATIVE_JOB),
-            ('macOS functional consumers profiler without the sender capture',
-             check_native_functional_consumers, NATIVE_FUNCTIONAL_JOB),
-        ):
-            expect_check(
-                label, lane, profile_jobs[job],
-                mutated_file(PROFILE_SCRIPT, directory, label,
-                             (('/usr/bin/eslogger', '/usr/bin/fixture-sender', None),)),
-                expected='capture sender and memory evidence')
-
-        # The same script must keep the post-exit host verdicts: the macOS
-        # diagnostic reports and the bounded kernel `log show` window.
-        for label, mutations in (
-            ('macOS candidates profiler without the DiagnosticReports capture',
-             (('DiagnosticReports', 'fixture-reports', None),)),
-            ('macOS candidates profiler without the diagnostic report glob',
-             (("'*.ips'", "'*.fixture'", 1),)),
-            ('macOS candidates profiler without the kernel log capture',
-             (('log show --info --debug', 'log show --last 10m', None),)),
-        ):
-            expect_check(
-                label, check_native_candidates, profile_jobs[NATIVE_JOB],
-                mutated_file(PROFILE_SCRIPT, directory, label, mutations),
-                expected='capture the host kill verdict')
 
         # The same-job server graph: real command ordering, the exact packaged
         # release selector/hash, server-only duplication, coverage separation,

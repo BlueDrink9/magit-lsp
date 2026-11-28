@@ -1,4 +1,4 @@
-.PHONY: build build-timings test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-timings test-lua test-file ui-unit ui-test ui-file ui-tour neovim native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf profiler-check
+.PHONY: build build-timings test-parallel vscode-host-spike release release-locked release-artifact-check release-native-build release-pipeline-check release-automation-unit release-publish release-contract-unit native-artifact-unit native-artifact-inspect native-artifact-check native-vscode-artifact-check vsix-candidate-unit test test-rust test-rust-artifact test-timings test-lua test-file ui-unit ui-test ui-file ui-tour neovim native-neovim-artifact-check plain-neovim lazy-install-check coverage-rust update-snapshots update-examples registry-docs-generate registry-docs-check vscode-test readme-shots hygiene format-check clippy hooks-install hooks-remove hooks-run hooks-run-pre-push format format-all format-all-check format-all-check-worktree format-all-list format-test docs-check check-test-premises vscode-deps-refresh vscode-download-startup release-automation-check release-contract-check workflows-check mason-package-check nvim-startup-check nvim-startup-strace nvim-startup-perf
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -213,14 +213,6 @@ test-rust-artifact:
 .PHONY: wrapper-check
 wrapper-check:
 	$(call run,wrapper-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_make_wrapper.py)
-
-# Exercises the macOS profile wrapper around a dummy passing and a dummy
-# failing command: raw samples and summary.json must exist and the wrapper's
-# exit status must be the child's. Runs on Linux; the profiler degrades to the
-# samplers this host has.
-.PHONY: profiler-check
-profiler-check:
-	$(call run,profiler-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_profile_ci_test.py)
 
 # Rust-only line coverage via cargo-llvm-cov: LCOV lands under the gitignored
 # build/ tree. Prerequisites are checked before any build.
